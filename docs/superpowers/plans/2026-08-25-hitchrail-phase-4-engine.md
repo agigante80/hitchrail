@@ -1129,7 +1129,7 @@ Then these methods:
             self.tmux.kill_session(name)
 
         self.tmux.new_session(
-            name, path_str, claude_ipc.launch_argv(self.config.claude_binary, name)
+            name, path_str, claude_ipc.launch_argv(self.config.agent_binary, name)
         )
         return self._await_running(name)
 
@@ -1190,7 +1190,7 @@ from __future__ import annotations
 
 import pytest
 
-from hitchrail.claude_ipc import GRACEFUL_STOP_KEYS
+from hitchrail import claude_ipc
 from hitchrail.config import Config
 from hitchrail.engine import Engine, NotRunning, Protected, State, UnknownProject
 from hitchrail.events import EventBus
@@ -1230,7 +1230,7 @@ def test_stop_sends_the_sequence_the_quarantine_module_defines(config) -> None:
     # change upstream touches one file.
     tmux = FakeTmux(sessions={"vessel": 500})
     build(config, tmux, RUNNING_PS, FakeClock()).stop("vessel")
-    assert [keys for _project, keys in tmux.sent] == list(GRACEFUL_STOP_KEYS)
+    assert [keys for _project, keys in tmux.sent] == list(claude_ipc.GRACEFUL_STOP_KEYS)
 
 
 def test_stopping_is_visible_in_list_and_get(config) -> None:
@@ -1410,8 +1410,14 @@ Expected: FAIL with `AttributeError: 'Engine' object has no attribute 'stop'`.
         self._stopping[name] = self._clock()
         # Ask, do not kill. What to type at Claude is Claude Code knowledge and
         # lives in the quarantine module; the engine only sends what it is given.
-        for keys in claude_ipc.GRACEFUL_STOP_KEYS:
-            self.tmux.send_keys(name, *keys)
+        # One call, and the engine does not know what a stop physically is.
+        # Iterating GRACEFUL_STOP_KEYS here would put three Claude Code
+        # assumptions in the engine: that stopping is keystrokes, that it is a
+        # sequence of them, and that they travel through tmux. See the design's
+        # sections 3.1 and 4.3. The engine owns the policy (the timeout, the in
+        # flight marker, never escalating on its own); the adapter owns the
+        # mechanism.
+        claude_ipc.request_stop(self.tmux, name)
         updated = self.get(name)
         self._announce(updated)
         return updated
@@ -1526,7 +1532,7 @@ git commit -m "feat(engine): three step stop with an announced, non persisted ma
 - [ ] `list()` issues exactly one tmux call and one `ps` call regardless of project count, and captures no pane.
 - [ ] `start` succeeds against a process table that is empty on the first look, and the grace window is bounded.
 - [ ] A second start of the same folder raises `Locked` immediately; a start of a different folder is unaffected; the lock is released on failure.
-- [ ] The stop sequence comes from `claude_ipc.GRACEFUL_STOP_KEYS` and `grep -rn '"/exit"' src/` returns only `claude_ipc.py`.
+- [ ] The engine asks for a stop and does not know what one is: `grep -rn '"/exit"' src/` returns only `claude_ipc.py`, AND `grep -rn 'GRACEFUL_STOP_KEYS\|send_keys' src/hitchrail/engine.py` returns nothing. The first half alone passes while the engine still iterates the sequence, which is the leak the design's section 4.3 exists to prevent.
 - [ ] Expiry drops the marker, announces it, and never escalates.
 - [ ] A fresh `Engine` reports no session as `stopping`.
 - [ ] A real Claude session has been started, watched, gracefully stopped and killed from a Python session, with no web server involved.

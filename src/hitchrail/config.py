@@ -226,7 +226,14 @@ class Config:
     hard_floor_mb: int = 1536
     soft_floor_mb: int = 3072
     session_mb: int = 1536
-    claude_binary: str = "claude"
+    # Named for the role, not the vendor. Hitchrail launches one agent today and
+    # the default below says which. The name is operator facing, and
+    # docs/versioning.md makes renaming an operator facing name a MAJOR, so it
+    # is worth costing nothing now rather than a major version later. See the
+    # multi agent note in the design's section 3.
+    agent_binary: str = "claude"
+    # The default is Claude Code's state directory. The field name is neutral
+    # because the directory is the agent adapter's business, not the server's.
     sessions_dir: Path = field(default_factory=lambda: Path.home() / ".claude" / "sessions")
     tmux_socket: str | None = None
     self_project: str | None = None
@@ -251,7 +258,7 @@ class Config:
 
         self._check_token()
         self._check_session_prefix()
-        self._check_claude_binary()
+        self._check_agent_binary()
         self._check_numbers()
         self._check_bind_host()
         self._check_extra_hosts()
@@ -305,16 +312,16 @@ class Config:
                 "named with one can be created and then never addressed"
             )
 
-    def _check_claude_binary(self) -> None:
+    def _check_agent_binary(self) -> None:
         """A binary name beginning with '-' becomes a flag in an argv slot.
 
         There is no shell anywhere in this project and that does not help here:
         argv[0] starting with a hyphen is read as an option by whatever ends up
         parsing it.
         """
-        binary = self.claude_binary.strip()
+        binary = self.agent_binary.strip()
         if not binary or binary.startswith("-"):
-            raise ConfigError(f"not an acceptable claude binary: {self.claude_binary!r}")
+            raise ConfigError(f"not an acceptable agent binary: {self.agent_binary!r}")
 
     def _check_numbers(self) -> None:
         if not (1 <= self.port <= 65535):

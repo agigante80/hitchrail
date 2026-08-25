@@ -396,14 +396,14 @@ git commit -m "build: project skeleton, module stubs, tooling and CI gates"
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `is_loopback_host(host: str) -> bool`; `is_wildcard_host(host: str) -> bool`; `local_addresses() -> tuple[str, ...]`; constant `HOST_PATTERN: re.Pattern[str]`; type alias `Resolver = Callable[[], tuple[str, ...]]`; frozen dataclass `Config` with fields `root: Path`, `host: str`, `port: int`, `token: str | None`, `extra_hosts: tuple[str, ...]`, `session_prefix: str`, `stop_timeout: float`, `hard_floor_mb: int`, `soft_floor_mb: int`, `session_mb: int`, `claude_binary: str`, `sessions_dir: Path`, `tmux_socket: str | None`, `self_project: str | None`, `resolver: Resolver | None`; properties `Config.is_loopback -> bool`, `Config.allowed_hosts -> tuple[str, ...]`, `Config.allowed_origins -> frozenset[str]`; exception `ConfigError`.
+- Produces: `is_loopback_host(host: str) -> bool`; `is_wildcard_host(host: str) -> bool`; `local_addresses() -> tuple[str, ...]`; constant `HOST_PATTERN: re.Pattern[str]`; type alias `Resolver = Callable[[], tuple[str, ...]]`; frozen dataclass `Config` with fields `root: Path`, `host: str`, `port: int`, `token: str | None`, `extra_hosts: tuple[str, ...]`, `session_prefix: str`, `stop_timeout: float`, `hard_floor_mb: int`, `soft_floor_mb: int`, `session_mb: int`, `agent_binary: str`, `sessions_dir: Path`, `tmux_socket: str | None`, `self_project: str | None`, `resolver: Resolver | None`; properties `Config.is_loopback -> bool`, `Config.allowed_hosts -> tuple[str, ...]`, `Config.allowed_origins -> frozenset[str]`; exception `ConfigError`.
 
 `__post_init__` validates more than the plan's first draft listed, because a
 class whose docstring says an unsafe configuration cannot exist has to mean it.
 An empty `session_prefix` makes "never kill a session without the configured
 prefix" vacuous, since every name satisfies `startswith("")`, and that guard is
 what stands between a stop and the developer's own tmux sessions. A
-`claude_binary` beginning with a hyphen becomes a flag in an argv slot. A
+`agent_binary` beginning with a hyphen becomes a flag in an argv slot. A
 `soft_floor_mb` below `hard_floor_mb` makes the confirmation gate unreachable.
 An `extra_hosts` entry carrying a port is accepted by every naive check and
 then never matches, because the Host header is compared with the port stripped.
@@ -644,7 +644,7 @@ class Config:
     hard_floor_mb: int = 1536
     soft_floor_mb: int = 3072
     session_mb: int = 1536
-    claude_binary: str = "claude"
+    agent_binary: str = "claude"
     sessions_dir: Path = field(default_factory=lambda: Path.home() / ".claude" / "sessions")
     tmux_socket: str | None = None
     self_project: str | None = None

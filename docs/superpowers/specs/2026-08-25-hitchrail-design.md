@@ -66,6 +66,50 @@ Out of scope for v1, and stated so nobody plans around them:
 - User accounts, roles, or multi-tenancy.
 - Sending input to a session. Hitchrail starts and stops agents; it is not a
   terminal.
+- **Any agent other than Claude Code.** No second agent is planned, none has
+  been asked for, and none will be considered until long after v1 ships. This
+  is a non goal rather than an omission, and the paragraph below says what is
+  being kept open anyway and why.
+
+### 3.1 Multi agent: not built, not closed off
+
+The temptation with a question like "could this run other agents one day" is to
+build a plugin system for one plugin. That is refused here. An interface derived
+from a single implementation is shaped like that implementation, and the second
+implementation is what teaches you the real interface; guessing it from one data
+point produces an abstraction that is harder to change than no abstraction.
+
+What IS done, because each item costs nothing today and is expensive to retrofit:
+
+1. **No vendor name appears in the operator or API contract.** Routes, states,
+   error codes and the `Session` fields are already neutral. The one exception,
+   the `claude_binary` setting, was renamed to `agent_binary` while nothing is
+   released. Under `docs/versioning.md` an operator facing rename is a MAJOR,
+   so this specific item goes from free to a major version bump the day v1
+   ships.
+2. **`claude_ipc.py` is the seam.** It already exists, quarantined for a
+   different reason (undocumented internals that change without notice), and
+   that is structurally the same boundary a second vendor would need. Its
+   members are an agent adapter interface in all but name: how to launch, how
+   to identify the process, how to ask for a graceful stop, how to find a
+   session link.
+3. **The engine asks for a stop; it does not know what a stop is.** See section
+   4.3. This is the one place the boundary would otherwise leak, and it leaks
+   in a costly direction.
+
+What is deliberately NOT done: no plugin discovery, no entry points, no setting
+to select an agent, no second adapter written speculatively, and no further
+abstraction of tmux, the process table or the memory guard, which are already
+agnostic because none of them can tell what is running in a pane.
+
+**The honest caveat.** The blocker on a second agent is unlikely to be code
+shape. Hitchrail's model is a long running headless process, in a tmux pane,
+that tolerates unattended operation and can be asked to stop politely. Claude
+Code fits because `--dangerously-skip-permissions` exists and it is a persistent
+terminal program. An agent that is request and response, or that needs
+interactive approval, does not fit that model however clean the adapter is. So
+the value of this seam is uncertain even though its cost is near zero, and that
+asymmetry is the entire argument for doing the cheap version and stopping.
 
 ## 4. Architecture
 
@@ -151,6 +195,22 @@ Kill is deliberately unreachable before a graceful attempt has been made. Not
 because forcing is wrong, but because on a phone the destructive control would
 otherwise sit under the thumb at the same size as the safe one.
 
+**The engine owns the policy; the agent adapter owns the mechanism.** Step 2 is
+"ask the agent to finish", and what that ASK physically is belongs entirely to
+`claude_ipc.py`. For Claude Code it is a key sequence typed into the pane. For
+something else it could be a signal, a subcommand, or an HTTP call. The engine
+therefore calls one function, `claude_ipc.request_stop(...)`, and never iterates
+a key sequence or reaches for `tmux.send_keys` itself.
+
+This split is worth stating because the obvious implementation gets it wrong.
+Writing `for keys in GRACEFUL_STOP_KEYS: tmux.send_keys(...)` in the engine puts
+three Claude Code assumptions into the layer that is supposed to hold none: that
+stopping is keystrokes, that it is a sequence of them, and that they travel
+through tmux. The engine keeps what is genuinely its own, which is the timeout,
+the in flight marker, the escalation policy and the refusal to escalate
+automatically. Step 3's kill stays in the engine too: killing the tmux session
+is not agent specific, which is exactly why it is the reliable backstop.
+
 This introduces the only state Hitchrail holds that is not derived from the
 operating system: the fact that a graceful stop is in flight, and when it
 started. It lives in memory in the engine, keyed by session name, and it is
@@ -175,6 +235,13 @@ All of this lives in `claude_ipc.py` behind one documented function with an
 explicit instability warning. When it breaks on a Claude Code update, exactly
 one module changes, and the UI degrades to a `pending` state rather than
 reporting something false.
+
+This module is also the vendor seam described in section 3.1, and the two roles
+reinforce each other rather than competing: whatever has to change when Claude
+Code changes is the same set of things that would have to change for a
+different agent. Keeping it narrow serves both. Nothing outside this module may
+name a Claude Code behaviour, a Claude Code file, or a Claude Code key
+sequence.
 
 ## 5. Security
 

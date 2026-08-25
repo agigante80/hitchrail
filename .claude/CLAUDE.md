@@ -163,7 +163,15 @@ These are the ones that cost real debugging to find, or that protect somebody.
 - **`claude_ipc.py` is quarantine.** It is the only module allowed to know
   about Claude Code internals, because they are undocumented and will change.
   When `bridgeSessionId` breaks, exactly one module changes and the UI degrades
-  to `pending` rather than reporting something false.
+  to `pending` rather than reporting something false. "Knows about" includes
+  iterating a key sequence, not only importing: the engine calls
+  `claude_ipc.request_stop(...)` and never loops over `GRACEFUL_STOP_KEYS`,
+  because a `for` loop in the engine teaches it that stopping is keystrokes
+  through tmux. `lint-imports` cannot catch this one, so it has a grep test.
+  This module is also the vendor seam. Multi agent is an explicit v1 non goal
+  (design section 3.1); what is kept open is the seam, not an abstraction, and
+  no vendor name may enter the operator or API contract. The setting is
+  `agent_binary`, not `claude_binary`, for that reason.
 - **Every ticket gets a milestone and an area label.** The milestone is a phase
   from `docs/roadmap.md`, or `Backlog` for triaged work with no phase. **Empty
   means untriaged**, never "no phase", so `is:open no:milestone` is the triage

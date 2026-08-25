@@ -760,7 +760,8 @@ git commit -m "feat(procs): process table snapshot with a cycle safe subtree wal
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: constant `REMOTE_CONTROL_MARKER = "--remote-control"`; constant `GRACEFUL_STOP_KEYS: tuple[tuple[str, ...], ...]`; `launch_argv(binary: str, project: str) -> list[str]`; `bridge_url(pid: int, sessions_dir: Path) -> str | None`; `session_url(pid: int, sessions_dir: Path, pane_text: str | None = None) -> str | None`.
+- Produces: constant `REMOTE_CONTROL_MARKER = "--remote-control"`; constant `GRACEFUL_STOP_KEYS: tuple[tuple[str, ...], ...]`; `launch_argv(binary: str, project: str) -> list[str]`; `request_stop(tmux: Tmux, project: str) -> None`; `bridge_url(pid: int, sessions_dir: Path) -> str | None`; `session_url(pid: int, sessions_dir: Path, pane_text: str | None = None) -> SessionUrl | None`.
+- `request_stop` is the addition made when multi agent was considered. It performs the graceful request rather than exposing the keys for the engine to iterate, so the engine never learns that stopping is keystrokes travelling through tmux. `GRACEFUL_STOP_KEYS` stays public for the test that asserts the exact sequence, but nothing outside this module may loop over it. See the design's sections 3.1 and 4.3.
 
 Everything in this module depends on undocumented Claude Code internals. It is
 the only module allowed to know about them, so a breaking change upstream

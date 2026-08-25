@@ -361,11 +361,11 @@ def test_a_prefix_that_would_make_the_kill_guard_vacuous_is_refused(
 
 
 @pytest.mark.parametrize("binary", ["", "  ", "-rf", "--dangerously-skip-permissions"])
-def test_a_flag_shaped_claude_binary_is_refused(tmp_path: Path, binary: str) -> None:
+def test_a_flag_shaped_agent_binary_is_refused(tmp_path: Path, binary: str) -> None:
     # argv[0] starting with a hyphen is read as an option by whatever parses it,
     # and no shell being involved does not help.
-    with pytest.raises(ConfigError, match="claude binary"):
-        Config(root=tmp_path, claude_binary=binary)
+    with pytest.raises(ConfigError, match="agent binary"):
+        Config(root=tmp_path, agent_binary=binary)
 
 
 @pytest.mark.parametrize("port", [0, -1, 65536, 99999])
