@@ -16,8 +16,10 @@ from hitchrail.config import (
     Config,
     ConfigError,
     is_loopback_host,
+    is_valid_host,
     is_wildcard_host,
     local_addresses,
+    normalise_host,
 )
 
 Resolver = Callable[[], tuple[str, ...]]
@@ -160,11 +162,45 @@ def test_allowed_origins_pin_the_port(tmp_path: Path) -> None:
     assert "http://localhost:3000" not in cfg.allowed_origins
 
 
-def test_the_proxy_origin_form_is_accepted(tmp_path: Path) -> None:
-    # Behind a TLS terminating proxy the browser sends https://name with no
-    # port. Refusing that would make the documented deployment impossible.
-    cfg = Config(root=tmp_path, host="192.168.1.10", token="t", port=8787)
-    assert "https://192.168.1.10" in cfg.allowed_origins
+def test_a_proxy_origin_is_configured_rather_than_guessed(tmp_path: Path) -> None:
+    """Named regression: `https://{host}` used to be derived for every host.
+
+    That made any HTTPS service on port 443 of the same machine a same origin
+    caller. The module's own argument for refusing `http://{host}` is that port
+    80 is a port like any other, and it applies to 443 unchanged. A TLS
+    terminating proxy is exactly the case that cannot be derived, because the
+    scheme and the port are both the proxy's.
+    """
+    guessed = Config(root=tmp_path, host="192.168.1.10", token="t", port=8787)
+    assert "https://192.168.1.10" not in guessed.allowed_origins
+    assert "https://localhost" not in guessed.allowed_origins
+
+    configured = Config(
+        root=tmp_path,
+        host="192.168.1.10",
+        token="t",
+        port=8787,
+        extra_origins=("https://box.lan:8443",),
+    )
+    assert "https://box.lan:8443" in configured.allowed_origins
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "box.lan",
+        "https://x/path",
+        "https://x?q=1",
+        "https://x#f",
+        "https://u@x",
+        "https://*",
+        "ftp://x",
+    ],
+    ids=["no-scheme", "path", "query", "fragment", "userinfo", "wildcard", "wrong-scheme"],
+)
+def test_a_configured_origin_that_is_not_an_origin_is_refused(tmp_path: Path, bad: str) -> None:
+    with pytest.raises(ConfigError):
+        Config(root=tmp_path, extra_origins=(bad,))
 
 
 def test_the_bare_http_origin_is_not_accepted(tmp_path: Path) -> None:
@@ -293,9 +329,20 @@ def test_an_extra_host_that_is_not_a_bare_hostname_is_refused(tmp_path: Path, ba
         Config(root=tmp_path, host="0.0.0.0", token="t", extra_hosts=(bad,))
 
 
-def test_a_bracketed_ipv6_extra_host_is_accepted(tmp_path: Path) -> None:
+def test_a_bracketed_ipv6_extra_host_is_stored_bare(tmp_path: Path) -> None:
+    """One canonical form. Brackets belong to the URL, not to the host.
+
+    A Host header brackets an IPv6 literal and a config file usually does not,
+    so the matcher normalises the header and both meet on the bare form.
+    Storing both spellings was a workaround for a matcher that could not strip
+    brackets, and two spellings of one host can disagree with each other.
+    """
     cfg = Config(root=tmp_path, host="0.0.0.0", token="t", extra_hosts=("[fe80::1]",))
-    assert "[fe80::1]" in cfg.allowed_hosts
+    assert "fe80::1" in cfg.allowed_hosts
+    assert "[fe80::1]" not in cfg.allowed_hosts
+    # Bracketed again on the way into an origin, because that is what a browser
+    # puts in the Origin header.
+    assert f"http://[fe80::1]:{cfg.port}" in cfg.allowed_origins
 
 
 @pytest.mark.parametrize("prefix", ["", "   ", " hr-", "hr- ", "hr.", "hr:", "h r-"])
@@ -401,3 +448,95 @@ def test_a_failing_gethostname_does_not_discard_the_probe_address(
     monkeypatch.setattr("hitchrail.config.socket.gethostname", boom)
     monkeypatch.setattr("hitchrail.config.socket.socket", lambda *a, **k: FakeSocket())
     assert local_addresses() == ("192.168.5.5",)
+
+
+@pytest.mark.parametrize(
+    "spelling", ["0.0.0.0", "::", "::0", "0:0:0:0:0:0:0:0", "[::]", " :: "]
+)
+def test_every_spelling_of_the_unspecified_address_is_a_wildcard(
+    tmp_path: Path, spelling: str
+) -> None:
+    """Named regression: a three element set called `::0` a concrete bind.
+
+    The resolver was then never consulted, so a wildcard bind written that way
+    was reachable on loopback only, which is the regression the resolver exists
+    to prevent. `ipaddress` already knows what an unspecified address is.
+    """
+    assert is_wildcard_host(spelling)
+    cfg = Config(root=tmp_path, host=spelling, token="t", resolver=fixed_resolver("10.0.0.2"))
+    assert "10.0.0.2" in cfg.allowed_hosts
+    assert spelling.strip() not in cfg.allowed_hosts
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "box.lan:8787",
+        "http://box.lan",
+        "box.lan/path",
+        "user@box.lan",
+        "[...]",
+        "[::1:::2]",
+        "a b",
+    ],
+)
+def test_the_bind_host_is_validated_like_everything_else(tmp_path: Path, bad: str) -> None:
+    """Named regression: the bind address skipped the validation extra_hosts got.
+
+    `--host box.lan:8787` was accepted, landed in the allowlist where it could
+    never match, and its colon misfired the IPv6 bracketing into an allowed
+    origin of `http://[box.lan:8787]:8787`.
+    """
+    with pytest.raises(ConfigError, match="bare host"):
+        Config(root=tmp_path, host=bad, token="t")
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("  BOX.LAN  ", "box.lan"),
+        ("[::1]", "::1"),
+        ("[2001:DB8::5]", "2001:db8::5"),
+        ("127.0.0.1", "127.0.0.1"),
+        ("", ""),
+    ],
+)
+def test_normalise_host_produces_one_form(raw: str, expected: str) -> None:
+    assert normalise_host(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "valid"),
+    [
+        ("box.lan", True),
+        ("a.b.c.example", True),
+        ("[::1]", True),
+        ("2001:db8::5", True),
+        ("127.0.0.1", True),
+        ("[...]", False),
+        ("[::1:::2]", False),
+        ("box.lan:8787", False),
+        ("-lead.example", False),
+        ("trail-.example", False),
+        ("a" * 254, False),
+        ("", False),
+    ],
+)
+def test_is_valid_host_defers_to_ipaddress_for_literals(value: str, valid: bool) -> None:
+    # A character class does not know what an IPv6 literal is: `[...]` and
+    # `[::1:::2]` both satisfied the pattern this replaces.
+    assert is_valid_host(value) is valid
+
+
+def test_a_resolver_returning_junk_cannot_widen_the_allowlist(tmp_path: Path) -> None:
+    # The resolver is an external surface. Its output is filtered on the way
+    # out, not trusted because it came from the operating system.
+    cfg = Config(
+        root=tmp_path,
+        host="0.0.0.0",
+        token="t",
+        resolver=fixed_resolver(
+            "10.0.0.2", "0.0.0.0", "::", "*", "not a host", "", "box.lan:1"
+        ),
+    )
+    assert cfg.allowed_hosts == ("localhost", "127.0.0.1", "::1", "10.0.0.2")

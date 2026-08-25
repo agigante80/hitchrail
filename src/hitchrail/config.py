@@ -9,21 +9,62 @@ import socket
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 LOOPBACK_NAMES = frozenset({"localhost", "localhost.localdomain"})
-WILDCARD_HOSTS = frozenset({"0.0.0.0", "::", "*"})  # noqa: S104
 
-# A bare hostname, or an IPv6 literal in brackets. Deliberately excludes a
-# port, a scheme, a path and userinfo: `--allow-host box.lan:8787` used to be
-# accepted and then never matched anything, because the Host header is compared
-# with the port already stripped. It also misfired the IPv6 bracketing below
-# and produced `http://[box.lan:8787]:8787` as an allowed origin. Silently
-# ignoring what the operator configured is worse than refusing it.
-HOST_PATTERN = re.compile(
-    r"\A(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)\Z"
+# A DNS hostname, one label or several. Deliberately excludes a port, a scheme,
+# a path and userinfo: `--allow-host box.lan:8787` was once accepted and then
+# never matched anything, because a Host header is compared with the port
+# already stripped. IP literals are validated by `ipaddress` instead, which is
+# the only thing that actually knows what one looks like: an earlier character
+# class accepted `[...]` and `[::1:::2]` as IPv6.
+HOSTNAME_PATTERN = re.compile(
+    r"\A(?!-)[A-Za-z0-9-]{1,63}(?<!-)(?:\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*\.?\Z"
 )
+MAX_HOSTNAME_LENGTH = 253
 
 Resolver = Callable[[], tuple[str, ...]]
+
+
+def normalise_host(raw: str) -> str:
+    """One canonical form for a host: trimmed, lowercased, brackets stripped.
+
+    Every host reaching the allowlist goes through here, whatever door it came
+    in by: the bind address, `extra_hosts`, and whatever the resolver returned.
+
+    Each of those grew its own partial normalisation, and every one of the five
+    defects this function replaces was the same shape. The bind address skipped
+    the validation `extra_hosts` got. The resolver's output skipped both.
+    IPv6 was stored bare from one door and bracketed from another, so the
+    allowlist held two spellings of one host and could disagree with itself.
+
+    Brackets are stripped rather than kept. A `Host` header brackets an IPv6
+    literal and a config file usually does not, so the matcher normalises the
+    header the same way and both meet in the middle on the bare form. Storing
+    both was a workaround for a matcher that could not strip them.
+    """
+    value = raw.strip().lower()
+    if value.startswith("[") and value.endswith("]"):
+        value = value[1:-1]
+    return value
+
+
+def is_valid_host(value: str) -> bool:
+    """A bare hostname or IP literal, and nothing else.
+
+    `ipaddress` decides what an IP literal is, because a character class does
+    not: `[...]` and `[::1:::2]` both satisfied the pattern this replaces, so
+    an entry the operator got wrong was accepted and then never matched.
+    """
+    bare = normalise_host(value)
+    if not bare or len(bare) > MAX_HOSTNAME_LENGTH:
+        return False
+    try:
+        ipaddress.ip_address(bare)
+    except ValueError:
+        return bool(HOSTNAME_PATTERN.match(bare))
+    return True
 
 
 class ConfigError(ValueError):
@@ -36,12 +77,12 @@ def is_loopback_host(host: str) -> bool:
     Two copies of this rule would drift, and the one that drifts is the one
     deciding whether a token is demanded at all.
 
-    Brackets are stripped first. `[::1]` is the form people copy out of a URL
-    and out of some proxy documentation, and reading it as a network bind meant
-    refusing to serve loopback without a token, with a message about anyone on
-    the network being able to run code as you. Fail safe, but wrong and rude.
+    `[::1]` is the form people copy out of a URL and out of some proxy
+    documentation, and reading it as a network bind meant refusing to serve
+    loopback without a token, with a message about anyone on the network being
+    able to run code as you. Fail safe, but wrong and rude.
     """
-    bare = host.strip().strip("[]")
+    bare = normalise_host(host)
     if bare in LOOPBACK_NAMES:
         return True
     try:
@@ -51,7 +92,21 @@ def is_loopback_host(host: str) -> bool:
 
 
 def is_wildcard_host(host: str) -> bool:
-    return host.strip().strip("[]") in WILDCARD_HOSTS
+    """Every spelling of "bind to everything", not a list of three.
+
+    `is_unspecified` is what `ipaddress` calls this, and it covers `0.0.0.0`,
+    `::`, `::0` and `0:0:0:0:0:0:0:0` alike. A membership test against a
+    three element set called `::0` a concrete bind, so the resolver was never
+    consulted and a wildcard bind written that way was reachable on loopback
+    only, which is the regression the whole resolver exists to prevent.
+    """
+    bare = normalise_host(host)
+    if bare == "*":
+        return True
+    try:
+        return ipaddress.ip_address(bare).is_unspecified
+    except ValueError:
+        return False
 
 
 def local_addresses() -> tuple[str, ...]:
@@ -114,6 +169,7 @@ class Config:
     port: int = 8787
     token: str | None = None
     extra_hosts: tuple[str, ...] = ()
+    extra_origins: tuple[str, ...] = ()
     session_prefix: str = "hr-"
     stop_timeout: float = 30.0
     hard_floor_mb: int = 1536
@@ -135,7 +191,9 @@ class Config:
         self._check_session_prefix()
         self._check_claude_binary()
         self._check_numbers()
+        self._check_bind_host()
         self._check_extra_hosts()
+        self._check_extra_origins()
 
         if not self.is_loopback and not self.token:
             raise ConfigError(
@@ -193,20 +251,61 @@ class Config:
                 f"{self.hard_floor_mb}, which makes the confirmation gate unreachable"
             )
 
+    def _check_bind_host(self) -> None:
+        """The bind address goes through the same door as everything else.
+
+        It used to skip this entirely, so `--host box.lan:8787` was accepted,
+        landed in the allowlist verbatim where it could never match a Host
+        header, and produced `http://[box.lan:8787]:8787` as an allowed origin
+        because the port's colon misfired the IPv6 bracketing.
+        """
+        if is_wildcard_host(self.host):
+            return
+        if not is_valid_host(self.host):
+            raise ConfigError(
+                f"not a bare host to bind to: {self.host!r}. Give the host on its "
+                "own, with no port, scheme or path; the port is --port"
+            )
+
     def _check_extra_hosts(self) -> None:
         for entry in self.extra_hosts:
-            candidate = entry.strip()
-            if is_wildcard_host(candidate) or candidate.startswith("*"):
+            if is_wildcard_host(entry) or entry.strip().startswith("*"):
                 raise ConfigError(
                     "a wildcard allowed host defeats the point of the allowlist; "
                     "name the hosts explicitly"
                 )
-            if not HOST_PATTERN.match(candidate):
+            if not is_valid_host(entry):
                 raise ConfigError(
                     f"not a bare hostname: {entry!r}. Give the host on its own, with "
                     "no port, scheme or path, because the Host header is compared "
                     "with the port already stripped"
                 )
+
+    def _check_extra_origins(self) -> None:
+        """An origin is a scheme, a host and a port, and nothing else.
+
+        Configured rather than guessed, because a TLS terminating proxy's
+        origin cannot be derived from our own bind: the scheme is the proxy's,
+        the port is the proxy's, and only the operator knows either.
+        """
+        for entry in self.extra_origins:
+            candidate = entry.strip().rstrip("/")
+            if "*" in candidate:
+                raise ConfigError(
+                    f"a wildcard origin defeats the point of the check: {entry!r}"
+                )
+            parts = urlsplit(candidate)
+            if parts.scheme not in {"http", "https"} or not parts.hostname:
+                raise ConfigError(
+                    f"not an origin: {entry!r}. Give scheme://host[:port], "
+                    "for example https://box.lan:8443"
+                )
+            if parts.path or parts.query or parts.fragment or parts.username:
+                raise ConfigError(
+                    f"an origin carries no path, query, fragment or userinfo: {entry!r}"
+                )
+            if not is_valid_host(parts.hostname):
+                raise ConfigError(f"not a valid host in origin {entry!r}")
 
     @property
     def is_loopback(self) -> bool:
@@ -223,7 +322,14 @@ class Config:
         return self._allowed_origins
 
     def _resolve_allowed_hosts(self) -> tuple[str, ...]:
-        hosts = ["localhost", "127.0.0.1", "::1", "[::1]"]
+        """One canonical form per host, whatever door it came in by.
+
+        `::1` appears once, bare. It used to appear twice, bare and bracketed,
+        which was a workaround for a matcher that could not strip brackets. The
+        matcher normalises now, so two spellings of one host would only be a
+        thing that can disagree with itself.
+        """
+        hosts = ["localhost", "127.0.0.1", "::1"]
 
         if is_wildcard_host(self.host):
             # We are listening on every interface, so the bind string cannot
@@ -236,39 +342,40 @@ class Config:
         else:
             hosts.append(self.host)
 
-        # Stripped: a padded entry (a stray space from a comma split) would be
-        # accepted here and then never match a Host header, which reads as the
-        # allowlist silently ignoring what the operator configured.
-        hosts.extend(h.strip() for h in self.extra_hosts)
-        # Filtering wildcards again on the way out, because the resolver is an
-        # external surface and its output is not trusted to be well formed.
-        return tuple(dict.fromkeys(h for h in hosts if h and not is_wildcard_host(h)))
+        hosts.extend(self.extra_hosts)
+        # The resolver is an external surface, so its output is filtered on the
+        # way out too: a wildcard or an unparseable name from it must never
+        # reach the allowlist just because it arrived from the operating system.
+        normalised = (normalise_host(h) for h in hosts)
+        return tuple(
+            dict.fromkeys(
+                h for h in normalised if h and not is_wildcard_host(h) and is_valid_host(h)
+            )
+        )
 
     def _derive_allowed_origins(self) -> frozenset[str]:
-        """Hostname alone is not enough.
+        """Exactly the origins we can know, plus exactly the ones configured.
 
-        Another application on `localhost:3000` would otherwise be same origin
-        against an API equivalent to a shell.
+        We know our own bind: scheme http, the hosts we answer to, our port.
+        That is derived.
 
-        `https://name` with no port is included because behind a TLS
-        terminating reverse proxy, the deployment the README recommends, that
-        is exactly what the browser sends.
+        Everything else is configured, and that is the change. An earlier
+        version guessed `https://{host}` for every allowed host, which made any
+        HTTPS service on port 443 of the same machine a same origin caller
+        against an API equivalent to a shell. The module's own argument for
+        refusing `http://{host}` is that port 80 is a port like any other, and
+        that applies to 443 unchanged.
 
-        `http://name` with no port is NOT included, and that omission is the
-        point. Port 80 is a port like any other, so accepting the bare form
-        would make any plain HTTP page anywhere on the same host or LAN address
-        a same origin caller, which is the hole the port pinning exists to
-        close.
-
-        Known limitation: a TLS proxy on a port other than 443 sends
-        `https://name:8443` and is refused. There is no way to derive that port
-        from our own bind, so it needs configuration rather than a guess. See
-        https://github.com/agigante80/hitchrail/issues/6.
+        A TLS terminating reverse proxy is the case the guess was for, and it
+        is precisely the case we cannot derive: the scheme is the proxy's, the
+        port is the proxy's, and only the operator knows either. So it is
+        `extra_origins`, and the README says so.
         """
         origins: set[str] = set()
         for host in self._allowed_hosts:
-            # A bare ::1 in an origin is not a URL; IPv6 literals are bracketed.
-            bracketed = f"[{host}]" if ":" in host and not host.startswith("[") else host
+            # An IPv6 literal is bracketed in a URL even though it is stored
+            # bare, because that is what a browser sends in an Origin header.
+            bracketed = f"[{host}]" if ":" in host else host
             origins.add(f"http://{bracketed}:{self.port}")
-            origins.add(f"https://{bracketed}")
+        origins.update(o.strip().rstrip("/").lower() for o in self.extra_origins)
         return frozenset(origins)

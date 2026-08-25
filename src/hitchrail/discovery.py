@@ -86,7 +86,7 @@ class NoSuchProject(InvalidName):
     """
 
 
-class RootUnavailable(ValueError):
+class RootUnavailable(Exception):
     """The root itself could not be read.
 
     Config checks the root is a directory once, at construction. A USB drive,
@@ -95,6 +95,15 @@ class RootUnavailable(ValueError):
     handling as a 500. Reporting honestly that the root cannot be read is the
     behaviour control 7 asks for; guessing that there are no projects would say
     every session is stopped.
+
+    NOT a ValueError, deliberately, and this is the whole point of the class.
+    `InvalidName`, `NoSuchProject`, `OutsideRoot` and `AlreadyExists` are all
+    things the CALLER did wrong, and a handler written as
+    `except ValueError -> 400` is correct for every one of them. This is not:
+    an unplugged drive is not a bad request, and answering 400 would tell the
+    caller to fix something they did not break. It was a ValueError in its
+    first version, which put it in the bucket the exception was created to
+    escape from.
     """
 
 

@@ -610,3 +610,28 @@ def test_a_clean_root_reports_a_total_of_zero(tmp_path: Path) -> None:
     listing = scan(tmp_path)
     assert listing.unsupported == ()
     assert listing.unsupported_total == 0
+
+
+def test_root_unavailable_is_not_a_client_error(tmp_path: Path) -> None:
+    """Named regression: it was a ValueError, which is the bucket it escapes from.
+
+    `InvalidName`, `NoSuchProject`, `OutsideRoot` and `AlreadyExists` are all
+    things the caller did wrong, so a handler written as
+    `except ValueError -> 400` is right for every one of them. An unplugged USB
+    drive is not a bad request, and answering 400 tells the caller to fix
+    something they did not break.
+    """
+    assert not issubclass(RootUnavailable, ValueError)
+    for client_error in (InvalidName, NoSuchProject, OutsideRoot, AlreadyExists):
+        assert issubclass(client_error, ValueError)
+
+    gone = tmp_path / "unplugged"
+    gone.mkdir()
+    gone.rmdir()
+    # The distinction has to survive a real call, not just the class hierarchy.
+    try:
+        list_projects(gone)
+    except ValueError:  # pragma: no cover - the failure this test exists for
+        raise AssertionError("a vanished root was reported as a client error") from None
+    except RootUnavailable:
+        pass
