@@ -3,11 +3,19 @@
 A web UI for starting and stopping headless Claude Code sessions across a
 folder of projects. Open it on your phone, tap a folder, get a session link.
 
-**Status: design complete, not yet implemented.** There is no working code in
-this repository yet. See
+**Status: early. Phase 1 of 7 is built; there is no runnable server yet.**
+
+What exists today is the package skeleton with five blocking gates on Python
+3.11, 3.12 and 3.13, the configuration and its refusals, and the folder
+discovery that makes the root a hard boundary. What does not exist yet is
+everything you would actually use: the HTTP API, the browser interface, and
+the engine that starts and stops sessions. `hitchrail` is not on PyPI, and the
+install commands below will not work until it is.
+
+See [`docs/roadmap.md`](docs/roadmap.md) for the order of work,
 [`docs/superpowers/specs/2026-08-25-hitchrail-design.md`](docs/superpowers/specs/2026-08-25-hitchrail-design.md)
 for the design, and [`docs/tech-guidelines.md`](docs/tech-guidelines.md) for the
-engineering rules that govern the code once it exists.
+engineering rules that govern the code.
 
 ## What it will do
 
@@ -22,6 +30,9 @@ rather not wait.
 
 ## Install
 
+**Not yet.** Nothing is published, so none of these work today. They are here
+so the intended shape is on the record, and they become true at Phase 7.
+
 Hitchrail is a Python package, so the equivalent of `npx` here is `uvx`:
 
 ```sh
@@ -32,10 +43,32 @@ pipx install hitchrail         # if you already live in pipx
 
 One word, no hyphen.
 
+## Working on it
+
+```sh
+uv sync                    # set up
+uv run pytest              # tests
+uv run ruff check          # lint
+uv run ruff format         # format
+uv run mypy                # types
+uv run lint-imports        # module boundaries
+```
+
+All five are blocking in CI on 3.11, 3.12 and 3.13. The last one is the
+unusual one: it enforces that the engine layer never imports Starlette,
+uvicorn, `sse_starlette`, the server or the CLI, so the engine stays testable
+without HTTP. Import boundaries defended only by good intentions do not
+survive.
+
 ## Read this before running it
 
 Hitchrail starts `claude --dangerously-skip-permissions`. **Anyone who can reach
 its API can run arbitrary code on that machine as you.**
+
+This section describes the finished tool. Of the controls below, the mandatory
+token off loopback and the root boundary are built; the host and origin checks
+land in Phase 2, before there is any API to reach. None of it is optional, and
+none of it is a reason to run this on a network you do not trust.
 
 It binds to loopback with no authentication by default. Binding it to any other
 interface requires a token, and the server refuses to start without one. It
