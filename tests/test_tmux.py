@@ -30,11 +30,39 @@ def test_a_name_with_a_separator_becomes_addressable(name: str) -> None:
     assert ":" not in out
 
 
-def test_sanitize_keeps_the_readable_part() -> None:
-    assert sanitize("dotted.site").startswith("dotted-it")
+def test_an_ordinary_name_is_untouched() -> None:
+    """The readability guarantee that actually matters.
+
+    Most project names hold neither separator, and those pass through
+    unchanged, so `tmux ls` stays legible for the common case. Names that must
+    be encoded are less pretty, and that is the right trade: the project keeps
+    the display name apart from the tmux name precisely so the tmux name can be
+    optimised for correctness.
+    """
+    for name in ("hitchrail", "my-app", "project_2", "a-b-28b8f5"):
+        assert sanitize(name) == name
 
 
-@pytest.mark.parametrize(("a", "b"), [("a.b", "a-b"), ("a:b", "a.b"), ("a.b", "a:b")])
+def test_an_encoded_name_keeps_its_stem_recognisable() -> None:
+    """Not required for correctness, but it is why the encoding is not a hash."""
+    assert "dotted" in sanitize("dotted.site")
+
+
+@pytest.mark.parametrize(
+    ("a", "b"),
+    [
+        ("a.b", "a-b"),
+        ("a:b", "a.b"),
+        ("a.b", "a:b"),
+        # The pair that broke the digest version. `a.b` mapped to
+        # `a-b-<6 hex of blake2b>`, and a project literally named that string
+        # was already safe so it came back unchanged and collided. The
+        # colliding name is computable by anyone who can create a folder.
+        ("a.b", "a-b-28b8f5"),
+        ("dotted.site", "e-dotted-dit"),
+        ("a-b", "e-a--b"),
+    ],
+)
 def test_sanitize_is_injective(a: str, b: str) -> None:
     """The expensive one to leave out.
 
@@ -44,6 +72,36 @@ def test_sanitize_is_injective(a: str, b: str) -> None:
     one folder" outcome #11 fixed from the discovery side.
     """
     assert sanitize(a) != sanitize(b)
+
+
+def test_sanitize_is_injective_over_a_generated_corpus() -> None:
+    """Injectivity asserted by exhaustion, not by three hand picked pairs.
+
+    Hand picked pairs are how the digest version passed while colliding: every
+    pair somebody thought to write down was fine. This builds every string up
+    to length four over an alphabet holding both separators, the escape
+    character and the encoded prefix, and asserts the mapping never merges two
+    of them.
+    """
+    from itertools import product
+
+    alphabet = ".:-abe"
+    names = ["".join(p) for n in range(1, 5) for p in product(alphabet, repeat=n)]
+    seen: dict[str, str] = {}
+    for name in names:
+        out = sanitize(name)
+        clash = seen.get(out)
+        assert clash is None, f"{name!r} and {clash!r} both sanitize to {out!r}"
+        seen[out] = name
+    assert len(seen) == len(names)
+
+
+@pytest.mark.parametrize("name", ["a.b", "e-x", "a-b", "..", "e-", "a:b.c"])
+def test_a_sanitized_name_is_free_of_separators(name: str) -> None:
+    """Whatever the encoding does, the output must be addressable."""
+    out = sanitize(name)
+    assert "." not in out
+    assert ":" not in out
 
 
 def test_an_already_safe_name_is_left_alone() -> None:

@@ -12,7 +12,6 @@ This module is in the engine layer and imports nothing from the web layer;
 
 from __future__ import annotations
 
-import hashlib
 import subprocess
 from collections.abc import Callable
 
@@ -21,14 +20,14 @@ from collections.abc import Callable
 # on. `procs` consumes this alias too.
 Runner = Callable[[list[str]], "subprocess.CompletedProcess[str]"]
 
-# tmux reads both as target separators. Mapped to '-' rather than stripped so
-# the readable part of the name survives.
-_UNSAFE = str.maketrans({".": "-", ":": "-"})
+# tmux reads both of these as target separators, so neither may appear in a
+# session name. `-` is the escape character, which is why it is escaped too.
+_SEPARATORS = (".", ":")
 
-# Six hex characters. Long enough that a collision needs deliberate effort,
-# short enough that the session name stays something a person can read in
-# `tmux ls`.
-_DIGEST_BYTES = 3
+# Marks a name that went through the encoding below. A name that would
+# otherwise start with it is encoded as well, which is what keeps the encoded
+# and unencoded forms disjoint and therefore the whole mapping injective.
+_ENCODED_PREFIX = "e-"
 
 
 class NotOurSession(ValueError):
@@ -36,7 +35,7 @@ class NotOurSession(ValueError):
 
 
 def sanitize(name: str) -> str:
-    """Make a project name addressable as a tmux session, one to one.
+    """Make a project name addressable as a tmux session, ONE TO ONE.
 
     tmux reads '.' and ':' as window and pane separators in a target spec.
     Verified on 3.4: a session created as `hr-dotted.site` is stored as
@@ -45,21 +44,42 @@ def sanitize(name: str) -> str:
     presents as the session having vanished. Emitting neither character
     sidesteps the rewrite rather than trying to predict it.
 
-    The digest is the part that is easy to leave out and expensive to leave
-    out. A plain replacement maps both `a.b` and `a-b` onto `a-b`, so two
-    folders share one tmux session: one reads as running because the other is,
-    and stopping one kills the other's agent. That is the same "two agents in
-    one folder" outcome #11 fixed from the discovery side, reached from here.
+    Injectivity is the hard requirement here, not a nicety. If two project
+    names collide onto one session name, one project reads as running because
+    the other is, and stopping one kills the other's agent. That is the "two
+    agents in one folder" outcome #11 fixed from the discovery side, reached
+    from this one.
 
-    It is appended only when the name actually changed, so ordinary names stay
-    readable, and it is deterministic, because a session has to survive a
-    restart of Hitchrail.
+    **A digest suffix does not deliver it, which is why this is an escape
+    encoding.** An earlier version returned `a-b-<6 hex of blake2b>` for `a.b`
+    and returned already safe names unchanged. A project named literally
+    `a-b-28b8f5` is already safe, so it came back unchanged and collided with
+    `a.b`, and the colliding name is trivially computable by anyone who can
+    create a folder. Widening the digest only raises the price: 6 hex is 24
+    bits, so distinct names also birthday collide by accident somewhere around
+    four thousand projects. Injective by construction beats injective by hash.
+
+    The encoding is the usual escape and escape-the-escape:
+
+        -  ->  --      .  ->  -d      :  ->  -c
+
+    and the whole thing gets an `e-` prefix so encoded and unencoded names
+    occupy disjoint spaces. A name that already starts with `e-` is encoded for
+    the same reason. Names with neither separator are returned untouched, so
+    the common case still reads plainly in `tmux ls`, and readability is the
+    right thing to trade away here anyway: the project already keeps the
+    display name apart from the tmux name.
     """
-    safe = name.translate(_UNSAFE)
-    if safe == name:
-        return safe
-    digest = hashlib.blake2b(name.encode(), digest_size=_DIGEST_BYTES).hexdigest()
-    return f"{safe}-{digest}"
+    if not _needs_encoding(name):
+        return name
+    body = name.replace("-", "--").replace(".", "-d").replace(":", "-c")
+    return f"{_ENCODED_PREFIX}{body}"
+
+
+def _needs_encoding(name: str) -> bool:
+    """A name is encoded if it holds a separator, or could be mistaken for one
+    that was. The second half is what keeps the two spaces disjoint."""
+    return any(sep in name for sep in _SEPARATORS) or name.startswith(_ENCODED_PREFIX)
 
 
 class Tmux:
