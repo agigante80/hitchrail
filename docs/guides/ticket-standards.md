@@ -122,6 +122,74 @@ it into play, and the gate derives that scope rather than asking the author to s
 When you add a new rule with a coverage-style requirement, give it an explicit type-and-area
 scope here, or it will backfire.
 
+## Milestones and labels
+
+Every ticket carries **one milestone and at least one area label**, and each of
+those answers a different question. The milestone says *when*; the labels say
+*what* and *where*.
+
+### The milestone is the phase, and empty means untriaged
+
+| Milestone | Meaning |
+|---|---|
+| `Phase 1` through `Phase 7` | Triaged, and it belongs to that phase of `docs/roadmap.md` |
+| `Backlog` | Triaged, real work, no phase. Do-anytime maintenance, and tickets whose right answer may turn out to be closing them |
+| **empty** | **Nobody has triaged this yet** |
+
+The empty state is load bearing, so do not use it as a resting place. A ticket
+with no phase is not "unphased", it is **unread**, and `is:open no:milestone`
+is therefore the triage queue rather than a list of things somebody decided to
+leave alone. That distinction is free, and it disappears the moment an empty
+milestone is allowed to mean two things.
+
+`Backlog` is the honest answer for work with no phase. Its progress bar is
+meant to stay partial; it is a holding pen, not a phase.
+
+**One milestone, not several.** A ticket that wants two phases is a ticket that
+wants splitting, and this is the pressure that reveals it. Issue #9 spanned
+Phase 2 and Phase 3 and read as one coherent ticket until a milestone forced
+the question; it became #9 and #11, and the two halves land months apart.
+
+### Labels, in three groups
+
+| Group | Labels | Rule |
+|---|---|---|
+| **Area** | `config`, `discovery`, `tmux`, `procs`, `claude-ipc`, `ram`, `events`, `engine`, `security`, `server`, `web`, `cli`, `packaging`, `infrastructure`, `documentation` | **At least one, and the gate blocks without it.** This is what routes the specialist agents |
+| **Type** | `bug`, `enhancement`, `security`, `design`, `testing`, `documentation` | At least one. A missing type warns rather than blocks |
+| **Process** | `gated`, `blocked`, `needs-human`, `from-review` | Optional, applied as the ticket moves |
+
+`gated` is applied by whoever runs `/gate-ticket` when every agent scores
+10/10, and it is the answer to "what can I start". Without it the gate's
+verdict lives only in a comment, which is not a thing you can query.
+
+`from-review` marks a ticket that came out of code review rather than out of
+using the tool. It is worth being able to see that ratio: if nearly everything
+is `from-review`, review is doing the work usage should be doing.
+
+`needs-human` marks a decision only a person can make. `blocked` is the
+general case, waiting on another ticket.
+
+### Priority is not a label
+
+The five issue templates already carry a required Priority dropdown, and
+`ticket-gate` reads it. A `P0` label would be a second copy of the same fact,
+and the first section of this document explains at length what happens to the
+second copy. Filter on the body, or on the milestone, which is usually the
+question you actually meant.
+
+### Where this is enforced
+
+- **`ticket-gate` Step 0b** refuses to score a ticket with no area label or no
+  milestone. Nothing gets implemented without both.
+- **`scripts/check-ticket-hygiene.sh`** sweeps every open issue and reports
+  what is missing, because the gate only sees tickets somebody chose to run it
+  on. Run it before planning a phase.
+- Issue forms **cannot** set a milestone. GitHub's form schema supports
+  `labels`, `assignees`, `projects`, `title` and `type`, and nothing else, so
+  the templates set labels and the milestone is applied by hand or by the
+  sweep. That is checked, not remembered: see the syntax reference for issue
+  forms.
+
 ## Area labels
 
 The gate blocks a ticket with no area label, because that is what routes the specialist agents.

@@ -170,11 +170,27 @@ Review the synthesised content and re-run /gate-ticket <N> if corrections are ne
 
 **0c-vi. Proceed to 0b.** Do NOT return BLOCKED at this step.
 
-#### 0b. Label validation
+#### 0b. Milestone and label validation
 
 ```bash
-gh issue view <NUMBER> --repo agigante80/hitchrail --json labels --jq '.labels[].name'
+gh issue view <NUMBER> --repo agigante80/hitchrail --json labels,milestone \
+  --jq '{labels: [.labels[].name], milestone: .milestone.title}'
 ```
+
+0. **A milestone is required**, and blocks without one. The phases are `Phase 1`
+   through `Phase 7`, matching `docs/roadmap.md`, plus `Backlog` for triaged
+   work with no phase.
+
+   **An empty milestone means nobody has triaged this ticket yet.** That is a
+   real state and it is why it blocks: scoring an unread ticket for
+   implementation readiness answers a question nobody asked. Return
+   `BLOCKED - MILESTONE_REQUIRED` and post: "This ticket has no milestone, which
+   means it has not been triaged. Give it a phase, or `Backlog` if it has no
+   phase, then re-run the gate. See docs/guides/ticket-standards.md."
+
+   A ticket that wants two phases wants splitting. Say so rather than picking
+   one: issue #9 read as coherent until a milestone forced the question, and it
+   became #9 and #11 landing months apart.
 
 1. **At least one area label is required.** One per module the plan creates, so routing lands
    on the right specialist: `config`, `discovery`, `tmux`, `procs`, `claude-ipc`, `ram`,
@@ -186,6 +202,24 @@ gh issue view <NUMBER> --repo agigante80/hitchrail --json labels --jq '.labels[]
 
 2. **Warn if no type label** (`bug`, `enhancement`, `security`, `design`, `testing`,
    `documentation`). Log the warning in the scorecard; do not block.
+
+3. **On a PASS, apply the `gated` label.**
+
+```bash
+gh issue edit <NUMBER> --repo agigante80/hitchrail --add-label gated
+```
+
+   Without it the verdict lives only in a scorecard comment, which is not
+   something anybody can query. `gated` is the answer to "what can I start",
+   and `is:open label:gated` is the work queue.
+
+   **Remove it whenever the ticket stops being ready:** on any FAIL, and after
+   Step 0c auto-synthesis, which voids every prior score. A stale `gated` label
+   is worse than none, because it is an assurance nobody checked.
+
+```bash
+gh issue edit <NUMBER> --repo agigante80/hitchrail --remove-label gated
+```
 
 ---
 
@@ -632,6 +666,12 @@ print each URL.
   scores 10 with a one line justification. An unrelated agent must never drag an otherwise ready
   ticket below 10/10. A docs-only ticket is not penalised by Blast Radius.
 - **Minimum passing score: 10/10 from every agent that runs.** No exceptions.
+- **A milestone and an area label are both required before scoring.** The area
+  label routes the specialist agents; the milestone says the ticket has been
+  read by a person. `scripts/check-ticket-hygiene.sh` sweeps for tickets
+  missing either, because this gate only sees the ones somebody ran it on.
+- **`gated` is applied on PASS and removed on FAIL or after auto-synthesis.**
+  An assurance nobody rechecked is worse than no assurance.
 - **Minimum agent count: 5** (Security, Architect, Developer, QA, Blast Radius).
 - **Override:** `critical` or `security` labels run ALL agents.
 - **Agents must be specific.** "Needs improvement" is not acceptable feedback.

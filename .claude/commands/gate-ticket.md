@@ -32,6 +32,11 @@ All agents must score 10/10 for the ticket to be considered implementation ready
 - The fifth core agent is **Blast Radius**, not GDPR. Hitchrail stores no personal data and has
   no database; what it does have is arbitrary code execution as the user. The reasoning lives in
   `docs/guides/ticket-standards.md` section 5.
+- A **milestone is required** and blocks without one: `Phase 1` through `Phase 7`, or
+  `Backlog` for triaged work with no phase. An empty milestone means the ticket has not
+  been triaged, so `is:open no:milestone` is the triage queue rather than a resting place.
+- On a PASS the gate applies the **`gated`** label, and removes it on a FAIL or after
+  auto-synthesis. `is:open label:gated` is then the list of tickets ready to implement.
 - An **area label is required** and blocks without one. One per module: `config`, `discovery`,
   `tmux`, `procs`, `claude-ipc`, `ram`, `events`, `engine`, `security`, `server`, `web`, `cli`,
   plus `packaging`, `infrastructure` and `documentation`. The canonical list lives in
