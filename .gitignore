@@ -5,6 +5,7 @@ dist/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.import_linter_cache/
 docs/design/hitchrail-session-manager.html
 .claude/settings.local.json
 CLAUDE.local.md
