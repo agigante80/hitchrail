@@ -12,12 +12,12 @@ from pathlib import Path
 
 import pytest
 
-from hitchrail import config as config_module
 from hitchrail.config import (
     Config,
     ConfigError,
     is_loopback_host,
     is_wildcard_host,
+    local_addresses,
 )
 
 Resolver = Callable[[], tuple[str, ...]]
@@ -188,13 +188,12 @@ def test_a_named_bind_still_demands_a_token(tmp_path: Path) -> None:
 def test_local_addresses_survives_a_machine_with_no_hostname(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(config_module.socket, "gethostname", lambda: "")
-    monkeypatch.setattr(
-        config_module.socket,
-        "getaddrinfo",
-        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not be asked")),
-    )
-    assert isinstance(config_module.local_addresses(), tuple)
+    def refuse(*args: object, **kwargs: object) -> object:
+        raise AssertionError("getaddrinfo must not be asked without a hostname")
+
+    monkeypatch.setattr("hitchrail.config.socket.gethostname", lambda: "")
+    monkeypatch.setattr("hitchrail.config.socket.getaddrinfo", refuse)
+    assert isinstance(local_addresses(), tuple)
 
 
 def test_local_addresses_survives_a_failing_lookup(
@@ -204,19 +203,18 @@ def test_local_addresses_survives_a_failing_lookup(
     def boom(*args: object, **kwargs: object) -> object:
         raise OSError("no resolver")
 
-    monkeypatch.setattr(config_module.socket, "gethostname", lambda: "box")
-    monkeypatch.setattr(config_module.socket, "getaddrinfo", boom)
-    assert "box" in config_module.local_addresses()
+    monkeypatch.setattr("hitchrail.config.socket.gethostname", lambda: "box")
+    monkeypatch.setattr("hitchrail.config.socket.getaddrinfo", boom)
+    assert "box" in local_addresses()
 
 
 def test_local_addresses_never_returns_a_wildcard(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # The one output that would turn the allowlist into no allowlist at all.
-    monkeypatch.setattr(config_module.socket, "gethostname", lambda: "0.0.0.0")
+    monkeypatch.setattr("hitchrail.config.socket.gethostname", lambda: "0.0.0.0")
     monkeypatch.setattr(
-        config_module.socket, "getaddrinfo", lambda *a, **k: [(0, 0, 0, "", ("::", 0))]
+        "hitchrail.config.socket.getaddrinfo",
+        lambda *a, **k: [(0, 0, 0, "", ("::", 0))],
     )
-    assert config_module.local_addresses() == () or all(
-        not is_wildcard_host(h) for h in config_module.local_addresses()
-    )
+    assert all(not is_wildcard_host(h) for h in local_addresses())
