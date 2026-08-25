@@ -135,9 +135,7 @@ async def test_a_mutating_request_with_the_matching_origin_is_served(
     tmp_path: Path,
 ) -> None:
     app = build(Config(root=tmp_path, port=8787))
-    response = await call(
-        app, "POST", headers={**HOST, "origin": "http://localhost:8787"}
-    )
+    response = await call(app, "POST", headers={**HOST, "origin": "http://localhost:8787"})
     assert response.status_code == 200
 
 
@@ -164,9 +162,7 @@ async def test_an_ipv6_origin_is_bracketed_the_way_a_browser_sends_it(
 ) -> None:
     cfg = Config(root=tmp_path, port=8787)
     app = build(cfg)
-    response = await call(
-        app, "POST", headers={"host": "[::1]", "origin": "http://[::1]:8787"}
-    )
+    response = await call(app, "POST", headers={"host": "[::1]", "origin": "http://[::1]:8787"})
     assert response.status_code == 200
 
 
@@ -188,9 +184,7 @@ async def test_origin_matching_is_case_insensitive_on_scheme_and_host(
 ) -> None:
     # Scheme and host are case insensitive per RFC 3986; the port is digits.
     app = build(Config(root=tmp_path, port=8787))
-    response = await call(
-        app, "POST", headers={**HOST, "origin": "HTTP://LOCALHOST:8787"}
-    )
+    response = await call(app, "POST", headers={**HOST, "origin": "HTTP://LOCALHOST:8787"})
     assert response.status_code == 200
 
 
