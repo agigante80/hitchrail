@@ -104,6 +104,50 @@ class HostAllowlistMiddleware:
         await self.app(scope, receive, send)
 
 
+class OriginCheckMiddleware:
+    """CSRF control for a same origin JSON API.
+
+    Browsers attach Origin to cross site requests and a rebound attacker cannot
+    forge it, so requiring it to name an origin we already serve is sufficient
+    here and needs no token round trip.
+
+    Exact origins, not hostnames. Matching on hostname alone would make
+    `http://localhost:3000` same origin with an API equivalent to a shell, so
+    every other development server on the machine could drive it.
+
+    Safe methods are exempt, and that is deliberate rather than an oversight:
+    `EventSource` cannot set request headers, so `/api/events` cannot carry an
+    Origin requirement. There is a named test asserting the exemption exists on
+    purpose, because otherwise somebody notices the gap, fixes it, and silently
+    breaks every live update in the product.
+    """
+
+    def __init__(self, app: ASGIApp, allowed_origins: frozenset[str]) -> None:
+        self.app = app
+        self.allowed = frozenset(o.strip().rstrip("/").lower() for o in allowed_origins)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope["method"] in SAFE_METHODS:
+            await self.app(scope, receive, send)
+            return
+
+        origin = header_map(scope).get("origin", "")
+        if not origin:
+            await deny(403, "origin_missing", "this request needs an Origin header")(
+                scope, receive, send
+            )
+            return
+        # Scheme and host are case insensitive per RFC 3986, and some clients
+        # append a slash that is not part of an origin. Normalise both rather
+        # than turn either into a refusal nobody can explain.
+        if origin.strip().rstrip("/").lower() not in self.allowed:
+            await deny(403, "origin_rejected", f"origin not allowed: {origin}")(
+                scope, receive, send
+            )
+            return
+        await self.app(scope, receive, send)
+
+
 def middleware_stack(config: Config) -> list[Middleware]:
     """Order matters, and it is asserted by a test rather than left to habit.
 
@@ -113,4 +157,5 @@ def middleware_stack(config: Config) -> list[Middleware]:
     """
     return [
         Middleware(HostAllowlistMiddleware, allowed_hosts=frozenset(config.allowed_hosts)),
+        Middleware(OriginCheckMiddleware, allowed_origins=config.allowed_origins),
     ]
