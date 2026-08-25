@@ -1,0 +1,12 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 390, "h": 844, "title": "Phone", "is_interactive": true },
+    { "file": "States.dc.html", "x": 490, "y": 0, "w": 900, "h": 1220, "title": "Edge states" },
+    { "file": "Desktop.dc.html", "x": 0, "y": 1400, "w": 1440, "h": 900, "title": "Desktop", "is_interactive": true }
+  ],
+  "annotations": [
+    { "id": "note-density", "x": 0, "y": -150, "w": 390, "text": "Running rows carry three actions, so they are tall. Stopped rows are a single line with one button, so the other 45 stay scannable with a thumb. That asymmetry is the whole mobile argument." },
+    { "id": "note-touch", "x": 0, "y": 1250, "w": 420, "text": "Same data, wide table. Nothing anywhere depends on hover, so touch and mouse get identical affordances." }
+  ],
+  "launch": { "view": "canvas" }
+}

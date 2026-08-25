@@ -1,0 +1,168 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;600;700&family=Karla:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; font-family: 'Karla', system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    a { color: #A8642E; text-decoration: none; }
+    a:hover { color: #8C5124; }
+    button { font-family: inherit; cursor: pointer; border: none; background: none; }
+  </style>
+</helmet>
+
+<div style="width: 900px; min-height: 1220px; background: #F3ECE1; padding: 36px; display: flex; flex-direction: column; gap: 26px;">
+
+  <div style="display: flex; flex-direction: column; gap: 5px;">
+    <div style="font-family: 'Zilla Slab', Georgia, serif; font-size: 26px; font-weight: 700; letter-spacing: -0.015em; color: #2E251C;">The states that decide the design</div>
+    <div style="font-size: 14px; color: #6B5A48; max-width: 620px;">The happy path is easy. These six are where a session manager either tells you the truth or quietly lies to you.</div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 30px 28px;">
+
+    <div style="display: flex; flex-direction: column; gap: 10px;">
+      <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: #A2917D;">Memory, soft threshold</div>
+      <div style="background: #FFFDFA; border: 1px solid #E8DFD1; border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 13px;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <div style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px; background: #FBF0DC; color: #B07D2A; flex-shrink: 0;">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 8v5"></path><path d="M12 17h.01"></path><path d="M10.3 3.9L2.4 17.6A2 2 0 0 0 4.1 20.6h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path></svg>
+          </div>
+          <div style="font-family: 'Zilla Slab', Georgia, serif; font-size: 18px; font-weight: 600;">Tight on memory</div>
+        </div>
+        <div style="font-size: 14px; line-height: 1.55; color: #6B5A48;">Starting <span style="font-weight: 700; color: #2E251C;">vessel</span> would leave about <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; color: #2E251C;">2.1 GB</span> free. Sessions have been killed by the kernel below that.</div>
+        <div style="display: flex; gap: 9px;">
+          <button style="flex-grow: 1; height: 44px; border-radius: 9px; border: 1px solid #E8DFD1; background: #FBF7F1; color: #4A3E31; font-size: 14px; font-weight: 600;">Cancel</button>
+          <button style="flex-grow: 1; height: 44px; border-radius: 9px; border: 1px solid #B07D2A; background: transparent; color: #8A5F17; font-size: 14px; font-weight: 700;">Start anyway</button>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 10px;">
+      <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: #A2917D;">Memory, hard floor</div>
+      <div style="background: #FFFDFA; border: 1px solid #E3C6C0; border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 13px;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <div style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px; background: #F6E4E0; color: #9A3B2B; flex-shrink: 0;">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><path d="M15 9l-6 6M9 9l6 6"></path></svg>
+          </div>
+          <div style="font-family: 'Zilla Slab', Georgia, serif; font-size: 18px; font-weight: 600;">Not enough memory</div>
+        </div>
+        <div style="font-size: 14px; line-height: 1.55; color: #6B5A48;">Only <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; color: #2E251C;">1.2 GB</span> free. Corral will not start a session into that.</div>
+        <div style="padding: 11px 13px; border-radius: 9px; background: #FBF7F1; border: 1px solid #E8DFD1; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
+            <div style="font-size: 13px; font-weight: 700;">vessel</div>
+            <div style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: #806E5A;">largest, 1.5 GB</div>
+          </div>
+          <button style="flex-shrink: 0; height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid #E3C6C0; background: transparent; color: #9A3B2B; font-size: 13px; font-weight: 700;">Stop it</button>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 10px;">
+      <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: #A2917D;">Detached, the another tool blind spot</div>
+      <div style="background: #FFFDFA; border: 1px solid #E8DFD1; border-left: 3px solid #B07D2A; border-radius: 10px; padding: 13px 14px; display: flex; flex-direction: column; gap: 11px;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;">
+          <div style="display: flex; flex-direction: column; gap: 3px; min-width: 0;">
+            <div style="font-size: 16px; font-weight: 700; letter-spacing: -0.01em;">vessel</div>
+            <div style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: #806E5A;">pid 24188  ·  no tmux session</div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0; height: 22px; padding: 0 9px; border-radius: 999px; background: #FBF0DC; color: #8A5F17; font-size: 11px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;">
+            <span style="width: 6px; height: 6px; border-radius: 999px; background: #B07D2A;"></span>detached
+          </div>
+        </div>
+        <div style="font-size: 13px; line-height: 1.5; color: #6B5A48;">Claude is alive but its terminal is gone. Starting a second one here would give you two agents in the same folder.</div>
+        <div style="display: flex; gap: 8px;">
+          <button style="flex-grow: 1; height: 40px; border-radius: 9px; border: 1px solid #E8DFD1; background: #FBF7F1; color: #4A3E31; font-size: 13px; font-weight: 600;">Leave it alone</button>
+          <button style="flex-grow: 1; height: 40px; border-radius: 9px; border: 1px solid #E3C6C0; background: #FBF7F1; color: #9A3B2B; font-size: 13px; font-weight: 700;">Kill pid 24188</button>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 10px;">
+      <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: #A2917D;">Link pending, and a dead start</div>
+      <div style="display: flex; flex-direction: column; gap: 9px;">
+        <div style="background: #FFFDFA; border: 1px solid #E8DFD1; border-left: 3px solid #5C7F4F; border-radius: 10px; padding: 13px 14px; display: flex; flex-direction: column; gap: 11px;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;">
+            <div style="display: flex; flex-direction: column; gap: 3px;">
+              <div style="font-size: 16px; font-weight: 700; letter-spacing: -0.01em;">forge-kit</div>
+              <div style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: #806E5A;">684 MB  ·  up 6s</div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0; height: 22px; padding: 0 9px; border-radius: 999px; background: #EDF2E9; color: #45663A; font-size: 11px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;">
+              <span style="width: 6px; height: 6px; border-radius: 999px; background: #5C7F4F;"></span>running
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: center; gap: 9px; height: 44px; border-radius: 9px; border: 1px dashed #D8CBB6; color: #A2917D; font-size: 14px; font-weight: 600;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+            waiting for its link
+          </div>
+        </div>
+
+        <div style="background: #FFFDFA; border: 1px solid #E3C6C0; border-left: 3px solid #9A3B2B; border-radius: 10px; padding: 13px 14px; display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+            <div style="font-size: 16px; font-weight: 700; letter-spacing: -0.01em;">koala</div>
+            <div style="flex-shrink: 0; height: 22px; padding: 0 9px; border-radius: 999px; background: #F6E4E0; color: #9A3B2B; font-size: 11px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; display: flex; align-items: center;">died</div>
+          </div>
+          <div style="font-size: 13px; line-height: 1.5; color: #6B5A48;">Started, then exited after 3 seconds.</div>
+          <button style="height: 40px; border-radius: 9px; border: 1px solid #E8DFD1; background: #FBF7F1; color: #4A3E31; font-size: 13px; font-weight: 600;">Read what it printed</button>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 10px;">
+      <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: #A2917D;">Reached over the network</div>
+      <div style="background: #FFFDFA; border: 1px solid #E8DFD1; border-radius: 12px; padding: 26px 20px; display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center;">
+        <div style="font-family: 'Zilla Slab', Georgia, serif; font-size: 30px; font-weight: 700; line-height: 1; letter-spacing: -0.015em; color: #A8642E;">corral</div>
+        <div style="font-size: 14px; line-height: 1.55; color: #6B5A48; max-width: 280px;">This corral is reachable from the network, so it needs the key printed in the terminal when you started it.</div>
+        <div style="width: 100%; height: 50px; border: 1px solid #E8DFD1; border-radius: 10px; background: #FBF7F1; display: flex; align-items: center; padding: 0 14px; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 14px; letter-spacing: 0.22em; color: #A2917D;">••••••••••••</div>
+        <button style="width: 100%; height: 48px; border-radius: 10px; background: #A8642E; color: #FFFDFA; font-size: 15px; font-weight: 700;">Unlock</button>
+        <div style="font-size: 12px; line-height: 1.5; color: #A2917D; max-width: 290px;">Anyone with this key can run code on that machine as you.</div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 10px;">
+      <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: #A2917D;">After dark</div>
+      <div style="background: #1E1913; border: 1px solid #362D24; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 9px;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 3px;">
+          <div style="font-family: 'Zilla Slab', Georgia, serif; font-size: 22px; font-weight: 700; line-height: 1; letter-spacing: -0.015em; color: #D08A4A;">corral</div>
+          <div style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: #8B7A66;">8 running</div>
+        </div>
+
+        <div style="background: #262019; border: 1px solid #362D24; border-left: 3px solid #86A876; border-radius: 10px; padding: 12px 13px; display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <div style="display: flex; flex-direction: column; gap: 3px;">
+              <div style="font-size: 15px; font-weight: 700; color: #F0E8DC;">media-sync</div>
+              <div style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: #8B7A66;">894 MB  ·  up 39m</div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border-radius: 999px; background: #2C3A26; color: #A3C193; font-size: 11px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;">
+              <span style="width: 6px; height: 6px; border-radius: 999px; background: #86A876;"></span>running
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <div style="flex-grow: 1; display: flex; align-items: center; justify-content: center; height: 40px; border-radius: 9px; background: #D08A4A; color: #1E1913; font-size: 14px; font-weight: 700;">Open</div>
+            <div style="width: 48px; height: 40px; border-radius: 9px; border: 1px solid #362D24; background: #221C16;"></div>
+            <div style="width: 48px; height: 40px; border-radius: 9px; border: 1px solid #4A3029; background: #221C16;"></div>
+          </div>
+        </div>
+
+        <div style="background: #262019; border: 1px solid #362D24; border-radius: 10px; padding: 11px 13px; display: flex; align-items: center; justify-content: space-between;">
+          <div style="font-size: 14px; font-weight: 600; color: #C9BCA9;">long-hyphenated-name</div>
+          <div style="height: 36px; padding: 0 16px; border-radius: 9px; border: 1px solid #D08A4A; color: #D08A4A; font-size: 13px; font-weight: 700; display: flex; align-items: center;">Start</div>
+        </div>
+
+        <div style="background: #262019; border: 1px solid #362D24; border-radius: 10px; padding: 11px 13px; display: flex; align-items: center; justify-content: space-between;">
+          <div style="font-size: 14px; font-weight: 600; color: #C9BCA9;">dotted.site</div>
+          <div style="height: 36px; padding: 0 16px; border-radius: 9px; border: 1px solid #D08A4A; color: #D08A4A; font-size: 13px; font-weight: 700; display: flex; align-items: center;">Start</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
