@@ -193,6 +193,19 @@ section 6, which names error codes the first plan draft did not deliver:
   the link only when Claude's own state file has already written it; the
   interface asks this route when the user taps a row whose link is still
   pending, and that is where the design's `url_pending` code is returned.
+- **`HostAllowlistMiddleware` replaces `TrustedHostMiddleware`**, which the
+  design's section 5.1 names. Starlette's does `host.split(":")[0]`, so every
+  IPv6 literal becomes `"["` and `http://[::1]:8787/` is refused whatever the
+  allowlist holds, which makes a phone on an IPv6 network unable to reach
+  Hitchrail at all. Its `www_redirect` default also answers an unrecognised
+  host with a 307 built from that same untrusted header. The control is
+  unchanged; only the mechanism is, which is why this is recorded here rather
+  than superseding the design.
+- **`--allow-origin`** is a configuration option the design does not mention.
+  `allowed_origins` used to derive `https://{host}` for every allowed host,
+  which made any HTTPS service on port 443 of the same machine a same origin
+  caller. A TLS terminating proxy's origin cannot be derived at all, because
+  the scheme and the port are both the proxy's, so it is configured.
 - **`locked`** is returned when a start arrives while another start is in flight
   for the same folder. The design asks for concurrent starts to serialize; a web
   UI makes double submission easy, and answering the second tap immediately and

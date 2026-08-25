@@ -93,10 +93,18 @@ non negotiable and each has a test that asserts the refusal.
 
 1. **No shell.** Subprocess calls take an argument list. `shell=True` is
    forbidden, with no exceptions.
-2. **Host allowlist always on.** `TrustedHostMiddleware` is applied to every
-   route including the event stream. This is DNS rebinding defence, and it is
-   the exact hole that produced CVE-2026-32632 in Glances, a tool of the same
-   shape.
+2. **Host allowlist always on**, applied to every route including the event
+   stream. This is DNS rebinding defence, and it is the exact hole that
+   produced CVE-2026-32632 in Glances, a tool of the same shape.
+
+   Implemented by `security.HostAllowlistMiddleware`, **not** by Starlette's
+   `TrustedHostMiddleware`, which the design originally named. That one does
+   `host.split(":")[0]`, so every IPv6 literal becomes `"["` and
+   `http://[::1]:8787/` is refused whatever the allowlist holds; and its
+   `www_redirect` default answers an unrecognised host with a redirect built
+   from that same untrusted header. Ten lines of our own, argued against
+   section 2 in `docs/superpowers/plans/2026-08-25-hitchrail-phase-2-security.md`
+   and recorded in `docs/roadmap.md`.
 3. **Origin checked on every mutating request.** This is the CSRF control for a
    same origin JSON API.
 4. **A token is mandatory for any non loopback bind.** The server refuses to
@@ -177,6 +185,15 @@ host allowlist rejecting a forged `Host` on a live socket.
 
 - Tests are hermetic. No test touches a real tmux server, a real Claude
   process, the network, or the filesystem outside a temporary root.
+- **One documented exception: `tests/test_live_socket.py`.** It binds 127.0.0.1
+  on an ephemeral port, talks to itself, and shuts down, and it is marked
+  `live` so it can be deselected. It exists because section 5 asks for a forged
+  `Host` to be refused on a live socket, and an `ASGITransport` test cannot
+  make that claim: it proves the middleware is configured, not that the
+  deployed server refuses anything, because a real request arrives through
+  uvicorn's HTTP parser rather than through a dictionary a test constructed.
+  A reader of these guidelines alone would otherwise conclude the suite opens
+  no socket at all.
 - External surfaces are faked behind injectable seams: tmux, the process table,
   memory readings, and the Claude state directory.
 - **The E2E tier drives a private tmux server on its own socket**, addressed as

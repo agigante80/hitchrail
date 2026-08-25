@@ -164,7 +164,7 @@ still refused, and that the token comparison was never reached, by patching it.
 | `tests/test_security_host.py` | the host allowlist and the DNS rebinding refusal |
 | `tests/test_security_origin.py` | the CSRF control, including the deliberate `GET` exemption |
 | `tests/test_security_token.py` | the three token carriers and the grant redirect |
-| `tests/test_live_socket.py` | the refusals on a real loopback socket |
+| `tests/test_live_socket.py` | the refusals on a real loopback socket, its own deliverable |
 | `pyproject.toml` | gains one registered pytest marker |
 
 One module rather than three. They are 120 lines together, they change together
