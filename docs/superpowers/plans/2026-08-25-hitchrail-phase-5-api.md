@@ -1039,6 +1039,17 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="an extra hostname this server will answer to; repeatable",
     )
     parser.add_argument(
+        "--allow-origin",
+        dest="allow_origins",
+        action="append",
+        default=[],
+        help=(
+            "an exact origin a browser may claim, scheme://host[:port]; "
+            "repeatable. Needed behind a TLS terminating proxy, whose scheme "
+            "and port cannot be derived from our own bind"
+        ),
+    )
+    parser.add_argument(
         "--self-project", default=None, help="a project that must never be stopped"
     )
     return parser.parse_args(argv)
@@ -1057,6 +1068,7 @@ def build_config(args: argparse.Namespace) -> Config:
         port=args.port,
         token=token,
         extra_hosts=tuple(args.allow_hosts),
+        extra_origins=tuple(args.allow_origins),
         self_project=args.self_project,
     )
 
