@@ -629,3 +629,73 @@ def test_no_token_at_all_is_still_allowed_on_loopback(tmp_path: Path) -> None:
     # None means "no authentication", which is a legitimate loopback choice.
     # Only the empty string, which looks like a token and is not, is refused.
     assert Config(root=tmp_path, token=None).token is None
+
+
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [
+        ("https://box.lan:443", {"https://box.lan", "https://box.lan:443"}),
+        ("https://box.lan", {"https://box.lan", "https://box.lan:443"}),
+        ("http://box.lan:80", {"http://box.lan", "http://box.lan:80"}),
+        ("https://box.lan:8443", {"https://box.lan:8443"}),
+    ],
+    ids=["https-explicit-443", "https-implicit", "http-explicit-80", "non-default-port"],
+)
+def test_a_configured_origin_covers_both_default_port_spellings(
+    tmp_path: Path, configured: str, expected: set[str]
+) -> None:
+    """Named regression: the default port rule reached derived origins only.
+
+    `--allow-origin https://box.lan:443` was stored verbatim and never matched
+    the `Origin: https://box.lan` a browser actually sends, because the URL
+    spec elides the default port. The TLS proxy deployment is the entire reason
+    `extra_origins` exists, so it failing there is the worst place for it.
+
+    Both paths go through `origin_forms` now, so they cannot drift apart again.
+    """
+    cfg = Config(root=tmp_path, extra_origins=(configured,))
+    assert expected <= cfg.allowed_origins
+
+
+@pytest.mark.parametrize("hostname", ["dev_box", "my_host.local", "a_b_c"])
+def test_an_underscore_in_a_hostname_is_accepted(tmp_path: Path, hostname: str) -> None:
+    """Named regression: tightening to RFC 1123 locked real machines out.
+
+    DNS does not permit an underscore in a hostname, and containers and
+    machines are named `dev_box` regardless, and `gethostname()` reports it. The
+    stricter pattern silently filtered such a host out of its own allowlist, so
+    `http://dev_box:8787/` answered 400, and `--allow-host dev_box` was a
+    startup refusal with no way around it.
+    """
+    cfg = Config(root=tmp_path, host="0.0.0.0", token="t", extra_hosts=(hostname,))
+    assert hostname in cfg.allowed_hosts
+
+
+@pytest.mark.parametrize("origin", ["http://[2001:db8::]", "http://[::1]", "http://[fe80::]"])
+def test_an_ipv6_origin_ending_in_a_double_colon_is_not_an_empty_port(
+    tmp_path: Path, origin: str
+) -> None:
+    """Named regression: the empty port guard stripped a trailing bracket first.
+
+    That made every IPv6 literal ending in `::` look like a trailing colon, so
+    a valid origin was refused with a message about something the operator
+    never wrote. The check belongs on the netloc, where `[2001:db8::]` ends
+    with `]` and `box.lan:` ends with `:`.
+    """
+    cfg = Config(root=tmp_path, extra_origins=(origin,))
+    assert any("2001:db8" in o or "::1" in o or "fe80" in o for o in cfg.allowed_origins)
+
+
+def test_a_wildcard_is_not_an_address_to_bind_to(tmp_path: Path) -> None:
+    """Named regression: `*` is an allowlist spelling, not a bindable address.
+
+    `is_wildcard_host` counts it as a wildcard, so `_check_bind_host` returned
+    early and `Config(host="*")` constructed. The CLI hands this straight to
+    uvicorn, where it dies at bind time with a message about getaddrinfo rather
+    than a ConfigError saying what to write instead.
+    """
+    with pytest.raises(ConfigError, match="not an address to bind to"):
+        Config(root=tmp_path, host="*", token="t")
+    # The real wildcards still work, which is what makes this a narrow fix.
+    for bindable in ("0.0.0.0", "::"):
+        assert Config(root=tmp_path, host=bindable, token="t").allowed_hosts

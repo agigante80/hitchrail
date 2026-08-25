@@ -302,7 +302,13 @@ class TokenMiddleware:
         Returns True when it answered the request.
         """
         assert self.token is not None
-        params = parse_qsl(scope.get("query_string", b"").decode(), keep_blank_values=True)
+        # latin-1, for the reason header_map spells out: an attacker picks
+        # these bytes, and `.decode()` strict throws UnicodeDecodeError on a
+        # byte over 0x7f, which is an unauthenticated 500 rather than a 401.
+        # Starlette's own QueryParams uses latin-1 too. This trap was fixed for
+        # headers and missed here, one function away.
+        query = scope.get("query_string", b"").decode("latin-1")
+        params = parse_qsl(query, keep_blank_values=True)
         offered = next((v for k, v in params if k == GRANT_PARAM), None)
         if offered is None or not _token_matches(offered, self.token):
             return False

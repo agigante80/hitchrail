@@ -19,11 +19,16 @@ LOOPBACK_NAMES = frozenset({"localhost", "localhost.localdomain"})
 # already stripped. IP literals are validated by `ipaddress` instead, which is
 # the only thing that actually knows what one looks like: an earlier character
 # class accepted `[...]` and `[::1:::2]` as IPv6.
+# Underscores are allowed. RFC 1123 does not permit them in a DNS hostname,
+# and real machines and containers are named `dev_box` anyway, and
+# `gethostname()` reports it. Tightening this to the RFC silently filtered
+# such a host out of its own allowlist and made `--allow-host dev_box` a
+# startup refusal with no way around it.
 HOSTNAME_PATTERN = re.compile(
-    r"\A(?!-)[A-Za-z0-9-]{1,63}(?<!-)(?:\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*\.?\Z"
+    r"\A(?!-)[A-Za-z0-9_-]{1,63}(?<!-)(?:\.(?!-)[A-Za-z0-9_-]{1,63}(?<!-))*\.?\Z"
 )
 MAX_HOSTNAME_LENGTH = 253
-HTTP_DEFAULT_PORT = 80
+DEFAULT_PORTS = {"http": 80, "https": 443}
 
 Resolver = Callable[[], tuple[str, ...]]
 
@@ -49,6 +54,36 @@ def normalise_host(raw: str) -> str:
     if value.startswith("[") and value.endswith("]"):
         value = value[1:-1]
     return value
+
+
+def origin_forms(scheme: str, host: str, port: int | None) -> set[str]:
+    """Every spelling a browser might send for one origin.
+
+    Two things a naive f-string gets wrong, and both were shipped once:
+
+    - An IPv6 literal is bracketed in a URL even though it is stored bare,
+      because that is what a browser puts in an Origin header.
+    - The URL spec serialises an origin WITHOUT the default port for its
+      scheme, so a browser on port 80 sends `Origin: http://box.lan` and never
+      `http://box.lan:80`. Both forms are emitted when the port is the default
+      for the scheme, so whichever the browser chose matches.
+
+    Used for the derived origins AND the configured ones. They had separate
+    code, the default port rule was applied to one of them, and
+    `--allow-origin https://box.lan:443` was then accepted and never matched.
+    """
+    bracketed = f"[{host}]" if ":" in host and not host.startswith("[") else host
+    forms = set()
+    if port is None:
+        forms.add(f"{scheme}://{bracketed}")
+        default = DEFAULT_PORTS.get(scheme)
+        if default is not None:
+            forms.add(f"{scheme}://{bracketed}:{default}")
+    else:
+        forms.add(f"{scheme}://{bracketed}:{port}")
+        if DEFAULT_PORTS.get(scheme) == port:
+            forms.add(f"{scheme}://{bracketed}")
+    return forms
 
 
 def is_valid_host(value: str) -> bool:
@@ -287,6 +322,15 @@ class Config:
         header, and produced `http://[box.lan:8787]:8787` as an allowed origin
         because the port's colon misfired the IPv6 bracketing.
         """
+        if self.host.strip() == "*":
+            # `*` is a spelling of "any host" for an ALLOWLIST, and
+            # is_wildcard_host counts it as one. It is not an address, and the
+            # CLI hands this field straight to uvicorn, where it dies at bind
+            # time with a message about getaddrinfo.
+            raise ConfigError(
+                "'*' is not an address to bind to: use 0.0.0.0 for every IPv4 "
+                "interface, or :: for every interface"
+            )
         if is_wildcard_host(self.host):
             return
         if not is_valid_host(self.host):
@@ -335,10 +379,16 @@ class Config:
                 raise ConfigError(
                     f"an origin carries no path, query, fragment or userinfo: {entry!r}"
                 )
-            if candidate.rstrip("]").endswith(":"):
+            if parts.netloc.endswith(":"):
                 # urlsplit reads `http://box.lan:` as port None rather than an
                 # error, so it was accepted and then could never match: a
                 # browser sends `http://box.lan`, never a bare trailing colon.
+                #
+                # Checked on the netloc, not the whole string. An earlier
+                # version stripped a trailing `]` first, which made every IPv6
+                # literal ending in `::` look like an empty port and refused
+                # `http://[2001:db8::]` with a message about something the
+                # operator never wrote.
                 raise ConfigError(f"origin has an empty port: {entry!r}")
             try:
                 port = parts.port
@@ -417,17 +467,9 @@ class Config:
         """
         origins: set[str] = set()
         for host in self._allowed_hosts:
-            # An IPv6 literal is bracketed in a URL even though it is stored
-            # bare, because that is what a browser sends in an Origin header.
-            bracketed = f"[{host}]" if ":" in host else host
-            origins.add(f"http://{bracketed}:{self.port}")
-            if self.port == HTTP_DEFAULT_PORT:
-                # The URL spec serialises an origin WITHOUT the default port
-                # for its scheme, so a browser on port 80 sends
-                # `Origin: http://box.lan` and the explicit form above would
-                # never match. Emitted only when we are actually on port 80,
-                # so this is not the unconditional guess that made any local
-                # HTTPS service a same origin caller.
-                origins.add(f"http://{bracketed}")
-        origins.update(o.strip().rstrip("/").lower() for o in self.extra_origins)
+            origins.update(origin_forms("http", host, self.port))
+        for entry in self.extra_origins:
+            parts = urlsplit(entry.strip().rstrip("/").lower())
+            assert parts.hostname is not None  # validated in _check_extra_origins
+            origins.update(origin_forms(parts.scheme, parts.hostname, parts.port))
         return frozenset(origins)

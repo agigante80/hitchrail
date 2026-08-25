@@ -423,3 +423,45 @@ async def test_a_websocket_handshake_is_not_waved_through(tmp_path: Path) -> Non
     )
     assert reached == [], "an unauthenticated websocket handshake reached the app"
     assert Config(root=tmp_path).token is None
+
+
+async def test_a_query_string_with_a_high_byte_is_a_refusal_not_a_crash(
+    tmp_path: Path,
+) -> None:
+    """Named regression: the same strict decode trap, one function from the fix.
+
+    `_maybe_grant` did `scope["query_string"].decode()`, which throws
+    UnicodeDecodeError on any byte over 0x7f, inside the auth middleware. That
+    is an unauthenticated 500 rather than a 401, and an attacker chooses the
+    bytes. `header_map` documents this trap and avoids it with latin-1;
+    Starlette's own QueryParams does the same.
+    """
+    app = guarded(tmp_path)
+    sent: list[MutableMapping[str, Any]] = []
+
+    async def receive() -> MutableMapping[str, Any]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: MutableMapping[str, Any]) -> None:
+        sent.append(message)
+
+    await app(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/x",
+            "raw_path": b"/x",
+            "query_string": b"token=caf\xe9",
+            "root_path": "",
+            "headers": [(b"host", b"localhost")],
+            "client": ("127.0.0.1", 5000),
+            "server": ("127.0.0.1", 8787),
+        },
+        receive,
+        send,
+    )
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    assert start["status"] == 401
