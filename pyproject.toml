@@ -67,7 +67,10 @@ ignore = ["S101"]
 # configuration rather than scattered through the code as inline noqa comments.
 "src/hitchrail/tmux.py" = ["S603"]
 "src/hitchrail/procs.py" = ["S603"]
-"tests/*" = ["S603", "S607"]
+# Tests are where the dangerous literals belong: a wildcard bind and a fake
+# token are the subject matter of the security suite, not a leak. src/ stays
+# strict, so a real 0.0.0.0 or credential in shipped code still fails.
+"tests/*" = ["S104", "S105", "S106", "S603", "S607"]
 
 [tool.mypy]
 python_version = "3.11"
