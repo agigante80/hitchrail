@@ -131,12 +131,29 @@ things worth carrying forward:
   every test author has to remember had already decayed by the time it was
   written down, so it is enforced by an autouse fixture instead.
 
-**The review loop ran to its fourth round rather than tripping.** Round 1 found
-nine, round 2 found five of which three were defects inside round 1's own
-fixes, and round 3 found five of which none were. That broke the consecutive
-streak the trip wire watches for, so the loop continued instead of stopping.
-Round 2's answer to its own injection was consolidation into `origin_forms`
-rather than a third point patch, and round 3 confirms that held.
+**The review loop ran its full four rounds and was stopped by the hard bound,
+not by running clean.** Round 1 found nine. Round 2 found five, three of them
+defects inside round 1's own fixes. Round 3 found five, none of them in round
+2's fixes, which broke the consecutive streak the trip wire watches for and is
+why the loop continued. Round 4 then found defects in round 3's fixes.
+
+Three of the four rounds found a defect in the previous round's work, which is
+above the 7 to 29 percent bad fix injection rate that the user's `CLAUDE.md`
+cites as normal, and it is the argument for the bound existing at all.
+
+The worst injection was mine and it is worth naming, because it is the failure
+mode this phase kept teaching. Round 3 stripped the FQDN root dot in
+`normalise_host` to fix an accepted-then-never-matches case, and by doing it on
+the config side only it created a fresh accepted-then-never-matches case
+(`box.lan..` stored as `box.lan.`) while removing the one spelling that had
+worked. A fix aimed at a defect class produced a new instance of that class.
+
+The resolution was a revert rather than a fifth patch. A revert restores a
+state that already survived three rounds and cannot inject anything; a
+cleverer two line fix at the hard stop would have shipped unreviewed with this
+batch's injection rate as the prior. Both remaining defects are tickets: #19
+for the root dot done on both sides, #20 for the access log leak on the paths
+the grant fix does not reach. A ticket is a finished outcome for a finding.
 
 ## Phase 3: The adapters
 

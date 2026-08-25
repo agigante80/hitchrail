@@ -40,8 +40,9 @@ below as a refusal with a test that asserts it, not as advice.
    response redirects it out of the address bar. `TokenMiddleware` clears
    `scope["query_string"]` once the grant token is spent, and
    `test_the_grant_keeps_the_token_out_of_the_access_log` fails if that stops.
-   Follow any secret that rides in a URL all the way to where the server writes
-   that URL down.
+   It covers the grant path only, so re opening the link with a valid cookie
+   still logs the token: that is #20. Follow any secret that rides in a URL all
+   the way to where the server writes that URL down.
 
 ## Order matters
 

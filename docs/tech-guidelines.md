@@ -127,6 +127,11 @@ non negotiable and each has a test that asserts the refusal.
    secret in a request target has to be followed all the way to where the
    server writes that target down.
 
+   That clearing is still incomplete, and #20 tracks it: it sits on the grant
+   path, so a request that already holds a valid cookie or header returns
+   before reaching it and logs the token anyway. A partial fix to this kind of
+   leak is worth recording as partial rather than as done.
+
    The suite could not see this on its own: the live socket fixture ran at
    `log_level="warning"`, so the component under test was silenced by the test
    that was meant to observe it. A tier that quiets its subject proves less
