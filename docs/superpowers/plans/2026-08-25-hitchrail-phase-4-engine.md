@@ -1408,9 +1408,9 @@ Expected: FAIL with `AttributeError: 'Engine' object has no attribute 'stop'`.
     def stop(self, name: str) -> Session:
         self._require_live(name)
         self._stopping[name] = self._clock()
-        # Ask, do not kill. What to type at Claude is Claude Code knowledge and
-        # lives in the quarantine module; the engine only sends what it is given.
-        # One call, and the engine does not know what a stop physically is.
+        # Ask, do not kill. One call, and the engine does not know what a stop
+        # physically is: it does not send keys, and it is not "given" any to
+        # send. It hands the quarantine module a pane and lets it decide.
         # Iterating GRACEFUL_STOP_KEYS here would put three Claude Code
         # assumptions in the engine: that stopping is keystrokes, that it is a
         # sequence of them, and that they travel through tmux. See the design's

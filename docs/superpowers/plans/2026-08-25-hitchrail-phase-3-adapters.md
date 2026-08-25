@@ -41,21 +41,28 @@ tickets carried in from earlier phases, and one is new.
 | #22 | injective naming and target specs (Task 7a) | #23, #27 |
 | #23 | the adapter operations (Task 7b) | #27 |
 | #24 | the process table snapshot (Task 8) | |
-| #25 | the Claude Code quarantine (Task 9) | |
+| #25 | the quarantine, control half: launch and stop (Task 9a) | #29 |
+| #29 | the quarantine, link half: the session URL (Task 9b) | |
 | #26 | the memory guard (Task 10) | |
 | #27 | prove the tmux workarounds against a real tmux | |
 | #18 | split `config.py` along its seam | |
 
-Two decisions were made on review and written into the tickets, because a
+Three decisions were made on review and written into the tickets, because a
 ticket that ends in unresolved options cannot be implemented and fails the
 readiness gate:
 
 - **#11** takes option A, deduplicate by resolved path in `scan`.
-- **#25** returns the URL's source (`bridge` or `scraped`) rather than a
+- **#29** returns the URL's source (`bridge` or `scraped`) rather than a
   confidence band, and the bridge value wins when both exist. A scraped URL can
   come from scrollback that outlived its session, which is syntactically
   perfect and semantically stale, so no amount of parsing separates it from a
   good one. Naming the source is the only honest answer.
+- **#25** declares the narrow `Pane` Protocol it needs rather than taking the
+  concrete `Tmux`, and drops the broad `AgentAdapter` Protocol an earlier draft
+  asked for. The first was a real defect: naming `Tmux` in the signature
+  contradicted this phase's no cross import rule and put the channel assumption
+  back into the function written to remove it. The second was ceremony that
+  would not have caught the leak it claimed to catch.
 
 One prerequisite gap came out of the same review and is #28: tmux and Claude
 Code are runtime requirements that no install route provides and nothing
@@ -754,14 +761,24 @@ git commit -m "feat(procs): process table snapshot with a cycle safe subtree wal
 
 ### Task 9: The Claude Code quarantine
 
+Split on review into 9a (#25, control: how Hitchrail drives the agent) and 9b
+(#29, link: how it links to one). Two different questions with different
+failure modes. If 9a is wrong, start and stop are broken; if 9b is wrong, a URL
+field is wrong. Every security refusal in the module lives in 9b, which is the
+argument for reviewing it on its own rather than as an appendix to a launch
+ticket. They share a file, so 9a lands first.
+
+#### Task 9a: launch and stop
+
 **Files:**
 - Modify: `src/hitchrail/claude_ipc.py`
 - Test: `tests/test_claude_ipc.py`
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: constant `REMOTE_CONTROL_MARKER = "--remote-control"`; constant `GRACEFUL_STOP_KEYS: tuple[tuple[str, ...], ...]`; `launch_argv(binary: str, project: str) -> list[str]`; `request_stop(tmux: Tmux, project: str) -> None`; `bridge_url(pid: int, sessions_dir: Path) -> str | None`; `session_url(pid: int, sessions_dir: Path, pane_text: str | None = None) -> SessionUrl | None`.
-- `request_stop` is the addition made when multi agent was considered. It performs the graceful request rather than exposing the keys for the engine to iterate, so the engine never learns that stopping is keystrokes travelling through tmux. `GRACEFUL_STOP_KEYS` stays public for the test that asserts the exact sequence, but nothing outside this module may loop over it. See the design's sections 3.1 and 4.3.
+- Produces: `Protocol Pane` with `send_keys(project: str, *keys: str) -> None`; constant `REMOTE_CONTROL_MARKER = "--remote-control"`; constant `GRACEFUL_STOP_KEYS: tuple[tuple[str, ...], ...]`; `launch_argv(binary: str, project: str) -> list[str]`; `request_stop(pane: Pane, project: str) -> None`. The session link half is Task 9b.
+- `request_stop` performs the graceful request rather than exposing the keys for the engine to iterate, so the engine never learns that stopping is keystrokes travelling through tmux. `GRACEFUL_STOP_KEYS` stays public for the test that asserts the exact sequence, but nothing outside this module may loop over it. See the design's sections 3.1 and 4.3.
+- **`Pane` is declared here, by the consumer, and is deliberately not `Tmux`.** A first draft typed the parameter as the concrete `Tmux`, which contradicted this phase's own architecture rule that no adapter imports another, contradicted this task's `Consumes: nothing`, and defeated the point: naming `Tmux` in the signature bakes "the stop channel is tmux" into the very function written to remove channel assumptions. An adapter that wanted a signal would need `procs`, and one that wanted an HTTP call would need neither. Declaring the narrow structural type it actually uses keeps the dependency pointing one way: `Tmux` satisfies `Pane` without either module knowing about the other, and mypy still checks it.
 
 Everything in this module depends on undocumented Claude Code internals. It is
 the only module allowed to know about them, so a breaking change upstream
@@ -1153,7 +1170,8 @@ git commit -m "feat(ram): memory guard deciding on what is left after starting"
 - [ ] A cyclic process table does not hang `descendants`.
 - [ ] A failed `ps` yields an empty table rather than an exception, and never reads as "nothing is running".
 - [ ] `bridge_url` refuses a non string, a separator, and a scheme in `bridgeSessionId`.
-- [ ] `GRACEFUL_STOP_KEYS` lives in `claude_ipc` and nowhere else. `grep -rn '"/exit"' src/` returns one file.
+- [ ] `GRACEFUL_STOP_KEYS` lives in `claude_ipc` and nowhere else, and nothing outside it iterates the sequence: `grep -rn '"/exit"' src/` returns one file AND `request_stop` is the only way the keys are sent. The grep alone passes while a caller still loops, which is the leak the design's section 4.3 exists to prevent.
+- [ ] `request_stop` accepts any object with `send_keys`, proven by a test that passes something which is not a `Tmux`. If the annotation is ever tightened to the concrete class, that test fails, which is the point: naming `Tmux` there puts the channel assumption back.
 - [ ] `guard(0, ...)` is `HARD`.
 
 When these hold, start Phase 4 from `docs/roadmap.md`.
