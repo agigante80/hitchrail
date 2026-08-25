@@ -27,6 +27,40 @@ Copied verbatim from the spec. Every task inherits these.
 - Defaults: session prefix `hr-`, hard memory floor 1536 MB, soft floor 3072 MB, per session estimate 1536 MB.
 - Tests are hermetic. No test touches a real tmux server, a real Claude process, the network, or the filesystem outside a temporary root.
 
+## Phase 3 tickets, in dependency order
+
+The four tasks below became nine tickets on review. Task 7 split, because
+addressing is pure string logic carrying four footguns while the operations are
+subprocess plumbing, and a reviewer can reject one and accept the other. Three
+tickets carried in from earlier phases, and one is new.
+
+| Ticket | What | Blocks |
+|---|---|---|
+| #11 | one directory must not be two startable projects | #22 |
+| #19 | the FQDN root dot, on both sides | #18 |
+| #22 | injective naming and target specs (Task 7a) | #23, #27 |
+| #23 | the adapter operations (Task 7b) | #27 |
+| #24 | the process table snapshot (Task 8) | |
+| #25 | the Claude Code quarantine (Task 9) | |
+| #26 | the memory guard (Task 10) | |
+| #27 | prove the tmux workarounds against a real tmux | |
+| #18 | split `config.py` along its seam | |
+
+Two orderings are not preferences:
+
+- **#11 before #22.** A symlinked alias is harmless until a session is keyed off
+  the project name, at which point two rows start two agents in one directory.
+- **#19 before #18.** #18 is a pure move whose diff must contain no behaviour
+  change, and that property cannot survive #19 landing at the same time.
+
+**#27 is new and is the reason this list is longer than the plan.** Every tmux
+test in Tasks 7a and 7b drives a `FakeRunner` and asserts the argv we sent,
+which proves the code builds the target we intended and cannot prove the target
+does what we intend, because the fake encodes the same belief the code does.
+Phase 2 hit this exactly: `ASGITransport` proved the middleware was configured,
+and only `tests/test_live_socket.py` proved the server refuses anything. #27 is
+the tmux equivalent, and it lands last in the tmux group as #16 did in Phase 2.
+
 ## Phase 3 file structure
 
 | File | Responsibility |
