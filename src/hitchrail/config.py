@@ -161,7 +161,7 @@ class Config:
         Known limitation: a TLS proxy on a port other than 443 sends
         `https://name:8443` and is refused. There is no way to derive that port
         from our own bind, so it needs configuration rather than a guess. See
-        the follow up issue linked from docs/roadmap.md.
+        https://github.com/agigante80/hitchrail/issues/6.
         """
         origins: set[str] = set()
         for host in self.allowed_hosts:
