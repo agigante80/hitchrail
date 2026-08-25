@@ -89,9 +89,15 @@ hitchrail --root ~/dev --host 0.0.0.0 --allow-host box.lan \
 
 Getting the token onto a phone is a link rather than 32 characters of typing.
 Open `http://<address>:8787/?token=<token>` once: it sets a cookie and
-redirects the token out of the address bar and the browser history. That
-first request is also kept out of the server's own access log; re opening the
-same link later is not yet, which is #20.
+redirects the token out of the address bar and the browser history.
+
+That link is still a URL with a secret in it, so treat it as one. The first
+open is kept out of Hitchrail's own access log, and re opening it later is not
+yet: that is #20. A reverse proxy in front, which is what the paragraph above
+recommends for TLS, keeps its own access log and will record the token there
+whatever Hitchrail does. #21 moves the token into a URL fragment, which is
+never sent to any server, and is the end of this problem rather than a
+narrowing of it.
 
 Hitchrail does not sandbox the sessions it starts. It is a launcher. The agent it
 launches has whatever access you have.

@@ -132,6 +132,13 @@ non negotiable and each has a test that asserts the refusal.
    before reaching it and logs the token anyway. A partial fix to this kind of
    leak is worth recording as partial rather than as done.
 
+   And note how far the rule reaches. Scrubbing our own log cannot be
+   sufficient while the secret is in the URL at all, because a reverse proxy,
+   the `Referer` header and browser history sync each write that URL down
+   somewhere we do not control. #21 moves it into a fragment, which no server
+   ever receives. When a mitigation only narrows an exposure, say which one
+   ends it.
+
    The suite could not see this on its own: the live socket fixture ran at
    `log_level="warning"`, so the component under test was silenced by the test
    that was meant to observe it. A tier that quiets its subject proves less

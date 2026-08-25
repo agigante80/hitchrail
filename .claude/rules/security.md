@@ -41,8 +41,10 @@ below as a refusal with a test that asserts it, not as advice.
    `scope["query_string"]` once the grant token is spent, and
    `test_the_grant_keeps_the_token_out_of_the_access_log` fails if that stops.
    It covers the grant path only, so re opening the link with a valid cookie
-   still logs the token: that is #20. Follow any secret that rides in a URL all
-   the way to where the server writes that URL down.
+   still logs the token: that is #20, and a reverse proxy logs it regardless,
+   which is why #21 moves the token into a fragment instead. Follow any secret
+   that rides in a URL all the way to every place that URL is written down, not
+   only the places this process controls.
 
 ## Order matters
 
