@@ -185,7 +185,7 @@ decision in a fourth file that reviewers would have to go find.
 
 **Not `TrustedHostMiddleware`.** See correction 1 above: it cannot match an IPv6 literal, and its `www_redirect` default answers an unrecognised host with a redirect built from that host.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/test_security_host.py`:
 
@@ -268,12 +268,12 @@ async def test_the_allowlist_never_contains_a_wildcard(tmp_path: Path) -> None:
     assert "0.0.0.0" not in cfg.allowed_hosts  # noqa: S104
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `uv run pytest tests/test_security_host.py -v`
 Expected: FAIL with `ImportError: cannot import name 'middleware_stack' from 'hitchrail.security'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Replace the stub `src/hitchrail/security.py` with:
 
@@ -364,12 +364,12 @@ def middleware_stack(config: Config) -> list[Middleware]:
     ]
 ```
 
-- [ ] **Step 4: Run to verify passing**
+- [x] **Step 4: Run to verify passing**
 
 Run: `uv run pytest tests/test_security_host.py -v`
 Expected: PASS, 9 tests (4 plain plus one parametrised case with 5 values).
 
-- [ ] **Step 5: Gates and commit**
+- [x] **Step 5: Gates and commit**
 
 ```bash
 uv run ruff check && uv run ruff format --check && uv run mypy && uv run lint-imports
@@ -396,7 +396,7 @@ be in the comparison, and the default port forms have to be accepted because
 behind the TLS terminating proxy the README recommends, the browser sends
 `https://name` with no port at all.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/test_security_origin.py`:
 
@@ -500,12 +500,12 @@ async def test_the_proxy_origin_form_is_served(tmp_path: Path) -> None:
     assert r.status_code == 200
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `uv run pytest tests/test_security_origin.py -v`
 Expected: FAIL. The mutating requests return 200 because nothing checks the origin yet.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Add to `src/hitchrail/security.py`, after `deny`:
 
@@ -568,12 +568,12 @@ def middleware_stack(config: Config) -> list[Middleware]:
     ]
 ```
 
-- [ ] **Step 4: Run to verify passing**
+- [x] **Step 4: Run to verify passing**
 
 Run: `uv run pytest tests/test_security_origin.py -v`
 Expected: PASS, 11 tests (4 plain, one parametrised with 2 values, one parametrised with 5 values).
 
-- [ ] **Step 5: Gates and commit**
+- [x] **Step 5: Gates and commit**
 
 ```bash
 uv run ruff check && uv run ruff format --check && uv run mypy && uv run lint-imports
@@ -618,7 +618,7 @@ supported deployment, a `Secure` cookie is never sent and the tool silently
 stops working. The cleartext exposure is already stated as a limitation in the
 README, and the remedy stated there is a TLS terminating proxy.
 
-- [ ] **Step 1: Confirm the pytest marker is registered in `pyproject.toml`**
+- [x] **Step 1: Confirm the pytest marker is registered in `pyproject.toml`**
 
 `--strict-markers` is on, so an unregistered marker is an error rather than a
 warning. Phase 1 Task 1 already ships this; confirm it is present rather than
@@ -630,7 +630,7 @@ markers = [
 ]
 ```
 
-- [ ] **Step 2: Write the failing token tests**
+- [x] **Step 2: Write the failing token tests**
 
 `tests/test_security_token.py`:
 
@@ -821,12 +821,12 @@ async def test_host_checking_happens_before_token_checking(tmp_path: Path) -> No
     assert r.status_code == 400
 ```
 
-- [ ] **Step 3: Run to verify failure**
+- [x] **Step 3: Run to verify failure**
 
 Run: `uv run pytest tests/test_security_token.py -v`
 Expected: FAIL with `ImportError: cannot import name 'TOKEN_COOKIE' from 'hitchrail.security'`.
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 Add to `src/hitchrail/security.py`:
 
@@ -970,12 +970,12 @@ def middleware_stack(config: Config) -> list[Middleware]:
     ]
 ```
 
-- [ ] **Step 5: Run to verify passing**
+- [x] **Step 5: Run to verify passing**
 
 Run: `uv run pytest tests/test_security_token.py -v`
 Expected: PASS, 20 tests (14 plain plus one parametrised case with 6 values).
 
-- [ ] **Step 6: Write the live socket test**
+- [x] **Step 6: Write the live socket test**
 
 This is the step that makes Phase 2 done. An `ASGITransport` test proves the
 middleware is configured. It does not prove the server people run refuses
@@ -1102,13 +1102,13 @@ def test_a_mutating_request_with_a_foreign_origin_is_refused_on_a_live_socket(
     assert r.status_code == 403
 ```
 
-- [ ] **Step 7: Run the live tests**
+- [x] **Step 7: Run the live tests**
 
 Run: `uv run pytest tests/test_live_socket.py -v`
 Expected: PASS, 5 tests. They take a second or two, which is the cost of the
 claim being true.
 
-- [ ] **Step 8: Gates and commit**
+- [x] **Step 8: Gates and commit**
 
 ```bash
 uv run ruff check && uv run ruff format --check && uv run mypy && uv run lint-imports && uv run pytest
@@ -1120,18 +1120,18 @@ git commit -m "feat(security): token over header, cookie and a one time grant th
 
 ## Phase 2 exit criteria
 
-- [ ] All five gates green on 3.11, 3.12 and 3.13.
-- [ ] A forged `Host` is refused on every route including `/api/events`, and on a real loopback socket, not only through `ASGITransport`.
-- [ ] `http://[::1]:8787/` is **served**, and `Host: [2001:db8::5]` matches an allowlist entry for that address. Starlette's `TrustedHostMiddleware` cannot do either, which is why it is not used.
-- [ ] An unrecognised `Host` produces a refusal, never a redirect built from that same header.
-- [ ] `Authorization: Bearer café` is a 401, not a 500.
-- [ ] A malformed cookie set by another application on the same host does not stop the token cookie working.
-- [ ] `?token=` on a path like `/\\evil.example` redirects to `/`, never off the site.
-- [ ] A mutating request with a missing, foreign, or wrong port `Origin` is refused, and `http://localhost:3000` is among the refused.
-- [ ] A `GET` needs no `Origin`, and a test asserts that exemption is deliberate.
-- [ ] A request shaped the way `EventSource` sends one, cookie only and no `Authorization` header, authenticates successfully.
-- [ ] `?token=` grants a cookie and redirects the token out of the URL, on safe methods only.
-- [ ] The host check is proven to run before the token check.
-- [ ] The token appears in no refusal body.
+- [x] All five gates green on 3.11, 3.12 and 3.13. gates green locally on `3037e99`; CI green on all three legs.
+- [x] A forged `Host` is refused on every route including `/api/events`, and on a real loopback socket, not only through `ASGITransport`. `test_a_forged_host_is_rejected`, `test_the_event_stream_is_behind_the_allowlist_too`, and on a real socket `test_a_forged_host_is_refused_on_a_live_socket`.
+- [x] `http://[::1]:8787/` is **served**, and `Host: [2001:db8::5]` matches an allowlist entry for that address. Starlette's `TrustedHostMiddleware` cannot do either, which is why it is not used. `test_an_ipv6_loopback_browser_is_served`, `test_an_ipv6_lan_address_is_served_when_allowed`, `test_an_ipv6_loopback_host_is_served_on_a_live_socket`.
+- [x] An unrecognised `Host` produces a refusal, never a redirect built from that same header. `test_an_unrecognised_host_is_refused_never_redirected`.
+- [x] `Authorization: Bearer café` is a 401, not a 500. `test_a_non_ascii_token_is_a_refusal_not_a_crash`, plus `test_a_query_string_with_a_high_byte_is_a_refusal_not_a_crash` for the same trap in the grant.
+- [x] A malformed cookie set by another application on the same host does not stop the token cookie working. `test_a_malformed_neighbour_cookie_does_not_lose_ours`, and `test_split_cookie_headers_are_joined_not_dropped` for the HTTP/2 split.
+- [x] `?token=` on a path like `/\\evil.example` redirects to `/`, never off the site. `test_the_grant_never_redirects_off_the_site`, `test_the_grant_reencodes_a_decoded_path`.
+- [x] A mutating request with a missing, foreign, or wrong port `Origin` is refused, and `http://localhost:3000` is among the refused. `test_a_mutating_request_without_an_origin_is_rejected`, `test_a_mutating_request_with_a_foreign_origin_is_rejected`, `test_another_local_application_is_not_same_origin`.
+- [x] A `GET` needs no `Origin`, and a test asserts that exemption is deliberate. `test_a_get_needs_no_origin`, `test_the_event_stream_needs_no_origin`, `test_safe_methods_are_exempt`.
+- [x] A request shaped the way `EventSource` sends one, cookie only and no `Authorization` header, authenticates successfully. `test_the_event_stream_authenticates_the_way_eventsource_sends_it`, and end to end in `test_the_query_grant_round_trips_on_a_live_socket`.
+- [x] `?token=` grants a cookie and redirects the token out of the URL, on safe methods only. `test_the_query_grant_sets_the_cookie_and_redirects`, `test_the_grant_is_not_available_on_a_mutating_request`, and `test_the_grant_keeps_the_token_out_of_the_access_log` for the server side of the same claim.
+- [x] The host check is proven to run before the token check. `test_host_checking_happens_before_token_checking`, `test_the_host_check_runs_before_the_origin_check`.
+- [x] The token appears in no refusal body. `test_the_token_never_appears_in_a_refusal`, `test_a_wrong_token_and_a_missing_one_are_indistinguishable`.
 
 When these hold, start Phase 3 from `docs/roadmap.md`.
