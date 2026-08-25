@@ -1007,6 +1007,11 @@ git commit -m "feat(claude-ipc): quarantine the bridge lookup and the stop seque
 
 ### Task 10: The memory guard
 
+**Done in c1ad4a0 (#26).** Task 7 is half done: 7a, the naming and target
+specs, landed in b2254d5 (#22); 7b, the operations, is #23 and open. Tasks 8
+and 9 are open. Only the boxes below are ticked, so the plan says what is
+actually built rather than what is in flight.
+
 **Files:**
 - Modify: `src/hitchrail/ram.py`
 - Test: `tests/test_ram.py`
@@ -1015,7 +1020,7 @@ git commit -m "feat(claude-ipc): quarantine the bridge lookup and the stop seque
 - Consumes: nothing.
 - Produces: `read_meminfo(path: Path = Path("/proc/meminfo")) -> str`; `available_mb(meminfo_text: str) -> int`; `StrEnum Verdict` with members `OK`, `SOFT`, `HARD`; `guard(available_mb: int, need_mb: int, hard_mb: int, soft_mb: int) -> Verdict`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/test_ram.py`:
 
@@ -1084,12 +1089,12 @@ def test_verdict_serialises_as_its_name() -> None:
     assert str(Verdict.SOFT) == "soft"
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `uv run pytest tests/test_ram.py -v`
 Expected: FAIL with `ImportError: cannot import name 'Verdict' from 'hitchrail.ram'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Replace the stub `src/hitchrail/ram.py` with:
 
@@ -1146,12 +1151,12 @@ def guard(available_mb: int, need_mb: int, hard_mb: int, soft_mb: int) -> Verdic
     return Verdict.OK
 ```
 
-- [ ] **Step 4: Run to verify passing**
+- [x] **Step 4: Run to verify passing**
 
 Run: `uv run pytest tests/test_ram.py -v`
 Expected: PASS, 13 tests (6 plain plus one parametrised case with 7 values).
 
-- [ ] **Step 5: Gates and commit**
+- [x] **Step 5: Gates and commit**
 
 ```bash
 uv run ruff check && uv run ruff format --check && uv run mypy && uv run lint-imports
