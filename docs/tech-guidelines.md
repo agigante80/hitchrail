@@ -118,6 +118,19 @@ non negotiable and each has a test that asserts the refusal.
 7. **Report refusals honestly.** A guard that fails open, or an error rendered
    as a success, is worse than no guard. If Hitchrail cannot determine a session's
    state, it says so rather than guessing.
+8. **A secret in a URL is a secret in the log.** Redirecting it out of the
+   address bar hides it from the browser and from nothing else. uvicorn builds
+   its access line after the application returns, from the same scope dict the
+   application was handed, so `?token=` was written to the server's log in
+   cleartext on every grant until `security.TokenMiddleware` started clearing
+   `scope["query_string"]` once the token is spent. Anything that carries a
+   secret in a request target has to be followed all the way to where the
+   server writes that target down.
+
+   The suite could not see this on its own: the live socket fixture ran at
+   `log_level="warning"`, so the component under test was silenced by the test
+   that was meant to observe it. A tier that quiets its subject proves less
+   than it appears to.
 
 ## 6. Dependencies
 
