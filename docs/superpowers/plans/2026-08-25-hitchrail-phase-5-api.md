@@ -42,6 +42,7 @@ first draft of this plan quietly dropped:
 | Code | Status | Meaning |
 |---|---|---|
 | `invalid_name` | 400 | the name is not one we will turn into a path |
+| `root_unavailable` | 503 | the configured root cannot be read right now |
 | `unknown_project` | 404 | no such folder under the root |
 | `already_running` | 409 | a session is already live there |
 | `already_exists` | 409 | a folder of that name is already there |
@@ -55,6 +56,16 @@ first draft of this plan quietly dropped:
 
 `ram_soft` is a confirmation gate. The server never proceeds on a soft refusal
 by itself; the client resubmits with `?acknowledged=1`.
+
+`root_unavailable` is not in the design's section 6 list, and it is not a
+refusal of the caller. `Config` checks the root once at construction; a USB
+drive, an autofs mount or a sync client can take it away afterwards, and
+`discovery.RootUnavailable` reports that honestly rather than letting a
+`FileNotFoundError` escape as a 500 or answering with an empty project list,
+which would report every session as stopped. That is control 7.
+
+`unknown_project` comes from `discovery.NoSuchProject`, which subclasses
+`InvalidName`. Catch the subclass first, or a missing project answers 400.
 
 ## Why every handler dispatches to a thread
 
@@ -460,6 +471,10 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus | None = None) 
             await in_thread(discovery.create_project, config.root, name)
         except discovery.AlreadyExists as exc:
             return _error(409, "already_exists", str(exc))
+        except discovery.RootUnavailable as exc:
+            # The root went away under us. Not the caller's fault, and not
+            # something to answer by pretending there are no projects.
+            return _error(503, "root_unavailable", str(exc))
         except (discovery.InvalidName, discovery.OutsideRoot) as exc:
             # Both mean "not a name we will turn into a path here". Telling the
             # caller which guard caught it describes the filesystem to them.

@@ -396,7 +396,21 @@ git commit -m "build: project skeleton, module stubs, tooling and CI gates"
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `is_loopback_host(host: str) -> bool`; `is_wildcard_host(host: str) -> bool`; `local_addresses(resolver: Resolver | None = None) -> tuple[str, ...]`; type alias `Resolver = Callable[[], tuple[str, ...]]`; frozen dataclass `Config` with fields `root: Path`, `host: str`, `port: int`, `token: str | None`, `extra_hosts: tuple[str, ...]`, `session_prefix: str`, `stop_timeout: float`, `hard_floor_mb: int`, `soft_floor_mb: int`, `session_mb: int`, `claude_binary: str`, `sessions_dir: Path`, `tmux_socket: str | None`, `self_project: str | None`, `resolver: Resolver | None`; properties `Config.is_loopback -> bool`, `Config.allowed_hosts -> tuple[str, ...]`, `Config.allowed_origins -> frozenset[str]`; exception `ConfigError`.
+- Produces: `is_loopback_host(host: str) -> bool`; `is_wildcard_host(host: str) -> bool`; `local_addresses() -> tuple[str, ...]`; constant `HOST_PATTERN: re.Pattern[str]`; type alias `Resolver = Callable[[], tuple[str, ...]]`; frozen dataclass `Config` with fields `root: Path`, `host: str`, `port: int`, `token: str | None`, `extra_hosts: tuple[str, ...]`, `session_prefix: str`, `stop_timeout: float`, `hard_floor_mb: int`, `soft_floor_mb: int`, `session_mb: int`, `claude_binary: str`, `sessions_dir: Path`, `tmux_socket: str | None`, `self_project: str | None`, `resolver: Resolver | None`; properties `Config.is_loopback -> bool`, `Config.allowed_hosts -> tuple[str, ...]`, `Config.allowed_origins -> frozenset[str]`; exception `ConfigError`.
+
+`__post_init__` validates more than the plan's first draft listed, because a
+class whose docstring says an unsafe configuration cannot exist has to mean it.
+An empty `session_prefix` makes "never kill a session without the configured
+prefix" vacuous, since every name satisfies `startswith("")`, and that guard is
+what stands between a stop and the developer's own tmux sessions. A
+`claude_binary` beginning with a hyphen becomes a flag in an argv slot. A
+`soft_floor_mb` below `hard_floor_mb` makes the confirmation gate unreachable.
+An `extra_hosts` entry carrying a port is accepted by every naive check and
+then never matches, because the Host header is compared with the port stripped.
+
+`allowed_hosts` is resolved **once**, in `__post_init__`, not on every read. As
+a plain property it ran `gethostname`, `getaddrinfo` and a UDP connect per
+access, and the middleware reads it once per request on the event loop.
 
 The one thing this task exists to get right, beyond the token refusal, is the
 wildcard bind. Binding to `0.0.0.0` is the normal case for a phone first tool,
@@ -715,7 +729,9 @@ git commit -m "feat(config): mandatory token off loopback, and an allowlist a ph
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `list_projects(root: Path) -> list[str]`; `validate_name(name: str) -> None`; `resolve_child(root: Path, name: str) -> Path`; `project_path(root: Path, name: str) -> Path`; `create_project(root: Path, name: str) -> Path`; exceptions `InvalidName`, `OutsideRoot`, `AlreadyExists`; constant `NAME_PATTERN: re.Pattern[str]`.
+- Produces: `list_projects(root: Path) -> list[str]`; `validate_name(name: str) -> None`; `resolve_child(root: Path, name: str) -> Path`; `project_path(root: Path, name: str) -> Path`; `create_project(root: Path, name: str) -> Path`; exceptions `InvalidName`, `NoSuchProject(InvalidName)`, `OutsideRoot`, `AlreadyExists`, `RootUnavailable`; constant `NAME_PATTERN: re.Pattern[str]`.
+
+**`NoSuchProject` subclasses `InvalidName`** so that `except InvalidName` still catches it, while the HTTP layer can tell 400 from 404. A project deleted from under a stale phone tab is not a client sending a bad request. **`RootUnavailable`** covers the root disappearing after `Config` validated it, a USB drive or an autofs mount: `FileNotFoundError` is not a `ValueError`, so unmapped it escapes every caller's refusal handling as a 500, and guessing "no projects" would report every session as stopped.
 
 `resolve_child` is factored out so that creation and lookup share one boundary
 check. In the first draft `create_project` validated the name and then called
