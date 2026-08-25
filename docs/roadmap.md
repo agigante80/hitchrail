@@ -31,6 +31,8 @@ name secured on both registries.
 
 ## Phase 1: Foundations
 
+**Status: done.** Issues #1, #2 and #3.
+
 **Plan: [`superpowers/plans/2026-08-25-hitchrail-phase-1-foundations.md`](superpowers/plans/2026-08-25-hitchrail-phase-1-foundations.md)**
 
 The skeleton, the gates, the configuration and the path boundary. Three tasks.
@@ -43,6 +45,20 @@ name allowlist that makes traversal impossible.
 **Done when:** all five gates are green on 3.11, 3.12 and 3.13; a wildcard bind
 produces an allowlist that actually contains the machine's own address; and a
 name containing a separator, a parent reference or a leading hyphen is refused.
+
+All three held, confirmed on the real runner and against this machine's real
+network configuration. Two things worth carrying forward:
+
+- Review of the batch found the path allowlist **failing open**. `NAME_PATTERN`
+  was anchored with `$`, which matches before a trailing newline, so `evil\n`
+  became a real directory and a 64 character name plus a newline walked past
+  the pattern's own length cap. Every hand written payload in the ticket's test
+  list passed that pattern. Future guards here want fuzzing or property tests,
+  not only enumeration.
+- Three deferred items came out of the phase: #4 (pin actions to SHAs before
+  Phase 7 introduces a publish token), #5 (the plans' snippets are no longer
+  checked by any tool), and #6 (a TLS proxy on a non standard port is refused
+  by the origin check, which Phase 2 Task 5 should settle).
 
 ## Phase 2: The security boundary
 
