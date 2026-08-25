@@ -31,7 +31,8 @@ name secured on both registries.
 
 ## Phase 1: Foundations
 
-**Status: done.** Issues #1, #2 and #3.
+**Status: done**, closed 2026-08-25 at `2c9be3b`. Issues #1, #2, #3 and #7.
+All six exit criteria in the plan are ticked with the evidence that closed them.
 
 **Plan: [`superpowers/plans/2026-08-25-hitchrail-phase-1-foundations.md`](superpowers/plans/2026-08-25-hitchrail-phase-1-foundations.md)**
 

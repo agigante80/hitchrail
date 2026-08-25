@@ -964,11 +964,53 @@ git commit -m "feat(discovery): list and create folders behind one shared bounda
 
 ## Phase 1 exit criteria
 
-- [ ] All five gates green on 3.11, 3.12 and 3.13, `lint-imports` included and passing without the contract having been edited after Task 1.
-- [ ] `Config(root=..., host="0.0.0.0", token="t")` produces an `allowed_hosts` containing this machine's own LAN address.
-- [ ] `Config(root=..., host="0.0.0.0")` with no token raises `ConfigError`.
-- [ ] `allowed_origins` rejects `http://localhost:3000` while accepting `http://localhost:8787`.
-- [ ] Every name in the refusal parameter list raises `InvalidName`, and a symlink out of the root raises `OutsideRoot` on both lookup and creation.
-- [ ] A refused creation leaves nothing on disk.
+**Met. Verified against the running code on 2026-08-25 at `2c9be3b`**, by executing
+each criterion rather than by reading the tests that cover it.
+
+- [x] All five gates green on 3.11, 3.12 and 3.13, `lint-imports` included and passing without the contract having been edited after Task 1.
+      *CI green on `2c9be3b` across all three legs. `git log 0b59370..HEAD -- pyproject.toml`
+      shows no commit touching `[tool.importlinter]`, so the contract written in Task 1 is
+      the contract still being enforced.*
+- [x] `Config(root=..., host="0.0.0.0", token="t")` produces an `allowed_hosts` containing this machine's own LAN address.
+      *Real resolver, no injection: `('17-R4', '127.0.1.1', '192.168.33.11')`. See the
+      caveat below, which is about other spellings of the same intent.*
+- [x] `Config(root=..., host="0.0.0.0")` with no token raises `ConfigError`.
+- [x] `allowed_origins` rejects `http://localhost:3000` while accepting `http://localhost:8787`.
+- [x] Every name in the refusal parameter list raises `InvalidName`, and a symlink out of the root raises `OutsideRoot` on both lookup and creation.
+      *14 payloads, none accepted by `project_path` or by `create_project`. The symlink
+      case refuses on both paths, which it did not in the first draft.*
+- [x] A refused creation leaves nothing on disk.
+      *Asserted as a side effect check, not only as an exception: the root is still empty
+      and no sibling was created outside it.*
+
+### One criterion passes its letter and not all of its intent
+
+Criterion 2 names `0.0.0.0`, and that works. What it is *for* is "a wildcard bind
+reaches the phone", and that has an IPv6 shaped hole:
+
+- `::0` and `0:0:0:0:0:0:0:0` are not recognised as wildcards, so the resolver is
+  never consulted and the allowlist gets the literal bind string back instead of an
+  address. A first check of this read the result as "non empty, therefore a LAN
+  address", which flattered it; `['::0']` is the wildcard echoed back.
+- `getaddrinfo` returns IPv6 addresses in bare form, and a browser sends
+  `Host: [2001:db8::5]`. The bare form is what lands in `allowed_hosts`, so the two
+  never match.
+
+Both are issue #8, milestoned Phase 2, which is where they start to matter: Task 4
+is the first code to consume `allowed_hosts`, and until then the gap is theoretical.
+Phase 1's contract is the six criteria above, and they hold.
+
+### What this phase cost, and what it taught
+
+Three tickets, 134 tests, 99% branch coverage across `config.py` and `discovery.py`.
+Four rounds of code review found 23 confirmed defects, 14 of which were fixed inside
+the batch and 9 of which became #8, #9 and #10 when the review loop hit its bad fix
+injection trip wire.
+
+The one worth remembering: `NAME_PATTERN` was anchored with `$`, which matches before
+a trailing newline, so `evil\n` became a real directory and a name at the cap plus a
+newline walked past the cap. **Every hand written payload in the ticket's own test
+list passed that pattern.** Guards here want fuzzing or property tests, not only
+enumeration.
 
 When these hold, start Phase 2 from `docs/roadmap.md`.
