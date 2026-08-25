@@ -729,7 +729,11 @@ git commit -m "feat(config): mandatory token off loopback, and an allowlist a ph
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `list_projects(root: Path) -> list[str]`; `validate_name(name: str) -> None`; `resolve_child(root: Path, name: str) -> Path`; `project_path(root: Path, name: str) -> Path`; `create_project(root: Path, name: str) -> Path`; exceptions `InvalidName`, `NoSuchProject(InvalidName)`, `OutsideRoot`, `AlreadyExists`, `RootUnavailable`; constant `NAME_PATTERN: re.Pattern[str]`.
+- Produces: `scan(root: Path) -> Listing`; `list_projects(root: Path) -> list[str]`; `explain_name(name: str) -> str | None`; `validate_name(name: str) -> None`; `resolve_child(root: Path, name: str) -> Path`; `project_path(root: Path, name: str) -> Path`; `create_project(root: Path, name: str) -> Path`; frozen dataclasses `Unsupported(name, reason)` and `Listing(projects, unsupported)`; exceptions `InvalidName`, `NoSuchProject(InvalidName)`, `OutsideRoot`, `AlreadyExists`, `RootUnavailable`; constants `NAME_PATTERN: re.Pattern[str]`, `MAX_NAME_LENGTH: int`.
+
+**`scan` returns both halves of the answer**, the folders that can be projects and the ones that cannot with the rule each broke. An earlier version filtered the unsupported ones out silently, so a folder called `my app` simply vanished and the honest reading from a phone was that Hitchrail could not see it. `list_projects` remains for the engine, which only acts on projects; anything rendering a list to a person uses `scan`. The reasoning and the options considered are in issue #7.
+
+**`MAX_NAME_LENGTH` is 255**, the filesystem's own limit, not the 64 an earlier draft invented. Length carries no security argument here, unlike the alphabet and the first character, and the low cap hid ordinary folders for nothing.
 
 **`NoSuchProject` subclasses `InvalidName`** so that `except InvalidName` still catches it, while the HTTP layer can tell 400 from 404. A project deleted from under a stale phone tab is not a client sending a bad request. **`RootUnavailable`** covers the root disappearing after `Config` validated it, a USB drive or an autofs mount: `FileNotFoundError` is not a `ValueError`, so unmapped it escapes every caller's refusal handling as a 500, and guessing "no projects" would report every session as stopped.
 

@@ -11,14 +11,17 @@ from pathlib import Path
 import pytest
 
 from hitchrail.discovery import (
+    MAX_NAME_LENGTH,
     AlreadyExists,
     InvalidName,
     NoSuchProject,
     OutsideRoot,
     RootUnavailable,
     create_project,
+    explain_name,
     list_projects,
     project_path,
+    scan,
 )
 
 
@@ -58,7 +61,7 @@ def test_dotted_names_are_allowed(tmp_path: Path) -> None:
         ".hidden",
         "-lead",
         "--dangerously-skip-permissions",
-        "x" * 65,
+        "x" * (MAX_NAME_LENGTH + 1),
         "a b",
         "a\x00b",
         "a‮b",
@@ -180,7 +183,7 @@ def test_a_refused_creation_leaves_nothing_behind(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "name",
-    ["evil\n", "evil\r\n", "x" * 64 + "\n", "ok\n\n"],
+    ["evil\n", "evil\r\n", "x" * (MAX_NAME_LENGTH - 1) + "\n", "ok\n\n"],
     ids=["newline", "crlf", "past-the-cap-via-newline", "double-newline"],
 )
 def test_a_trailing_newline_cannot_smuggle_a_name_past_the_pattern(
@@ -322,3 +325,166 @@ def test_root_unavailable_is_not_mistaken_for_an_empty_root(tmp_path: Path) -> N
     root.rmdir()
     with pytest.raises(RootUnavailable):
         list_projects(root)
+
+
+def test_the_length_cap_is_the_filesystems_own_limit(tmp_path: Path) -> None:
+    # 64 was invented. Length carries no security argument here, unlike the
+    # alphabet and the first character, and the old cap hid ordinary folders
+    # for no reason. 255 is what the filesystem itself allows, and the pattern
+    # is ASCII only so a character is a byte.
+    assert MAX_NAME_LENGTH == 255
+    ok = "a" * MAX_NAME_LENGTH
+    (tmp_path / ok).mkdir()
+    assert project_path(tmp_path, ok).is_dir()
+    with pytest.raises(InvalidName):
+        project_path(tmp_path, "a" * (MAX_NAME_LENGTH + 1))
+
+
+def test_scan_reports_the_folders_it_cannot_offer(tmp_path: Path) -> None:
+    """The fix for the silence.
+
+    These folders used to vanish from the listing with no signal at all, and
+    the honest reading from a phone was that Hitchrail could not see them.
+    """
+    for name in ("normal", "my app", "café", "report(final)", "-flag"):
+        (tmp_path / name).mkdir()
+
+    listing = scan(tmp_path)
+    assert listing.projects == ("normal",)
+
+    reported = {u.name: u.reason for u in listing.unsupported}
+    assert set(reported) == {"my app", "café", "report(final)", "-flag"}
+    assert "a space" in reported["my app"]
+    assert "non ASCII" in reported["café"]
+    assert "flag" in reported["-flag"]
+    # Every reason names the rule, so somebody can act on it.
+    assert all(r and not r.endswith(".") for r in reported.values())
+
+
+def test_scan_does_not_report_dot_directories_as_rejected_projects(
+    tmp_path: Path,
+) -> None:
+    # .git is not a folder somebody was trying to use as a project, so listing
+    # it as rejected would be noise rather than information.
+    (tmp_path / "real").mkdir()
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".cache").mkdir()
+
+    listing = scan(tmp_path)
+    assert listing.projects == ("real",)
+    assert listing.unsupported == ()
+
+
+def test_scan_reports_a_symlink_out_of_the_root_rather_than_hiding_it(
+    tmp_path: Path,
+) -> None:
+    outside = tmp_path.parent / "outside_scan"
+    outside.mkdir(exist_ok=True)
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "real").mkdir()
+    (root / "escape").symlink_to(outside, target_is_directory=True)
+
+    listing = scan(root)
+    assert listing.projects == ("real",)
+    assert [u.name for u in listing.unsupported] == ["escape"]
+    assert "outside the root" in listing.unsupported[0].reason
+
+
+def test_list_projects_still_answers_the_plain_question(tmp_path: Path) -> None:
+    # The engine only acts on projects and should not have to unpack a Listing.
+    (tmp_path / "one").mkdir()
+    (tmp_path / "my app").mkdir()
+    assert list_projects(tmp_path) == ["one"]
+
+
+def test_scan_makes_one_pass_over_the_root(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    # Two functions would mean two iterdir calls that can disagree about a
+    # directory somebody is editing while they look at it.
+    (tmp_path / "one").mkdir()
+    calls: list[int] = []
+    real_iterdir = Path.iterdir
+
+    def counting(self: Path):  # type: ignore[no-untyped-def]
+        calls.append(1)
+        return real_iterdir(self)
+
+    monkeypatch.setattr(Path, "iterdir", counting)
+    scan(tmp_path)
+    assert calls == [1]
+
+
+def test_scan_is_sorted_case_insensitively_on_both_halves(tmp_path: Path) -> None:
+    for name in ("Zebra", "apple", "My App", "beta gamma"):
+        (tmp_path / name).mkdir()
+    listing = scan(tmp_path)
+    assert listing.projects == ("apple", "Zebra")
+    assert [u.name for u in listing.unsupported] == ["beta gamma", "My App"]
+
+
+def test_a_root_that_vanishes_mid_scan_is_reported_not_crashed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # iterdir was wrapped, but is_dir and resolve one line below were not, so
+    # an autofs mount going away mid listing escaped as a bare OSError past the
+    # wrapper added directly above it.
+    (tmp_path / "one").mkdir()
+
+    def vanished(self: Path) -> bool:
+        raise OSError("mount went away")
+
+    monkeypatch.setattr(Path, "is_dir", vanished)
+    with pytest.raises(RootUnavailable):
+        scan(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("ok-name", None),
+        ("", "empty"),
+        (".hidden", "dot"),
+        ("-flag", "hyphen"),
+        ("a" * 300, "over the 255 limit"),
+        ("my app", "a space"),
+        ("café", "non ASCII"),
+    ],
+)
+def test_explain_name_says_which_rule_was_broken(name: str, expected: str | None) -> None:
+    reason = explain_name(name)
+    if expected is None:
+        assert reason is None
+    else:
+        assert reason is not None
+        assert expected in reason
+
+
+def test_a_name_starting_with_an_allowed_character_that_is_not_alphanumeric(
+    tmp_path: Path,
+) -> None:
+    # `_leading` passes every character check and still fails the pattern,
+    # because the first character must be a letter or a digit. It used to fall
+    # through to a message that named no rule at all.
+    (tmp_path / "_leading").mkdir()
+    reason = explain_name("_leading")
+    assert reason is not None
+    assert "start with a letter or a digit" in reason
+    assert [u.reason for u in scan(tmp_path).unsupported] == [reason]
+
+
+def test_an_entry_that_cannot_be_resolved_is_reported_not_crashed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # resolve() sits inside the loop, below the iterdir wrapper. An EACCES on
+    # one subdirectory used to escape as a bare OSError.
+    (tmp_path / "one").mkdir()
+    real_resolve = Path.resolve
+
+    def selective(self: Path, strict: bool = False) -> Path:
+        if self.name == "one":
+            raise OSError("EACCES")
+        return real_resolve(self)
+
+    monkeypatch.setattr(Path, "resolve", selective)
+    with pytest.raises(RootUnavailable):
+        scan(tmp_path)

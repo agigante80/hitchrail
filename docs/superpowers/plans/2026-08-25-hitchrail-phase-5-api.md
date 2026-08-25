@@ -452,9 +452,16 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus | None = None) 
     async def list_projects(request: Request) -> Response:
         sessions = await in_thread(engine.list)
         available = await in_thread(engine.available_mb)
+        # `unsupported` is the folders under the root that cannot be projects,
+        # each with the rule it broke. Dropping them silently made a folder
+        # called `my app` look like one Hitchrail could not see. See issue #7.
+        listing = await in_thread(discovery.scan, config.root)
         return JSONResponse(
             {
                 "projects": [s.as_dict() for s in sessions],
+                "unsupported": [
+                    {"name": u.name, "reason": u.reason} for u in listing.unsupported
+                ],
                 "memory": {"available_mb": available},
             }
         )
@@ -1190,6 +1197,7 @@ git commit -m "feat(cli): serve command with a generated token and a link a phon
 - [ ] `uvx hitchrail --root ~/dev` serves an API a person can drive with `curl`.
 - [ ] A real session has been started, observed, gracefully stopped and killed by hand, and the start returned 201 rather than `start_died`.
 - [ ] Every code in the error envelope table above is returned by at least one test, `locked` and `url_pending` included.
+- [ ] `GET /api/projects` reports `unsupported` alongside `projects`, so a folder the root holds but Hitchrail cannot open is accounted for rather than absent.
 - [ ] An unknown project is 404 on every route that takes a name.
 - [ ] A malformed JSON body is 400, not 500, and no error body contains a traceback or a filesystem path.
 - [ ] The event stream authenticates by cookie with no `Authorization` header, and refuses an unauthenticated reader.
