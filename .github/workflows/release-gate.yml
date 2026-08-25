@@ -1,0 +1,55 @@
+# Release Gate (lane A): block a PR to main unless it bumps the version past the latest release
+# tag. This is the CI-enforced counterpart of the `release` skill's "version was bumped past the
+# last published tag" precondition: enforced on every PR, not only when someone remembers to run
+# a release. No tokens, no recursion, and it only reads.
+#
+# LIMITATION, stated rather than hidden: this project's git convention is to work on `main`
+# directly, so a trunk commit never opens a PR and this gate never fires for it. Until work moves
+# to pull requests, the actual enforcement is the `release` skill's precondition check at the
+# moment somebody cuts a release. Do not read a green checks list as "the version was gated".
+#
+# Version source: pyproject.toml project.version (VERSION_SOURCE=python). The forge-kit reference
+# prefers tag-derived versioning (setuptools-scm / hatch-vcs) for a project that builds a wheel.
+# We deliberately do not: it would replace uv_build as the build backend, which the design picked
+# on purpose, and add a build-time dependency to a project whose whole discipline is having three.
+# pyproject.toml is the single canonical source and nothing mirrors it, so there is no drift to
+# guard against; hitchrail.__version__ is read at runtime from importlib.metadata.
+name: Release Gate
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  version-bumped:
+    runs-on: ubuntu-latest
+    env:
+      VERSION_SOURCE: python
+      TAG_GLOB: 'v*'
+      TAG_PREFIX: v
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0      # full history + tags, or the version to tag compare is wrong
+          fetch-tags: true
+
+      - name: Require a version bump past the latest release
+        run: |
+          set -euo pipefail
+          verdict=$(bash scripts/version-lib.sh)   # stderr already logged the working/tag detail
+          case "$verdict" in
+            ahead|first-release)
+              echo "::notice::release-gate: version is ahead of the last release, so the gate passes." ;;
+            equal)
+              echo "::error::release-gate: pyproject.toml project.version was NOT bumped past the last release. Bump it, choosing patch/minor/major by impact per docs/versioning.md. This gate is an intentional governance signal, not a CI breakage."
+              exit 1 ;;
+            behind)
+              echo "::error::release-gate: the version is BEHIND the last release, so this branch is stale. Merge or rebase main, then re-bump."
+              exit 1 ;;
+            *)
+              echo "::error::release-gate: unexpected verdict '$verdict'. Check scripts/version-lib.sh config."
+              exit 1 ;;
+          esac

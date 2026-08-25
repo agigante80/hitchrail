@@ -1,0 +1,247 @@
+name: Feature Request
+description: Propose a new feature or enhancement
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        <!-- template-version: 5 -->
+        ## Feature Request
+        Please fill in all required fields. Hitchrail spawns `claude --dangerously-skip-permissions`,
+        so the blast radius and test sections below are not paperwork: they are how a change gets
+        past the gate. See `docs/guides/ticket-standards.md`.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What does this feature do and why is it needed?
+      placeholder: "One paragraph describing the feature and its value."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - P0 - Critical (blocks a phase or weakens a security control)
+        - P1 - High (important for the current phase)
+        - P2 - Medium (should do, not blocking)
+        - P3 - Low (nice to have)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: areas
+    attributes:
+      label: Affected areas
+      description: Which modules does this touch? If 3+, consider splitting into separate tickets.
+      multiple: true
+      options:
+        - config (runtime configuration and its refusals)
+        - discovery (root scanning, folder creation, path safety)
+        - tmux (target addressing and the footguns)
+        - procs (the process table snapshot)
+        - claude_ipc (Claude Code internals, quarantined)
+        - ram (memory readings and the guard)
+        - events (the in process fan out)
+        - engine (state derivation, start, stop, log tail)
+        - security (host allowlist, origin, token)
+        - server (Starlette routes, middleware, SSE)
+        - web (browser interface, no build step)
+        - cli (arguments, config, uvicorn launch)
+        - packaging and distribution (pyproject, wheel, PyPI)
+        - CI and tooling
+        - docs
+    validations:
+      required: true
+
+  - type: textarea
+    id: files
+    attributes:
+      label: Files to create/modify
+      description: List all files that will be created or changed.
+      placeholder: |
+        - `src/hitchrail/engine.py` - new state transition
+        - `tests/test_engine.py` - regression test for it
+    validations:
+      required: false
+
+  - type: textarea
+    id: implementation
+    attributes:
+      label: Implementation details
+      description: |
+        How should this be implemented? Include code snippets if helpful. State which external
+        surface (tmux, the process table, memory, the Claude state directory, the clock) this
+        needs, and how it is injected rather than reached for directly.
+    validations:
+      required: false
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: What must be true for this feature to be considered complete?
+      placeholder: |
+        - [ ] Criterion 1
+        - [ ] Criterion 2
+    validations:
+      required: true
+
+  - type: textarea
+    id: blast_radius
+    attributes:
+      label: Blast radius
+      description: |
+        Hitchrail holds no personal data and has no database, so there is no GDPR section here.
+        What it does have is arbitrary code execution as the user. Answer against the seven
+        controls in `docs/tech-guidelines.md` section 5.
+      value: |
+        - **Touches a security control?** yes / no. If yes, which of the seven, and how.
+        - **New subprocess call?** argument list only; state the exact argv.
+        - **New tmux invocation?** state the target spec and how it is scoped to the prefix.
+        - **Crosses the root boundary?** how the path is resolved and checked.
+        - **New dependency?** runtime budget is three. Justify, or state "no".
+        - **Can it fail open?** what the code does when state cannot be determined.
+    validations:
+      required: true
+
+  - type: textarea
+    id: security
+    attributes:
+      label: Security considerations
+      description: Auth, host and origin checks, input validation, data exposure.
+      value: |
+        - **Authentication:** token required / loopback only (justify if the route is exempt)
+        - **Host allowlist:** does this add a route? It must be behind TrustedHostMiddleware.
+        - **Origin check:** is the route mutating? Then Origin is checked. GET is exempt.
+        - **Input validation:** allowlist pattern, never a denylist. State the pattern.
+        - **Error body:** which stable `code` does it return, and what does the message say?
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Other issues that must be completed before this one.
+      placeholder: "Depends on: #54, #55"
+    validations:
+      required: false
+
+  - type: textarea
+    id: scenarios
+    attributes:
+      label: Test scenarios (Given / When / Then)
+      description: |
+        One positive and one negative scenario per condition being added. For features with
+        multiple independent conditions, repeat the block for each. Refusals are conditions.
+      placeholder: |
+        **Condition: [name the condition]**
+
+        Positive
+        - Given: [valid starting state]
+        - When: [action is performed]
+        - Then: [expected correct result]
+
+        Negative
+        - Given: [invalid or edge-case state]
+        - When: [action is performed]
+        - Then: [expected refusal, with the error `code` it returns]
+    validations:
+      required: true
+
+  - type: textarea
+    id: unit_tests
+    attributes:
+      label: Unit tests
+      description: |
+        Specific test cases. State file path, input, and expected output for each. Unit tests
+        are hermetic: no real tmux, no real Claude, no network, no filesystem outside tmp_path.
+      placeholder: |
+        - [ ] Positive: `tests/test_engine.py` - fake tmux reports a prefixed session owning a claude pid -> state `running`
+        - [ ] Negative: `tests/test_engine.py` - claude pid alive with no owning pane -> state `detached`, pid surfaced
+        - [ ] `uv run pytest` passes
+    validations:
+      required: true
+
+  - type: textarea
+    id: integration_tests
+    attributes:
+      label: Integration tests
+      description: |
+        The API driven through `httpx.ASGITransport` against a real Starlette app with a faked
+        engine. No socket is opened. This tier proves routing, middleware, status codes, the
+        error body shape, and the SSE contract. Mark N/A with justification for engine-only work.
+      placeholder: |
+        - [ ] `tests/test_server.py` - POST with a foreign `Origin` -> 403, body `{code, message}`
+        - [ ] `tests/test_server.py` - `ram_soft` refusal is not retried by the server on its own
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: agent_reviews
+    attributes:
+      label: Required reviews (mandatory)
+      description: |
+        The gate auto-selects specialist agents from labels and content. All selected agents
+        must score 10/10 before implementation begins.
+      options:
+        - label: "**ticket-gate** - mandatory before implementation. Runs 5 core agents (Security, Architect, Developer, QA, Blast Radius) + dynamic agents based on labels. All must score 10/10."
+          required: true
+
+  - type: textarea
+    id: qa_security
+    attributes:
+      label: QA and security testing
+      description: |
+        Test the refusals, not only the successes. A security control with only a happy path
+        test is untested.
+      value: |
+        ### Security tests
+        - [ ] **Host allowlist:** forged `Host` rejected, including on `/api/events`
+        - [ ] **Origin:** mutating request with missing or foreign `Origin` rejected
+        - [ ] **Token:** non loopback bind without a token refuses to START, not warns
+        - [ ] **Root boundary:** name with a separator, a dot prefix, or a parent reference rejected
+        - [ ] **No shell:** no code path added here reaches a shell; argv asserted in the test
+        - [ ] **tmux scope:** no bare `kill-server`; every target carries the configured prefix
+
+        ### QA tests
+        - [ ] **Unit:** the behaviour, its edge cases, and every refusal
+        - [ ] **Integration:** status code AND error body `{code, message}` for each failure path
+        - [ ] **Regression:** if this is a fix, a named test that fails if the fix is reverted
+        - [ ] **Footgun guard:** if this works around a documented footgun, a named test that fails if the workaround is removed
+    validations:
+      required: true
+
+  - type: textarea
+    id: e2e_tests
+    attributes:
+      label: E2E test scenarios
+      description: |
+        The real server against a temporary root and a fake `claude` shim, driven with
+        Playwright. Required for anything a unit test structurally cannot see. API-only or
+        engine-only changes can mark this N/A with a justification.
+        Reminder: the E2E tier drives a private tmux server (`tmux -S "$SOCK"` via `env -u TMUX`).
+      placeholder: |
+        ### Happy path
+        - [ ] Tap start on a stopped row -> row becomes `running`, session link appears
+        - [ ] Tap stop -> confirm -> row enters `stopping`, kill control present for the whole wait
+
+        ### Unhappy path
+        - [ ] Session dies immediately -> `start_died` with captured output, never reported as running
+        - [ ] SSE stream drops after a backgrounded tab -> reconnects and the list is correct
+        - [ ] Forged `Host` on the live socket -> rejected
+    validations:
+      required: true
+
+  - type: textarea
+    id: codebase_context
+    attributes:
+      label: Codebase Context
+      description: "Auto-populated by ticket-gate. Do not edit manually."
+      placeholder: "Populated automatically when you run /gate-ticket"
+    validations:
+      required: false

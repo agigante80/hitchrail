@@ -1,0 +1,212 @@
+name: Security Issue
+description: Report a security vulnerability or propose a security hardening
+labels: ["security"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        <!-- template-version: 5 -->
+        ## Security Issue
+        **Do not file an exploitable vulnerability here while the repository is public.** Use the
+        contact in `SECURITY.md` instead. This template is for hardening work and for issues that
+        are already public.
+
+        Hitchrail spawns `claude --dangerously-skip-permissions`. Anyone who can drive its API can
+        run arbitrary code as the user who started it. The precedent is CVE-2026-32632
+        (GHSA-hhcg-r27j-fhv9) in Glances: same shape, smaller blast radius.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Vulnerability description
+      description: What is the weakness, and what does an attacker get from it?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: control
+    attributes:
+      label: Which control is involved
+      description: The seven controls in `docs/tech-guidelines.md` section 5.
+      options:
+        - 1. No shell (subprocess takes an argument list)
+        - 2. Host allowlist, always on (DNS rebinding defence)
+        - 3. Origin checked on every mutating request (CSRF)
+        - 4. Token mandatory for any non loopback bind
+        - 5. The root is a hard boundary (path resolution and allowlist names)
+        - 6. Never a bare tmux kill-server, never an unprefixed session
+        - 7. Report refusals honestly (no failing open, no error rendered as success)
+        - None of the seven - a new control is being proposed
+    validations:
+      required: true
+
+  - type: dropdown
+    id: owasp
+    attributes:
+      label: OWASP category
+      options:
+        - A01 Broken Access Control
+        - A02 Cryptographic Failures
+        - A03 Injection (including argument and path injection)
+        - A04 Insecure Design
+        - A05 Security Misconfiguration
+        - A07 Identification and Authentication Failures
+        - A08 Software and Data Integrity Failures
+        - A09 Security Logging and Monitoring Failures
+        - A10 Server Side Request Forgery
+        - API Security Top 10 (specify which)
+        - Not applicable
+    validations:
+      required: true
+
+  - type: textarea
+    id: affected
+    attributes:
+      label: Affected endpoints/files
+      description: |
+        Which routes and which modules. The five files that stand between a web page and a shell
+        are `security.py`, `server.py`, `tmux.py`, `discovery.py` and `cli.py`.
+      placeholder: |
+        - `POST /api/sessions/{name}` in `src/hitchrail/server.py`
+        - `src/hitchrail/discovery.py` - the name allowlist
+    validations:
+      required: true
+
+  - type: textarea
+    id: reachability
+    attributes:
+      label: Reachability
+      description: |
+        Who can actually reach this, and through what. This decides severity more than the
+        weakness class does.
+      value: |
+        - **Bind:** loopback only / any interface
+        - **Token required to reach it?** yes / no
+        - **Reachable from a page the user merely visits?** (rebinding, CSRF) yes / no
+        - **Order of checks:** does the request reach this before the host check? Host check runs first, always.
+        - **Pre-authentication?** yes / no
+    validations:
+      required: true
+
+  - type: textarea
+    id: blast_radius
+    attributes:
+      label: Blast radius
+      description: |
+        Hitchrail holds no personal data and has no database, so there is no GDPR section here.
+        State what an attacker gains, in plain terms.
+      value: |
+        - **Worst case:** arbitrary code execution as the user / session enumeration / denial of service / information disclosure
+        - **Does it cross the root boundary?** yes / no
+        - **Does it touch a session Hitchrail did not create?** yes / no
+        - **Does it leak the token, or allow probing whether a token is correct?** yes / no
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - Critical - unauthenticated code execution, or a control that fails open
+        - High - authenticated bypass of a control, or a path escape
+        - Medium - a control weakened but not bypassed
+        - Low - defence in depth, hardening
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] The refusal is asserted by a test, not only the success path
+        - [ ] The control is verified against a primary source, cited in the PR
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      placeholder: "Depends on: #54"
+    validations:
+      required: false
+
+  - type: textarea
+    id: scenarios
+    attributes:
+      label: Test scenarios (Given / When / Then)
+      description: |
+        The negative scenario is the point here. A security control with only a happy path test
+        is untested.
+      placeholder: |
+        **Condition: [the control being asserted]**
+
+        Positive
+        - Given: [a legitimate request]
+        - When: [it reaches the route]
+        - Then: [it succeeds]
+
+        Negative
+        - Given: [the attacker-shaped request]
+        - When: [it reaches the route]
+        - Then: [it is refused with `code` X, and nothing was spawned]
+    validations:
+      required: true
+
+  - type: textarea
+    id: unit_tests
+    attributes:
+      label: Unit tests
+      description: Every refusal gets a test. State file, input, expected refusal.
+      placeholder: |
+        - [ ] `tests/test_security.py` - `Host: evil.example` -> 400, before any token comparison happens
+        - [ ] `tests/test_security.py` - token compared with `secrets.compare_digest`, never `==`
+        - [ ] `tests/test_discovery.py` - `../etc`, `.hidden`, `a/b` all rejected by the allowlist
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: agent_reviews
+    attributes:
+      label: Required reviews (mandatory)
+      description: |
+        A `security` label makes the gate run ALL agents, not only the triggered ones.
+      options:
+        - label: "**ticket-gate** - mandatory before implementation. All agents run and all must score 10/10."
+          required: true
+
+  - type: textarea
+    id: remediation
+    attributes:
+      label: Remediation approach
+      description: |
+        If the fix appears to require weakening one of the seven controls, stop and say so here
+        rather than working around it quietly.
+    validations:
+      required: true
+
+  - type: textarea
+    id: tests
+    attributes:
+      label: Test plan for the fix
+      description: |
+        Include the live-socket check where the control only exists in the assembled application.
+        A forged `Host` refused on a real socket is not the same claim as a unit test passing.
+      value: |
+        - [ ] Unit: the refusal, asserted directly
+        - [ ] Integration: the route through `httpx.ASGITransport`, status code AND `{code, message}` body
+        - [ ] E2E: the refusal on a live socket, against the fake `claude` shim
+        - [ ] Regression: a named test that fails if the control is removed by a future tidy-up
+    validations:
+      required: true
+
+  - type: textarea
+    id: codebase_context
+    attributes:
+      label: Codebase Context
+      description: "Auto-populated by ticket-gate. Do not edit manually."
+      placeholder: "Populated automatically when you run /gate-ticket"
+    validations:
+      required: false

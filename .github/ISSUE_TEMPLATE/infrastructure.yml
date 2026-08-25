@@ -1,0 +1,162 @@
+name: Infrastructure Task
+description: CI, packaging, release, tooling, configuration
+labels: ["infrastructure"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        <!-- template-version: 5 -->
+        ## Infrastructure Task
+        Two standing constraints apply to almost everything here: the repository root stays lean
+        (configure tools from `pyproject.toml`, not a new dotfile), and the runtime dependency
+        budget is three. See `docs/tech-guidelines.md` sections 4 and 6.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What needs to change and why?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - P0 - Critical (a gate is broken, or a release is blocked)
+        - P1 - High (important for the current phase)
+        - P2 - Medium (should do, not blocking)
+        - P3 - Low (nice to have)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: areas
+    attributes:
+      label: Area(s) affected
+      multiple: true
+      options:
+        - CI workflows (3.11, 3.12, 3.13 matrix)
+        - Lint and format (ruff)
+        - Types (mypy strict)
+        - Tests (pytest, the three tiers)
+        - Module boundaries (import-linter contract)
+        - Packaging (pyproject, uv_build, the wheel)
+        - Release and PyPI publication
+        - Dependencies (the budget of three)
+        - Issue templates and governance
+        - Developer environment (uv, .python-version)
+    validations:
+      required: true
+
+  - type: textarea
+    id: files
+    attributes:
+      label: Files to create/modify
+      placeholder: |
+        - `pyproject.toml` - add the import-linter contract
+        - `.github/workflows/ci.yml` - add 3.13 to the matrix
+    validations:
+      required: true
+
+  - type: textarea
+    id: root_and_deps
+    attributes:
+      label: Root and dependency impact
+      description: |
+        The two constraints that this template exists to enforce. Answer both even when the
+        answer is "no change".
+      value: |
+        - **New root level file?** yes / no. If yes, why can it not live in `pyproject.toml` or a subdirectory?
+        - **New runtime dependency?** the budget is three (`starlette`, `uvicorn`, `sse-starlette`).
+          If yes, answer: what does it do that we would otherwise write, how much of it do we use,
+          who maintains it, and what is the cost of removing it later?
+        - **New development dependency?** lower bar, same question asked.
+        - **Version pinned or ranged?** and verified against the package index, not recalled.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] All five gates green on 3.11, 3.12 and 3.13
+        - [ ] The root gained no new dotfile
+    validations:
+      required: true
+
+  - type: textarea
+    id: rollback
+    attributes:
+      label: Rollback plan
+      description: How is this undone if it turns out to be wrong?
+    validations:
+      required: true
+
+  - type: textarea
+    id: security
+    attributes:
+      label: Security considerations
+      description: |
+        Infrastructure changes are audit surface too. A workflow with write permissions and a
+        token is a supply chain question, not just a CI question.
+      value: |
+        - **Workflow permissions:** least privilege? which scopes, and why?
+        - **Secrets touched:** which, and is any of it printed to a log?
+        - **Third party actions:** pinned to a SHA or to a tag? who maintains them?
+        - **Does this add audit surface?** a new dependency, a new action, a new script that runs in CI
+    validations:
+      required: true
+
+  - type: textarea
+    id: scenarios
+    attributes:
+      label: Test scenarios (Given / When / Then)
+      description: |
+        Infrastructure gets scenarios too. A gate that cannot fail has not been tested.
+      placeholder: |
+        **Condition: the import boundary contract**
+
+        Positive
+        - Given: `engine.py` imports only stdlib and project modules
+        - When: `uv run lint-imports` runs
+        - Then: it exits 0
+
+        Negative
+        - Given: `engine.py` is edited to `import starlette`
+        - When: `uv run lint-imports` runs
+        - Then: it exits non zero and names the forbidden import
+    validations:
+      required: true
+
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification
+      description: |
+        Done means run, not written. State how this was confirmed, not that it should work.
+      value: |
+        - [ ] Ran locally on the development interpreter
+        - [ ] Confirmed the gate FAILS when it should (deliberately broke it once)
+        - [ ] Green on all three Python versions in CI
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: agent_reviews
+    attributes:
+      label: Required reviews (mandatory)
+      options:
+        - label: "**ticket-gate** - mandatory before implementation. All selected agents must score 10/10."
+          required: true
+
+  - type: textarea
+    id: codebase_context
+    attributes:
+      label: Codebase Context
+      description: "Auto-populated by ticket-gate. Do not edit manually."
+      placeholder: "Populated automatically when you run /gate-ticket"
+    validations:
+      required: false

@@ -1,0 +1,209 @@
+name: Bug Report
+description: Report a bug or unexpected behaviour
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        <!-- template-version: 5 -->
+        ## Bug Report
+        A bug that makes Hitchrail report a session state incorrectly is a security bug, not a
+        cosmetic one: it invites starting a second agent in a folder that already has one.
+        See `docs/guides/ticket-standards.md`.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug description
+      description: What happened, and what did you expect instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: |
+        Exact steps. Include the invocation, the state of the machine, and whether you were
+        inside a tmux session at the time (that matters more often than it looks).
+      placeholder: |
+        1. `uvx hitchrail --root ~/dev`
+        2. Start a session in `alpha`
+        3. `tmux kill-session -t hr-alpha` from another terminal
+        4. Refresh the list
+      value: |
+        **Environment**
+        - Hitchrail version:
+        - Python version:
+        - tmux version:
+        - Inside a tmux session when this happened? yes / no
+        - Bind address: loopback / LAN
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual behaviour
+      description: |
+        If this is a state derivation bug, say which of the four states was reported and which
+        was true: `running`, `stale`, `detached`, `stopped`.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: areas
+    attributes:
+      label: Affected areas
+      multiple: true
+      options:
+        - config (runtime configuration and its refusals)
+        - discovery (root scanning, folder creation, path safety)
+        - tmux (target addressing and the footguns)
+        - procs (the process table snapshot)
+        - claude_ipc (Claude Code internals, quarantined)
+        - ram (memory readings and the guard)
+        - events (the in process fan out)
+        - engine (state derivation, start, stop, log tail)
+        - security (host allowlist, origin, token)
+        - server (Starlette routes, middleware, SSE)
+        - web (browser interface, no build step)
+        - cli (arguments, config, uvicorn launch)
+        - packaging and distribution (pyproject, wheel, PyPI)
+        - CI and tooling
+        - docs
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - Critical - a security control fails open, or a session is killed that should not have been
+        - High - a state is reported incorrectly, or start/stop does not work
+        - Medium - wrong behaviour with a workaround
+        - Low - cosmetic
+    validations:
+      required: true
+
+  - type: textarea
+    id: blast_radius
+    attributes:
+      label: Blast radius
+      description: |
+        Hitchrail holds no personal data and has no database, so there is no GDPR section here.
+        What it does have is arbitrary code execution as the user.
+      value: |
+        - **Does a security control fail open here?** yes / no. Which one.
+        - **Could this kill or touch a session Hitchrail did not create?** yes / no.
+        - **Does it misreport a state?** which state was shown, which was true.
+        - **Is the error rendered as a success?** an honest refusal is the requirement.
+    validations:
+      required: true
+
+  - type: textarea
+    id: security
+    attributes:
+      label: Security impact
+      description: Auth bypass, host or origin check bypass, path escape, shell reachability.
+      value: |
+        - **Control affected:** none / host allowlist / origin / token / root boundary / no-shell / tmux scope / honest refusal
+        - **Reachable without a token?** yes / no
+        - **Reachable from a browser on another site (rebinding or CSRF)?** yes / no
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] The reported state matches the machine in the scenario above
+        - [ ] A regression test fails if the fix is reverted
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      placeholder: "Depends on: #54"
+    validations:
+      required: false
+
+  - type: textarea
+    id: scenarios
+    attributes:
+      label: Test scenarios (Given / When / Then)
+      description: One positive and one negative scenario per condition the fix changes.
+      placeholder: |
+        **Condition: [name the condition]**
+
+        Positive
+        - Given: [state of tmux and the process table]
+        - When: [the list is derived]
+        - Then: [the correct state is reported]
+
+        Negative
+        - Given: [the state that triggered the bug]
+        - When: [the list is derived]
+        - Then: [the correct state, or an honest "cannot determine"]
+    validations:
+      required: true
+
+  - type: textarea
+    id: unit_tests
+    attributes:
+      label: Unit tests
+      description: |
+        The regression itself, plus the edge cases the fix introduces. Hermetic: tmux, the
+        process table, memory and the Claude state directory are faked behind injectable seams.
+      placeholder: |
+        - [ ] Regression: `tests/test_engine.py::test_<name>` - fails if the fix is reverted
+        - [ ] Negative: `tests/test_tmux.py` - `list-panes` target keeps its trailing `:` so a sibling session is not matched
+        - [ ] `uv run pytest` passes
+    validations:
+      required: true
+
+  - type: textarea
+    id: e2e_tests
+    attributes:
+      label: E2E tests
+      description: |
+        Required when the bug is only visible in the assembled application. Mark N/A with
+        justification otherwise. The E2E tier drives a private tmux server on its own socket.
+      placeholder: |
+        - [ ] Reproduce the bug end to end against the fake `claude` shim, assert it no longer occurs
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: agent_reviews
+    attributes:
+      label: Required reviews (mandatory)
+      options:
+        - label: "**ticket-gate** - mandatory before implementation. All selected agents must score 10/10."
+          required: true
+
+  - type: textarea
+    id: qa_security
+    attributes:
+      label: QA and regression tests
+      value: |
+        - [ ] **Named regression test** that fails if the fix is reverted
+        - [ ] **Refusals tested**, not only the success path
+        - [ ] **Footgun guard:** if the fix is a workaround for a documented footgun, a named test protects it from a future tidy-up
+        - [ ] **No new bare tmux invocation**; every target is scoped to the configured prefix
+        - [ ] `uv run pytest`, `ruff check`, `ruff format --check`, `mypy`, `lint-imports` all green
+    validations:
+      required: true
+
+  - type: textarea
+    id: codebase_context
+    attributes:
+      label: Codebase Context
+      description: "Auto-populated by ticket-gate. Do not edit manually."
+      placeholder: "Populated automatically when you run /gate-ticket"
+    validations:
+      required: false

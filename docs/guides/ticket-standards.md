@@ -1,0 +1,161 @@
+<!-- template-version: 5 -->
+
+# Ticket standards (canonical)
+
+This is the **single source of truth** for what a *ready* work ticket must contain in this
+repository. The five work issue templates (`feature`, `bug`, `security`, `infrastructure`,
+`design`) carry the form fields that collect the content; this document holds the rules and the
+reasons. The `ticket-gate` agent enforces them, and `scripts/check-template-lockstep.sh` keeps
+the templates and this document on one shared `template-version`, so the standard cannot
+silently drift apart from the forms that implement it.
+
+It sits under `docs/tech-guidelines.md`, not beside it. The guidelines are binding for code; this
+says what a ticket must contain before that code is written. Where the two appear to disagree,
+the guidelines win and this document is wrong.
+
+## Why single source
+
+The requirement text used to be restated in each template, in `CLAUDE.md`, and in the gate. Six
+copies drift: prose says one thing while a template says another, and nobody notices until a
+ticket is gated against a stale rule. Keeping the rules here, referenced rather than restated
+elsewhere, plus the lockstep guard, makes "the standard is the same everywhere" mechanically true
+instead of a matter of discipline.
+
+## Required sections
+
+A ready work ticket must satisfy every rule below whose scope it actually touches. Applicability
+is decided by the gate from the ticket type and the modules it affects. A rule the ticket does
+not touch is marked N/A with a one-line justification, never failed. A rule that *does* apply and
+is absent fails the gate.
+
+### 1. GWT scenarios (Given / When / Then)
+
+At least one positive and one negative scenario per independent condition, written against
+specific module, route and state names where the ticket makes them evident. Vague restatements of
+the description do not count.
+
+**A refusal is a condition.** If the change adds a guard, the negative scenario is the guard
+firing, and it names the error `code` returned.
+
+### 2. Unit test specs
+
+Concrete cases: a specific test file path, a concrete input value, and the expected output or
+error code. "Add unit tests" is not a spec.
+
+Unit tests here are **hermetic**. No test touches a real tmux server, a real Claude process, the
+network, or the filesystem outside a temporary root. tmux, the process table, memory readings,
+the Claude state directory and the clock are faked behind injectable seams, so a ticket that
+introduces a new external surface must say how that surface is injected.
+
+**When a ticket adds or modifies an HTTP route**, complete coverage of that route is required:
+the success path, every documented refusal with the `code` it returns, and the error body shape.
+
+### 3. Integration test specs
+
+The API driven through `httpx.ASGITransport` against a real Starlette app with a faked engine. No
+socket is opened and no server is started. This is the tier that proves routing, middleware,
+status codes, error bodies and the SSE contract.
+
+Required for anything that touches `server.py`. Engine-only and discovery-only tickets mark it
+N/A with that reason.
+
+### 4. E2E test specs
+
+The real application, launched the way a user launches it, against a temporary root and a fake
+`claude` shim, driven through a browser with Playwright. Give a specific test file, the setup,
+the action and the assertion, for the happy and the unhappy path.
+
+Required for any interface-visible behaviour, and for anything a unit test **structurally cannot
+see**: the SSE stream reconnecting, the stop escalation arriving in the state the user is really
+in, the layout holding at a phone viewport, a forged `Host` refused on a live socket.
+
+API-only and engine-only tickets mark this N/A with justification rather than inventing a flow.
+
+**The E2E tier drives a private tmux server on its own socket**, addressed as `tmux -S "$SOCK"`
+and invoked through `env -u TMUX`. A ticket that adds E2E coverage inherits that rule; a ticket
+that proposes E2E coverage without it is not ready.
+
+### 5. Blast radius
+
+There is no GDPR section in this repository's templates, and its absence is deliberate.
+Hitchrail stores no personal data and has no database: state is derived on demand from the
+operating system, and the only thing it holds in memory is an in-flight stop marker. A GDPR
+section here would auto-score N/A on every ticket forever, which trains authors to skip sections.
+
+What replaces it is the thing this project actually risks. Hitchrail spawns
+`claude --dangerously-skip-permissions`, so anyone who can drive its API can run arbitrary code
+as the user who started it. Every ticket states, in plain terms:
+
+- whether it touches one of the seven controls in `docs/tech-guidelines.md` section 5, and how
+- the exact argv of any new subprocess call (argument list, never a shell)
+- the target spec of any new tmux invocation, and how it is scoped to the configured prefix
+- how any new path is resolved and confirmed to be a direct child of the root
+- whether it adds a runtime dependency, against a budget of three
+- what the code does when a session's state cannot be determined
+
+That last one is the one people skip. A guard that fails open, or an error rendered as a success,
+is worse than no guard.
+
+### 6. Security checklist
+
+Which control applies, what the allowlist pattern is, which stable error `code` the refusal
+returns, and whether the route is mutating (Origin checked) or a `GET` (exempt, because
+`EventSource` cannot set headers).
+
+Order matters and the ticket should reflect it: the host check runs before the token check, so a
+rebound request never reaches anything that could reveal whether a token is even correct.
+
+A `security` label makes the gate run every agent, not only the triggered ones.
+
+### 7. Required reviews
+
+The reviews the ticket must pass before it is done, checked off explicitly. This is the author
+acknowledging the gate, not a substitute for it.
+
+## The N/A rule (load-bearing)
+
+A coverage or E2E requirement that a docs-only, infrastructure-only or engine-only ticket cannot
+satisfy makes that ticket **un-passable**, which trains people to box-tick and rots the whole
+gate. Every rule here is scoped: it applies only to tickets whose type and affected modules bring
+it into play, and the gate derives that scope rather than asking the author to self-declare it.
+
+When you add a new rule with a coverage-style requirement, give it an explicit type-and-area
+scope here, or it will backfire.
+
+## Area labels
+
+The gate blocks a ticket with no area label, because that is what routes the specialist agents.
+The areas match the module layout in the design, section 4:
+
+| Label | Covers |
+|---|---|
+| `config` | runtime configuration and its refusals |
+| `discovery` | root scanning, folder creation, path safety |
+| `tmux` | target addressing and the footguns |
+| `procs` | the process table snapshot |
+| `claude-ipc` | the Claude Code quarantine |
+| `ram` | memory readings and the guard |
+| `events` | the in process fan out |
+| `engine` | state derivation, start, stop, log tail |
+| `security` | host allowlist, origin check, token |
+| `server` | Starlette routes, middleware, SSE |
+| `web` | the browser interface |
+| `cli` | arguments, config, uvicorn launch |
+| `packaging` | pyproject, the wheel, PyPI |
+| `infrastructure` | CI, tooling, gates |
+| `documentation` | docs and specs |
+
+One label per module the implementation plan creates. Routing a ticket to the
+right specialist is the whole reason the gate blocks without an area, and a
+vocabulary that stops short of the modules people actually work in forces them
+to pick the nearest wrong answer.
+
+Type labels are `bug`, `enhancement`, `security`, `design`, `testing`, `documentation`. A missing
+type label warns; a missing area label blocks.
+
+## What this document does not do
+
+It does not restate `docs/tech-guidelines.md`, and it does not restate the design. A ticket that
+contradicts the design is not fixed by writing more ticket: either it follows the design, or it
+changes the design deliberately with a new dated document in `docs/superpowers/specs/` that says
+what it supersedes. Drift is the failure this whole apparatus exists to prevent.

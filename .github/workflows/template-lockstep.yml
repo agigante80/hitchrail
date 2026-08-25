@@ -1,0 +1,33 @@
+# Keep every work issue template and docs/guides/ticket-standards.md on one shared
+# template-version. Divergence makes ticket-gate's version check mis-fire across ticket types,
+# because it reads one version and compares every ticket against it.
+#
+# This is a standalone workflow rather than a job in the main CI matrix on purpose: it is a
+# governance check on the committed .github/ tree, it needs no Python and no dependency install,
+# and it must stay green independently of whether the test matrix is passing.
+name: Template lockstep
+
+on:
+  push:
+    paths:
+      - '.github/ISSUE_TEMPLATE/**'
+      - 'docs/guides/ticket-standards.md'
+      - 'scripts/*template-lockstep.sh'
+      - '.github/workflows/template-lockstep.yml'
+  pull_request:
+    paths:
+      - '.github/ISSUE_TEMPLATE/**'
+      - 'docs/guides/ticket-standards.md'
+      - 'scripts/*template-lockstep.sh'
+      - '.github/workflows/template-lockstep.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  lockstep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/check-template-lockstep.sh
+      - run: bash scripts/test-template-lockstep.sh

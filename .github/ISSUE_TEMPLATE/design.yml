@@ -1,0 +1,193 @@
+name: Design / UX Task
+description: Artboards, interface behaviour, accessibility, dark theme
+labels: ["design"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        <!-- template-version: 5 -->
+        ## Design / UX Task
+        The canvas is the reference, not a suggestion:
+        https://claude.ai/code/artifact/e02013e2-d501-405a-a95c-6404ebe492a6
+        Sources live in `docs/design/`. The primary interface is a phone; desktop is secondary.
+
+        If this changes a decision the design already argued (section 7 of the design doc), say
+        so explicitly. Drift is the failure mode this template exists to catch.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What changes, and which decision in the design does it implement or revise?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - P0 - Critical (a destructive control is reachable in the wrong state)
+        - P1 - High (important for the current phase)
+        - P2 - Medium (should do, not blocking)
+        - P3 - Low (nice to have)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: viewports
+    attributes:
+      label: Viewport(s)
+      multiple: true
+      options:
+        - Phone (primary)
+        - Desktop (secondary)
+        - Both
+    validations:
+      required: true
+
+  - type: dropdown
+    id: theme
+    attributes:
+      label: Theme
+      description: Dark theme is a first class requirement, not a later addition.
+      multiple: true
+      options:
+        - Light
+        - Dark
+        - Both
+    validations:
+      required: true
+
+  - type: textarea
+    id: screens
+    attributes:
+      label: Screens / components affected
+      placeholder: |
+        - The running row (three actions, tall)
+        - The stopped row (one line, one button)
+        - The stop confirm sheet
+        - The timeout screen
+        - The memory footer
+        - The token screen
+    validations:
+      required: true
+
+  - type: textarea
+    id: artboards
+    attributes:
+      label: Artboard references
+      description: |
+        Which artboard in `docs/design/` shows this, and does the artboard need updating too?
+      placeholder: |
+        - `docs/design/Main.dc.html` - the list
+        - `docs/design/States.dc.html` - the stop escalation
+        - Artboard needs updating: yes / no
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] Matches the artboard at a phone viewport
+        - [ ] Holds in dark theme
+    validations:
+      required: true
+
+  - type: textarea
+    id: destructive_controls
+    attributes:
+      label: Destructive control placement
+      description: |
+        The one design rule that is a safety rule. On a phone the destructive path must never sit
+        under the thumb at the same weight as the safe one. Answer even when nothing destructive
+        is involved (say "no destructive control").
+      value: |
+        - **Does this screen expose stop or kill?** yes / no
+        - **Is kill reachable before a graceful attempt was made?** it must not be
+        - **Is kill phrased as impatience, not as an alternative?** ("Do not wait, kill it now")
+        - **Does the timeout screen state the risk before offering the kill?**
+        - **Is the controller session shown as locked rather than offered a stop it would refuse?**
+    validations:
+      required: true
+
+  - type: textarea
+    id: accessibility
+    attributes:
+      label: Accessibility requirements
+      value: |
+        - [ ] **44px minimum hit target** for every interactive element
+        - [ ] **Nothing depends on hover.** Touch and pointer get identical affordances
+        - [ ] Contrast checked in both themes
+        - [ ] Focus order is sensible and focus is visible
+        - [ ] State is not carried by colour alone (`running` sage, `stale`, `detached`, `stopped`)
+        - [ ] Live region announces state changes arriving over SSE
+    validations:
+      required: true
+
+  - type: textarea
+    id: palette
+    attributes:
+      label: Palette and type
+      description: |
+        Defined in the canvas. Warm neutral ground, saddle tan accent, sage for running, brick
+        for destructive. Zilla Slab for display, Karla for body, IBM Plex Mono for machine values.
+        The frontend has no build step: vanilla CSS, served as a static file.
+      value: |
+        - **New colour or type token?** yes / no. If yes, why is an existing one insufficient?
+        - **Any new asset?** it ships in the wheel as a static file; state the size.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scenarios
+    attributes:
+      label: Test scenarios (Given / When / Then)
+      placeholder: |
+        **Condition: the stop escalation**
+
+        Positive
+        - Given: a running row, and the user has confirmed a stop
+        - When: the graceful request is in flight
+        - Then: the row reads `stopping` and the kill control is present for the whole wait
+
+        Negative
+        - Given: a running row that has not been confirmed for stopping
+        - When: the user looks for a kill control
+        - Then: there is none to tap
+    validations:
+      required: true
+
+  - type: textarea
+    id: e2e_tests
+    attributes:
+      label: E2E tests
+      description: |
+        Interface work is exactly what unit tests structurally cannot see. Playwright against the
+        real server, a temporary root and a fake `claude` shim.
+      value: |
+        - [ ] The flow at a phone viewport, in both themes
+        - [ ] The layout holds with a realistic number of rows (50+)
+        - [ ] The escalation reaches the kill control in the state the user is really in
+        - [ ] SSE reconnects after a backgrounded tab and the list is correct afterwards
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: agent_reviews
+    attributes:
+      label: Required reviews (mandatory)
+      options:
+        - label: "**ticket-gate** - mandatory before implementation. All selected agents must score 10/10."
+          required: true
+
+  - type: textarea
+    id: codebase_context
+    attributes:
+      label: Codebase Context
+      description: "Auto-populated by ticket-gate. Do not edit manually."
+      placeholder: "Populated automatically when you run /gate-ticket"
+    validations:
+      required: false
