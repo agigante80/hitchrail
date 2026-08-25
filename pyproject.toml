@@ -58,8 +58,18 @@ extend-exclude = ["docs", ".claude"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "SIM", "PTH", "RUF", "S"]
-# S101 is `assert`, which is how every test in this project states its claim.
-ignore = ["S101"]
+ignore = [
+  # `assert`, which is how every test in this project states its claim.
+  "S101",
+  # N818 wants an Error suffix on every exception. This project's exceptions
+  # are named as the refusals they are: `raise Protected(name)` and
+  # `raise AlreadyExists(name)` read as the sentence the code is making, and
+  # `ProtectedError` does not. Every one derives from ValueError or a
+  # documented EngineError base, so the class is still recognisable as an
+  # exception. The names are fixed across the implementation plan's declared
+  # interfaces, so this is a vocabulary decision, not a per file exception.
+  "N818",
+]
 
 [tool.ruff.lint.per-file-ignores]
 # S603 is ruff's warning about subprocess calls. Silenced only in the two
