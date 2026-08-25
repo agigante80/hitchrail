@@ -3,15 +3,36 @@
 A web UI for starting and stopping headless Claude Code sessions across a folder
 of projects. Phone first. Python, standalone, no bash dependency.
 
+## Status: docs only
+
+There is no code in this repository yet. No `src/`, no `pyproject.toml`, no
+`tests/`. The commands below describe the project once Task 1 of the Phase 1
+plan has created the skeleton; until then they will fail, and that is expected
+rather than a broken checkout.
+
 ## Where things are
 
 - `docs/roadmap.md` is the order of work. Read it before starting anything.
 - `docs/superpowers/specs/2026-08-25-hitchrail-design.md` is the design. It is
   the argument; follow it or change it deliberately, never drift from it.
-- `docs/superpowers/plans/` holds the implementation plan for the current phase.
+- `docs/superpowers/plans/` holds one plan per phase, five of them for the core.
+  Tasks are numbered continuously across the phases, 1 to 17, in dependency
+  order. Work them in that order and do not start a phase before the previous
+  one meets its exit criteria.
 - `docs/tech-guidelines.md` is binding for all code here.
+- `docs/guides/ticket-standards.md` is the single source of truth for what a
+  ready ticket contains. The issue templates collect it, `ticket-gate` scores
+  against it, and `scripts/check-template-lockstep.sh` keeps them on one version.
+- `docs/versioning.md` is the single semver authority. Semver here is an operator
+  contract: MAJOR means the person running `uvx hitchrail` must change something.
 - `docs/design/` holds the interface artboards. The published canvas is
   https://claude.ai/code/artifact/e02013e2-d501-405a-a95c-6404ebe492a6
+- `.claude/rules/` holds path scoped rules that load automatically when you edit
+  the files they name: testing for anything under `src/` or `tests/`, security
+  for the five modules that stand between a web page and a shell.
+- `.claude/agents/`, `.claude/commands/` and `.claude/skills/` hold the
+  governance components, adapted to this project rather than copied. Each carries
+  a `<name>-version` marker so `forge-adapt` can tell drift from adaptation.
 
 ## Commands
 
@@ -27,6 +48,79 @@ uv run lint-imports        # module boundaries
 All five gates are blocking in CI on 3.11, 3.12 and 3.13. Run them before
 committing, not after being asked.
 
+One test, one file, one tier:
+
+```sh
+uv run pytest tests/test_engine.py::test_detached_is_not_stopped
+uv run pytest tests/e2e -x        # slow tier, needs a fake claude shim
+uv run pytest -k detached
+```
+
+Three tiers, and the choice is not a matter of taste. Unit is hermetic with
+every external surface faked. Integration drives the real Starlette app through
+`httpx.ASGITransport` with a faked engine, and opens no socket. End to end
+launches the real server against a temporary root, and is the only tier that
+can see SSE reconnection, the stop escalation in the state the user is really
+in, the phone viewport, or a forged `Host` refused on a live socket.
+
+**The E2E tier must drive a private tmux server**, `tmux -S "$SOCK"` invoked
+through `env -u TMUX`. A bare `tmux` honours `$TMUX` over `$TMUX_TMPDIR`, so a
+suite run from inside tmux talks to the developer's real server.
+
+## Architecture
+
+Three layers with hard boundaries. The engine must be testable without HTTP,
+and the HTTP layer testable without tmux.
+
+```
+src/hitchrail/
+  discovery.py   root scanning, folder creation, path safety
+  engine.py      state derivation, start, stop, log tail
+  claude_ipc.py  everything that knows Claude Code internals
+  ram.py         memory readings and the guard decision
+  server.py      Starlette app, routes, middleware, SSE
+  web/           index.html, app.js, app.css (no build step)
+  cli.py         argument parsing, config, uvicorn launch
+```
+
+Every external surface is injected: tmux, the process table, memory readings,
+the Claude state directory, the clock. That is what makes the engine testable
+without a real machine, so a new external dependency arrives as a seam.
+
+**State is derived on demand, never stored.** There is no database and no
+session registry, so there is nothing to drift. Derivation runs in two
+directions, and the second one is the whole point: for each prefixed tmux
+session find the Claude process it owns, then *independently* scan for Claude
+processes no pane owns. A tool that only asks tmux reports an agent that
+outlived its terminal as `stopped`, and invites you to start a second one in
+the same folder.
+
+| State | Meaning |
+|---|---|
+| `running` | tmux session alive, owns a live Claude process |
+| `stale` | tmux session alive, no Claude in it |
+| `detached` | Claude alive, no tmux session owns it |
+| `stopped` | neither |
+
+`detached` is surfaced with its pid and never silently reconciled. It is the
+state a naive implementation gets wrong, and it has its own test.
+
+**One piece of state is not derived:** the in flight graceful stop, held in
+memory in the engine, keyed by session name, deliberately not persisted. It is
+an overlay on the table above, not a fifth state. If Hitchrail restarts mid
+stop that knowledge is lost and the session reads as `running` again, which is
+the truth; a `stopping` marker that outlived the process would be a lie.
+
+Stopping is a sequence: confirm, graceful request, kill available throughout the
+wait, then a 30 second timeout that reports and **does not escalate on its own**.
+The API keeps graceful and kill as separate calls rather than one call with a
+flag, so a client that meant to be gentle is never one query parameter from a
+kill. The etiquette of trying gently first is a property of the interface, not
+of the API.
+
+Defaults: session prefix `hr-`, stop timeout 30s, hard memory floor 1536 MB,
+soft floor 3072 MB, per session estimate 1536 MB, port 8787.
+
 ## Non negotiables
 
 These are the ones that cost real debugging to find, or that protect somebody.
@@ -36,6 +130,14 @@ These are the ones that cost real debugging to find, or that protect somebody.
 - **Never a bare `tmux kill-server`.** Never kill a tmux session that does not
   carry the configured prefix. A bare `tmux` honours `$TMUX`, so from inside a
   session it hits the developer's real server.
+- **tmux target specs lie by default.** `has-session -t name` prefix matches, so
+  `hr-vessel` resolves `hr-vessel-social`; `=` forces exact, and only for a
+  session target. `list-panes` ignores a leading `=` and needs a trailing `:` to
+  read its argument as a session, or a stopped project reports a sibling's
+  process as its own. `.` and `:` are window and pane separators, so a session
+  named `dotted.site` can be created and never addressed: sanitize on the way in
+  and keep the display name apart from the tmux name. Each of these gets a named
+  regression test that fails if the workaround is removed.
 - **Starlette is 1.x here.** `on_startup`, `on_shutdown`, `add_event_handler()`
   and the `@app.route()` decorators were removed at 1.0. Use the `lifespan`
   context manager and an explicit `routes=` list. Most examples online are
@@ -49,6 +151,10 @@ These are the ones that cost real debugging to find, or that protect somebody.
   root level dotfiles without a reason.
 - **`claude_ipc.py` is quarantine.** It is the only module allowed to know
   about Claude Code internals, because they are undocumented and will change.
+  When `bridgeSessionId` breaks, exactly one module changes and the UI degrades
+  to `pending` rather than reporting something false.
+- **Test the refusals.** A security control with only a happy path test is
+  untested. Full rules in `.claude/rules/security.md`.
 
 ## Verify, do not recall
 
@@ -61,6 +167,16 @@ exactly why: the remembered API is the wrong one.
 Comments carry what the code cannot: a workaround, a footgun, a decision that
 looks wrong and is not. A comment restating the line above it gets deleted.
 When a change reverses an earlier decision, write the reason into the code.
+
+**No em dashes or en dashes,** anywhere: code, comments, docs, commit messages,
+release notes, issue bodies. Every document in this repository already held to
+this before it was written down; `.claude/no-dashes` now opts the project into
+the hook that enforces it. Do not substitute an ASCII hyphen when it fires.
+Restructure instead: a colon for an explanation, commas for an aside, "to" for a
+range, or two sentences for a strong contrast.
+
+A file past roughly 400 lines is doing more than one thing. Split it along the
+seam that is already there.
 
 ## Git
 
