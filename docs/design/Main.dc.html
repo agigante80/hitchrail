@@ -16,6 +16,10 @@
     button { font-family: inherit; cursor: pointer; border: none; background: none; }
     input { font-family: inherit; }
     .cr-scroll::-webkit-scrollbar { width: 0px; }
+    @keyframes cr-fill { from { width: 5%; } to { width: 100%; } }
+    .cr-progress { animation: cr-fill 4s linear forwards; }
+    @keyframes cr-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+    .cr-pulse { animation: cr-pulse 1.4s ease-in-out infinite; }
   </style>
 </helmet>
 
@@ -128,12 +132,44 @@
     <div style="position: absolute; left: 0; right: 0; bottom: 0; background: #FFFDFA; border-top: 1px solid #E8DFD1; border-radius: 16px 16px 0 0; padding: 20px 18px 26px; display: flex; flex-direction: column; gap: 14px;">
       <div style="width: 38px; height: 4px; border-radius: 999px; background: #E8DFD1; align-self: center;"></div>
       <div style="font-family: 'Zilla Slab', Georgia, serif; font-size: 21px; font-weight: 600; letter-spacing: -0.01em;">Stop {{ target }}?</div>
-      <div style="font-size: 14px; line-height: 1.5; color: #6B5A48;">Corral asks the agent to wrap up and exit. If it does not answer within 30 seconds, nothing is killed and you decide again.</div>
+      <div style="font-size: 14px; line-height: 1.5; color: #6B5A48;">Corral asks the agent to wrap up and exit. Nothing is killed, and you can escalate while it works.</div>
       <div style="display: flex; gap: 10px; margin-top: 2px;">
         <button onClick="{{ closeSheet }}" style="flex-grow: 1; height: 48px; border-radius: 10px; border: 1px solid #E8DFD1; background: #FBF7F1; color: #4A3E31; font-size: 15px; font-weight: 600;">Cancel</button>
-        <button onClick="{{ doStop }}" style="flex-grow: 1; height: 48px; border-radius: 10px; background: {{accent}}; color: #FFFDFA; font-size: 15px; font-weight: 700;">Stop</button>
+        <button onClick="{{ beginStop }}" style="flex-grow: 1; height: 48px; border-radius: 10px; background: {{accent}}; color: #FFFDFA; font-size: 15px; font-weight: 700;">Stop</button>
       </div>
-      <button onClick="{{ doStop }}" style="align-self: center; padding: 8px; color: #9A3B2B; font-size: 14px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px;">Force stop now</button>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isStopping }}" hint-placeholder-val="{{ false }}">
+    <div style="position: absolute; left: 0; right: 0; bottom: 0; background: #FFFDFA; border-top: 1px solid #E8DFD1; border-radius: 16px 16px 0 0; padding: 20px 18px 26px; display: flex; flex-direction: column; gap: 14px;">
+      <div style="width: 38px; height: 4px; border-radius: 999px; background: #E8DFD1; align-self: center;"></div>
+      <div style="display: flex; align-items: center; gap: 9px;">
+        <span class="cr-pulse" style="width: 9px; height: 9px; border-radius: 999px; background: {{accent}};"></span>
+        <div style="font-family: 'Zilla Slab', Georgia, serif; font-size: 21px; font-weight: 600; letter-spacing: -0.01em;">Stopping {{ target }}</div>
+      </div>
+      <div style="font-size: 14px; line-height: 1.5; color: #6B5A48;">Asking it to finish what it is doing and exit cleanly. It usually answers in a few seconds.</div>
+      <div style="height: 6px; border-radius: 999px; background: #EFE6D8; overflow: hidden;">
+        <div class="cr-progress" style="height: 100%; background: {{accent}}; border-radius: 999px;"></div>
+      </div>
+      <button onClick="{{ doKill }}" style="height: 48px; border-radius: 10px; border: 1px solid #E3C6C0; background: #FBF7F1; color: #9A3B2B; font-size: 15px; font-weight: 700; margin-top: 2px;">Do not wait, kill it now</button>
+      <button onClick="{{ closeSheet }}" style="align-self: center; padding: 6px; color: #806E5A; font-size: 14px; font-weight: 600;">Hide, keep stopping</button>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isUnanswered }}" hint-placeholder-val="{{ false }}">
+    <div style="position: absolute; left: 0; right: 0; bottom: 0; background: #FFFDFA; border-top: 1px solid #E8DFD1; border-radius: 16px 16px 0 0; padding: 20px 18px 26px; display: flex; flex-direction: column; gap: 14px;">
+      <div style="width: 38px; height: 4px; border-radius: 999px; background: #E8DFD1; align-self: center;"></div>
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <div style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px; background: #FBF0DC; color: #B07D2A; flex-shrink: 0;">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+        </div>
+        <div style="font-family: 'Zilla Slab', Georgia, serif; font-size: 21px; font-weight: 600; letter-spacing: -0.01em;">No answer from {{ target }}</div>
+      </div>
+      <div style="font-size: 14px; line-height: 1.5; color: #6B5A48;">Thirty seconds, no reply. It is still running. It may be mid-task and unable to answer, so killing it now can lose uncommitted work.</div>
+      <div style="display: flex; gap: 10px; margin-top: 2px;">
+        <button onClick="{{ closeSheet }}" style="flex-grow: 1; height: 48px; border-radius: 10px; border: 1px solid #E8DFD1; background: #FBF7F1; color: #4A3E31; font-size: 15px; font-weight: 600;">Leave it</button>
+        <button onClick="{{ doKill }}" style="flex-grow: 1; height: 48px; border-radius: 10px; background: #9A3B2B; color: #FFFDFA; font-size: 15px; font-weight: 700;">Kill it</button>
+      </div>
     </div>
   </sc-if>
 
@@ -185,6 +221,7 @@ class Component extends DCLogic {
       sheet: null,
       target: '',
       newName: '',
+      stopSeq: 0,
       running: {
         'workstation':             { ram: '1.0 GB', up: '2h 48m', controller: true },
         'vessel':                { ram: '1.5 GB', up: '31m' },
@@ -285,6 +322,8 @@ class Component extends DCLogic {
       target: this.state.target,
       sheetOpen: this.state.sheet !== null,
       isConfirm: this.state.sheet === 'confirm',
+      isStopping: this.state.sheet === 'stopping',
+      isUnanswered: this.state.sheet === 'unanswered',
       isLogs: this.state.sheet === 'logs',
       isNew: this.state.sheet === 'new',
       logLines: logLines,
@@ -293,10 +332,19 @@ class Component extends DCLogic {
       onNewName: (e) => this.setState({ newName: e.target.value }),
       doCreate: () => this.setState({ sheet: null }),
       closeSheet: () => this.setState({ sheet: null }),
-      doStop: () => {
+      beginStop: () => {
+        const seq = this.state.stopSeq + 1;
+        this.setState({ sheet: 'stopping', stopSeq: seq });
+        setTimeout(() => {
+          if (this.state.stopSeq === seq && this.state.sheet === 'stopping') {
+            this.setState({ sheet: 'unanswered' });
+          }
+        }, 4000);
+      },
+      doKill: () => {
         const next = Object.assign({}, this.state.running);
         delete next[this.state.target];
-        this.setState({ running: next, sheet: null });
+        this.setState({ running: next, sheet: null, stopSeq: this.state.stopSeq + 1 });
       }
     };
   }

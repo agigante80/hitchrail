@@ -70,6 +70,12 @@ more than one thing, and split along the seam that is already there.
 | Tests | pytest | CI, blocking |
 | Boundaries | import-linter | CI, blocking |
 
+**The repository root stays lean.** Anything that can live in a subdirectory
+does. Every tool that can be configured from `pyproject.toml` is configured
+there and not in its own dotfile: ruff, mypy and pytest read it natively, and
+Import Linter reads a `[tool.importlinter]` section. A new tool that insists on
+its own root level config file needs a reason before it is adopted.
+
 - Full type annotations on everything public. `Any` needs a comment explaining
   why it is unavoidable.
 - Docstrings state why, not what. The signature already says what.
@@ -121,16 +127,72 @@ project, which defeats the point of it being auditable.
 
 ## 7. Testing
 
+Every implementation includes automated test coverage appropriate to what it
+changed. This is part of the work, not a follow up ticket.
+
+### 7.1 The standard
+
+Before writing tests, read how this project already tests the area you are
+touching and follow that pattern. Do not introduce a second style alongside an
+established one.
+
+Then cover, for the behaviour you added or changed:
+
+- the primary success path
+- the edge cases the behaviour actually has
+- the failure and error conditions, including every refusal
+- the regression itself, when the change is a bug fix
+
+Add or update whichever kind of test fits: unit, integration, end to end,
+component. The type is chosen to suit the behaviour, not to suit convenience.
+
+### 7.2 Done means run, not written
+
+Work is not complete because the code type checks and the existing suite still
+passes. Those say nothing about the behaviour just added.
+
+Complete means: the relevant suites have been run, output inspected, failures
+and regressions introduced by the change have been fixed, and the new behaviour
+is protected by a test that would fail if the change were reverted. If a quality
+gate exists, the change satisfies it.
+
+Claiming completion without having run the tests is the single failure mode this
+section exists to prevent.
+
+### 7.3 Prove it in the running application
+
+Where it is practical, verify behaviour through the actual runtime rather than
+through unit tests and type checking alone. Unit tests confirm that a function
+does what its author believed; they cannot confirm that the assembled
+application does anything at all.
+
+For this project that means an end to end tier: the real server, launched the
+way a user launches it, against a temporary root and a fake `claude` shim,
+driven through a browser. Use it for anything a unit test structurally cannot
+see, including the SSE stream reconnecting, the stop escalation arriving in the
+state the user is really in, the layout holding at a phone viewport, and the
+host allowlist rejecting a forged `Host` on a live socket.
+
+### 7.4 Standing rules
+
 - Tests are hermetic. No test touches a real tmux server, a real Claude
   process, the network, or the filesystem outside a temporary root.
 - External surfaces are faked behind injectable seams: tmux, the process table,
   memory readings, and the Claude state directory.
+- **The E2E tier drives a private tmux server on its own socket**, addressed as
+  `tmux -S "$SOCK"` and invoked through `env -u TMUX`. A bare `tmux` honours
+  `$TMUX` over `$TMUX_TMPDIR`, so a suite run from inside tmux would otherwise
+  talk to the developer's real server. It creates only prefixed sessions, kills
+  only what it created, and never the server.
 - Test the refusals, not only the successes. A security control with only a
   happy path test is untested.
 - Every workaround for a documented footgun gets a named regression test that
   fails if the workaround is removed. A workaround with no test is a bug
   waiting to be reintroduced by someone tidying up.
 - New behaviour arrives with its test in the same commit.
+- Coverage is measured and reported, but not enforced as a percentage. A
+  percentage gate is satisfied by executing lines without asserting on them,
+  which rewards exactly the wrong behaviour. The gate is review against 7.1.
 
 ## 8. Documentation
 

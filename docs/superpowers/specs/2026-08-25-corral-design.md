@@ -37,7 +37,8 @@ In scope for v1:
 - Refresh the list on demand.
 - Create a new empty folder, immediately startable.
 - Start a session in a folder.
-- Stop a session, gracefully first, with force as an explicit second choice.
+- Stop a session in three steps: confirm, then a graceful request you can watch,
+  then a kill you can reach for at any moment during the wait. See section 4.3.
 - Filter by state (all, running, stopped) and search by name.
 - Refuse or warn when starting would exhaust memory.
 - Live updates over SSE.
@@ -60,7 +61,7 @@ Claude Code specifics quarantined to one side, HTTP on top. The engine must be
 testable without HTTP, and the HTTP layer must be testable without tmux.
 
 ```
-corral/
+src/corral/
   discovery.py   root scanning, folder creation, path safety
   engine.py      state derivation, start, stop, log tail
   claude_ipc.py  everything that knows Claude Code internals
@@ -119,7 +120,37 @@ not know about them.
 5. Never issue a bare `tmux kill-server`. Never kill a session Corral did not
    create. Every tmux invocation is scoped explicitly.
 
-### 4.3 Claude Code internals are quarantined
+### 4.3 Stopping, and the one piece of state that is not derived
+
+Stopping is a sequence, not a button:
+
+1. **Confirm.** Cheap to reverse, so it is one tap away from nothing happening.
+2. **Graceful request.** Corral asks the agent to finish and exit, and the row
+   enters `stopping`. Nothing has been killed. The user watches it happen.
+3. **Escalation, available throughout.** A kill control is present for the whole
+   wait, so a user who does not want to wait never has to. It is styled as the
+   secondary, destructive path, never as the way out of a stuck dialog.
+4. **Timeout.** After 30 seconds with no reply, Corral stops waiting and says
+   so. It does **not** escalate on its own. The session is still running, and
+   the choice to kill it stays the user's.
+
+Kill is deliberately unreachable before a graceful attempt has been made. Not
+because forcing is wrong, but because on a phone the destructive control would
+otherwise sit under the thumb at the same size as the safe one.
+
+This introduces the only state Corral holds that is not derived from the
+operating system: the fact that a graceful stop is in flight, and when it
+started. It lives in memory in the engine, keyed by session name, and it is
+deliberately not persisted. If Corral restarts mid-stop, that knowledge is lost
+and the session simply reads as `running` or `stopped` again, which is the
+truth. A `stopping` marker that outlived the process would be a lie waiting to
+be told.
+
+So the state table in 4.1 gains one transient overlay, not a fifth derived
+state: any session may additionally be marked `stopping` while a request is in
+flight. Every consumer treats an unknown or expired marker as absent.
+
+### 4.4 Claude Code internals are quarantined
 
 The session link comes from `~/.claude/sessions/<pid>.json`, key
 `bridgeSessionId`, whose value is the URL path segment verbatim including its
@@ -190,9 +221,23 @@ Documented in the README rather than hidden:
 | GET | `/api/projects` | every folder with its state |
 | POST | `/api/projects` | create a folder |
 | POST | `/api/sessions/{name}` | start a session |
-| DELETE | `/api/sessions/{name}` | stop a session, `?force=1` to skip the graceful attempt |
+| DELETE | `/api/sessions/{name}` | begin a graceful stop, returns immediately |
+| DELETE | `/api/sessions/{name}?kill=1` | kill now, valid at any point |
 | GET | `/api/sessions/{name}/logs` | tail of the pane |
 | GET | `/api/events` | SSE stream of state changes |
+
+The two stop calls are separate on purpose. The graceful one returns as soon as
+the request is sent, marks the session `stopping`, and never blocks the
+connection for 30 seconds; progress arrives over SSE like every other state
+change. The kill is a distinct call rather than a flag on the same one, so that
+"escalate the stop I already started" and "stop this thing" cannot be confused
+at the call site, and so a kill is never a query parameter away from a client
+that meant to be gentle.
+
+A kill is accepted whether or not a graceful stop preceded it. The requirement
+that you try gently first is a property of the interface, not of the API: a CLI
+user or a script has a legitimate need to kill outright, and enforcing etiquette
+in the transport would only invite working around it.
 
 Errors return a JSON body with a stable machine readable `code` and a human
 readable `message`. The codes carry the meanings the UI branches on, including
@@ -220,9 +265,14 @@ The canvas linked in section 1 is the reference. The decisions it encodes:
 - **The controller session is visibly protected.** Where Corral is running in a
   folder that has its own session, that row shows a lock rather than a stop
   control. Refusing after the tap is worse than not offering the tap.
-- **Graceful stop is the primary button; force is a separate underlined link.**
-  On a phone, the destructive path must not sit under the thumb with the same
-  weight as the safe one.
+- **Stopping escalates, it does not branch.** The confirm step offers only
+  Cancel and Stop. Kill appears once the graceful attempt is under way, phrased
+  as impatience rather than as an alternative ("Do not wait, kill it now"), and
+  stays available for the whole wait. On a phone the destructive path must never
+  sit under the thumb at the same weight as the safe one.
+- **The timeout screen states the risk before offering the kill**, because that
+  is the moment the user is most likely to reach for it and least likely to have
+  thought about uncommitted work.
 - **The token screen states the consequence plainly**, in the words a person
   would use, not in security jargon.
 - **Dark theme is a first class requirement**, not a later addition.
@@ -265,27 +315,135 @@ The frontend has no build step: vanilla JavaScript and CSS served as static
 files. A `node_modules` tree would be larger than the auditable part of the
 project.
 
-## 9. Testing
+## 9. Distribution and repository layout
 
-Hermetic. No test touches a real tmux server, a real Claude, or the real
-filesystem outside a temporary root.
+### 9.1 How a user installs it
 
-- `tmux`, the process table and `/proc` are faked behind injectable seams, the
-  same approach the reference `another tool` suite uses for its hardware backends.
-- Every behaviour in section 4.2 gets a named regression test that fails if the
+Python, so the equivalent of `npx` is `uvx`. Three supported routes, in the
+order the README should present them:
+
+```sh
+uvx corral                      # run it without installing anything
+uv tool install corral          # keep it on PATH
+pipx install corral             # for people already living in pipx
+```
+
+`uvx corral` is the headline. It fetches, resolves and runs in one command, and
+leaves nothing behind, which is the right first contact for a tool that people
+should be able to try before trusting.
+
+The package name `corral` is confirmed free on PyPI as of 2026-08-25. `coral`
+is taken, so the spelling with two r's is the only one available and the README
+should say so once, because people will mistype it.
+
+The distribution is a pure Python wheel built by `uv_build`. The frontend has
+no build step, so the wheel is source plus three static files, and nothing in
+the release pipeline compiles anything.
+
+### 9.2 Repository layout
+
+The root is kept deliberately small. Anything that can live in a subdirectory
+does, and every tool that can be configured from `pyproject.toml` is configured
+there rather than in its own dotfile.
+
+```
+README.md          what it is, how to run it, what it will not protect you from
+LICENSE            MIT
+pyproject.toml     package metadata AND ruff, mypy, pytest, import-linter config
+uv.lock            resolved dependencies, committed
+.python-version    the development interpreter
+.gitignore
+src/corral/        the package (see section 4 for the modules)
+tests/             mirrors src/corral/, plus tests/e2e/
+docs/              specs, guidelines, and the design canvas sources
+.github/workflows/ CI
+```
+
+`src/` layout rather than a flat package, so tests run against the installed
+distribution and cannot accidentally pass by importing the working tree.
+
+Ruff, mypy and pytest all read `pyproject.toml` natively. Import Linter also
+supports it, via a `[tool.importlinter]` section, which is what keeps a fifth
+dotfile out of the root.
+
+## 10. Testing
+
+Every change ships with the test coverage appropriate to it. Code that
+compiles, and a suite that still passes, are not evidence that new behaviour
+works: they are evidence that nothing obviously broke. The two are different
+claims and only the second one is cheap.
+
+### 10.1 What must be covered
+
+For any behaviour added or modified:
+
+- the primary success path
+- the edge cases that behaviour actually has
+- the failure and error conditions, including the refusals
+- the regression, when the change is a fix
+
+A change is not done when the code is written. It is done when the relevant
+suites have been run, the failures the change introduced have been fixed, and
+the new behaviour is demonstrably protected by a test that would fail without
+it.
+
+### 10.2 Three tiers
+
+**Unit.** Hermetic and fast. `tmux`, the process table, memory readings and the
+Claude state directory are all faked behind injectable seams, the same approach
+the `another tool` suite uses for its hardware backends. No unit test touches a real
+tmux server, a real Claude, the network, or the filesystem outside a temporary
+root.
+
+**Integration.** The API driven through `httpx.ASGITransport` against a real
+Starlette app with a faked engine. No socket is opened and no server is started.
+This is the tier that proves routing, middleware, status codes, error bodies and
+the SSE contract.
+
+**End to end.** The real application, launched the way a user launches it,
+against a temporary root and a fake `claude` shim, driven through a browser with
+Playwright. This tier exists because the things most likely to be wrong here are
+precisely the things unit tests cannot see: whether the SSE stream actually
+reconnects, whether the stop escalation reaches the kill control in the state
+the user is really in, whether 53 rows behave at a phone viewport, and whether
+the host allowlist rejects a forged `Host` on a live socket rather than in
+theory.
+
+E2E has one hard safety rule, learned the expensive way in the reference
+implementation: **the E2E tier drives a private tmux server on its own socket**
+(`tmux -S "$SOCK"`, invoked with `env -u TMUX`). A bare `tmux` honours `$TMUX`
+over `$TMUX_TMPDIR`, so a suite run from inside a tmux session would otherwise
+talk to the developer's real server. It creates only prefixed sessions, kills
+only what it created, and never the server.
+
+Playwright is a development dependency. It does not touch the three package
+runtime dependency budget.
+
+### 10.3 Non negotiable tests
+
+- Each of the four states in 4.1, including `detached`, which is the one a naive
+  implementation gets wrong.
+- The `stopping` overlay from 4.3: that it is set, that it expires, that a
+  restart clears it, and that a kill during the wait is accepted.
+- Each tmux behaviour in 4.2, as a named regression test that fails if the
   workaround is removed.
-- The four states in section 4.1 each get a test, including `detached`, which is
-  the one a naive implementation gets wrong.
-- Security tests assert refusals, not just successes: a bad Host is rejected, a
-  missing Origin on a mutating request is rejected, a non loopback bind without
-  a token refuses to start, and a folder name containing a path separator or a
-  parent reference is rejected.
-- The API is tested through `httpx.ASGITransport` with no network and no server.
+- Every security control in section 5 asserted as a refusal, not only as a
+  success: a bad `Host` is rejected, a mutating request with a missing or
+  foreign `Origin` is rejected, a non loopback bind without a token refuses to
+  start, a folder name containing a separator or a parent reference is rejected,
+  and no code path reaches a shell.
 
-CI runs lint, format check, types, the import boundary contract, and tests on
-Python 3.11, 3.12 and 3.13.
+### 10.4 Gates
 
-## 10. Risks
+CI runs lint, format check, types, the import boundary contract, unit,
+integration and E2E on Python 3.11, 3.12 and 3.13. All are blocking.
+
+Coverage is measured and reported. It is not turned into a percentage gate:
+a number that can be satisfied by exercising lines without asserting on them
+rewards the wrong behaviour. The gate is review, and the standard is the list in
+10.1.
+
+## 11. Risks
 
 | Risk | Handling |
 |---|---|

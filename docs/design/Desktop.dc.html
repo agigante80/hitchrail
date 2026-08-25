@@ -15,6 +15,10 @@
     a:hover { color: #8C5124; }
     button { font-family: inherit; cursor: pointer; border: none; background: none; }
     input { font-family: inherit; }
+    @keyframes cr-fill { from { width: 5%; } to { width: 100%; } }
+    .cr-progress { animation: cr-fill 4s linear forwards; }
+    @keyframes cr-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+    .cr-pulse { animation: cr-pulse 1.4s ease-in-out infinite; }
   </style>
 </helmet>
 
@@ -129,6 +133,52 @@
     <div onClick="{{ closeLogs }}" style="position: absolute; inset: 0; background: rgba(46, 37, 28, 0.38);"></div>
   </sc-if>
 
+  <sc-if value="{{ stopOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="position: absolute; inset: 0; background: rgba(46, 37, 28, 0.42); display: flex; align-items: center; justify-content: center;">
+      <div style="width: 460px; background: #FFFDFA; border: 1px solid #E8DFD1; border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 15px;">
+
+        <sc-if value="{{ stopConfirm }}" hint-placeholder-val="{{ true }}">
+          <div style="font-family: 'Zilla Slab', Georgia, serif; font-size: 22px; font-weight: 600; letter-spacing: -0.01em;">Stop {{ stopFor }}?</div>
+          <div style="font-size: 14.5px; line-height: 1.55; color: #6B5A48;">Corral asks the agent to wrap up and exit. Nothing is killed, and you can escalate while it works.</div>
+          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 3px;">
+            <button onClick="{{ closeStop }}" style="height: 42px; padding: 0 20px; border-radius: 9px; border: 1px solid #E8DFD1; background: #FBF7F1; color: #4A3E31; font-size: 14px; font-weight: 600;">Cancel</button>
+            <button onClick="{{ beginStop }}" style="height: 42px; padding: 0 24px; border-radius: 9px; background: {{accent}}; color: #FFFDFA; font-size: 14px; font-weight: 700;">Stop</button>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ stopRunning }}" hint-placeholder-val="{{ false }}">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span class="cr-pulse" style="width: 9px; height: 9px; border-radius: 999px; background: {{accent}};"></span>
+            <div style="font-family: 'Zilla Slab', Georgia, serif; font-size: 22px; font-weight: 600; letter-spacing: -0.01em;">Stopping {{ stopFor }}</div>
+          </div>
+          <div style="font-size: 14.5px; line-height: 1.55; color: #6B5A48;">Asking it to finish what it is doing and exit cleanly. It usually answers in a few seconds.</div>
+          <div style="height: 6px; border-radius: 999px; background: #EFE6D8; overflow: hidden;">
+            <div class="cr-progress" style="height: 100%; background: {{accent}}; border-radius: 999px;"></div>
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 3px;">
+            <button onClick="{{ closeStop }}" style="height: 42px; padding: 0 18px; border-radius: 9px; background: transparent; color: #806E5A; font-size: 14px; font-weight: 600;">Hide, keep stopping</button>
+            <button onClick="{{ doKill }}" style="height: 42px; padding: 0 20px; border-radius: 9px; border: 1px solid #E3C6C0; background: #FBF7F1; color: #9A3B2B; font-size: 14px; font-weight: 700;">Do not wait, kill it now</button>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ stopStuck }}" hint-placeholder-val="{{ false }}">
+          <div style="display: flex; align-items: center; gap: 11px;">
+            <div style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px; background: #FBF0DC; color: #B07D2A; flex-shrink: 0;">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+            </div>
+            <div style="font-family: 'Zilla Slab', Georgia, serif; font-size: 22px; font-weight: 600; letter-spacing: -0.01em;">No answer from {{ stopFor }}</div>
+          </div>
+          <div style="font-size: 14.5px; line-height: 1.55; color: #6B5A48;">Thirty seconds, no reply. It is still running. It may be mid-task and unable to answer, so killing it now can lose uncommitted work.</div>
+          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 3px;">
+            <button onClick="{{ closeStop }}" style="height: 42px; padding: 0 20px; border-radius: 9px; border: 1px solid #E8DFD1; background: #FBF7F1; color: #4A3E31; font-size: 14px; font-weight: 600;">Leave it running</button>
+            <button onClick="{{ doKill }}" style="height: 42px; padding: 0 24px; border-radius: 9px; background: #9A3B2B; color: #FFFDFA; font-size: 14px; font-weight: 700;">Kill it</button>
+          </div>
+        </sc-if>
+
+      </div>
+    </div>
+  </sc-if>
+
   <sc-if value="{{ logsOpen }}" hint-placeholder-val="{{ false }}">
     <div style="position: absolute; top: 0; right: 0; bottom: 0; width: 560px; background: #FFFDFA; border-left: 1px solid #E8DFD1; display: flex; flex-direction: column;">
       <div style="flex-shrink: 0; padding: 20px 24px 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #E8DFD1;">
@@ -159,6 +209,9 @@ class Component extends DCLogic {
       query: '',
       filter: 'all',
       logsFor: '',
+      stopFor: '',
+      stopPhase: '',
+      stopSeq: 0,
       running: {
         'workstation':             { ram: '1.0 GB', up: '2h 48m', controller: true },
         'vessel':                { ram: '1.5 GB', up: '31m' },
@@ -209,11 +262,7 @@ class Component extends DCLogic {
           next[name] = { ram: '712 MB', up: '4s' };
           this.setState({ running: next });
         },
-        stop: () => {
-          const next = Object.assign({}, this.state.running);
-          delete next[name];
-          this.setState({ running: next });
-        },
+        stop: () => this.setState({ stopFor: name, stopPhase: 'confirm' }),
         logs: () => this.setState({ logsFor: name })
       };
     });
@@ -242,6 +291,26 @@ class Component extends DCLogic {
       logsFor: this.state.logsFor,
       logsOpen: this.state.logsFor !== '',
       closeLogs: () => this.setState({ logsFor: '' }),
+      stopFor: this.state.stopFor,
+      stopOpen: this.state.stopPhase !== '',
+      stopConfirm: this.state.stopPhase === 'confirm',
+      stopRunning: this.state.stopPhase === 'stopping',
+      stopStuck: this.state.stopPhase === 'unanswered',
+      closeStop: () => this.setState({ stopPhase: '' }),
+      beginStop: () => {
+        const seq = this.state.stopSeq + 1;
+        this.setState({ stopPhase: 'stopping', stopSeq: seq });
+        setTimeout(() => {
+          if (this.state.stopSeq === seq && this.state.stopPhase === 'stopping') {
+            this.setState({ stopPhase: 'unanswered' });
+          }
+        }, 4000);
+      },
+      doKill: () => {
+        const next = Object.assign({}, this.state.running);
+        delete next[this.state.stopFor];
+        this.setState({ running: next, stopPhase: '', stopSeq: this.state.stopSeq + 1 });
+      },
       logLines: [
         { text: '> read the handoff note and pick up where we left off', fg: '#6B5A48' },
         { text: '', fg: '#6B5A48' },

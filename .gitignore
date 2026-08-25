@@ -5,4 +5,4 @@ dist/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
-design/corral-session-manager.html
+docs/design/corral-session-manager.html

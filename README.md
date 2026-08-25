@@ -16,6 +16,22 @@ live Claude Code session, and lets you start or stop one with a single tap. It
 shows memory pressure, refuses to start a session that would exhaust the
 machine, and tails a session's output when you want to know what it is doing.
 
+Stopping is a sequence rather than a button: it asks the agent to wrap up, shows
+you the wait, and keeps a kill control within reach the whole time if you would
+rather not wait.
+
+## Install
+
+Corral is a Python package, so the equivalent of `npx` here is `uvx`:
+
+```sh
+uvx corral                  # run it, install nothing
+uv tool install corral      # keep it on PATH
+pipx install corral         # if you already live in pipx
+```
+
+Two r's. `coral` is a different package belonging to somebody else.
+
 ## Read this before running it
 
 Corral starts `claude --dangerously-skip-permissions`. **Anyone who can reach
