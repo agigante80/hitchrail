@@ -1,4 +1,4 @@
-# Corral: design
+# Hitchrail: design
 
 Date: 2026-08-25
 Status: approved for planning
@@ -17,16 +17,29 @@ https://claude.ai/code/artifact/e02013e2-d501-405a-a95c-6404ebe492a6
 
 ## 2. Why the name
 
-`corral`. Free on PyPI, a real word rather than a mashup, and the metaphor
-matches the job: a corral is where you gather a group, let one out to work and
-bring it back. The CLI reads naturally as `corral serve`.
+`hitchrail`. A hitching rail is what you tie your mounts to while they wait,
+outside whichever building you are working in. That is what this tool holds: a
+row of projects, standing ready, none of them costing you anything until you
+take one out.
+
+It was chosen against a hard availability bar, because this is a public
+repository and a published package and a rename later would be expensive:
+
+- free on PyPI, including the hyphenated variants PyPI normalizes together
+- **zero** existing GitHub repositories of that name, anywhere
+- `github.com/hitchrail` unclaimed as an account or organisation
+- no software trademark found
+
+Nothing else screened this cleanly. `corral`, the first choice, is free on PyPI
+but `ponylang/corral` already owns the name on GitHub. `remuda` has the better
+metaphor, a remuda being the string of horses a ranch hand picks a mount from
+each day, but its GitHub account name is taken and few people can pronounce it.
 
 Deliberately not named with "Claude" in it. That is Anthropic's trademark, and
 a third party package leading with it invites a forced rename later. "Claude
 Code" belongs in the description and the README, not in the package name.
 
-Known collision: the Pony language's dependency manager is also called Corral.
-Different ecosystem, judged acceptable.
+The CLI reads as `hitchrail serve`.
 
 ## 3. Scope
 
@@ -51,7 +64,7 @@ Out of scope for v1, and stated so nobody plans around them:
 - Any authentication beyond a single shared token.
 - Streaming logs. A tail on demand is enough.
 - User accounts, roles, or multi-tenancy.
-- Sending input to a session. Corral starts and stops agents; it is not a
+- Sending input to a session. Hitchrail starts and stops agents; it is not a
   terminal.
 
 ## 4. Architecture
@@ -61,7 +74,7 @@ Claude Code specifics quarantined to one side, HTTP on top. The engine must be
 testable without HTTP, and the HTTP layer must be testable without tmux.
 
 ```
-src/corral/
+src/hitchrail/
   discovery.py   root scanning, folder creation, path safety
   engine.py      state derivation, start, stop, log tail
   claude_ipc.py  everything that knows Claude Code internals
@@ -97,9 +110,9 @@ same folder. Four states result:
 | `detached` | Claude process alive, no tmux session owns it |
 | `stopped` | neither |
 
-`detached` is surfaced in the UI with its pid and an explanation. Corral never
+`detached` is surfaced in the UI with its pid and an explanation. Hitchrail never
 silently reconciles it, because the safe action depends on what that agent is
-doing, which Corral cannot know.
+doing, which Hitchrail cannot know.
 
 ### 4.2 tmux behaviours to encode deliberately
 
@@ -117,7 +130,7 @@ not know about them.
    this wrong makes a stopped project read as running on a sibling's process.
 4. Concurrent starts must serialize behind a lock. A web UI makes double
    submission far easier than a CLI does.
-5. Never issue a bare `tmux kill-server`. Never kill a session Corral did not
+5. Never issue a bare `tmux kill-server`. Never kill a session Hitchrail did not
    create. Every tmux invocation is scoped explicitly.
 
 ### 4.3 Stopping, and the one piece of state that is not derived
@@ -125,12 +138,12 @@ not know about them.
 Stopping is a sequence, not a button:
 
 1. **Confirm.** Cheap to reverse, so it is one tap away from nothing happening.
-2. **Graceful request.** Corral asks the agent to finish and exit, and the row
+2. **Graceful request.** Hitchrail asks the agent to finish and exit, and the row
    enters `stopping`. Nothing has been killed. The user watches it happen.
 3. **Escalation, available throughout.** A kill control is present for the whole
    wait, so a user who does not want to wait never has to. It is styled as the
    secondary, destructive path, never as the way out of a stuck dialog.
-4. **Timeout.** After 30 seconds with no reply, Corral stops waiting and says
+4. **Timeout.** After 30 seconds with no reply, Hitchrail stops waiting and says
    so. It does **not** escalate on its own. The session is still running, and
    the choice to kill it stays the user's.
 
@@ -138,10 +151,10 @@ Kill is deliberately unreachable before a graceful attempt has been made. Not
 because forcing is wrong, but because on a phone the destructive control would
 otherwise sit under the thumb at the same size as the safe one.
 
-This introduces the only state Corral holds that is not derived from the
+This introduces the only state Hitchrail holds that is not derived from the
 operating system: the fact that a graceful stop is in flight, and when it
 started. It lives in memory in the engine, keyed by session name, and it is
-deliberately not persisted. If Corral restarts mid-stop, that knowledge is lost
+deliberately not persisted. If Hitchrail restarts mid-stop, that knowledge is lost
 and the session simply reads as `running` or `stopped` again, which is the
 truth. A `stopping` marker that outlived the process would be a lie waiting to
 be told.
@@ -165,7 +178,7 @@ reporting something false.
 
 ## 5. Security
 
-The threat model is not incidental to this project. Corral spawns
+The threat model is not incidental to this project. Hitchrail spawns
 `claude --dangerously-skip-permissions`. Anyone who can drive its API can run
 arbitrary code as the user who started it.
 
@@ -177,7 +190,7 @@ exception, so the token path is the main path.
 1. **Host allowlist, always on.** `TrustedHostMiddleware` with an allowlist
    covering loopback names plus any host the operator configures. This is DNS
    rebinding defence: without it, any site the user visits in any browser on the
-   network can rebind a name to Corral's address and drive the API, with the
+   network can rebind a name to Hitchrail's address and drive the API, with the
    browser treating responses as same origin.
 2. **Origin check on every mutating request.** `fetch` and `EventSource` send
    `Origin` and a rebound attacker cannot forge it. This is the CSRF control for
@@ -196,8 +209,8 @@ exception, so the token path is the main path.
 This is not hypothetical. CVE-2026-32632 (GHSA-hhcg-r27j-fhv9) hit Glances, a
 localhost and LAN system monitoring web UI, for exactly this: no host
 validation, therefore DNS rebinding, therefore an attacker's page reading the
-API. Fixed in 4.5.2 by adding a host allowlist. Corral has the same shape and a
-worse blast radius, because Glances reports state while Corral starts processes.
+API. Fixed in 4.5.2 by adding a host allowlist. Hitchrail has the same shape and a
+worse blast radius, because Glances reports state while Hitchrail starts processes.
 
 Sources:
 - https://github.com/nicolargo/glances/security/advisories/GHSA-hhcg-r27j-fhv9
@@ -210,7 +223,7 @@ Documented in the README rather than hidden:
 - Over plain HTTP on a LAN the token crosses the network in cleartext. On a
   WPA2 or WPA3 network that is a modest risk; the remedy is a reverse proxy
   with TLS, and that is documented.
-- Corral does not sandbox the sessions it starts. It is a launcher. The agent
+- Hitchrail does not sandbox the sessions it starts. It is a launcher. The agent
   it launches has whatever access the user has.
 
 ## 6. HTTP interface
@@ -262,7 +275,7 @@ The canvas linked in section 1 is the reference. The decisions it encodes:
   remaining folders stay scannable with a thumb.
 - **Nothing depends on hover.** Touch and pointer get identical affordances.
 - **44px minimum hit target** in all mockup content.
-- **The controller session is visibly protected.** Where Corral is running in a
+- **The controller session is visibly protected.** Where Hitchrail is running in a
   folder that has its own session, that row shows a lock rather than a stop
   control. Refusing after the tap is worse than not offering the tap.
 - **Stopping escalates, it does not branch.** The confirm step offers only
@@ -323,18 +336,18 @@ Python, so the equivalent of `npx` is `uvx`. Three supported routes, in the
 order the README should present them:
 
 ```sh
-uvx corral                      # run it without installing anything
-uv tool install corral          # keep it on PATH
-pipx install corral             # for people already living in pipx
+uvx hitchrail                      # run it without installing anything
+uv tool install hitchrail          # keep it on PATH
+pipx install hitchrail             # for people already living in pipx
 ```
 
-`uvx corral` is the headline. It fetches, resolves and runs in one command, and
-leaves nothing behind, which is the right first contact for a tool that people
-should be able to try before trusting.
+`uvx hitchrail` is the headline. It fetches, resolves and runs in one command,
+and leaves nothing behind, which is the right first contact for a tool that
+people should be able to try before trusting.
 
-The package name `corral` is confirmed free on PyPI as of 2026-08-25. `coral`
-is taken, so the spelling with two r's is the only one available and the README
-should say so once, because people will mistype it.
+The package name is confirmed free on PyPI as of 2026-08-25, along with the
+hyphenated variants PyPI normalizes to the same project. See section 2 for the
+full availability check.
 
 The distribution is a pure Python wheel built by `uv_build`. The frontend has
 no build step, so the wheel is source plus three static files, and nothing in
@@ -353,8 +366,8 @@ pyproject.toml     package metadata AND ruff, mypy, pytest, import-linter config
 uv.lock            resolved dependencies, committed
 .python-version    the development interpreter
 .gitignore
-src/corral/        the package (see section 4 for the modules)
-tests/             mirrors src/corral/, plus tests/e2e/
+src/hitchrail/        the package (see section 4 for the modules)
+tests/             mirrors src/hitchrail/, plus tests/e2e/
 docs/              specs, guidelines, and the design canvas sources
 .github/workflows/ CI
 ```
@@ -448,7 +461,7 @@ rewards the wrong behaviour. The gate is review, and the standard is the list in
 | Risk | Handling |
 |---|---|
 | `bridgeSessionId` changes or disappears | quarantined in `claude_ipc.py`, degrades to `pending` |
-| A user exposes Corral to a hostile network | token forced on non loopback bind, host allowlist always on |
+| A user exposes Hitchrail to a hostile network | token forced on non loopback bind, host allowlist always on |
 | Two starts race on the same folder | start lock, and the API is idempotent per folder |
 | A started session dies immediately | reported as `start_died` with the captured output, never as running |
 | Memory exhaustion from one tap per session | RAM guard with a hard floor and a soft confirmation gate |

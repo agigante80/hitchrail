@@ -1,4 +1,4 @@
-# Corral: technical guidelines
+# Hitchrail: technical guidelines
 
 These are binding for all code in this repository, from the first commit.
 Where a rule is enforced by tooling, the tooling is named. A rule that cannot
@@ -87,7 +87,7 @@ its own root level config file needs a reason before it is adopted.
 
 ## 5. Security rules
 
-Corral spawns `claude --dangerously-skip-permissions`. Anyone who can drive its
+Hitchrail spawns `claude --dangerously-skip-permissions`. Anyone who can drive its
 API can run arbitrary code as the user who started it. Every rule below is
 non negotiable and each has a test that asserts the refusal.
 
@@ -105,10 +105,10 @@ non negotiable and each has a test that asserts the refusal.
 5. **The root is a hard boundary.** Resolve every path and confirm it is a
    direct child of the configured root before spawning anything or creating
    anything. Validate names against an allowlist pattern, never a denylist.
-6. **Never a bare `tmux kill-server`,** and never kill a session Corral did not
+6. **Never a bare `tmux kill-server`,** and never kill a session Hitchrail did not
    create. Scope every tmux invocation explicitly.
 7. **Report refusals honestly.** A guard that fails open, or an error rendered
-   as a success, is worse than no guard. If Corral cannot determine a session's
+   as a success, is worse than no guard. If Hitchrail cannot determine a session's
    state, it says so rather than guessing.
 
 ## 6. Dependencies
@@ -196,7 +196,7 @@ host allowlist rejecting a forged `Host` on a live socket.
 
 ## 8. Documentation
 
-- The README states what Corral does, how to run it, and its limitations,
+- The README states what Hitchrail does, how to run it, and its limitations,
   including the ones that are inconvenient to admit.
 - A stated limitation is a feature of the documentation. Do not soften it.
 - `docs/superpowers/specs/` holds design documents. They are not updated to

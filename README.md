@@ -1,11 +1,11 @@
-# corral
+# hitchrail
 
 A web UI for starting and stopping headless Claude Code sessions across a
 folder of projects. Open it on your phone, tap a folder, get a session link.
 
 **Status: design complete, not yet implemented.** There is no working code in
 this repository yet. See
-[`docs/superpowers/specs/2026-08-25-corral-design.md`](docs/superpowers/specs/2026-08-25-corral-design.md)
+[`docs/superpowers/specs/2026-08-25-hitchrail-design.md`](docs/superpowers/specs/2026-08-25-hitchrail-design.md)
 for the design, and [`docs/tech-guidelines.md`](docs/tech-guidelines.md) for the
 engineering rules that govern the code once it exists.
 
@@ -22,19 +22,19 @@ rather not wait.
 
 ## Install
 
-Corral is a Python package, so the equivalent of `npx` here is `uvx`:
+Hitchrail is a Python package, so the equivalent of `npx` here is `uvx`:
 
 ```sh
-uvx corral                  # run it, install nothing
-uv tool install corral      # keep it on PATH
-pipx install corral         # if you already live in pipx
+uvx hitchrail                  # run it, install nothing
+uv tool install hitchrail      # keep it on PATH
+pipx install hitchrail         # if you already live in pipx
 ```
 
-Two r's. `coral` is a different package belonging to somebody else.
+One word, no hyphen.
 
 ## Read this before running it
 
-Corral starts `claude --dangerously-skip-permissions`. **Anyone who can reach
+Hitchrail starts `claude --dangerously-skip-permissions`. **Anyone who can reach
 its API can run arbitrary code on that machine as you.**
 
 It binds to loopback with no authentication by default. Binding it to any other
@@ -44,12 +44,12 @@ without that check can be driven by any website you visit, through DNS
 rebinding. Over plain HTTP on a LAN the token crosses the network in cleartext;
 put a TLS terminating reverse proxy in front of it if that matters to you.
 
-Corral does not sandbox the sessions it starts. It is a launcher. The agent it
+Hitchrail does not sandbox the sessions it starts. It is a launcher. The agent it
 launches has whatever access you have.
 
 ## Not affiliated with Anthropic
 
-Corral is an independent open source tool. Claude and Claude Code are
+Hitchrail is an independent open source tool. Claude and Claude Code are
 trademarks of Anthropic.
 
 ## Licence

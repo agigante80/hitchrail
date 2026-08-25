@@ -29,7 +29,7 @@
 
     <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
       <div style="display: flex; flex-direction: column; gap: 2px;">
-        <div style="font-family: 'Zilla Slab', Georgia, serif; font-size: 27px; font-weight: 700; line-height: 1; letter-spacing: -0.015em; color: {{accent}};">corral</div>
+        <div style="font-family: 'Zilla Slab', Georgia, serif; font-size: 27px; font-weight: 700; line-height: 1; letter-spacing: -0.015em; color: {{accent}};">hitchrail</div>
         <div style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: #806E5A;">~/dev-github-personal</div>
       </div>
       <button onClick="{{ openNew }}" style="display: flex; align-items: center; gap: 6px; height: 44px; padding: 0 14px; border: 1px solid #E8DFD1; border-radius: 9px; background: #FBF7F1; color: #2E251C; font-size: 14px; font-weight: 600;">
@@ -132,7 +132,7 @@
     <div style="position: absolute; left: 0; right: 0; bottom: 0; background: #FFFDFA; border-top: 1px solid #E8DFD1; border-radius: 16px 16px 0 0; padding: 20px 18px 26px; display: flex; flex-direction: column; gap: 14px;">
       <div style="width: 38px; height: 4px; border-radius: 999px; background: #E8DFD1; align-self: center;"></div>
       <div style="font-family: 'Zilla Slab', Georgia, serif; font-size: 21px; font-weight: 600; letter-spacing: -0.01em;">Stop {{ target }}?</div>
-      <div style="font-size: 14px; line-height: 1.5; color: #6B5A48;">Corral asks the agent to wrap up and exit. Nothing is killed, and you can escalate while it works.</div>
+      <div style="font-size: 14px; line-height: 1.5; color: #6B5A48;">Hitchrail asks the agent to wrap up and exit. Nothing is killed, and you can escalate while it works.</div>
       <div style="display: flex; gap: 10px; margin-top: 2px;">
         <button onClick="{{ closeSheet }}" style="flex-grow: 1; height: 48px; border-radius: 10px; border: 1px solid #E8DFD1; background: #FBF7F1; color: #4A3E31; font-size: 15px; font-weight: 600;">Cancel</button>
         <button onClick="{{ beginStop }}" style="flex-grow: 1; height: 48px; border-radius: 10px; background: {{accent}}; color: #FFFDFA; font-size: 15px; font-weight: 700;">Stop</button>
@@ -236,7 +236,7 @@ class Component extends DCLogic {
   }
 
   folders() {
-    return ['ledger-mcp-server','ledger-sync','WeatherOpenData','weather-pr','GateKeeper','workstation','vessel','vessel-articles','vessel-legal','vessel-social','vessel-long-review','articles-drafts','orchard-site','matchmaker','message-bus','design-bridge','config','corral','tax-return','draw-a-map','emulator','forge-kit','home-fan-control','home-remote','ideas','koala','game-port','Riverside','data-service','media-sync','network','Marisol','ShopFront','personal','budget-tracker','dns-config','Polytone','print_queue','pi-os','handoff-notes','dotted.site','ferreira','profile-site','TileForge','substream','nasdocker','TheQuietLoom','smartplug-local','prompt-library','TunnelSentinel','long-hyphenated-name','vpn-server'];
+    return ['ledger-mcp-server','ledger-sync','WeatherOpenData','weather-pr','GateKeeper','workstation','vessel','vessel-articles','vessel-legal','vessel-social','vessel-long-review','articles-drafts','orchard-site','matchmaker','message-bus','design-bridge','config','hitchrail','tax-return','draw-a-map','emulator','forge-kit','home-fan-control','home-remote','ideas','koala','game-port','Riverside','data-service','media-sync','network','Marisol','ShopFront','personal','budget-tracker','dns-config','Polytone','print_queue','pi-os','handoff-notes','dotted.site','ferreira','profile-site','TileForge','substream','nasdocker','TheQuietLoom','smartplug-local','prompt-library','TunnelSentinel','long-hyphenated-name','vpn-server'];
   }
 
   renderVals() {
