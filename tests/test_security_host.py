@@ -163,7 +163,12 @@ async def test_an_ipv6_lan_address_is_served_when_allowed(tmp_path: Path) -> Non
         resolver=fixed_resolver("2001:db8::5"),
     )
     app = build(cfg)
-    assert (await call(app, headers={"host": "[2001:db8::5]:8787"})).status_code == 200
+    # A non loopback bind demands a token, so this carries one: the subject
+    # here is the host check, not the absence of authentication.
+    response = await call(
+        app, headers={"host": "[2001:db8::5]:8787", "authorization": "Bearer t"}
+    )
+    assert response.status_code == 200
 
 
 async def test_stripping_brackets_did_not_become_any_ipv6_is_fine(tmp_path: Path) -> None:
@@ -174,7 +179,9 @@ async def test_stripping_brackets_did_not_become_any_ipv6_is_fine(tmp_path: Path
         resolver=fixed_resolver("2001:db8::5"),
     )
     app = build(cfg)
-    response = await call(app, headers={"host": "[2001:db8::9]:8787"})
+    response = await call(
+        app, headers={"host": "[2001:db8::9]:8787", "authorization": "Bearer t"}
+    )
     assert response.status_code == 400
 
 

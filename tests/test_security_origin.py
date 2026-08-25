@@ -152,7 +152,15 @@ async def test_a_configured_proxy_origin_is_served(tmp_path: Path) -> None:
     )
     app = build(cfg)
     response = await call(
-        app, "POST", headers={"host": "box.lan", "origin": "https://box.lan:8443"}
+        app,
+        "POST",
+        headers={
+            "host": "box.lan",
+            "origin": "https://box.lan:8443",
+            # A non loopback bind demands a token. The subject here is the
+            # origin check, so the request is otherwise authenticated.
+            "authorization": "Bearer t",
+        },
     )
     assert response.status_code == 200
 

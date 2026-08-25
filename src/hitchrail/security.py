@@ -15,13 +15,23 @@ starts processes rather than reporting on them.
 
 from __future__ import annotations
 
+import secrets
+from urllib.parse import parse_qsl, urlencode
+
 from starlette.middleware import Middleware
-from starlette.responses import JSONResponse
+from starlette.requests import cookie_parser
+from starlette.responses import JSONResponse, RedirectResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from hitchrail.config import Config
 
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+# The cookie NAME, not a secret. S105 pattern matches on the word "token".
+TOKEN_COOKIE = "hitchrail_token"  # noqa: S105
+GRANT_PARAM = "token"
+# Thirty days. Long enough that a phone is not re-granted every session, short
+# enough that a device left behind stops working eventually.
+COOKIE_MAX_AGE = 60 * 60 * 24 * 30
 
 
 def deny(status: int, code: str, message: str) -> JSONResponse:
@@ -32,10 +42,19 @@ def deny(status: int, code: str, message: str) -> JSONResponse:
 def header_map(scope: Scope) -> dict[str, str]:
     """Lowercased header names, decoded once per request.
 
+    latin-1, which is what RFC 7230 says an HTTP header field is and what
+    Starlette's own `Headers` uses. It is also the only choice that cannot
+    raise: utf-8 strict throws `UnicodeDecodeError` on a header carrying
+    latin-1 bytes, and an attacker chooses those bytes, so decoding strictly
+    here is an unauthenticated crash rather than a refusal.
+
     Shared because all three middlewares need it and decoding the raw scope
     headers three times per request is work nobody asked for.
     """
-    return {key.decode().lower(): value.decode() for key, value in scope["headers"]}
+    return {
+        key.decode("latin-1").lower(): value.decode("latin-1")
+        for key, value in scope["headers"]
+    }
 
 
 def parse_host(raw: str) -> str:
@@ -148,14 +167,137 @@ class OriginCheckMiddleware:
         await self.app(scope, receive, send)
 
 
+def _token_matches(presented: str, expected: str) -> bool:
+    """Constant time, always. `==` on a secret leaks its prefix through timing.
+
+    Compared as BYTES. `compare_digest` on `str` raises TypeError for anything
+    non ASCII, and `presented` comes from an attacker supplied header, cookie
+    or query value, so the str form turned `Authorization: Bearer café` into an
+    unauthenticated 500.
+    """
+    return secrets.compare_digest(presented.encode("utf-8"), expected.encode("utf-8"))
+
+
+def _bearer(header: str) -> str:
+    """Extract a bearer credential. RFC 7235 auth schemes are case insensitive.
+
+    Exactly one space, and the credential is not trimmed. `Bearer  token` with
+    two spaces means the credential is ` token`, which is not the token, and a
+    security control has no business deciding the client meant something other
+    than what it sent.
+    """
+    scheme, separator, credential = header.partition(" ")
+    if not separator or scheme.lower() != "bearer":
+        return ""
+    return credential
+
+
+def _safe_redirect_path(path: str) -> str:
+    r"""A path is not automatically a safe redirect target.
+
+    `/\evil.example` survives as `scope["path"]`, and browsers normalise the
+    backslash, so a Location built from it leaves the site. `//evil.example` is
+    protocol relative and does the same thing more obviously. One client under
+    test normalised the second away by itself, which is exactly why this cannot
+    be left to the client.
+    """
+    if not path.startswith("/") or path[1:2] in {"/", "\\"}:
+        return "/"
+    return path
+
+
+class TokenMiddleware:
+    """One shared token, over three carriers.
+
+    `EventSource` cannot set request headers, so a token that lives only in
+    `Authorization` authenticates every route except the live update stream,
+    which is the one the interface exists to use. The cookie is the carrier
+    `EventSource` can use; the query grant is how that cookie gets set from a
+    link you open on a phone.
+
+    The cookie is `SameSite=Strict`, and the origin check still runs on every
+    mutating request. Either alone would cover the cases we can think of, which
+    is why there are two.
+
+    It is deliberately not `Secure`. Over plain HTTP on a LAN, a documented and
+    supported deployment, a `Secure` cookie is never sent and the tool silently
+    stops working. The cleartext exposure is stated as a limitation in the
+    README, with a TLS terminating proxy as the remedy.
+    """
+
+    def __init__(self, app: ASGIApp, token: str | None) -> None:
+        self.app = app
+        self.token = token
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or self.token is None:
+            await self.app(scope, receive, send)
+            return
+
+        headers = header_map(scope)
+
+        presented = _bearer(headers.get("authorization", ""))
+        if presented and _token_matches(presented, self.token):
+            await self.app(scope, receive, send)
+            return
+
+        # cookie_parser, not SimpleCookie: SimpleCookie discards the WHOLE jar
+        # when any crumb is malformed, so one bad cookie set by another
+        # application on the same host silently stops us authenticating.
+        offered = cookie_parser(headers.get("cookie", "")).get(TOKEN_COOKIE)
+        if offered is not None and _token_matches(offered, self.token):
+            await self.app(scope, receive, send)
+            return
+
+        if scope["method"] in SAFE_METHODS and await self._maybe_grant(scope, receive, send):
+            return
+
+        await deny(401, "unauthorized", "a valid token is required")(scope, receive, send)
+
+    async def _maybe_grant(self, scope: Scope, receive: Receive, send: Send) -> bool:
+        """Trade `?token=` for a cookie, then redirect the token out of the URL.
+
+        Safe methods only. A grant on a mutating request would let a link
+        perform an action, which is the shape of the attack the origin check
+        exists to stop.
+
+        Returns True when it answered the request.
+        """
+        assert self.token is not None
+        params = parse_qsl(scope.get("query_string", b"").decode(), keep_blank_values=True)
+        offered = next((v for k, v in params if k == GRANT_PARAM), None)
+        if offered is None or not _token_matches(offered, self.token):
+            return False
+
+        remaining = urlencode([(k, v) for k, v in params if k != GRANT_PARAM])
+        path = _safe_redirect_path(scope["path"])
+        location = f"{path}?{remaining}" if remaining else path
+
+        response = RedirectResponse(location, status_code=303)
+        response.set_cookie(
+            TOKEN_COOKIE,
+            self.token,
+            httponly=True,
+            samesite="strict",
+            path="/",
+            max_age=COOKIE_MAX_AGE,
+        )
+        await response(scope, receive, send)
+        return True
+
+
 def middleware_stack(config: Config) -> list[Middleware]:
     """Order matters, and it is asserted by a test rather than left to habit.
 
     Starlette applies this list as an onion: the first entry is outermost and
-    runs first. Host is outermost so a rebound request never reaches anything
-    that could leak whether a token is even correct.
+    runs first.
+
+    Host is outermost so a rebound request never reaches anything that could
+    leak whether a token is even correct. Token sits before Origin so an
+    unauthenticated caller cannot learn which origins this server accepts.
     """
     return [
         Middleware(HostAllowlistMiddleware, allowed_hosts=frozenset(config.allowed_hosts)),
+        Middleware(TokenMiddleware, token=config.token),
         Middleware(OriginCheckMiddleware, allowed_origins=config.allowed_origins),
     ]
