@@ -4,9 +4,9 @@
 
 **Goal:** Build the controls that stand between a web page and a shell, and prove them on a real socket, before there is anything to serve.
 
-**Architecture:** Three plain ASGI middlewares composed in a fixed order by one function, so the ordering is a single reviewable decision rather than an emergent property of wherever somebody added the next `Middleware(...)`. Each middleware depends only on `Config` from Phase 1, which is why this phase can run before the engine exists.
+**Architecture:** Three plain ASGI middlewares, all three written here, composed in a fixed order by one function, so the ordering is a single reviewable decision rather than an emergent property of wherever somebody added the next `Middleware(...)`. Each middleware depends only on `Config` from Phase 1, which is why this phase can run before the engine exists.
 
-**Tech Stack:** Python 3.11+, Starlette 1.6 (`TrustedHostMiddleware` and raw ASGI), uvicorn for the live socket test, pytest, httpx.
+**Tech Stack:** Python 3.11+, Starlette 1.6 (raw ASGI middleware, `cookie_parser`), uvicorn for the live socket test, pytest, httpx.
 
 **Spec:** `docs/superpowers/specs/2026-08-25-hitchrail-design.md` section 5
 
@@ -33,6 +33,129 @@ The first is the CVE precedent. CVE-2026-32632 (GHSA-hhcg-r27j-fhv9) hit Glances
 
 The second is that the token has to reach the event stream, and it is not obvious that it can. `EventSource` cannot set request headers, so a token carried only in `Authorization` authenticates every route except the one the interface depends on for live updates. The first draft of this plan put security at task 12 of 15 and did not surface that until review. Task 6 solves it with a cookie and a one time query grant, and this is the phase where being wrong about it is cheap.
 
+## Corrections made before implementation
+
+Five things in the first draft of this plan were checked against the installed
+Starlette 1.6.0 and the standard library rather than recalled, and all five were
+wrong. They are corrected in the tasks below; recorded here because the reasoning
+matters more than the diff.
+
+### 1. `TrustedHostMiddleware` cannot do IPv6, so we do not use it
+
+```python
+host = headers.get("host", "").split(":")[0]     # starlette/middleware/trustedhost.py
+```
+
+It splits on the **first** colon. Every IPv6 literal becomes `"["`:
+
+| `Host` header | Starlette compares | Result |
+|---|---|---|
+| `localhost:8787` | `localhost` | served |
+| `[::1]:8787` | `[` | **400** |
+| `[2001:db8::5]:8787` | `[` | **400** |
+
+Verified by driving a real app: `http://[::1]:8787/` is refused no matter what is
+in the allowlist, so the `::1` and `[::1]` entries `Config` puts there are dead
+weight, and a phone on an IPv6 network cannot reach Hitchrail at all.
+
+Its `www_redirect` default is a second problem. An unrecognised `Host` produces a
+**307 redirect built from that same untrusted header**, in the middleware whose
+entire job is not trusting it:
+
+```
+Host: box.lan  ->  307  Location: http://www.box.lan/x
+```
+
+So Task 4 writes `HostAllowlistMiddleware` instead, about ten lines. This is a
+deliberate departure from the design's section 5.1, which names
+`TrustedHostMiddleware`, and it is worth stating why it does not contradict
+"reuse before invention". That rule has a stated counterweight and a worked
+example: `sse-starlette` is a dependency because SSE is **awkward to operate**,
+while there is no `SessionBackend` base class because inventing a seam with one
+implementation is overhead. Host matching is neither awkward nor generic. It is
+ten lines of string handling, we need exact semantics that Starlette's does not
+have, and its wildcard support is a feature `Config` already refuses. Depending
+on a third party implementation whose semantics differ from ours, for the one
+control the CVE precedent is about, is the wrong place to save ten lines.
+
+The parser, verified against every form a browser sends:
+
+```python
+def parse_host(raw: str) -> str:
+    """Host header to a bare host: brackets stripped, port removed, lowercased.
+
+    Returns "" for anything malformed, which never matches an allowlist entry,
+    so an unparseable Host is refused rather than guessed at.
+    """
+    value = raw.strip()
+    if value.startswith("["):                     # [::1] or [::1]:8787
+        end = value.find("]")
+        return value[1:end].lower() if end != -1 else ""
+    # A bare `::1` is not a legal Host header, and more than one colon in an
+    # unbracketed value means it is not a host and a port either.
+    return value.split(":")[0].lower() if value.count(":") <= 1 else ""
+```
+
+The allowlist it matches against holds **one canonical form per host**: bare, no
+brackets, lowercased. `Config` currently emits both `::1` and `[::1]`, which was a
+workaround for a matcher that could not strip brackets. With a matcher that can,
+one form is correct and two is a bug waiting to disagree with itself. That is
+issue #8.
+
+### 2. `secrets.compare_digest` raises on a non ASCII token
+
+```
+secrets.compare_digest("café", "s3cret")
+TypeError: comparing strings with non-ASCII characters is not supported
+```
+
+Task 6 calls it directly on a value taken from an attacker supplied header, so
+`Authorization: Bearer café` is an **unauthenticated 500**. Compare the encoded
+bytes instead, which is total:
+
+```python
+def _token_matches(presented: str, expected: str) -> bool:
+    return secrets.compare_digest(presented.encode("utf-8"), expected.encode("utf-8"))
+```
+
+### 3. The grant redirect can leave the site
+
+`RedirectResponse` built from `scope["path"]` looked safe because the path is not
+caller supplied in the usual sense. It is enough:
+
+```
+GET /\evil.example?token=...   ->   scope["path"] == "/\evil.example"
+Location: /\evil.example       ->   browsers normalise \ to / and leave the site
+```
+
+`//evil.example` was normalised away by the client under test, which is exactly
+why this cannot be left to the client. Task 6 refuses to redirect at all unless
+the path starts with a single `/` and its second character is neither `/` nor
+`\`, and falls back to `/`.
+
+### 4. `SimpleCookie` loses the whole jar to one bad crumb
+
+The cookie is the carrier `EventSource` depends on, and localhost is shared with
+whatever else the developer runs.
+
+| `Cookie` header | `SimpleCookie` | `starlette.requests.cookie_parser` |
+|---|---|---|
+| `hitchrail_token=x` | `x` | `x` |
+| `hitchrail_token=x; junk` | **lost** | `x` |
+| `junk; hitchrail_token=x` | **lost** | `x` |
+
+One malformed cookie set by another application on the same host and Hitchrail
+stops authenticating, with a 401 nobody can explain. Task 6 uses Starlette's
+`cookie_parser`, which is lenient about neighbours it does not recognise.
+
+### 5. The ordering test proves less than it claims
+
+`test_host_checking_happens_before_token_checking` asserts a 400 rather than a
+401 for a forged host. That passes if the token check simply never runs, which is
+also what happens if somebody deletes the token middleware entirely. Task 6
+additionally asserts that a request with a forged host **and** a valid token is
+still refused, and that the token comparison was never reached, by patching it.
+
 ## Phase 2 file structure
 
 | File | Responsibility |
@@ -58,7 +181,9 @@ decision in a fourth file that reviewers would have to go find.
 
 **Interfaces:**
 - Consumes: `hitchrail.config.Config` (Phase 1 Task 2), specifically `Config.allowed_hosts`.
-- Produces: `middleware_stack(config: Config) -> list[Middleware]`; `deny(status: int, code: str, message: str) -> JSONResponse`.
+- Produces: `middleware_stack(config: Config) -> list[Middleware]`; `deny(status: int, code: str, message: str) -> JSONResponse`; `parse_host(raw: str) -> str`; `HostAllowlistMiddleware(app: ASGIApp, allowed_hosts: frozenset[str])`.
+
+**Not `TrustedHostMiddleware`.** See correction 1 above: it cannot match an IPv6 literal, and its `www_redirect` default answers an unrecognised host with a redirect built from that host.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -171,12 +296,55 @@ starts processes rather than reporting on them.
 from __future__ import annotations
 
 from starlette.middleware import Middleware
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from hitchrail.config import Config
 
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def parse_host(raw: str) -> str:
+    """Host header to a bare host: brackets stripped, port removed, lowercased.
+
+    Returns "" for anything malformed, which matches no allowlist entry, so an
+    unparseable Host is refused rather than guessed at.
+
+    Starlette's TrustedHostMiddleware does `split(":")[0]`, which turns every
+    IPv6 literal into "[" and refuses it whatever the allowlist says. That is
+    why this is here rather than imported.
+    """
+    value = raw.strip()
+    if value.startswith("["):
+        end = value.find("]")
+        return value[1:end].lower() if end != -1 else ""
+    # A bare `::1` is not a legal Host header, and more than one colon in an
+    # unbracketed value means it is not a host and a port either.
+    return value.split(":")[0].lower() if value.count(":") <= 1 else ""
+
+
+class HostAllowlistMiddleware:
+    """DNS rebinding defence. The control CVE-2026-32632 was about.
+
+    No wildcards, deliberately: Config already refuses a wildcard entry, so
+    supporting one here would be implementing a feature the layer below rejects.
+    No www redirect either: answering an unrecognised Host with a redirect built
+    from that same Host is the opposite of not trusting it.
+    """
+
+    def __init__(self, app: ASGIApp, allowed_hosts: frozenset[str]) -> None:
+        self.app = app
+        self.allowed = {h.lower() for h in allowed_hosts}
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+        headers = {k.decode().lower(): v.decode() for k, v in scope["headers"]}
+        if parse_host(headers.get("host", "")) not in self.allowed:
+            await deny(400, "host_rejected", "unrecognised Host header")(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
 
 
 def deny(status: int, code: str, message: str) -> JSONResponse:
@@ -192,7 +360,7 @@ def middleware_stack(config: Config) -> list[Middleware]:
     that could leak whether a token is even correct.
     """
     return [
-        Middleware(TrustedHostMiddleware, allowed_hosts=list(config.allowed_hosts)),
+        Middleware(HostAllowlistMiddleware, allowed_hosts=frozenset(config.allowed_hosts)),
     ]
 ```
 
@@ -395,7 +563,7 @@ def middleware_stack(config: Config) -> list[Middleware]:
     that could leak whether a token is even correct.
     """
     return [
-        Middleware(TrustedHostMiddleware, allowed_hosts=list(config.allowed_hosts)),
+        Middleware(HostAllowlistMiddleware, allowed_hosts=frozenset(config.allowed_hosts)),
         Middleware(OriginCheckMiddleware, allowed_origins=config.allowed_origins),
     ]
 ```
@@ -667,8 +835,13 @@ TOKEN_COOKIE = "hitchrail_token"
 
 
 def _token_matches(presented: str, expected: str) -> bool:
-    """Constant time, always. `==` on a secret leaks its prefix through timing."""
-    return secrets.compare_digest(presented, expected)
+    """Constant time, always. `==` on a secret leaks its prefix through timing.
+
+    Compared as BYTES. compare_digest on str raises TypeError for anything non
+    ASCII, and `presented` comes from an attacker supplied header, so the str
+    form turns `Authorization: Bearer café` into an unauthenticated 500.
+    """
+    return secrets.compare_digest(presented.encode("utf-8"), expected.encode("utf-8"))
 
 
 def _bearer(header: str) -> str:
@@ -713,10 +886,11 @@ class TokenMiddleware:
             await self.app(scope, receive, send)
             return
 
-        cookies = SimpleCookie()
-        cookies.load(headers.get("cookie", ""))
-        morsel = cookies.get(TOKEN_COOKIE)
-        if morsel is not None and _token_matches(morsel.value, self.token):
+        # cookie_parser, not SimpleCookie: SimpleCookie discards the WHOLE
+        # jar when any crumb is malformed, so one bad cookie set by another
+        # application on the same host silently stops us authenticating.
+        offered_cookie = cookie_parser(headers.get("cookie", "")).get(TOKEN_COOKIE)
+        if offered_cookie is not None and _token_matches(offered_cookie, self.token):
             await self.app(scope, receive, send)
             return
 
@@ -744,7 +918,13 @@ class TokenMiddleware:
             return False
 
         remaining = urlencode([(k, v) for k, v in params if k != "token"])
+        # A path is not automatically a safe redirect target. `/\\evil.example`
+        # survives as a path and browsers normalise the backslash, so the
+        # Location leaves the site. Anything that is not a single leading slash
+        # followed by an ordinary character falls back to the root.
         path = scope["path"]
+        if not path.startswith("/") or path[1:2] in {"/", "\\"}:
+            path = "/"
         location = f"{path}?{remaining}" if remaining else path
 
         response = RedirectResponse(location, status_code=303)
@@ -764,9 +944,9 @@ Add these imports at the top:
 
 ```python
 import secrets
-from http.cookies import SimpleCookie
 from urllib.parse import parse_qsl, urlencode
 
+from starlette.requests import cookie_parser
 from starlette.responses import RedirectResponse
 ```
 
@@ -784,7 +964,7 @@ def middleware_stack(config: Config) -> list[Middleware]:
     unauthenticated caller cannot learn which origins this server accepts.
     """
     return [
-        Middleware(TrustedHostMiddleware, allowed_hosts=list(config.allowed_hosts)),
+        Middleware(HostAllowlistMiddleware, allowed_hosts=frozenset(config.allowed_hosts)),
         Middleware(TokenMiddleware, token=config.token),
         Middleware(OriginCheckMiddleware, allowed_origins=config.allowed_origins),
     ]
@@ -942,6 +1122,11 @@ git commit -m "feat(security): token over header, cookie and a one time grant th
 
 - [ ] All five gates green on 3.11, 3.12 and 3.13.
 - [ ] A forged `Host` is refused on every route including `/api/events`, and on a real loopback socket, not only through `ASGITransport`.
+- [ ] `http://[::1]:8787/` is **served**, and `Host: [2001:db8::5]` matches an allowlist entry for that address. Starlette's `TrustedHostMiddleware` cannot do either, which is why it is not used.
+- [ ] An unrecognised `Host` produces a refusal, never a redirect built from that same header.
+- [ ] `Authorization: Bearer café` is a 401, not a 500.
+- [ ] A malformed cookie set by another application on the same host does not stop the token cookie working.
+- [ ] `?token=` on a path like `/\\evil.example` redirects to `/`, never off the site.
 - [ ] A mutating request with a missing, foreign, or wrong port `Origin` is refused, and `http://localhost:3000` is among the refused.
 - [ ] A `GET` needs no `Origin`, and a test asserts that exemption is deliberate.
 - [ ] A request shaped the way `EventSource` sends one, cookie only and no `Authorization` header, authenticates successfully.
