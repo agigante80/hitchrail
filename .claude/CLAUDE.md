@@ -151,14 +151,14 @@ These are the ones that cost real debugging to find, or that protect somebody.
   root level dotfiles without a reason.
 - **`claude_ipc.py` is quarantine.** It is the only module allowed to know
   about Claude Code internals, because they are undocumented and will change.
+  When `bridgeSessionId` breaks, exactly one module changes and the UI degrades
+  to `pending` rather than reporting something false.
 - **Every ticket gets a milestone and an area label.** The milestone is a phase
   from `docs/roadmap.md`, or `Backlog` for triaged work with no phase. **Empty
   means untriaged**, never "no phase", so `is:open no:milestone` is the triage
   queue. `ticket-gate` blocks without both, and
   `scripts/check-ticket-hygiene.sh` sweeps for the ones it never sees. A ticket
   that wants two milestones wants splitting.
-  When `bridgeSessionId` breaks, exactly one module changes and the UI degrades
-  to `pending` rather than reporting something false.
 - **Test the refusals.** A security control with only a happy path test is
   untested. Full rules in `.claude/rules/security.md`.
 
