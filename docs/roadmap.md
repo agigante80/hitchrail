@@ -55,10 +55,28 @@ network configuration. Two things worth carrying forward:
   the pattern's own length cap. Every hand written payload in the ticket's test
   list passed that pattern. Future guards here want fuzzing or property tests,
   not only enumeration.
-- Three deferred items came out of the phase: #4 (pin actions to SHAs before
+- Seven deferred items came out of the phase: #4 (pin actions to SHAs before
   Phase 7 introduces a publish token), #5 (the plans' snippets are no longer
-  checked by any tool), and #6 (a TLS proxy on a non standard port is refused
-  by the origin check, which Phase 2 Task 5 should settle).
+  checked by any tool), #6 (a TLS proxy on a non standard port is refused by
+  the origin check), #7 (folders with a space or a non ASCII name are silently
+  invisible, needs a decision), #8 (normalise every host in one place), #9
+  (`RootUnavailable` is a client error, and an intra-root alias is two
+  projects), and #10 (the mypy gate checks 3.11 on all three matrix legs).
+
+**The review loop was stopped by its trip wire, not by running clean.** Three
+rounds found nine findings each, and rounds 2 and 3 each found defects inside
+the previous round's fixes: the `contextlib.suppress` placement fixed in round
+1 had the same defect one line above it, and the `extra_hosts` validation added
+in round 2 left the same hole open on `host`. The user's `CLAUDE.md` says to
+stop immediately when two consecutive rounds do that, because past that point
+iteration removes value rather than adding it.
+
+Fourteen findings were fixed across rounds 1 and 2, every one with a named
+regression test verified to fail on revert. The nine from round 3 are #8, #9
+and #10, to be done as deliberate work rather than a fourth round of point
+patches. #8 in particular argues for one normalisation function rather than
+per entry point validation, which is the shape all three rounds kept
+rediscovering.
 
 ## Phase 2: The security boundary
 
