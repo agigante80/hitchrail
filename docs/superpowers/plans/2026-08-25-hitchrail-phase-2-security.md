@@ -450,10 +450,11 @@ supported deployment, a `Secure` cookie is never sent and the tool silently
 stops working. The cleartext exposure is already stated as a limitation in the
 README, and the remedy stated there is a TLS terminating proxy.
 
-- [ ] **Step 1: Register the pytest marker in `pyproject.toml`**
+- [ ] **Step 1: Confirm the pytest marker is registered in `pyproject.toml`**
 
 `--strict-markers` is on, so an unregistered marker is an error rather than a
-warning. Add to `[tool.pytest.ini_options]`:
+warning. Phase 1 Task 1 already ships this; confirm it is present rather than
+adding a second copy:
 
 ```toml
 markers = [

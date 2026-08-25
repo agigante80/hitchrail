@@ -113,6 +113,12 @@ dev = [
 [tool.ruff]
 line-length = 96
 src = ["src", "tests"]
+# ruff 0.16 formats Python code fences inside Markdown, which reaches the plan
+# documents and the adapted skills under .claude/. Those hold deliberately
+# partial snippets ("add this to __init__"), so formatting them is not a
+# no-op, and it would let a documentation edit fail a code formatting gate.
+# The gate is for the project's Python; prose is reviewed by people.
+extend-exclude = ["docs", ".claude"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "SIM", "PTH", "RUF", "S"]
@@ -133,6 +139,9 @@ warn_unreachable = true
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-ra --strict-markers --strict-config"
+markers = [
+  "live: binds a real loopback socket on an ephemeral port",
+]
 
 [tool.coverage.run]
 source = ["hitchrail"]
@@ -343,11 +352,15 @@ jobs:
       matrix:
         python: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@v7
+      # setup-uv stopped publishing moving major tags after v7, so this is
+      # pinned exactly rather than to a major that would never move again.
+      - uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
-      - run: uv sync --python ${{ matrix.python }}
+      # --locked asserts uv.lock is current rather than quietly updating it,
+      # so a forgotten lock change fails here instead of drifting.
+      - run: uv sync --locked --python ${{ matrix.python }}
       - run: uv run ruff check
       - run: uv run ruff format --check
       - run: uv run mypy
@@ -359,6 +372,12 @@ jobs:
 `permissions: contents: read` is least privilege: this workflow only reads the
 repository. A workflow with a write token on a package people install with
 `uvx` is supply chain surface.
+
+**Action versions are verified, not recalled.** At implementation time
+`actions/checkout` was at v7 (the first draft of this plan said v5, two majors
+stale) and `astral-sh/setup-uv` was at v10.0.1 with no moving major tag past
+v7, which is why one is pinned to a major and the other to an exact version.
+Check both again rather than trusting these numbers.
 
 - [ ] **Step 7: Commit**
 

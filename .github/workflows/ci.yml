@@ -1,0 +1,39 @@
+# The five blocking gates, on every interpreter the package claims to support.
+# All five are blocking on purpose: a gate that can be ignored is documentation.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege. This workflow only reads the repository, and a write token
+# on a package people install with `uvx` is supply chain surface.
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      # Not fail-fast: a gate that breaks on 3.13 alone is a version
+      # compatibility bug, and cancelling the other legs hides which it is.
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v7
+      # setup-uv stopped publishing moving major tags after v7, so this is
+      # pinned exactly rather than to a major that would never move again.
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      # --locked asserts uv.lock is current rather than quietly updating it,
+      # so a forgotten lock change fails here instead of drifting.
+      - run: uv sync --locked --python ${{ matrix.python }}
+      - run: uv run ruff check
+      - run: uv run ruff format --check
+      - run: uv run mypy
+      - run: uv run lint-imports
+      - run: uv run coverage run -m pytest
+      - run: uv run coverage report

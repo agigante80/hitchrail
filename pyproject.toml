@@ -1,0 +1,117 @@
+[project]
+name = "hitchrail"
+version = "0.1.0"
+description = "Start and stop headless Claude Code sessions across a folder of projects, from your phone."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "agigante80" }]
+keywords = ["claude-code", "tmux", "session-manager", "self-hosted"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Web Environment",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+  "starlette>=1.6,<2",
+  "uvicorn>=0.52,<1",
+  "sse-starlette>=3.4,<4",
+]
+
+[project.scripts]
+hitchrail = "hitchrail.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/agigante80/hitchrail"
+Issues = "https://github.com/agigante80/hitchrail/issues"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+  "pytest>=9.1",
+  "pytest-asyncio>=1.4",
+  "httpx>=0.28",
+  "ruff>=0.16",
+  "mypy>=2.3",
+  "import-linter>=2.13",
+  "coverage[toml]>=7.15",
+]
+
+[tool.ruff]
+line-length = 96
+src = ["src", "tests"]
+# ruff 0.16 formats Python code fences inside Markdown, which reaches the plan
+# documents and the adapted skills under .claude/. Those hold deliberately
+# partial snippets ("add this to __init__"), so formatting them is not a
+# no-op, and it would let a documentation edit fail a code formatting gate.
+# The gate is for the project's Python; prose is reviewed by people.
+extend-exclude = ["docs", ".claude"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "SIM", "PTH", "RUF", "S"]
+# S101 is `assert`, which is how every test in this project states its claim.
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+# S603 is ruff's warning about subprocess calls. Silenced only in the two
+# modules that legitimately run subprocesses, so the exception is visible in
+# configuration rather than scattered through the code as inline noqa comments.
+"src/hitchrail/tmux.py" = ["S603"]
+"src/hitchrail/procs.py" = ["S603"]
+"tests/*" = ["S603", "S607"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src", "tests"]
+warn_unreachable = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-ra --strict-markers --strict-config"
+markers = [
+  "live: binds a real loopback socket on an ephemeral port",
+]
+
+[tool.coverage.run]
+source = ["hitchrail"]
+branch = true
+
+[tool.importlinter]
+root_package = "hitchrail"
+include_external_packages = true
+
+# The engine layer is testable without HTTP, and this is what keeps it that
+# way. Import boundaries defended only by good intentions do not survive.
+# `hitchrail.security` is deliberately absent from source_modules: it is part
+# of the web layer and imports Starlette on purpose.
+[[tool.importlinter.contracts]]
+name = "the engine layer knows nothing about the web"
+type = "forbidden"
+source_modules = [
+  "hitchrail.config",
+  "hitchrail.discovery",
+  "hitchrail.tmux",
+  "hitchrail.procs",
+  "hitchrail.claude_ipc",
+  "hitchrail.ram",
+  "hitchrail.events",
+  "hitchrail.engine",
+]
+forbidden_modules = [
+  "hitchrail.server",
+  "hitchrail.cli",
+  "starlette",
+  "uvicorn",
+  "sse_starlette",
+]
