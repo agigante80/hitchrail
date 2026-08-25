@@ -462,6 +462,10 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus | None = None) 
                 "unsupported": [
                     {"name": u.name, "reason": u.reason} for u in listing.unsupported
                 ],
+                # The true count, because the list above is capped. The
+                # interface says "50 of 1240 shown"; hiding the excess
+                # silently would be the bug this whole field exists to fix.
+                "unsupported_total": listing.unsupported_total,
                 "memory": {"available_mb": available},
             }
         )
@@ -1197,7 +1201,8 @@ git commit -m "feat(cli): serve command with a generated token and a link a phon
 - [ ] `uvx hitchrail --root ~/dev` serves an API a person can drive with `curl`.
 - [ ] A real session has been started, observed, gracefully stopped and killed by hand, and the start returned 201 rather than `start_died`.
 - [ ] Every code in the error envelope table above is returned by at least one test, `locked` and `url_pending` included.
-- [ ] `GET /api/projects` reports `unsupported` alongside `projects`, so a folder the root holds but Hitchrail cannot open is accounted for rather than absent.
+- [ ] `GET /api/projects` reports `unsupported` and `unsupported_total` alongside `projects`, so a folder the root holds but Hitchrail cannot open is accounted for rather than absent.
+- [ ] A folder whose name is not valid UTF-8 does not turn the project list into a 500. `discovery.display_name` escapes it; the raw name never leaves the module.
 - [ ] An unknown project is 404 on every route that takes a name.
 - [ ] A malformed JSON body is 400, not 500, and no error body contains a traceback or a filesystem path.
 - [ ] The event stream authenticates by cookie with no `Authorization` header, and refuses an unauthenticated reader.

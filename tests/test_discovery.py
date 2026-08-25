@@ -6,18 +6,23 @@ their own target directories under tmp_path.parent, which pytest owns.
 
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 
 import pytest
 
 from hitchrail.discovery import (
+    _UNSAFE_TO_DISPLAY,
     MAX_NAME_LENGTH,
+    MAX_REPORTED_UNSUPPORTED,
     AlreadyExists,
     InvalidName,
     NoSuchProject,
     OutsideRoot,
     RootUnavailable,
     create_project,
+    display_name,
     explain_name,
     list_projects,
     project_path,
@@ -183,7 +188,7 @@ def test_a_refused_creation_leaves_nothing_behind(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "name",
-    ["evil\n", "evil\r\n", "x" * (MAX_NAME_LENGTH - 1) + "\n", "ok\n\n"],
+    ["evil\n", "evil\r\n", "x" * MAX_NAME_LENGTH + "\n", "ok\n\n"],
     ids=["newline", "crlf", "past-the-cap-via-newline", "double-newline"],
 )
 def test_a_trailing_newline_cannot_smuggle_a_name_past_the_pattern(
@@ -422,20 +427,31 @@ def test_scan_is_sorted_case_insensitively_on_both_halves(tmp_path: Path) -> Non
     assert [u.name for u in listing.unsupported] == ["beta gamma", "My App"]
 
 
-def test_a_root_that_vanishes_mid_scan_is_reported_not_crashed(
+def test_one_unreadable_entry_does_not_erase_its_neighbours(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # iterdir was wrapped, but is_dir and resolve one line below were not, so
-    # an autofs mount going away mid listing escaped as a bare OSError past the
-    # wrapper added directly above it.
-    (tmp_path / "one").mkdir()
+    """Named regression: a per entry failure is not a root failure.
 
-    def vanished(self: Path) -> bool:
-        raise OSError("mount went away")
+    An earlier version turned an OSError on any single entry into
+    RootUnavailable for the whole root, so one stale NFS handle or one
+    unreadable subdirectory hid twenty healthy projects behind "the root cannot
+    be read". That is the same silent loss `scan` was written to fix, moved up
+    one level.
+    """
+    for name in ("alpha", "beta", "gamma"):
+        (tmp_path / name).mkdir()
+    real_is_dir = Path.is_dir
 
-    monkeypatch.setattr(Path, "is_dir", vanished)
-    with pytest.raises(RootUnavailable):
-        scan(tmp_path)
+    def stale(self: Path) -> bool:
+        if self.name == "beta":
+            raise OSError(116, "Stale file handle")
+        return real_is_dir(self)
+
+    monkeypatch.setattr(Path, "is_dir", stale)
+    listing = scan(tmp_path)
+    assert listing.projects == ("alpha", "gamma")
+    assert [u.name for u in listing.unsupported] == ["beta"]
+    assert "Stale file handle" in listing.unsupported[0].reason
 
 
 @pytest.mark.parametrize(
@@ -476,15 +492,121 @@ def test_an_entry_that_cannot_be_resolved_is_reported_not_crashed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # resolve() sits inside the loop, below the iterdir wrapper. An EACCES on
-    # one subdirectory used to escape as a bare OSError.
+    # one subdirectory used to escape as a bare OSError, and then as a fatal
+    # RootUnavailable. It belongs in the report, next to the folder it is about.
     (tmp_path / "one").mkdir()
+    (tmp_path / "two").mkdir()
     real_resolve = Path.resolve
 
     def selective(self: Path, strict: bool = False) -> Path:
         if self.name == "one":
-            raise OSError("EACCES")
+            raise OSError(13, "Permission denied")
         return real_resolve(self)
 
     monkeypatch.setattr(Path, "resolve", selective)
+    listing = scan(tmp_path)
+    assert listing.projects == ("two",)
+    assert [u.name for u in listing.unsupported] == ["one"]
+
+
+def test_only_an_unreadable_root_is_fatal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The root itself is the one thing that cannot degrade: with no listing at
+    # all, answering "no projects" would report every session as stopped.
+    def gone(self: Path):  # type: ignore[no-untyped-def]
+        raise OSError(2, "No such file or directory")
+
+    monkeypatch.setattr(Path, "iterdir", gone)
     with pytest.raises(RootUnavailable):
         scan(tmp_path)
+
+
+def test_a_folder_name_that_is_not_valid_utf8_does_not_break_serialisation(
+    tmp_path: Path,
+) -> None:
+    """Named regression: one latin-1 folder used to 500 the whole project list.
+
+    os.listdir surrogate escapes a name that is not valid UTF-8, and
+    json.dumps(...).encode("utf-8") then raises. Reporting rejected folders is
+    what created that path: before, such names were silently dropped.
+    """
+    # os-level, with bytes, on purpose: Path works in str and cannot create a
+    # name that is not valid UTF-8, which is precisely what this test needs.
+    os.mkdir(os.path.join(os.fsencode(tmp_path), b"caf\xe9"))  # noqa: PTH102, PTH118
+    (tmp_path / "healthy").mkdir()
+
+    listing = scan(tmp_path)
+    assert listing.projects == ("healthy",)
+    assert len(listing.unsupported) == 1
+
+    payload = json.dumps(
+        [{"name": u.name, "reason": u.reason} for u in listing.unsupported],
+        ensure_ascii=False,
+    )
+    payload.encode("utf-8")  # the call that used to raise
+    assert not any("\ud800" <= c <= "\udfff" for c in listing.unsupported[0].name)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["report\x1b[2J", "proj‮gnp.exe", "a​b", "line\x85break", "iso⁦late"],
+    ids=["ansi-escape", "bidi-override", "zero-width", "c1-control", "bidi-isolate"],
+)
+def test_a_rejected_name_is_escaped_before_it_leaves_the_module(
+    tmp_path: Path, raw: str
+) -> None:
+    """Named regression: the allowlist keeps these out, and reporting let them back.
+
+    A folder named `report\\x1b[2J` clears the terminal of anything printing the
+    listing; a bidi override reorders what a reader sees even through
+    textContent. Nothing here is a valid project name, so escaping loses
+    nothing at all.
+    """
+    (tmp_path / raw).mkdir()
+    listing = scan(tmp_path)
+    assert len(listing.unsupported) == 1
+    shown = listing.unsupported[0].name
+    assert not _UNSAFE_TO_DISPLAY.search(shown), f"unescaped control character in {shown!r}"
+    assert "\\u" in shown
+
+
+def test_display_name_leaves_an_ordinary_name_readable() -> None:
+    # Escaping is for the dangerous characters, not for everything. `café`
+    # should still read as `café` when it is reported as unsupported.
+    assert display_name("café") == "café"
+    assert display_name("my app") == "my app"
+
+
+def test_a_non_breaking_space_is_one_problem_not_two(tmp_path: Path) -> None:
+    # NBSP is both whitespace and non ASCII, and landing in both buckets
+    # reported one character as two separate problems. Copy and paste out of a
+    # browser produces it routinely.
+    reason = explain_name("my\xa0app")
+    assert reason is not None
+    assert "whitespace" not in reason
+    assert "non ASCII" in reason
+
+
+def test_the_report_is_capped_but_the_count_is_honest(tmp_path: Path) -> None:
+    """A root sharing a tree with a Downloads folder can hold thousands.
+
+    Serialising all of them to a phone to say "these are not projects" is worse
+    than saying how many there were, but hiding the excess silently would be
+    the very bug this whole type exists to fix.
+    """
+    for i in range(MAX_REPORTED_UNSUPPORTED + 25):
+        (tmp_path / f"bad name {i:03d}").mkdir()
+    (tmp_path / "good").mkdir()
+
+    listing = scan(tmp_path)
+    assert listing.projects == ("good",)
+    assert len(listing.unsupported) == MAX_REPORTED_UNSUPPORTED
+    assert listing.unsupported_total == MAX_REPORTED_UNSUPPORTED + 25
+
+
+def test_a_clean_root_reports_a_total_of_zero(tmp_path: Path) -> None:
+    (tmp_path / "one").mkdir()
+    listing = scan(tmp_path)
+    assert listing.unsupported == ()
+    assert listing.unsupported_total == 0

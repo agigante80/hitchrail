@@ -28,6 +28,48 @@ NAME_PATTERN = re.compile(rf"\A[A-Za-z0-9][A-Za-z0-9._-]{{0,{MAX_NAME_LENGTH - 1
 
 _ALLOWED_CHARS = re.compile(r"[A-Za-z0-9._-]")
 
+# How many rejected folders to name before giving up and reporting a count.
+# A root that shares a tree with a Downloads folder can hold thousands.
+MAX_REPORTED_UNSUPPORTED = 50
+
+# Characters that are dangerous to hand to whatever renders the listing, as
+# opposed to merely invalid in a name. Written as escapes rather than literals
+# on purpose: several of these are invisible or reorder their neighbours, so a
+# literal here would be unreadable in the source and could reorder this very
+# comment.
+#
+#   \x00-\x1f, \x7f-\x9f  C0 and C1 controls, and DEL. A folder named
+#                         report\x1b[2J clears the terminal of anything
+#                         printing the listing.
+#   \u200b-\u200f         zero width space through the LTR and RTL marks
+#   \u2028-\u202e         line and paragraph separators, bidi embedding and
+#                         override. The override displays proj<RLO>gnp.exe as
+#                         projexe.gnp, even through textContent.
+#   \u2066-\u2069         bidi isolates, the same trick with newer codepoints
+_UNSAFE_TO_DISPLAY = re.compile("[\x00-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2066-\u2069]")
+
+
+def display_name(name: str) -> str:
+    """Make a filesystem name safe to show, without pretending it is valid.
+
+    Two separate hazards, both of which arrive only because rejected folders
+    are now reported rather than dropped:
+
+    - **Surrogates.** `os.listdir` surrogate escapes a name that is not valid
+      UTF-8, and `json.dumps(...).encode("utf-8")` then raises. One latin-1
+      named folder under the root would have turned the whole project list into
+      a 500, hiding every healthy project behind it.
+    - **Control and bidi characters.** These are exactly what the allowlist
+      refuses on the way in, and reporting the rejection handed them straight
+      back out.
+
+    Nothing passed to this function is a valid project name, so escaping loses
+    nothing: no caller can open these paths anyway.
+    """
+    # errors="replace" turns lone surrogates into U+FFFD rather than raising.
+    decoded = name.encode("utf-8", "replace").decode("utf-8", "replace")
+    return _UNSAFE_TO_DISPLAY.sub(lambda m: f"\\u{ord(m.group()):04x}", decoded)
+
 
 class InvalidName(ValueError):
     """The name is not one we are willing to turn into a path."""
@@ -68,6 +110,15 @@ class AlreadyExists(ValueError):
 class Unsupported:
     """A folder that exists but cannot be a project, and why.
 
+    `name` is a DISPLAY name, escaped by `display_name`, not the raw filesystem
+    name. That distinction is the whole safety of this type. Reporting rejected
+    folders opens an outbound path for exactly the strings the allowlist exists
+    to keep out: a folder called `report\\x1b[2J` clears the terminal of
+    anything printing the listing, and a bidi override reorders what a reader
+    sees even through `textContent`. Nothing here is a valid project name, so
+    nothing is lost by escaping it, and there is no need to pass the raw bytes
+    on: no caller can open these anyway.
+
     The reason is written for the person looking at their own folder, not for a
     log. They know the folder is there; what they need is which rule it broke.
     """
@@ -82,10 +133,18 @@ class Listing:
 
     Two separate functions would mean two `iterdir()` calls that can disagree
     with each other about a directory somebody is editing.
+
+    `unsupported` is capped at `MAX_REPORTED_UNSUPPORTED`; `unsupported_total`
+    is the true count. A root that shares a tree with a Downloads folder can
+    hold thousands of odd names, and serialising all of them to a phone to say
+    "these are not projects" is worse than saying how many there were. Showing
+    a capped list with an honest total is the point: this whole type exists
+    because dropping things silently was the bug.
     """
 
     projects: tuple[str, ...]
     unsupported: tuple[Unsupported, ...]
+    unsupported_total: int = 0
 
 
 def _describe_offenders(offenders: list[str]) -> str:
@@ -95,8 +154,12 @@ def _describe_offenders(offenders: list[str]) -> str:
     non ASCII character ('e') and 3 more" for a Cyrillic folder name, which
     tells the reader nothing they could not see and buries the one useful
     word in it.
+
+    The buckets are exclusive. A non breaking space, which copy and paste out
+    of a browser produces routinely, is both whitespace and non ASCII, and
+    landing in two buckets reported one character as two separate problems.
     """
-    spaces = [c for c in offenders if c.isspace()]
+    spaces = [c for c in offenders if c.isascii() and c.isspace()]
     non_ascii = [c for c in offenders if not c.isascii()]
     other = [c for c in offenders if c.isascii() and not c.isspace()]
 
@@ -205,43 +268,43 @@ def scan(root: Path) -> Listing:
     """
     projects: list[str] = []
     unsupported: list[Unsupported] = []
+
+    # Only failing to read the root itself is fatal. Everything below is per
+    # entry, and one bad entry must not take the healthy ones with it.
     try:
         entries = sorted(root.iterdir(), key=lambda p: p.name)
     except OSError as exc:
         raise RootUnavailable(f"cannot read the root {root}: {exc}") from exc
 
     for entry in entries:
+        name = entry.name
         try:
             if not entry.is_dir():
                 continue
-        except OSError as exc:
-            raise RootUnavailable(f"cannot read {entry} under {root}: {exc}") from exc
-
-        name = entry.name
-        reason = explain_name(name)
-        if reason is None:
-            try:
+            reason = explain_name(name)
+            if reason is None:
                 resolve_child(root, name)
-            except OutsideRoot:
-                unsupported.append(
-                    Unsupported(name, "points outside the root, so it is not safe to open")
-                )
+                projects.append(name)
                 continue
-            # No `except InvalidName` here: explain_name returns None exactly
-            # when NAME_PATTERN matches, which is exactly when validate_name
-            # passes, so resolve_child cannot raise it on this path. A branch
-            # no test can reach is dead code, not defence.
-            except OSError as exc:
-                raise RootUnavailable(f"cannot resolve {name!r} under {root}: {exc}") from exc
-            projects.append(name)
-        elif not name.startswith("."):
-            # A dot directory is not a project somebody was trying to make.
-            # Reporting `.git` as rejected would be noise, not information.
-            unsupported.append(Unsupported(name, reason))
+        except OutsideRoot:
+            reason = "points outside the root, so it is not safe to open"
+        except OSError as exc:
+            # ESTALE on an autofs mount, EACCES on one subdirectory. Reporting
+            # it as unreadable keeps the other twenty projects visible; making
+            # it fatal for the whole root was the same silent loss this
+            # function was written to fix, relocated one level up.
+            reason = f"cannot be read: {exc.strerror or exc}"
 
+        # A dot directory is not a project somebody was trying to make.
+        # Reporting `.git` as rejected would be noise, not information.
+        if not name.startswith("."):
+            unsupported.append(Unsupported(display_name(name), reason))
+
+    ordered = sorted(unsupported, key=lambda u: u.name.lower())
     return Listing(
         projects=tuple(sorted(projects, key=str.lower)),
-        unsupported=tuple(sorted(unsupported, key=lambda u: u.name.lower())),
+        unsupported=tuple(ordered[:MAX_REPORTED_UNSUPPORTED]),
+        unsupported_total=len(ordered),
     )
 
 

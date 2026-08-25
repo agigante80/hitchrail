@@ -729,9 +729,11 @@ git commit -m "feat(config): mandatory token off loopback, and an allowlist a ph
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `scan(root: Path) -> Listing`; `list_projects(root: Path) -> list[str]`; `explain_name(name: str) -> str | None`; `validate_name(name: str) -> None`; `resolve_child(root: Path, name: str) -> Path`; `project_path(root: Path, name: str) -> Path`; `create_project(root: Path, name: str) -> Path`; frozen dataclasses `Unsupported(name, reason)` and `Listing(projects, unsupported)`; exceptions `InvalidName`, `NoSuchProject(InvalidName)`, `OutsideRoot`, `AlreadyExists`, `RootUnavailable`; constants `NAME_PATTERN: re.Pattern[str]`, `MAX_NAME_LENGTH: int`.
+- Produces: `scan(root: Path) -> Listing`; `list_projects(root: Path) -> list[str]`; `explain_name(name: str) -> str | None`; `validate_name(name: str) -> None`; `resolve_child(root: Path, name: str) -> Path`; `project_path(root: Path, name: str) -> Path`; `create_project(root: Path, name: str) -> Path`; `display_name(name: str) -> str`; frozen dataclasses `Unsupported(name, reason)` and `Listing(projects, unsupported, unsupported_total)`; constant `MAX_REPORTED_UNSUPPORTED: int`; exceptions `InvalidName`, `NoSuchProject(InvalidName)`, `OutsideRoot`, `AlreadyExists`, `RootUnavailable`; constants `NAME_PATTERN: re.Pattern[str]`, `MAX_NAME_LENGTH: int`.
 
 **`scan` returns both halves of the answer**, the folders that can be projects and the ones that cannot with the rule each broke. An earlier version filtered the unsupported ones out silently, so a folder called `my app` simply vanished and the honest reading from a phone was that Hitchrail could not see it. `list_projects` remains for the engine, which only acts on projects; anything rendering a list to a person uses `scan`. The reasoning and the options considered are in issue #7.
+
+**`Unsupported.name` is a display name, not the raw filesystem name.** Reporting rejected folders opens an outbound path for exactly the strings the allowlist exists to keep out: a folder called `report\x1b[2J` clears the terminal of anything printing the listing, and a name that is not valid UTF-8 arrives surrogate escaped and cannot be serialised to JSON at all. `display_name` escapes both. Nothing reported here is a valid project name, so escaping loses nothing.
 
 **`MAX_NAME_LENGTH` is 255**, the filesystem's own limit, not the 64 an earlier draft invented. Length carries no security argument here, unlike the alphabet and the first character, and the low cap hid ordinary folders for nothing.
 
