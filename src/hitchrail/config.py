@@ -60,9 +60,13 @@ def local_addresses() -> tuple[str, ...]:
 
     # The primary outbound address, which is usually the one a phone will use.
     # Connecting a UDP socket sends no packet; it only asks the routing table.
+    # suppress FIRST: `with a, b:` enters a before it evaluates b, so this
+    # also covers a socket() that fails outright. Constructing the socket in
+    # the first slot let an OSError escape a function documented as best
+    # effort, and the caller's suppress then threw away the hostnames above.
     with (
-        socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe,
         contextlib.suppress(OSError),
+        socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe,
     ):
         probe.connect(("192.0.2.1", 1))  # TEST-NET-1, guaranteed unrouted
         found.append(str(probe.getsockname()[0]))
@@ -129,7 +133,10 @@ class Config:
         else:
             hosts.append(self.host)
 
-        hosts.extend(self.extra_hosts)
+        # Stripped: a padded entry (a stray space from a comma split) would
+        # be accepted here and then never match a Host header, which reads
+        # as the allowlist silently ignoring what the operator configured.
+        hosts.extend(h.strip() for h in self.extra_hosts)
         # Filtering wildcards again on the way out, because the resolver is an
         # external surface and its output is not trusted to be well formed.
         return tuple(dict.fromkeys(h for h in hosts if h and not is_wildcard_host(h)))
@@ -141,15 +148,25 @@ class Config:
         Hostname alone is not enough. Another application on `localhost:3000`
         would otherwise be same origin against an API equivalent to a shell.
 
-        The default port forms are included because behind a TLS terminating
-        reverse proxy the browser sends `https://name` with no port at all,
-        and that deployment is the one the README recommends.
+        `https://name` with no port is included because behind a TLS
+        terminating reverse proxy, the deployment the README recommends, that
+        is exactly what the browser sends.
+
+        `http://name` with no port is NOT included, and that omission is the
+        point. Port 80 is a port like any other, so accepting the bare form
+        would make any plain HTTP page anywhere on the same host or LAN address
+        a same origin caller, which is the hole the port pinning above exists
+        to close.
+
+        Known limitation: a TLS proxy on a port other than 443 sends
+        `https://name:8443` and is refused. There is no way to derive that port
+        from our own bind, so it needs configuration rather than a guess. See
+        the follow up issue linked from docs/roadmap.md.
         """
         origins: set[str] = set()
         for host in self.allowed_hosts:
             # A bare ::1 in an origin is not a URL; IPv6 literals are bracketed.
             bracketed = f"[{host}]" if ":" in host and not host.startswith("[") else host
             origins.add(f"http://{bracketed}:{self.port}")
-            origins.add(f"http://{bracketed}")
             origins.add(f"https://{bracketed}")
         return frozenset(origins)

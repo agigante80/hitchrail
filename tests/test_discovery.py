@@ -174,3 +174,84 @@ def test_a_refused_creation_leaves_nothing_behind(tmp_path: Path) -> None:
         create_project(root, "../evil")
     assert list(root.iterdir()) == []
     assert not (tmp_path / "evil").exists()
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["evil\n", "evil\r\n", "x" * 64 + "\n", "ok\n\n"],
+    ids=["newline", "crlf", "past-the-cap-via-newline", "double-newline"],
+)
+def test_a_trailing_newline_cannot_smuggle_a_name_past_the_pattern(
+    tmp_path: Path, name: str
+) -> None:
+    """Named regression: `$` matched before a trailing newline, `\\Z` does not.
+
+    With `$`, `evil\\n` satisfied the allowlist and became a real directory, and
+    a 64 character name plus a newline walked past the pattern's own length
+    cap. This is the entire path guard failing open over one character, so it
+    is asserted from both directions.
+    """
+    with pytest.raises(InvalidName):
+        project_path(tmp_path, name)
+    with pytest.raises(InvalidName):
+        create_project(tmp_path, name)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_listing_never_offers_a_folder_that_cannot_be_started(tmp_path: Path) -> None:
+    """Named regression: the list and the lookup must agree.
+
+    Listing `.git` and a symlink out of the root, then refusing both the moment
+    somebody taps them, is an interface offering actions that cannot work.
+    """
+    outside = tmp_path.parent / "outside_listing"
+    outside.mkdir(exist_ok=True)
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "real").mkdir()
+    (root / ".git").mkdir()
+    (root / ".hidden").mkdir()
+    (root / "-flag").mkdir()
+    (root / "escape").symlink_to(outside, target_is_directory=True)
+
+    listed = list_projects(root)
+    assert listed == ["real"]
+    for name in listed:
+        assert project_path(root, name).is_dir()
+
+
+def test_a_symlink_to_a_nested_directory_is_refused_with_an_honest_message(
+    tmp_path: Path,
+) -> None:
+    # Deliberate: the design says a DIRECT child of the root. The message has
+    # to say that rather than claiming the target is outside the root, because
+    # it is not, and a misleading refusal wastes somebody's afternoon.
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "inner").mkdir()
+    (tmp_path / "nested").symlink_to(tmp_path / "sub" / "inner", target_is_directory=True)
+    with pytest.raises(OutsideRoot, match="not a direct child"):
+        project_path(tmp_path, "nested")
+
+
+def test_a_create_that_loses_a_race_refuses_rather_than_raising_oserror(
+    tmp_path: Path,
+) -> None:
+    """Named regression: check-then-create let FileExistsError escape.
+
+    FileExistsError is not a ValueError, so every caller's refusal handling
+    missed it and the API would have answered 500 rather than a refusal. A web
+    interface makes the double submission that triggers it easy.
+    """
+    (tmp_path / "racer").mkdir()
+    with pytest.raises(AlreadyExists):
+        create_project(tmp_path, "racer")
+
+
+def test_creation_never_follows_a_symlink_to_its_target(tmp_path: Path) -> None:
+    # Creating at the RESOLVED path would make the link's target instead of the
+    # name that was asked for, which is a different directory entirely.
+    target = tmp_path / "elsewhere"
+    (tmp_path / "ghost").symlink_to(target)
+    with pytest.raises(AlreadyExists):
+        create_project(tmp_path, "ghost")
+    assert not target.exists()

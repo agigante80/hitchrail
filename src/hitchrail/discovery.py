@@ -10,7 +10,13 @@ from pathlib import Path
 # dot; and cannot become a flag in an argv slot, because it cannot begin with a
 # hyphen. Everything outside the pattern is refused without being enumerated,
 # which is what makes it robust against encodings nobody thought to list.
-NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+#
+# \Z, not $. `$` matches before a trailing newline, so `evil\n` satisfied this
+# pattern and became a real directory, and `("x" * 64) + "\n"` walked straight
+# past the 64 character cap the pattern is written to impose. \Z anchors at the
+# actual end of the string. This is the whole allowlist failing open over one
+# character, so it gets a named regression test.
+NAME_PATTERN = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
 
 
 class InvalidName(ValueError):
@@ -18,16 +24,11 @@ class InvalidName(ValueError):
 
 
 class OutsideRoot(ValueError):
-    """The name resolves to somewhere that is not inside the root."""
+    """The name does not resolve to a direct child of the root."""
 
 
 class AlreadyExists(ValueError):
     """A folder of that name is already there."""
-
-
-def list_projects(root: Path) -> list[str]:
-    """Every direct subfolder. No git filter, no badge: a folder is a project."""
-    return sorted((p.name for p in root.iterdir() if p.is_dir()), key=str.lower)
 
 
 def validate_name(name: str) -> None:
@@ -43,21 +44,50 @@ def resolve_child(root: Path, name: str) -> Path:
     inside the root that points somewhere else. Either alone would be enough
     for the cases we can think of, which is exactly why there are two.
 
-    Every filesystem operation in this module goes through here, so creation
-    and lookup cannot end up with different guards. An earlier draft had
+    Every path in this module goes through here, so listing, lookup and
+    creation cannot end up with different guards. An earlier draft had
     create_project validate and then mkdir while project_path resolved, and two
     ways into the same filesystem with different guards is how the weaker one
     gets found.
 
     The parent is compared for equality rather than by prefix: a prefix check
-    would accept `/root-evil` for a root of `/root`.
+    would accept `/root-evil` for a root of `/root`. That also means a symlink
+    to a NESTED directory inside the root is refused, which is deliberate and
+    matches the design's "a direct child of the configured root".
     """
     validate_name(name)
     real_root = root.resolve()
     real = (root / name).resolve()
     if real.parent != real_root:
-        raise OutsideRoot(f"{name!r} resolves outside {real_root}")
+        raise OutsideRoot(
+            f"{name!r} resolves to {real}, which is not a direct child of {real_root}"
+        )
     return real
+
+
+def list_projects(root: Path) -> list[str]:
+    """Every direct subfolder that is actually startable.
+
+    No git filter and no badge: whether a folder is a repository has nothing to
+    do with whether it is a project, which is what the design means by "a
+    folder is a project".
+
+    It does exclude what `project_path` would refuse. Listing `.git` and a
+    symlink pointing out of the root, and then refusing both the moment
+    somebody taps them, is not "no distinction", it is an interface offering
+    actions that cannot work. One guard decides membership, and it is the same
+    guard that decides everything else here.
+    """
+    names: list[str] = []
+    for entry in root.iterdir():
+        if not entry.is_dir():
+            continue
+        try:
+            resolve_child(root, entry.name)
+        except (InvalidName, OutsideRoot):
+            continue
+        names.append(entry.name)
+    return sorted(names, key=str.lower)
 
 
 def project_path(root: Path, name: str) -> Path:
@@ -68,12 +98,24 @@ def project_path(root: Path, name: str) -> Path:
 
 
 def create_project(root: Path, name: str) -> Path:
-    resolved = resolve_child(root, name)
-    # Both sides, because Path.exists() follows symlinks: a dangling link
-    # inside the root reports False on the resolved path while very much
-    # occupying the name, and mkdir would then raise FileExistsError rather
-    # than one of our refusals.
-    if resolved.exists() or (root / name).is_symlink() or (root / name).exists():
-        raise AlreadyExists(f"already there: {name!r}")
-    resolved.mkdir()
-    return resolved
+    """Create a folder, or refuse. Never creates through a symlink.
+
+    mkdir on `root / name` rather than on the resolved path, and no existence
+    check before it. Both matter:
+
+    - Checking and then creating is a race. A concurrent create, which a web
+      interface makes easy, produced a FileExistsError that is not a
+      ValueError, so every caller's refusal handling missed it and the API
+      would have answered 500 instead of a refusal.
+    - mkdir refuses when the final component exists at all, symlinks included,
+      so a dangling link occupying the name cannot be followed. Creating at the
+      RESOLVED path would have created the link's target instead, which is a
+      different directory than the one that was asked for.
+    """
+    resolve_child(root, name)
+    target = root / name
+    try:
+        target.mkdir()
+    except FileExistsError as exc:
+        raise AlreadyExists(f"already there: {name!r}") from exc
+    return target.resolve()

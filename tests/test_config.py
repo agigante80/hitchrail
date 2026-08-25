@@ -148,12 +148,53 @@ def test_allowed_origins_pin_the_port(tmp_path: Path) -> None:
     assert "http://localhost:3000" not in cfg.allowed_origins
 
 
-def test_allowed_origins_include_the_default_port_forms(tmp_path: Path) -> None:
+def test_the_proxy_origin_form_is_accepted(tmp_path: Path) -> None:
     # Behind a TLS terminating proxy the browser sends https://name with no
     # port. Refusing that would make the documented deployment impossible.
     cfg = Config(root=tmp_path, host="192.168.1.10", token="t", port=8787)
     assert "https://192.168.1.10" in cfg.allowed_origins
-    assert "http://192.168.1.10" in cfg.allowed_origins
+
+
+def test_the_bare_http_origin_is_not_accepted(tmp_path: Path) -> None:
+    """Named regression: port 80 is a port like any other.
+
+    An earlier version added `http://{host}` alongside the proxy form, which
+    made any plain HTTP page on port 80 of the same host or LAN address a same
+    origin caller against an API equivalent to a shell. That is precisely the
+    hole the port pinning is written to close, reopened one line below the
+    docstring claiming it was closed.
+    """
+    cfg = Config(root=tmp_path, host="192.168.1.10", token="t", port=8787)
+    assert "http://192.168.1.10" not in cfg.allowed_origins
+    assert "http://localhost" not in cfg.allowed_origins
+
+
+def test_a_padded_extra_host_is_usable(tmp_path: Path) -> None:
+    # A stray space from a comma split was accepted and then could never match
+    # a Host header, which reads as the allowlist ignoring the operator.
+    cfg = Config(root=tmp_path, host="0.0.0.0", token="t", extra_hosts=(" phone.lan ",))
+    assert "phone.lan" in cfg.allowed_hosts
+    assert " phone.lan " not in cfg.allowed_hosts
+
+
+def test_local_addresses_survives_a_machine_that_cannot_make_a_socket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Named regression: the socket was built before the suppress was entered.
+
+    `with socket.socket(...) as p, contextlib.suppress(OSError):` evaluates the
+    constructor before suppress is active, so a machine that cannot make a UDP
+    socket raised out of a function documented as best effort, and the caller's
+    own suppress then discarded the hostnames already collected.
+    """
+
+    def no_sockets(*args: object, **kwargs: object) -> object:
+        raise OSError("EMFILE")
+
+    monkeypatch.setattr("hitchrail.config.socket.gethostname", lambda: "box")
+    monkeypatch.setattr("hitchrail.config.socket.getaddrinfo", lambda *a, **k: [])
+    monkeypatch.setattr("hitchrail.config.socket.socket", no_sockets)
+    assert local_addresses() == ("box",)
 
 
 def test_allowed_origins_bracket_an_ipv6_host(tmp_path: Path) -> None:
