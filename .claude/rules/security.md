@@ -34,6 +34,14 @@ below as a refusal with a test that asserts it, not as advice.
 7. **Report refusals honestly.** A guard that fails open, or an error rendered
    as a success, is worse than no guard. If the state of a session cannot be
    determined, say so rather than guessing.
+8. **A secret in a URL is a secret in the log.** uvicorn writes its access line
+   after the application returns, from the same scope dict the application was
+   handed, so a token in the request target is logged in cleartext even when the
+   response redirects it out of the address bar. `TokenMiddleware` clears
+   `scope["query_string"]` once the grant token is spent, and
+   `test_the_grant_keeps_the_token_out_of_the_access_log` fails if that stops.
+   Follow any secret that rides in a URL all the way to where the server writes
+   that URL down.
 
 ## Order matters
 
