@@ -3,12 +3,14 @@
 A web UI for starting and stopping headless Claude Code sessions across a folder
 of projects. Phone first. Python, standalone, no bash dependency.
 
-## Status: docs only
+## Status: phases 1 and 2 of 7 are built
 
-There is no code in this repository yet. No `src/`, no `pyproject.toml`, no
-`tests/`. The commands below describe the project once Task 1 of the Phase 1
-plan has created the skeleton; until then they will fail, and that is expected
-rather than a broken checkout.
+What exists: the package skeleton with five blocking gates, `config.py`,
+`discovery.py` and `security.py`, and 316 tests. What does not exist yet is
+everything you would actually run: the HTTP API, the browser interface, and the
+engine that starts and stops sessions. The remaining modules listed under
+Architecture are one line placeholders, so an import of them succeeds and tells
+you nothing. Phase 3 is the next work; read `docs/roadmap.md` first.
 
 ## Where things are
 
@@ -74,14 +76,23 @@ and the HTTP layer testable without tmux.
 
 ```
 src/hitchrail/
+  config.py      one canonical form for every host and origin, and the refusals
   discovery.py   root scanning, folder creation, path safety
-  engine.py      state derivation, start, stop, log tail
+  tmux.py        the tmux adapter and its footguns
+  procs.py       process table snapshot
   claude_ipc.py  everything that knows Claude Code internals
   ram.py         memory readings and the guard decision
+  events.py      the change feed the SSE stream serves
+  engine.py      state derivation, start, stop, log tail
+  security.py    host allowlist, origin check, token, in that order
   server.py      Starlette app, routes, middleware, SSE
   web/           index.html, app.js, app.css (no build step)
   cli.py         argument parsing, config, uvicorn launch
 ```
+
+`config.py` and `security.py` sit at the boundary rather than in the engine, and
+`security.py` is the only module the `.claude/rules/security.md` rules load for
+alongside the four that spawn things.
 
 Every external surface is injected: tmux, the process table, memory readings,
 the Claude state directory, the clock. That is what makes the engine testable
