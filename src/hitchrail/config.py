@@ -50,17 +50,19 @@ def normalise_host(raw: str) -> str:
     header the same way and both meet in the middle on the bare form. Storing
     both was a workaround for a matcher that could not strip them.
 
-    A trailing root dot goes too. `box.lan.` and `box.lan` name the same
-    machine and HOSTNAME_PATTERN accepts both, but a browser's Host header
-    never carries the dot, so an allowlist entry written in FQDN root form was
-    stored in a spelling nothing could ever match and answered 400 to the very
-    host it was added for.
+    A trailing root dot is deliberately NOT stripped here, though `box.lan.`
+    and `box.lan` name the same machine. Stripping it on this side only, which
+    is what a first attempt did, made things worse rather than better: the
+    header side (`security.parse_host`) does not strip, so `--allow-host
+    box.lan.` stopped serving `Host: box.lan.` and no spelling of the flag
+    served it at all. It also let `box.lan..` past `is_valid_host`, which
+    normalises before matching, and stored it as `box.lan.`, turning a clean
+    refusal into exactly the accepted-then-never-matches case this module
+    refuses to have. Doing it properly means both sides at once. See #19.
     """
     value = raw.strip().lower()
     if value.startswith("[") and value.endswith("]"):
         value = value[1:-1]
-    if len(value) > 1 and value.endswith("."):
-        value = value[:-1]
     return value
 
 
@@ -240,7 +242,8 @@ class Config:
         # The bind address is stored canonical, not as it was typed. It is
         # validated through is_valid_host, which normalises before matching, so
         # `[::1]` and ` 127.0.0.1 ` passed validation and were then handed to
-        # uvicorn verbatim by cli._serve, where socket.bind raises gaierror.
+        # uvicorn verbatim by the CLI (phase 5), where socket.bind raises
+        # gaierror.
         # `[::1]` is the spelling people copy out of a browser's address bar,
         # so it is worth accepting rather than refusing; it just has to be
         # written down in the form that can be bound.

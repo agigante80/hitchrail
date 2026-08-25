@@ -333,10 +333,19 @@ class TokenMiddleware:
         # reports. Overwriting the value here is what the logger ends up
         # printing, verified on a live socket by test_live_socket.py.
         #
-        # This reaches into uvicorn's bookkeeping through a documented ASGI
-        # affordance: the scope is mutable, and rewriting query_string is the
-        # same move a router makes when it rewrites path. Nothing downstream
-        # reads it, because this request is answered right here with a 303.
+        # This depends on a uvicorn implementation detail, NOT on anything ASGI
+        # guarantees. h11_impl emits the access line inside send() while
+        # handling http.response.start, and protocols/utils builds it from the
+        # live scope, so a rewrite before `await response(...)` lands in the
+        # log. Verified against uvicorn 0.52.4 on a real socket. If that
+        # ordering changes, test_the_grant_keeps_the_token_out_of_the_access_log
+        # fails, which is the point of pinning it with a live test rather than
+        # a unit test. Nothing downstream reads the value: this request is
+        # answered here with a 303.
+        #
+        # This covers the grant path ONLY. A request that already carries a
+        # valid cookie or Bearer header returns before reaching this function,
+        # so re-opening the same link still logs the token. See #20.
         scope["query_string"] = remaining.encode("latin-1")
 
         response = RedirectResponse(location, status_code=303)

@@ -703,7 +703,7 @@ def test_a_wildcard_is_not_an_address_to_bind_to(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     ("given", "stored"),
-    [("[::1]", "::1"), (" 127.0.0.1 ", "127.0.0.1"), ("[::]", "::"), ("BOX.lan.", "box.lan")],
+    [("[::1]", "::1"), (" 127.0.0.1 ", "127.0.0.1"), ("[::]", "::"), (" BOX.lan ", "box.lan")],
 )
 def test_the_bind_address_is_stored_in_the_form_uvicorn_can_bind(
     tmp_path: Path, given: str, stored: str
@@ -712,23 +712,10 @@ def test_the_bind_address_is_stored_in_the_form_uvicorn_can_bind(
 
     `is_valid_host` strips brackets and whitespace before matching, so all of
     these passed validation, and `Config.host` kept the spelling as typed.
-    cli._serve gives that field straight to uvicorn.run(host=...), where
+    The CLI hands that field straight to uvicorn.run(host=...) once phase 5
+    builds it, where
     socket.bind raises gaierror on `[::1]`. Accepted at startup and dead at
     bind time is the worst of both.
     """
     cfg = Config(root=tmp_path, host=given, token="tok", extra_hosts=("box.lan",))
     assert cfg.host == stored
-
-
-def test_an_allowed_host_written_with_a_root_dot_still_matches(tmp_path: Path) -> None:
-    """Named regression: `--allow-host box.lan.` was accepted and never matched.
-
-    HOSTNAME_PATTERN allows the trailing root dot of an FQDN, a browser's Host
-    header never sends it, and normalise_host did not strip it, so the entry
-    sat in the allowlist in a spelling nothing could equal. That is the
-    accepted-then-never-matches shape this module refuses to have.
-    """
-    cfg = Config(root=tmp_path, host="0.0.0.0", token="tok", extra_hosts=("box.lan.",))
-    assert "box.lan" in cfg.allowed_hosts
-    assert "box.lan." not in cfg.allowed_hosts
-    assert "http://box.lan:8787" in cfg.allowed_origins
