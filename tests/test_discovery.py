@@ -129,11 +129,22 @@ def test_symlink_escaping_the_root_is_refused(tmp_path: Path) -> None:
 
 
 def test_a_symlink_to_a_sibling_inside_the_root_is_allowed(tmp_path: Path) -> None:
-    # The boundary is the root, not "no symlinks". A link that stays inside is
-    # a legitimate way for somebody to organise their projects.
+    """The boundary is the root, not "no symlinks", and that is still true.
+
+    Updated rather than deleted when #11 landed, because it encodes a
+    deliberate decision. A link that stays inside the root is a legitimate way
+    to organise projects and is still resolvable by name; what changed is that
+    `scan` no longer LISTS both names, so one directory cannot become two
+    startable rows. Refusing intra root links outright was considered and
+    rejected: it would remove a legitimate arrangement to fix a display
+    problem.
+    """
     (tmp_path / "real").mkdir()
     (tmp_path / "alias").symlink_to(tmp_path / "real", target_is_directory=True)
     assert project_path(tmp_path, "alias") == (tmp_path / "real").resolve()
+    # Still addressable by either name, which is what makes A a display level
+    # fix rather than a restriction.
+    assert project_path(tmp_path, "real") == (tmp_path / "real").resolve()
 
 
 def test_creating_a_folder_makes_it_startable(tmp_path: Path) -> None:
@@ -635,3 +646,87 @@ def test_root_unavailable_is_not_a_client_error(tmp_path: Path) -> None:
         raise AssertionError("a vanished root was reported as a client error") from None
     except RootUnavailable:
         pass
+
+
+# -- #11: one directory must not be two startable projects -----------------
+
+
+def test_an_intra_root_alias_yields_one_project(tmp_path: Path) -> None:
+    """Two names for one directory means two rows that start two agents in it.
+
+    Harmless while nothing keys off the name. The moment a tmux session is
+    keyed off the project name, tapping both rows starts two agents with the
+    same working directory and stopping one leaves the other running in it,
+    which is the outcome the `detached` state exists to prevent, reached by a
+    different road.
+    """
+    (tmp_path / "real").mkdir()
+    (tmp_path / "alias").symlink_to(tmp_path / "real", target_is_directory=True)
+    listing = scan(tmp_path)
+    assert listing.projects == ("alias",)
+
+
+def test_the_dropped_alias_is_reported_not_hidden(tmp_path: Path) -> None:
+    """Silently dropping a folder the user can see is the bug this avoids.
+
+    `scan` already exists to stop exactly that: a folder called `my app` used
+    to vanish, and the honest reading from a phone was that Hitchrail could not
+    see it. A deduplicated alias goes down the same channel with the surviving
+    name in its reason.
+    """
+    (tmp_path / "real").mkdir()
+    (tmp_path / "alias").symlink_to(tmp_path / "real", target_is_directory=True)
+    listing = scan(tmp_path)
+    dropped = [u for u in listing.unsupported if u.name == "real"]
+    assert len(dropped) == 1
+    assert "alias" in dropped[0].reason
+
+
+def test_the_surviving_name_is_deterministic(tmp_path: Path) -> None:
+    """Not filesystem order dependent, so two machines agree.
+
+    A session is keyed off the surviving name, so if the choice varied by
+    listing order the same folder would get different sessions on different
+    machines, or after a remount.
+    """
+    first = tmp_path / "one"
+    first.mkdir()
+    (first / "zebra").mkdir()
+    (first / "alpha").symlink_to(first / "zebra", target_is_directory=True)
+
+    second = tmp_path / "two"
+    second.mkdir()
+    (second / "alpha").mkdir()
+    (second / "zebra").symlink_to(second / "alpha", target_is_directory=True)
+
+    # Whichever is the real directory, the alphabetically first name wins.
+    assert scan(first).projects == ("alpha",)
+    assert scan(second).projects == ("alpha",)
+
+
+def test_three_names_for_one_directory_keep_one(tmp_path: Path) -> None:
+    (tmp_path / "real").mkdir()
+    (tmp_path / "a1").symlink_to(tmp_path / "real", target_is_directory=True)
+    (tmp_path / "a2").symlink_to(tmp_path / "real", target_is_directory=True)
+    listing = scan(tmp_path)
+    assert listing.projects == ("a1",)
+    assert listing.unsupported_total == 2
+
+
+def test_distinct_directories_are_untouched(tmp_path: Path) -> None:
+    """The dedup must not collapse projects that merely look similar."""
+    for name in ("alpha", "beta", "gamma"):
+        (tmp_path / name).mkdir()
+    assert scan(tmp_path).projects == ("alpha", "beta", "gamma")
+
+
+def test_a_symlink_out_of_the_root_is_still_refused(tmp_path: Path) -> None:
+    """The root boundary must survive a change that tidies names inside it."""
+    outside = tmp_path.parent / "outside-root"
+    outside.mkdir(exist_ok=True)
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "escape").symlink_to(outside, target_is_directory=True)
+    listing = scan(root)
+    assert listing.projects == ()
+    assert any("outside the root" in u.reason for u in listing.unsupported)

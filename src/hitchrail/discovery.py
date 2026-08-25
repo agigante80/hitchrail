@@ -277,6 +277,12 @@ def scan(root: Path) -> Listing:
     """
     projects: list[str] = []
     unsupported: list[Unsupported] = []
+    # Resolved directory -> the name already accepted for it. Two names for one
+    # directory means two rows that both start an agent in it, and a session is
+    # keyed off the NAME, so both rows would start their own. Entries are
+    # visited in sorted order, so the first name accepted for a directory wins
+    # and the choice does not vary with filesystem order.
+    seen: dict[Path, str] = {}
 
     # Only failing to read the root itself is fatal. Everything below is per
     # entry, and one bad entry must not take the healthy ones with it.
@@ -292,9 +298,17 @@ def scan(root: Path) -> Listing:
                 continue
             reason = explain_name(name)
             if reason is None:
-                resolve_child(root, name)
-                projects.append(name)
-                continue
+                resolved = resolve_child(root, name)
+                first = seen.get(resolved)
+                if first is None:
+                    seen[resolved] = name
+                    projects.append(name)
+                    continue
+                # Reported, never dropped in silence. The alias is a folder the
+                # user can see, and a folder that simply vanishes reads as
+                # Hitchrail being unable to see it, which is the bug `scan`
+                # exists to avoid. Name the survivor so the row is explicable.
+                reason = f"another name for {display_name(first)}, already listed"
         except OutsideRoot:
             reason = "points outside the root, so it is not safe to open"
         except OSError as exc:
