@@ -6,3 +6,5 @@ dist/
 .ruff_cache/
 .mypy_cache/
 docs/design/hitchrail-session-manager.html
+.claude/settings.local.json
+CLAUDE.local.md
