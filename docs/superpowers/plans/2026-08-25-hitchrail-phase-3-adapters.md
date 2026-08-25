@@ -46,6 +46,21 @@ tickets carried in from earlier phases, and one is new.
 | #27 | prove the tmux workarounds against a real tmux | |
 | #18 | split `config.py` along its seam | |
 
+Two decisions were made on review and written into the tickets, because a
+ticket that ends in unresolved options cannot be implemented and fails the
+readiness gate:
+
+- **#11** takes option A, deduplicate by resolved path in `scan`.
+- **#25** returns the URL's source (`bridge` or `scraped`) rather than a
+  confidence band, and the bridge value wins when both exist. A scraped URL can
+  come from scrollback that outlived its session, which is syntactically
+  perfect and semantically stale, so no amount of parsing separates it from a
+  good one. Naming the source is the only honest answer.
+
+One prerequisite gap came out of the same review and is #28: tmux and Claude
+Code are runtime requirements that no install route provides and nothing
+checked.
+
 Two orderings are not preferences:
 
 - **#11 before #22.** A symlinked alias is harmless until a session is keyed off

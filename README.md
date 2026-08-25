@@ -29,6 +29,22 @@ Stopping is a sequence rather than a button: it asks the agent to wrap up, shows
 you the wait, and keeps a kill control within reach the whole time if you would
 rather not wait.
 
+## Prerequisites
+
+Hitchrail is a launcher, so the things it launches have to already be there. It
+does not vendor or install any of them.
+
+| Needed | Why | Checked |
+|---|---|---|
+| **tmux** | every session Hitchrail starts lives in a tmux session; this is the whole mechanism, not an option | `tmux -V` |
+| **Claude Code on `PATH`** | it is what Hitchrail runs. Configurable with `--claude-binary` | `claude --version` |
+| **Linux** | memory pressure is read from `/proc/meminfo`, and the process table from `ps`. macOS has neither in this form, which is why the package declares `Operating System :: POSIX :: Linux` | |
+| **Python 3.11+** | `uvx` and `pipx` handle this for you | `python3 --version` |
+
+Installing Hitchrail with `uvx` will succeed on a machine with no tmux and no
+Claude Code, because neither is a Python dependency. It will then fail at the
+first attempt to start a session. Check the two commands above first.
+
 ## Install
 
 **Not yet.** Nothing is published, so none of these work today. They are here

@@ -376,6 +376,15 @@ pipx install hitchrail             # for people already living in pipx
 and leaves nothing behind, which is the right first contact for a tool that
 people should be able to try before trusting.
 
+**None of these install the things Hitchrail actually needs**, and that is a
+property of being a launcher rather than an oversight. tmux and Claude Code are
+runtime prerequisites on `PATH`, and neither is a Python dependency, so every
+route above succeeds on a machine that cannot run a single session. The README
+states them, and the CLI checks them at startup and refuses with a message
+naming what is missing, because the alternative is an obscure failure at the
+first tap. Linux only: memory comes from `/proc/meminfo` and the process table
+from `ps`.
+
 The package name is confirmed free on PyPI as of 2026-08-25, along with the
 hyphenated variants PyPI normalizes to the same project. See section 2 for the
 full availability check.
