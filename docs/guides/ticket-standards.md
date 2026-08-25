@@ -1,4 +1,4 @@
-<!-- template-version: 5 -->
+<!-- template-version: 6 -->
 
 # Ticket standards (canonical)
 
@@ -111,6 +111,46 @@ A `security` label makes the gate run every agent, not only the triggered ones.
 
 The reviews the ticket must pass before it is done, checked off explicitly. This is the author
 acknowledging the gate, not a substitute for it.
+
+### 8. Documentation impact
+
+Which documents this change makes wrong, and the edit that fixes each. Named files, not
+"update the docs".
+
+This section exists because the project shipped two phases without the README once
+mentioning tmux, while every session Hitchrail starts lives in one. Nothing was
+negligent: each ticket did its own job, and no ticket owned the sentence. A section
+nobody is required to fill in is a section that gets filled in by nobody.
+
+**Documentation is part of the change, not a follow up ticket.** The same rule the testing
+guidelines apply to tests applies here: a ticket that lands code and leaves a document
+contradicting it has not finished, it has created a second ticket nobody wrote down.
+
+The candidates in this repository, and what each one owns:
+
+| Document | Owns |
+|---|---|
+| `README.md` | anything a user does before or while running Hitchrail: prerequisites, install, flags, stated limitations |
+| `docs/superpowers/specs/...-design.md` | the argument. Amend it when the implementation departs from it, rather than letting the code drift |
+| `docs/roadmap.md` | phase scope, exit criteria, and the retrospective once a phase closes |
+| `docs/tech-guidelines.md` | a rule that generalises beyond this ticket |
+| `.claude/rules/*.md` | the same rule, where it loads automatically for the files it governs |
+| `.claude/CLAUDE.md` | project shape, commands, architecture, and the non negotiables |
+| `docs/versioning.md` | anything that changes the operator contract |
+
+Three cases where this section may **not** be N/A, because these are the ones that were
+missed:
+
+1. **A new runtime prerequisite**, or a new assumption about the machine. It goes in the
+   README, and it needs a check in the program, because a README is documentation rather
+   than a mitigation.
+2. **A deliberate departure from the design.** Amend the design and say why. The design is
+   the argument; code that silently disagrees with it turns the argument into fiction.
+3. **A mitigation that is not a fix.** Say which one it is and name the ticket that ends
+   it. A partial fix recorded as complete is how a known exposure stops being tracked.
+
+N/A is legitimate and common: a pure refactor with no behaviour change, or a bug fix that
+restores documented behaviour, changes no document. Say that, with the reason.
 
 ## The N/A rule (load-bearing)
 

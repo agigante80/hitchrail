@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        <!-- template-version: 5 -->
+        <!-- template-version: 6 -->
         ## Feature Request
         Please fill in all required fields. Hitchrail spawns `claude --dangerously-skip-permissions`,
         so the blast radius and test sections below are not paperwork: they are how a change gets
@@ -234,6 +234,23 @@ body:
         - [ ] Session dies immediately -> `start_died` with captured output, never reported as running
         - [ ] SSE stream drops after a backgrounded tab -> reconnects and the list is correct
         - [ ] Forged `Host` on the live socket -> rejected
+    validations:
+      required: true
+
+  - type: textarea
+    id: documentation_impact
+    attributes:
+      label: Documentation impact
+      description: |
+        Which documents this change makes wrong, and the edit that fixes each. Named files,
+        not "update the docs". Documentation is part of the change, not a follow up ticket.
+        Not N/A when the change adds a runtime prerequisite, departs from the design, or
+        ships a mitigation rather than a fix. N/A is fine for a pure refactor: say why.
+      placeholder: |
+        - `README.md`: add tmux to the prerequisites table, with `tmux -V` as the check
+        - `docs/superpowers/specs/...-design.md`: amend section 5.1, which still names
+          TrustedHostMiddleware, and say why it is not used
+        - N/A for `docs/versioning.md`: no operator facing behaviour changes
     validations:
       required: true
 

@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        <!-- template-version: 5 -->
+        <!-- template-version: 6 -->
         ## Bug Report
         A bug that makes Hitchrail report a session state incorrectly is a security bug, not a
         cosmetic one: it invites starting a second agent in a folder that already has one.
@@ -196,6 +196,23 @@ body:
         - [ ] **Footgun guard:** if the fix is a workaround for a documented footgun, a named test protects it from a future tidy-up
         - [ ] **No new bare tmux invocation**; every target is scoped to the configured prefix
         - [ ] `uv run pytest`, `ruff check`, `ruff format --check`, `mypy`, `lint-imports` all green
+    validations:
+      required: true
+
+  - type: textarea
+    id: documentation_impact
+    attributes:
+      label: Documentation impact
+      description: |
+        Which documents this change makes wrong, and the edit that fixes each. Named files,
+        not "update the docs". Documentation is part of the change, not a follow up ticket.
+        Not N/A when the change adds a runtime prerequisite, departs from the design, or
+        ships a mitigation rather than a fix. N/A is fine for a pure refactor: say why.
+      placeholder: |
+        - `README.md`: add tmux to the prerequisites table, with `tmux -V` as the check
+        - `docs/superpowers/specs/...-design.md`: amend section 5.1, which still names
+          TrustedHostMiddleware, and say why it is not used
+        - N/A for `docs/versioning.md`: no operator facing behaviour changes
     validations:
       required: true
 
