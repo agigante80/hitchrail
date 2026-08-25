@@ -233,16 +233,34 @@ def test_a_symlink_to_a_nested_directory_is_refused_with_an_honest_message(
         project_path(tmp_path, "nested")
 
 
-def test_a_create_that_loses_a_race_refuses_rather_than_raising_oserror(
+def test_creating_a_folder_that_already_exists_is_refused_not_crashed(
     tmp_path: Path,
+) -> None:
+    (tmp_path / "racer").mkdir()
+    with pytest.raises(AlreadyExists):
+        create_project(tmp_path, "racer")
+
+
+def test_a_create_that_loses_a_race_refuses_rather_than_raising_oserror(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Named regression: check-then-create let FileExistsError escape.
 
     FileExistsError is not a ValueError, so every caller's refusal handling
     missed it and the API would have answered 500 rather than a refusal. A web
     interface makes the double submission that triggers it easy.
+
+    The race is simulated rather than run. Asserting on an already existing
+    folder is not enough: check-then-create produces AlreadyExists for that
+    case too, so such a test documents the contract without noticing a revert.
+    Making mkdir itself lose the race is what turns this into a guard, and a
+    genuinely concurrent test here would be flaky.
     """
-    (tmp_path / "racer").mkdir()
+
+    def lost_the_race(self: Path, *args: object, **kwargs: object) -> None:
+        raise FileExistsError(17, "File exists")
+
+    monkeypatch.setattr(Path, "mkdir", lost_the_race)
     with pytest.raises(AlreadyExists):
         create_project(tmp_path, "racer")
 

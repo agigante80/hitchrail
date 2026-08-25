@@ -35,5 +35,9 @@ jobs:
       - run: uv run ruff format --check
       - run: uv run mypy
       - run: uv run lint-imports
+      # Measured and reported, NOT gated. There is deliberately no fail_under:
+      # docs/tech-guidelines.md section 7.4 rules out a percentage threshold,
+      # because it is satisfied by executing lines without asserting on them.
+      # The five gates above are the blocking ones.
       - run: uv run coverage run -m pytest
       - run: uv run coverage report
