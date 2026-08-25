@@ -28,6 +28,18 @@ def fixed_resolver(*addresses: str) -> Resolver:
     return lambda: tuple(addresses)
 
 
+def no_socket(*args: object, **kwargs: object) -> object:
+    """Refuse to make a socket.
+
+    Three tests here patched gethostname and getaddrinfo and then fell straight
+    through to the UDP routing table probe, so they opened a real socket and
+    the wildcard filter test asserted over whatever address this developer's
+    machine happened to have. Hermetic means every surface, not the two that
+    were obvious.
+    """
+    raise OSError("tests must not open a socket")
+
+
 def test_loopback_bind_needs_no_token(tmp_path: Path) -> None:
     cfg = Config(root=tmp_path)
     assert cfg.is_loopback
@@ -234,7 +246,8 @@ def test_local_addresses_survives_a_machine_with_no_hostname(
 
     monkeypatch.setattr("hitchrail.config.socket.gethostname", lambda: "")
     monkeypatch.setattr("hitchrail.config.socket.getaddrinfo", refuse)
-    assert isinstance(local_addresses(), tuple)
+    monkeypatch.setattr("hitchrail.config.socket.socket", no_socket)
+    assert local_addresses() == ()
 
 
 def test_local_addresses_survives_a_failing_lookup(
@@ -246,7 +259,8 @@ def test_local_addresses_survives_a_failing_lookup(
 
     monkeypatch.setattr("hitchrail.config.socket.gethostname", lambda: "box")
     monkeypatch.setattr("hitchrail.config.socket.getaddrinfo", boom)
-    assert "box" in local_addresses()
+    monkeypatch.setattr("hitchrail.config.socket.socket", no_socket)
+    assert local_addresses() == ("box",)
 
 
 def test_local_addresses_never_returns_a_wildcard(
@@ -258,4 +272,132 @@ def test_local_addresses_never_returns_a_wildcard(
         "hitchrail.config.socket.getaddrinfo",
         lambda *a, **k: [(0, 0, 0, "", ("::", 0))],
     )
-    assert all(not is_wildcard_host(h) for h in local_addresses())
+    monkeypatch.setattr("hitchrail.config.socket.socket", no_socket)
+    assert local_addresses() == ()
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["box.lan:8787", "http://box.lan", "box.lan/path", "user@box.lan", "box.lan?x=1"],
+    ids=["port", "scheme", "path", "userinfo", "query"],
+)
+def test_an_extra_host_that_is_not_a_bare_hostname_is_refused(tmp_path: Path, bad: str) -> None:
+    """Named regression: a configured host that can never match is worse than a refusal.
+
+    `box.lan:8787` was accepted, landed in allowed_hosts verbatim, and never
+    matched a Host header because the middleware compares with the port already
+    stripped. It also misfired the IPv6 bracketing and produced an allowed
+    origin of `http://[box.lan:8787]:8787`.
+    """
+    with pytest.raises(ConfigError, match="bare hostname"):
+        Config(root=tmp_path, host="0.0.0.0", token="t", extra_hosts=(bad,))
+
+
+def test_a_bracketed_ipv6_extra_host_is_accepted(tmp_path: Path) -> None:
+    cfg = Config(root=tmp_path, host="0.0.0.0", token="t", extra_hosts=("[fe80::1]",))
+    assert "[fe80::1]" in cfg.allowed_hosts
+
+
+@pytest.mark.parametrize("prefix", ["", "   ", " hr-", "hr- ", "hr.", "hr:", "h r-"])
+def test_a_prefix_that_would_make_the_kill_guard_vacuous_is_refused(
+    tmp_path: Path, prefix: str
+) -> None:
+    """Named regression: "never kill a session without the prefix" needs a prefix.
+
+    Every tmux session name satisfies startswith(""), so an empty prefix turns
+    the guard that protects the developer's own sessions into a no-op. Dots and
+    colons are refused for the separate reason that tmux reads them as window
+    and pane separators.
+    """
+    with pytest.raises(ConfigError, match="session prefix"):
+        Config(root=tmp_path, session_prefix=prefix)
+
+
+@pytest.mark.parametrize("binary", ["", "  ", "-rf", "--dangerously-skip-permissions"])
+def test_a_flag_shaped_claude_binary_is_refused(tmp_path: Path, binary: str) -> None:
+    # argv[0] starting with a hyphen is read as an option by whatever parses it,
+    # and no shell being involved does not help.
+    with pytest.raises(ConfigError, match="claude binary"):
+        Config(root=tmp_path, claude_binary=binary)
+
+
+@pytest.mark.parametrize("port", [0, -1, 65536, 99999])
+def test_a_port_out_of_range_is_refused(tmp_path: Path, port: int) -> None:
+    with pytest.raises(ConfigError, match="port"):
+        Config(root=tmp_path, port=port)
+
+
+def test_a_non_positive_stop_timeout_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="stop timeout"):
+        Config(root=tmp_path, stop_timeout=0)
+
+
+def test_an_inverted_pair_of_memory_floors_is_refused(tmp_path: Path) -> None:
+    # The soft floor is the "ask first" threshold and the hard floor is the
+    # refusal. Inverted, the confirmation gate can never fire and the guard
+    # loses a step without saying so.
+    with pytest.raises(ConfigError, match="soft floor"):
+        Config(root=tmp_path, hard_floor_mb=3072, soft_floor_mb=1536)
+
+
+@pytest.mark.parametrize("host", ["[::1]", " ::1 ", "[::1] "])
+def test_a_bracketed_loopback_bind_is_recognised(tmp_path: Path, host: str) -> None:
+    """Named regression: [::1] is the form people copy out of a URL.
+
+    Reading it as a network bind meant refusing to serve loopback without a
+    token, with a message about anyone on the network running code as you.
+    """
+    cfg = Config(root=tmp_path, host=host)
+    assert cfg.is_loopback
+    assert cfg.token is None
+
+
+def test_the_allowlist_is_resolved_once_not_on_every_read(tmp_path: Path) -> None:
+    """Named regression: the middleware reads this per request.
+
+    As a plain property it ran gethostname, getaddrinfo and a UDP connect on
+    every access, on the event loop, and two reads inside one request could
+    disagree with each other.
+    """
+    calls: list[int] = []
+
+    def counting() -> tuple[str, ...]:
+        calls.append(1)
+        return ("10.0.0.2",)
+
+    cfg = Config(root=tmp_path, host="0.0.0.0", token="t", resolver=counting)
+    for _ in range(5):
+        _ = cfg.allowed_hosts
+        _ = cfg.allowed_origins
+    assert calls == [1]
+
+
+def test_a_failing_gethostname_does_not_discard_the_probe_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Named regression: gethostname sat outside any suppress.
+
+    A container with an unreadable UTS name aborted local_addresses before the
+    routing table probe, so a wildcard bind never learned its LAN address and
+    degraded to loopback only.
+    """
+
+    class FakeSocket:
+        def __enter__(self) -> FakeSocket:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def connect(self, address: tuple[str, int]) -> None:
+            return None
+
+        def getsockname(self) -> tuple[str, int]:
+            return ("192.168.5.5", 0)
+
+    def boom(*args: object, **kwargs: object) -> object:
+        raise OSError("no UTS name")
+
+    monkeypatch.setattr("hitchrail.config.socket.gethostname", boom)
+    monkeypatch.setattr("hitchrail.config.socket.socket", lambda *a, **k: FakeSocket())
+    assert local_addresses() == ("192.168.5.5",)

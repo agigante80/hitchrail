@@ -13,7 +13,9 @@ import pytest
 from hitchrail.discovery import (
     AlreadyExists,
     InvalidName,
+    NoSuchProject,
     OutsideRoot,
+    RootUnavailable,
     create_project,
     list_projects,
     project_path,
@@ -273,3 +275,50 @@ def test_creation_never_follows_a_symlink_to_its_target(tmp_path: Path) -> None:
     with pytest.raises(AlreadyExists):
         create_project(tmp_path, "ghost")
     assert not target.exists()
+
+
+def test_a_missing_project_is_distinguishable_from_a_malformed_name(
+    tmp_path: Path,
+) -> None:
+    """Named regression: 400 and 404 are different answers.
+
+    Both used to raise a bare InvalidName, so the HTTP layer could only answer
+    400 for each. A project deleted from under a stale phone tab is not a
+    client sending a bad request.
+    """
+    with pytest.raises(NoSuchProject):
+        project_path(tmp_path, "well-formed-but-absent")
+    with pytest.raises(InvalidName) as bad:
+        project_path(tmp_path, "../etc")
+    assert not isinstance(bad.value, NoSuchProject)
+
+    # Still a subclass, so existing handlers and the declared interface for
+    # later phases keep working unchanged.
+    assert issubclass(NoSuchProject, InvalidName)
+
+
+def test_a_root_that_vanished_is_reported_rather_than_crashing(tmp_path: Path) -> None:
+    """Named regression: FileNotFoundError is not a ValueError.
+
+    Config checks the root once, at construction. A USB drive, an autofs mount
+    or a sync client can take it away afterwards, and an unmapped OSError
+    escaped every caller's refusal handling as a 500. This is the same door the
+    AlreadyExists mapping closed on the creation side.
+    """
+    root = tmp_path / "gone"
+    root.mkdir()
+    root.rmdir()
+    with pytest.raises(RootUnavailable):
+        list_projects(root)
+    with pytest.raises(RootUnavailable):
+        create_project(root, "anything")
+
+
+def test_root_unavailable_is_not_mistaken_for_an_empty_root(tmp_path: Path) -> None:
+    # Guessing "no projects" from a root we could not read would report every
+    # session as stopped, which is control 7's whole point.
+    root = tmp_path / "vanished"
+    root.mkdir()
+    root.rmdir()
+    with pytest.raises(RootUnavailable):
+        list_projects(root)

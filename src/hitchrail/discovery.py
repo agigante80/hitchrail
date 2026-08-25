@@ -23,6 +23,29 @@ class InvalidName(ValueError):
     """The name is not one we are willing to turn into a path."""
 
 
+class NoSuchProject(InvalidName):
+    """The name is fine, but there is no folder of that name.
+
+    A subclass so that `except InvalidName` still catches it and the declared
+    interface for later phases does not change. It exists because the HTTP
+    layer has to answer 400 for a malformed name and 404 for a missing one,
+    and one exception type cannot carry both. A project deleted from under a
+    stale phone tab is not a client sending a bad request.
+    """
+
+
+class RootUnavailable(ValueError):
+    """The root itself could not be read.
+
+    Config checks the root is a directory once, at construction. A USB drive,
+    an autofs mount or a sync client can take it away afterwards, and
+    FileNotFoundError is not a ValueError, so it escaped every caller's refusal
+    handling as a 500. Reporting honestly that the root cannot be read is the
+    behaviour control 7 asks for; guessing that there are no projects would say
+    every session is stopped.
+    """
+
+
 class OutsideRoot(ValueError):
     """The name does not resolve to a direct child of the root."""
 
@@ -77,9 +100,21 @@ def list_projects(root: Path) -> list[str]:
     somebody taps them, is not "no distinction", it is an interface offering
     actions that cannot work. One guard decides membership, and it is the same
     guard that decides everything else here.
+
+    KNOWN GAP, and it is a real one: that guard also hides ordinary folders
+    whose names fall outside NAME_PATTERN, such as `my app`, `cafe` with an
+    accent, or anything over 64 characters. They vanish from the listing with
+    no signal. Fixing it means either widening a security control's alphabet or
+    adding a way to report hidden folders, and which of those is acceptable is
+    a product decision rather than a code one. See
+    https://github.com/agigante80/hitchrail/issues/7.
     """
     names: list[str] = []
-    for entry in root.iterdir():
+    try:
+        entries = sorted(root.iterdir(), key=lambda p: p.name)
+    except OSError as exc:
+        raise RootUnavailable(f"cannot read the root {root}: {exc}") from exc
+    for entry in entries:
         if not entry.is_dir():
             continue
         try:
@@ -93,7 +128,7 @@ def list_projects(root: Path) -> list[str]:
 def project_path(root: Path, name: str) -> Path:
     resolved = resolve_child(root, name)
     if not resolved.is_dir():
-        raise InvalidName(f"no such project: {name!r}")
+        raise NoSuchProject(f"no such project: {name!r}")
     return resolved
 
 
@@ -118,4 +153,9 @@ def create_project(root: Path, name: str) -> Path:
         target.mkdir()
     except FileExistsError as exc:
         raise AlreadyExists(f"already there: {name!r}") from exc
+    except OSError as exc:
+        # The root went away between construction and now, or it is not
+        # writable. Either way this is not a bad request, and letting an
+        # OSError past here reopens the door the AlreadyExists mapping closed.
+        raise RootUnavailable(f"cannot create in the root {root}: {exc}") from exc
     return target.resolve()
