@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from hitchrail import config as config_module
 from hitchrail.config import (
     Config,
     ConfigError,
@@ -169,3 +170,53 @@ def test_the_config_is_frozen(tmp_path: Path) -> None:
     cfg = Config(root=tmp_path)
     with pytest.raises(AttributeError):
         cfg.token = "sneaked in"  # type: ignore[misc]
+
+
+@pytest.mark.parametrize("host", ["box.lan", "example.com", "not-an-ip", "localhos"])
+def test_a_hostname_that_is_not_an_ip_is_not_loopback(host: str) -> None:
+    # The ValueError path in is_loopback_host. If this ever answered True, a
+    # bind to a named host would skip the token requirement entirely, so it
+    # gets an assertion rather than being left to the type checker.
+    assert not is_loopback_host(host)
+
+
+def test_a_named_bind_still_demands_a_token(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="token"):
+        Config(root=tmp_path, host="box.lan")
+
+
+def test_local_addresses_survives_a_machine_with_no_hostname(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config_module.socket, "gethostname", lambda: "")
+    monkeypatch.setattr(
+        config_module.socket,
+        "getaddrinfo",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not be asked")),
+    )
+    assert isinstance(config_module.local_addresses(), tuple)
+
+
+def test_local_addresses_survives_a_failing_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A machine with no DNS is a machine Hitchrail still has to run on.
+    def boom(*args: object, **kwargs: object) -> object:
+        raise OSError("no resolver")
+
+    monkeypatch.setattr(config_module.socket, "gethostname", lambda: "box")
+    monkeypatch.setattr(config_module.socket, "getaddrinfo", boom)
+    assert "box" in config_module.local_addresses()
+
+
+def test_local_addresses_never_returns_a_wildcard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The one output that would turn the allowlist into no allowlist at all.
+    monkeypatch.setattr(config_module.socket, "gethostname", lambda: "0.0.0.0")
+    monkeypatch.setattr(
+        config_module.socket, "getaddrinfo", lambda *a, **k: [(0, 0, 0, "", ("::", 0))]
+    )
+    assert config_module.local_addresses() == () or all(
+        not is_wildcard_host(h) for h in config_module.local_addresses()
+    )
