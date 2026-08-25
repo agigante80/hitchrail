@@ -132,6 +132,14 @@ emitting no `.` or `:` at all, so tmux never rewrites anything.
 Two things here are new relative to a naive adapter, and both come out of
 review rather than out of tmux's manual.
 
+**`sanitize` must be injective, and the digest below does not achieve it.**
+Implemented in 3aadc32 as an escape encoding instead. The digest form returned
+already safe names unchanged, so a project named literally `a-b-<the digest of
+a.b>` collided with `a.b`, and that name is computable by anyone who can create
+a folder. Six hex is 24 bits, so accidental collisions also arrive around four
+thousand projects. The code and #22 carry the full reasoning; the snippets
+below are kept as the record of what was proposed.
+
 **`sanitize` must be injective.** Replacing `.` and `:` with `-` makes a name
 addressable, and it also makes `a.b` and `a-b` the same tmux session. Two
 folders then share one agent: one reads as running because of the other, and
