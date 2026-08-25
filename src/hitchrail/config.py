@@ -50,20 +50,55 @@ def normalise_host(raw: str) -> str:
     header the same way and both meet in the middle on the bare form. Storing
     both was a workaround for a matcher that could not strip them.
 
-    A trailing root dot is deliberately NOT stripped here, though `box.lan.`
-    and `box.lan` name the same machine. Stripping it on this side only, which
-    is what a first attempt did, made things worse rather than better: the
-    header side (`security.parse_host`) does not strip, so `--allow-host
-    box.lan.` stopped serving `Host: box.lan.` and no spelling of the flag
-    served it at all. It also let `box.lan..` past `is_valid_host`, which
-    normalises before matching, and stored it as `box.lan.`, turning a clean
-    refusal into exactly the accepted-then-never-matches case this module
-    refuses to have. Doing it properly means both sides at once. See #19.
+    The trailing root dot of an FQDN goes too, and this reverses an earlier
+    decision recorded here, so the reasoning is worth keeping. `box.lan.` and
+    `box.lan` name the same machine, and a browser at `http://box.lan./` sends
+    the dot in both `Host` and `Origin`. A first attempt stripped it HERE ONLY
+    and made things worse: `security.parse_host` did not strip, the two sides
+    stopped meeting, and no spelling of `--allow-host` served a dotted `Host`.
+    It was reverted rather than patched. Both doors now strip, which is the
+    only form that works, and `security.parse_host` carries the same rule.
+
+    The strip is unconditional, not one dot. `is_valid_host` normalises before
+    matching, so a single strip turned `box.lan..` into `box.lan.`, walked it
+    past the pattern, and stored an entry nothing could ever match: a clean
+    refusal converted into the accepted-then-never-matches shape this module
+    exists to refuse. `rstrip` takes `.` and `..` to the empty string, which
+    the pattern already rejects, so the refusal stays a refusal.
     """
     value = raw.strip().lower()
     if value.startswith("[") and value.endswith("]"):
         value = value[1:-1]
-    return value
+    # Unconditional: see the docstring. A `len(value) > 1` guard looked like
+    # safety and was the bug.
+    return value.rstrip(".")
+
+
+def normalise_origin(raw: str) -> str:
+    """One canonical form for an origin, host included.
+
+    `normalise_host` canonicalises a bare host and this does the same for a
+    host wrapped in an origin, so the allowlist and an `Origin` header meet in
+    the middle exactly as they do for `Host`. Fixing the `Host` side alone
+    would serve the page at `http://box.lan./` and then refuse every mutating
+    request from it, which reads as the application being broken rather than
+    misconfigured.
+
+    Anything that is not an origin is returned unchanged rather than repaired.
+    The caller compares for equality against an allowlist, so a value this
+    function cannot parse simply fails to match and the request is refused.
+    Repairing junk into a match is the failure mode worth avoiding here.
+    """
+    value = raw.strip().rstrip("/").lower()
+    scheme, separator, rest = value.partition("://")
+    if not separator or not rest:
+        return value
+    if rest.startswith("["):
+        # An IPv6 literal cannot carry a root dot, and its brackets must not be
+        # split on the colons inside them.
+        return f"{scheme}://{rest}"
+    host, colon, port = rest.partition(":")
+    return f"{scheme}://{host.rstrip('.')}{colon}{port}"
 
 
 def origin_forms(scheme: str, host: str, port: int | None) -> set[str]:
@@ -498,5 +533,10 @@ class Config:
         for entry in self.extra_origins:
             parts = urlsplit(entry.strip().rstrip("/").lower())
             assert parts.hostname is not None  # validated in _check_extra_origins
-            origins.update(origin_forms(parts.scheme, parts.hostname, parts.port))
+            # normalise_host, not parts.hostname raw: urlsplit lowercases but
+            # keeps a trailing root dot, so `--allow-origin https://box.lan.`
+            # would be stored in a spelling no browser sends.
+            origins.update(
+                origin_forms(parts.scheme, normalise_host(parts.hostname), parts.port)
+            )
         return frozenset(origins)

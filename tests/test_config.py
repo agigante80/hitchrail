@@ -20,6 +20,7 @@ from hitchrail.config import (
     is_wildcard_host,
     local_addresses,
     normalise_host,
+    normalise_origin,
 )
 
 Resolver = Callable[[], tuple[str, ...]]
@@ -719,3 +720,98 @@ def test_the_bind_address_is_stored_in_the_form_uvicorn_can_bind(
     """
     cfg = Config(root=tmp_path, host=given, token="tok", extra_hosts=("box.lan",))
     assert cfg.host == stored
+
+
+# -- #19: the FQDN root dot, on every door ---------------------------------
+
+
+@pytest.mark.parametrize("door", ["bind", "extra_hosts", "resolver"])
+def test_a_root_dot_is_stripped_from_every_door(tmp_path: Path, door: str) -> None:
+    """`box.lan.` and `box.lan` name the same machine, so one form is stored.
+
+    Every door into the allowlist goes through `normalise_host`, and this
+    asserts all three rather than the one that happened to be fixed.
+    """
+    kwargs: dict[str, object] = {"root": tmp_path, "token": "t"}
+    if door == "bind":
+        kwargs["host"] = "box.lan."
+        kwargs["resolver"] = lambda: ()
+    elif door == "extra_hosts":
+        kwargs["host"] = "0.0.0.0"
+        kwargs["extra_hosts"] = ("box.lan.",)
+        kwargs["resolver"] = lambda: ()
+    else:
+        kwargs["host"] = "0.0.0.0"
+        kwargs["resolver"] = lambda: ("box.lan.",)
+    cfg = Config(**kwargs)  # type: ignore[arg-type]
+    assert "box.lan" in cfg.allowed_hosts
+    assert "box.lan." not in cfg.allowed_hosts
+
+
+@pytest.mark.parametrize("bad", [".", "..", "...", "box..lan", "box.lan:8787"])
+def test_a_host_with_no_valid_reading_is_a_startup_refusal(tmp_path: Path, bad: str) -> None:
+    """Dots that leave nothing behind, or that are not root dots at all.
+
+    `.` and `..` normalise to the empty string and `box..lan` has an empty
+    label in the middle, which is a different thing from a trailing root dot
+    and stays refused.
+    """
+    with pytest.raises(ConfigError):
+        Config(
+            root=tmp_path, host="0.0.0.0", token="t", extra_hosts=(bad,), resolver=lambda: ()
+        )
+
+
+@pytest.mark.parametrize("given", ["box.lan.", "box.lan..", "box.lan..."])
+def test_a_repeated_root_dot_normalises_rather_than_lingering(
+    tmp_path: Path, given: str
+) -> None:
+    """Named regression for the reverted first attempt at #19.
+
+    That attempt stripped ONE dot. Because `is_valid_host` normalises before
+    matching, `box.lan..` became `box.lan.`, passed the pattern, and landed in
+    the allowlist in a spelling nothing could ever match. That is the defect,
+    and this asserts the property rather than a policy: whatever goes in, what
+    comes out is a spelling a browser can actually send.
+
+    An earlier draft of #19 specified refusing `box.lan..` instead. That was
+    over specified before the code existed. A doubled root dot has exactly one
+    possible reading, unlike `box.lan:8787` where the port is meaningful and
+    wrong, so normalising loses nothing and widens nothing.
+    """
+    cfg = Config(
+        root=tmp_path, host="0.0.0.0", token="t", extra_hosts=(given,), resolver=lambda: ()
+    )
+    assert "box.lan" in cfg.allowed_hosts
+    assert not any(h.endswith(".") for h in cfg.allowed_hosts)
+
+
+def test_a_configured_origin_with_a_root_dot_normalises(tmp_path: Path) -> None:
+    cfg = Config(
+        root=tmp_path,
+        host="0.0.0.0",
+        token="t",
+        extra_hosts=("box.lan",),
+        extra_origins=("https://box.lan.:8443",),
+        resolver=lambda: (),
+    )
+    assert "https://box.lan:8443" in cfg.allowed_origins
+    assert "https://box.lan.:8443" not in cfg.allowed_origins
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("http://box.lan.:8787", "http://box.lan:8787"),
+        ("http://box.lan.", "http://box.lan"),
+        ("HTTPS://BOX.LAN./", "https://box.lan"),
+        ("http://[::1]:8787", "http://[::1]:8787"),
+        ("http://10.0.0.2.:80", "http://10.0.0.2:80"),
+        # Not an origin: returned unchanged so the caller's equality fails and
+        # the request is refused, rather than being repaired into a match.
+        ("box.lan.", "box.lan."),
+        ("", ""),
+    ],
+)
+def test_normalise_origin_canonicalises_only_the_host(raw: str, expected: str) -> None:
+    assert normalise_origin(raw) == expected

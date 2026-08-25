@@ -255,3 +255,49 @@ def test_split_cookie_headers_are_joined_not_dropped() -> None:
 
     reversed_scope = {"headers": [(b"cookie", b"hitchrail_token=tok"), (b"cookie", b"a=1")]}
     assert "hitchrail_token=tok" in header_map(reversed_scope)["cookie"]
+
+
+# -- #19: a root dot on the Host header ------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("box.lan.", "box.lan"),
+        ("box.lan.:8787", "box.lan"),
+        ("BOX.LAN.", "box.lan"),
+        ("box.lan...", "box.lan"),
+        # Not a host at all once the dots go, so it matches nothing.
+        (".", ""),
+        ("..", ""),
+    ],
+)
+def test_parse_host_strips_the_root_dot(raw: str, expected: str) -> None:
+    """The header side of #19.
+
+    Stripping in `config.normalise_host` alone made things worse: the two
+    sides then disagreed and no spelling of `--allow-host` served a dotted
+    Host. Both doors strip, or neither does.
+    """
+    assert parse_host(raw) == expected
+
+
+@pytest.mark.parametrize("configured", ["box.lan", "box.lan."])
+@pytest.mark.parametrize("sent", ["box.lan", "box.lan."])
+async def test_dotted_and_undotted_hosts_all_match(
+    tmp_path: Path, configured: str, sent: str
+) -> None:
+    """All four combinations, because the defect was asymmetry.
+
+    Testing one direction passes while the other is broken, which is exactly
+    how the first attempt shipped.
+    """
+    cfg = Config(
+        root=tmp_path,
+        host="0.0.0.0",
+        token="t",
+        extra_hosts=(configured,),
+        resolver=fixed_resolver("10.0.0.2"),
+    )
+    response = await call(build(cfg), headers={"host": sent, "authorization": "Bearer t"})
+    assert response.status_code == 200

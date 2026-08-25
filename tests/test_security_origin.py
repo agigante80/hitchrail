@@ -207,3 +207,32 @@ async def test_the_host_check_runs_before_the_origin_check(tmp_path: Path) -> No
     )
     assert response.status_code == 400
     assert response.json()["code"] == "host_rejected"
+
+
+# -- #19: a root dot in the Origin header ----------------------------------
+
+
+@pytest.mark.parametrize("configured", ["box.lan", "box.lan."])
+@pytest.mark.parametrize("sent", ["http://box.lan:8787", "http://box.lan.:8787"])
+async def test_a_dotted_origin_matches_an_undotted_entry(
+    tmp_path: Path, configured: str, sent: str
+) -> None:
+    """A browser at `http://box.lan./` sends the dot in Origin too.
+
+    Fixing only the Host header would serve the page and then refuse every
+    mutating request from it, which is a worse failure than refusing outright
+    because it looks like the app is broken rather than misconfigured.
+    """
+    cfg = Config(
+        root=tmp_path,
+        host="0.0.0.0",
+        token="t",
+        extra_hosts=(configured,),
+        resolver=lambda: (),
+    )
+    response = await call(
+        build(cfg),
+        "POST",
+        headers={"host": "box.lan", "origin": sent, "authorization": "Bearer t"},
+    )
+    assert response.status_code == 200

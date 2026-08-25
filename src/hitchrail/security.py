@@ -23,7 +23,7 @@ from starlette.requests import cookie_parser
 from starlette.responses import JSONResponse, RedirectResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from hitchrail.config import Config
+from hitchrail.config import Config, normalise_origin
 
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 # The cookie NAME, not a secret. S105 pattern matches on the word "token".
@@ -110,7 +110,14 @@ def parse_host(raw: str) -> str:
     host = value.split(":")[0]
     # A Host header has no whitespace in it. Smuggling one past a proxy that
     # splits differently is a known trick, so anything containing it is junk.
-    return "" if any(c.isspace() for c in host) else host
+    if any(c.isspace() for c in host):
+        return ""
+    # The FQDN root dot, stripped on this side too. `config.normalise_host`
+    # strips it on the way in, and a browser at `http://box.lan./` sends it
+    # here, so both doors have to agree or the allowlist holds a spelling the
+    # header can never equal. Stripping on one side only is worse than on
+    # neither, which is how the first attempt at this was reverted.
+    return host.rstrip(".")
 
 
 class HostAllowlistMiddleware:
@@ -161,7 +168,7 @@ class OriginCheckMiddleware:
 
     def __init__(self, app: ASGIApp, allowed_origins: frozenset[str]) -> None:
         self.app = app
-        self.allowed = frozenset(o.strip().rstrip("/").lower() for o in allowed_origins)
+        self.allowed = frozenset(normalise_origin(o) for o in allowed_origins)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] not in ("http", "websocket"):  # pragma: no cover - lifespan
@@ -184,7 +191,7 @@ class OriginCheckMiddleware:
         # Scheme and host are case insensitive per RFC 3986, and some clients
         # append a slash that is not part of an origin. Normalise both rather
         # than turn either into a refusal nobody can explain.
-        if origin.strip().rstrip("/").lower() not in self.allowed:
+        if normalise_origin(origin) not in self.allowed:
             await deny(403, "origin_rejected", f"origin not allowed: {origin}")(
                 scope, receive, send
             )
