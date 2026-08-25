@@ -113,6 +113,7 @@ name = "the engine layer knows nothing about the web"
 type = "forbidden"
 source_modules = [
   "hitchrail.config",
+  "hitchrail.hostnames",
   "hitchrail.discovery",
   "hitchrail.tmux",
   "hitchrail.procs",

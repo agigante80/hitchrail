@@ -240,9 +240,9 @@ def test_local_addresses_survives_a_machine_that_cannot_make_a_socket(
     def no_sockets(*args: object, **kwargs: object) -> object:
         raise OSError("EMFILE")
 
-    monkeypatch.setattr("hitchrail.config.socket.gethostname", lambda: "box")
-    monkeypatch.setattr("hitchrail.config.socket.getaddrinfo", lambda *a, **k: [])
-    monkeypatch.setattr("hitchrail.config.socket.socket", no_sockets)
+    monkeypatch.setattr("hitchrail.hostnames.socket.gethostname", lambda: "box")
+    monkeypatch.setattr("hitchrail.hostnames.socket.getaddrinfo", lambda *a, **k: [])
+    monkeypatch.setattr("hitchrail.hostnames.socket.socket", no_sockets)
     assert local_addresses() == ("box",)
 
 
@@ -281,9 +281,9 @@ def test_local_addresses_survives_a_machine_with_no_hostname(
     def refuse(*args: object, **kwargs: object) -> object:
         raise AssertionError("getaddrinfo must not be asked without a hostname")
 
-    monkeypatch.setattr("hitchrail.config.socket.gethostname", lambda: "")
-    monkeypatch.setattr("hitchrail.config.socket.getaddrinfo", refuse)
-    monkeypatch.setattr("hitchrail.config.socket.socket", no_socket)
+    monkeypatch.setattr("hitchrail.hostnames.socket.gethostname", lambda: "")
+    monkeypatch.setattr("hitchrail.hostnames.socket.getaddrinfo", refuse)
+    monkeypatch.setattr("hitchrail.hostnames.socket.socket", no_socket)
     assert local_addresses() == ()
 
 
@@ -294,9 +294,9 @@ def test_local_addresses_survives_a_failing_lookup(
     def boom(*args: object, **kwargs: object) -> object:
         raise OSError("no resolver")
 
-    monkeypatch.setattr("hitchrail.config.socket.gethostname", lambda: "box")
-    monkeypatch.setattr("hitchrail.config.socket.getaddrinfo", boom)
-    monkeypatch.setattr("hitchrail.config.socket.socket", no_socket)
+    monkeypatch.setattr("hitchrail.hostnames.socket.gethostname", lambda: "box")
+    monkeypatch.setattr("hitchrail.hostnames.socket.getaddrinfo", boom)
+    monkeypatch.setattr("hitchrail.hostnames.socket.socket", no_socket)
     assert local_addresses() == ("box",)
 
 
@@ -304,12 +304,12 @@ def test_local_addresses_never_returns_a_wildcard(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # The one output that would turn the allowlist into no allowlist at all.
-    monkeypatch.setattr("hitchrail.config.socket.gethostname", lambda: "0.0.0.0")
+    monkeypatch.setattr("hitchrail.hostnames.socket.gethostname", lambda: "0.0.0.0")
     monkeypatch.setattr(
-        "hitchrail.config.socket.getaddrinfo",
+        "hitchrail.hostnames.socket.getaddrinfo",
         lambda *a, **k: [(0, 0, 0, "", ("::", 0))],
     )
-    monkeypatch.setattr("hitchrail.config.socket.socket", no_socket)
+    monkeypatch.setattr("hitchrail.hostnames.socket.socket", no_socket)
     assert local_addresses() == ()
 
 
@@ -446,8 +446,8 @@ def test_a_failing_gethostname_does_not_discard_the_probe_address(
     def boom(*args: object, **kwargs: object) -> object:
         raise OSError("no UTS name")
 
-    monkeypatch.setattr("hitchrail.config.socket.gethostname", boom)
-    monkeypatch.setattr("hitchrail.config.socket.socket", lambda *a, **k: FakeSocket())
+    monkeypatch.setattr("hitchrail.hostnames.socket.gethostname", boom)
+    monkeypatch.setattr("hitchrail.hostnames.socket.socket", lambda *a, **k: FakeSocket())
     assert local_addresses() == ("192.168.5.5",)
 
 
@@ -815,3 +815,31 @@ def test_a_configured_origin_with_a_root_dot_normalises(tmp_path: Path) -> None:
 )
 def test_normalise_origin_canonicalises_only_the_host(raw: str, expected: str) -> None:
     assert normalise_origin(raw) == expected
+
+
+# -- #18: the seam holds ---------------------------------------------------
+
+
+def test_hostnames_does_not_import_config() -> None:
+    """The dependency runs one way, which is what makes this a seam.
+
+    `config` imports `hostnames`. If `hostnames` ever imports `config` back,
+    the split stops being a seam and becomes a cut through a cycle, and the
+    next person to tidy up will reasonably merge them again.
+    """
+    source = (Path(__file__).parent.parent / "src" / "hitchrail" / "hostnames.py").read_text()
+    assert "import config" not in source
+    assert "from hitchrail.config" not in source
+    assert "from .config" not in source
+
+
+def test_both_modules_are_under_the_size_guideline() -> None:
+    """The reason #18 existed. Asserted so it does not silently regress.
+
+    `.claude/CLAUDE.md` says a file past roughly 400 lines is doing more than
+    one thing. config.py reached 502 before this split.
+    """
+    src = Path(__file__).parent.parent / "src" / "hitchrail"
+    for name in ("config.py", "hostnames.py"):
+        lines = len((src / name).read_text().splitlines())
+        assert lines < 400, f"{name} is {lines} lines"

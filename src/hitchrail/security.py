@@ -23,7 +23,8 @@ from starlette.requests import cookie_parser
 from starlette.responses import JSONResponse, RedirectResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from hitchrail.config import Config, normalise_origin
+from hitchrail.config import Config
+from hitchrail.hostnames import normalise_origin
 
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 # The cookie NAME, not a secret. S105 pattern matches on the word "token".
