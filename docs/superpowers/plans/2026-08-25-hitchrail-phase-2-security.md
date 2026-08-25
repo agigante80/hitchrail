@@ -167,9 +167,16 @@ still refused, and that the token comparison was never reached, by patching it.
 | `tests/test_live_socket.py` | the refusals on a real loopback socket, its own deliverable |
 | `pyproject.toml` | gains one registered pytest marker |
 
-One module rather than three. They are 120 lines together, they change together
-whenever the threat model changes, and splitting them would put the ordering
-decision in a fourth file that reviewers would have to go find.
+One module rather than three. They change together whenever the threat model
+changes, and splitting them would put the ordering decision in a fourth file
+that reviewers would have to go find.
+
+The 120 line estimate here was wrong by a factor of three: `security.py` landed
+at 378 lines, because almost every line of it is a footgun the estimate did not
+know about yet. That is under the 400 line rule in `.claude/CLAUDE.md` but not
+by much, and the seam to split on if it grows is the header parsing helpers
+(`header_map`, `parse_host`, `_bearer`, `_safe_redirect_path`) away from the
+three middlewares themselves.
 
 ---
 

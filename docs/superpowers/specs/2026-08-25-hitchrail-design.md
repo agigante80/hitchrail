@@ -187,16 +187,47 @@ exception, so the token path is the main path.
 
 ### 5.1 Controls
 
-1. **Host allowlist, always on.** `TrustedHostMiddleware` with an allowlist
-   covering loopback names plus any host the operator configures. This is DNS
-   rebinding defence: without it, any site the user visits in any browser on the
-   network can rebind a name to Hitchrail's address and drive the API, with the
-   browser treating responses as same origin.
+1. **Host allowlist, always on**, covering loopback names plus any host the
+   operator configures. This is DNS rebinding defence: without it, any site the
+   user visits in any browser on the network can rebind a name to Hitchrail's
+   address and drive the API, with the browser treating responses as same
+   origin.
+
+   **Amended in Phase 2: not `TrustedHostMiddleware`.** This section originally
+   specified Starlette's. Checked against the installed 1.6.0 rather than
+   recalled, it does `host.split(":")[0]`, which splits on the FIRST colon and
+   turns every IPv6 literal into `"["`, so `http://[::1]:8787/` is refused
+   whatever the allowlist holds and a phone on an IPv6 network cannot reach
+   Hitchrail at all. Its `www_redirect` default also answers an unrecognised
+   host with a redirect built from that same untrusted header.
+   `security.HostAllowlistMiddleware` is ten lines and does neither.
 2. **Origin check on every mutating request.** `fetch` and `EventSource` send
    `Origin` and a rebound attacker cannot forge it. This is the CSRF control for
    a same origin JSON API.
 3. **Token required for any non loopback bind.** Refuse to start, do not warn.
-   Generated on first run, printed to the terminal, compared in constant time.
+   Generated on first run, printed to the terminal, compared in constant time
+   with `secrets.compare_digest` on bytes, never on `str`, which raises
+   `TypeError` on any non ASCII character and turns a wrong token into an
+   unauthenticated 500.
+
+   **Amended in Phase 2: the token needs three carriers, not one.** This
+   section originally said "token" and left the carrier implicit, which hid a
+   hole: `EventSource` cannot set request headers, so a token carried only in
+   `Authorization` authenticates every route except the live update stream the
+   interface is built on. Hitchrail therefore accepts the token as a Bearer
+   header, as a `hitchrail_token` cookie, and as a one time `?token=` query
+   grant that trades itself for that cookie and redirects.
+
+   The cookie is `SameSite=Lax`, because `Strict` is withheld on cross site top
+   level navigation and a valid cookie would answer 401 to somebody tapping a
+   link to Hitchrail from another page. It is deliberately not `Secure`,
+   because over plain HTTP on a LAN, a supported deployment, a `Secure` cookie
+   is never sent and the tool silently stops working.
+
+   The query grant is a stopgap and is tracked as one. A secret in a URL is
+   written down by everything it passes: our access log, a reverse proxy's,
+   the `Referer` header and browser history sync. #21 moves it to a URL
+   fragment, which no server ever receives.
 4. **Root is a hard boundary.** Every path is resolved with `Path.resolve()` and
    confirmed to be a direct child of the configured root before any process is
    spawned or any directory created. Folder names are validated against an
