@@ -89,7 +89,8 @@ hitchrail --root ~/dev --host 0.0.0.0 --allow-host box.lan \
 
 Getting the token onto a phone is a link rather than 32 characters of typing.
 Open `http://<address>:8787/?token=<token>` once: it sets a cookie and
-redirects the token out of the address bar and the browser history.
+redirects the token out of the address bar, the browser history and the
+server's own access log.
 
 Hitchrail does not sandbox the sessions it starts. It is a launcher. The agent it
 launches has whatever access you have.

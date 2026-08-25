@@ -40,7 +40,7 @@ def deny(status: int, code: str, message: str) -> JSONResponse:
 
 
 def header_map(scope: Scope) -> dict[str, str]:
-    """Lowercased header names, decoded once per request.
+    """Lowercased header names, with the decoding rules the whole stack shares.
 
     latin-1, which is what RFC 7230 says an HTTP header field is and what
     Starlette's own `Headers` uses. It is also the only choice that cannot
@@ -48,8 +48,13 @@ def header_map(scope: Scope) -> dict[str, str]:
     latin-1 bytes, and an attacker chooses those bytes, so decoding strictly
     here is an unauthenticated crash rather than a refusal.
 
-    Shared because all three middlewares need it and decoding the raw scope
-    headers three times per request is work nobody asked for.
+    Shared for the RULES above, not to save the decoding. Each of the three
+    middlewares calls this on its own, so a request that reaches all three is
+    decoded three times; that is a dict comprehension over a handful of
+    headers and is not worth caching state on the scope to avoid. What is
+    worth sharing is that all three agree on latin-1, on first-wins, and on
+    joining Cookie, because a middleware that read a header differently from
+    the one beside it is where request smuggling lives.
     """
     headers: dict[str, str] = {}
     for raw_key, raw_value in scope["headers"]:
@@ -316,6 +321,23 @@ class TokenMiddleware:
         remaining = urlencode([(k, v) for k, v in params if k != GRANT_PARAM])
         path = _safe_redirect_path(scope["path"])
         location = f"{path}?{remaining}" if remaining else path
+
+        # Take the token out of the scope, not only out of the Location.
+        #
+        # uvicorn writes its access line AFTER the app returns, and it builds
+        # that line from this same dict: get_path_with_query_string reads
+        # scope["query_string"] at logging time. Redirecting the token out of
+        # the address bar therefore did nothing for the server's own log, where
+        # every grant landed as `"GET /?token=<the real token>" 303` in
+        # cleartext, in a file that gets tailed, shipped and pasted into bug
+        # reports. Overwriting the value here is what the logger ends up
+        # printing, verified on a live socket by test_live_socket.py.
+        #
+        # This reaches into uvicorn's bookkeeping through a documented ASGI
+        # affordance: the scope is mutable, and rewriting query_string is the
+        # same move a router makes when it rewrites path. Nothing downstream
+        # reads it, because this request is answered right here with a 303.
+        scope["query_string"] = remaining.encode("latin-1")
 
         response = RedirectResponse(location, status_code=303)
         response.set_cookie(

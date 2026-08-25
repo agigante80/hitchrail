@@ -49,10 +49,18 @@ def normalise_host(raw: str) -> str:
     literal and a config file usually does not, so the matcher normalises the
     header the same way and both meet in the middle on the bare form. Storing
     both was a workaround for a matcher that could not strip them.
+
+    A trailing root dot goes too. `box.lan.` and `box.lan` name the same
+    machine and HOSTNAME_PATTERN accepts both, but a browser's Host header
+    never carries the dot, so an allowlist entry written in FQDN root form was
+    stored in a spelling nothing could ever match and answered 400 to the very
+    host it was added for.
     """
     value = raw.strip().lower()
     if value.startswith("[") and value.endswith("]"):
         value = value[1:-1]
+    if len(value) > 1 and value.endswith("."):
+        value = value[:-1]
     return value
 
 
@@ -228,6 +236,15 @@ class Config:
     def __post_init__(self) -> None:
         if not self.root.is_dir():
             raise ConfigError(f"root is not a directory: {self.root}")
+
+        # The bind address is stored canonical, not as it was typed. It is
+        # validated through is_valid_host, which normalises before matching, so
+        # `[::1]` and ` 127.0.0.1 ` passed validation and were then handed to
+        # uvicorn verbatim by cli._serve, where socket.bind raises gaierror.
+        # `[::1]` is the spelling people copy out of a browser's address bar,
+        # so it is worth accepting rather than refusing; it just has to be
+        # written down in the form that can be bound.
+        object.__setattr__(self, "host", normalise_host(self.host) or self.host)
 
         self._check_token()
         self._check_session_prefix()

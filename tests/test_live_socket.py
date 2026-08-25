@@ -14,6 +14,7 @@ Those are different claims and only the second one is the design's.
 
 from __future__ import annotations
 
+import logging
 import socket
 import threading
 import time
@@ -45,11 +46,11 @@ def free_port() -> int:
 class LiveServer:
     """A real uvicorn on loopback, started and stopped around one test."""
 
-    def __init__(self, app: Starlette, port: int) -> None:
+    def __init__(self, app: Starlette, port: int, log_level: str = "warning") -> None:
         self.port = port
         self.base = f"http://127.0.0.1:{port}"
         self._server = uvicorn.Server(
-            uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
+            uvicorn.Config(app, host="127.0.0.1", port=port, log_level=log_level)
         )
         self._thread = threading.Thread(target=self._server.run, daemon=True)
 
@@ -242,3 +243,52 @@ def test_the_server_is_shut_down_afterwards(tmp_path: Path) -> None:
         except OSError:
             time.sleep(0.1)
     raise AssertionError(f"port {port} was still bound after the server stopped")
+
+
+def test_the_grant_keeps_the_token_out_of_the_access_log(tmp_path: Path) -> None:
+    """Named regression: the redirect hides the token from the browser, not the server.
+
+    uvicorn builds its access line after the app returns, from the same scope
+    dict the app was handed, so `?token=` was written to the server's log in
+    cleartext on every grant. Its own fixture runs at log_level="warning", which
+    is exactly why the suite could not see this; this test turns access logging
+    on deliberately.
+
+    Fails if `scope["query_string"]` stops being overwritten in _maybe_grant.
+    """
+    port = free_port()
+    config = Config(root=tmp_path, host="127.0.0.1", port=port, token=TOKEN)
+    server = LiveServer(make_app(config), port, log_level="info")
+
+    records: list[str] = []
+
+    class Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record.getMessage())
+
+    handler = Capture()
+    access = logging.getLogger("uvicorn.access")
+    server.start()
+    access.addHandler(handler)
+    try:
+        response = httpx.get(
+            f"{server.base}/x?token={TOKEN}&keep=1",
+            headers={"Host": "127.0.0.1"},
+            follow_redirects=False,
+            timeout=TIMEOUT,
+        )
+        assert response.status_code == 303
+        # The redirect still carries the rest of the query, so the fix is not
+        # "throw the query away".
+        assert response.headers["location"] == "/x?keep=1"
+        deadline = time.monotonic() + TIMEOUT
+        while time.monotonic() < deadline and not records:
+            time.sleep(0.05)
+    finally:
+        access.removeHandler(handler)
+        server.stop()
+
+    assert records, "uvicorn wrote no access line, so this test proves nothing"
+    logged = "\n".join(records)
+    assert TOKEN not in logged, f"the token reached the access log: {logged}"
+    assert "keep=1" in logged

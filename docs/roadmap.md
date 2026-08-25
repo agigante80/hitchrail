@@ -56,13 +56,14 @@ network configuration. Two things worth carrying forward:
   the pattern's own length cap. Every hand written payload in the ticket's test
   list passed that pattern. Future guards here want fuzzing or property tests,
   not only enumeration.
-- Seven deferred items came out of the phase: #4 (pin actions to SHAs before
-  Phase 7 introduces a publish token), #5 (the plans' snippets are no longer
-  checked by any tool), #6 (a TLS proxy on a non standard port is refused by
-  the origin check), #7 (folders with a space or a non ASCII name are silently
-  invisible, needs a decision), #8 (normalise every host in one place), #9
-  (`RootUnavailable` is a client error, and an intra-root alias is two
-  projects), and #10 (the mypy gate checks 3.11 on all three matrix legs).
+- Seven deferred items came out of the phase. Phase 2 closed four of them:
+  #6 (a TLS proxy on a non standard port is refused by the origin check), #7
+  (folders with a space or a non ASCII name are silently invisible), #8
+  (normalise every host in one place) and #9 (`RootUnavailable` is a client
+  error, and an intra-root alias is two projects). Still open: #4 (pin actions
+  to SHAs before Phase 7 introduces a publish token), #5 (the plans' snippets
+  are no longer checked by any tool) and #10 (the mypy gate checks 3.11 on all
+  three matrix legs).
 
 **The review loop was stopped by its trip wire, not by running clean.** Three
 rounds found nine findings each, and rounds 2 and 3 each found defects inside
@@ -97,6 +98,45 @@ the token check.
 
 **Not done if:** the only proof is an `ASGITransport` test. That proves the
 middleware is configured, not that the deployed server refuses anything.
+
+All of it held. `tests/test_live_socket.py` binds a real loopback socket and
+drives every refusal through uvicorn's own HTTP parser, and the middleware
+order is asserted by a test rather than left to the order somebody typed. Four
+things worth carrying forward:
+
+- **The same defect shape ran through all three review rounds:** a value
+  accepted after normalisation and then used in its raw form. `--allow-host
+  box.lan:8787` validated and never matched. `--allow-origin https://box.lan:443`
+  validated and never matched. `Config(host="[::1]")` validated and could not
+  be bound. The fix that finally held was one canonical function each for hosts
+  (`normalise_host`) and origins (`origin_forms`), used by every door, rather
+  than a validator per entry point. Per entry point validation is how the
+  allowlist ended up holding two spellings of one host and disagreeing with
+  itself.
+- **A redirect hides a secret from the browser, not from the server.** The
+  `?token=` grant redirects the token out of the address bar, and it was still
+  written to uvicorn's access log in cleartext on every use, because uvicorn
+  builds that line after the app returns from the same scope dict the app was
+  handed. The fix overwrites `scope["query_string"]` once the token is spent.
+  The suite could not see this because its own fixture ran at
+  `log_level="warning"`; a test tier that silences the component under test
+  cannot observe it.
+- The three security controls landing together broke two host and origin tests
+  that bound a network address, because such a bind now demands a token. That
+  is the suite catching a real cross ticket interaction, and it is the argument
+  for building the boundary as one phase rather than three.
+- `tests/conftest.py` now stubs `local_addresses` for every test that is not
+  marked `live`. Around twenty tests in the tier the guidelines call hermetic
+  were doing real DNS, and their answers changed with the machine. A rule that
+  every test author has to remember had already decayed by the time it was
+  written down, so it is enforced by an autouse fixture instead.
+
+**The review loop ran to its fourth round rather than tripping.** Round 1 found
+nine, round 2 found five of which three were defects inside round 1's own
+fixes, and round 3 found five of which none were. That broke the consecutive
+streak the trip wire watches for, so the loop continued instead of stopping.
+Round 2's answer to its own injection was consolidation into `origin_forms`
+rather than a third point patch, and round 3 confirms that held.
 
 ## Phase 3: The adapters
 
