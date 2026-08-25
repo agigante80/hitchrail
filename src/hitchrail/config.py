@@ -23,6 +23,7 @@ HOSTNAME_PATTERN = re.compile(
     r"\A(?!-)[A-Za-z0-9-]{1,63}(?<!-)(?:\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*\.?\Z"
 )
 MAX_HOSTNAME_LENGTH = 253
+HTTP_DEFAULT_PORT = 80
 
 Resolver = Callable[[], tuple[str, ...]]
 
@@ -124,11 +125,16 @@ def local_addresses() -> tuple[str, ...]:
     """
     found: list[str] = []
 
-    with contextlib.suppress(OSError):
+    # UnicodeError as well as OSError. getaddrinfo raises UnicodeError, which
+    # is a ValueError and NOT an OSError, for a hostname with a label over 63
+    # characters or one that will not encode to IDNA. A container or a pod can
+    # easily have such a name, and suppressing only OSError let Config() die
+    # with a raw UnicodeError on that machine.
+    with contextlib.suppress(OSError, UnicodeError):
         hostname = socket.gethostname()
         if hostname:
             found.append(hostname)
-            with contextlib.suppress(OSError):
+            with contextlib.suppress(OSError, UnicodeError):
                 for info in socket.getaddrinfo(hostname, None):
                     address = info[4][0]
                     if isinstance(address, str):
@@ -188,6 +194,7 @@ class Config:
         if not self.root.is_dir():
             raise ConfigError(f"root is not a directory: {self.root}")
 
+        self._check_token()
         self._check_session_prefix()
         self._check_claude_binary()
         self._check_numbers()
@@ -203,6 +210,27 @@ class Config:
 
         object.__setattr__(self, "_allowed_hosts", self._resolve_allowed_hosts())
         object.__setattr__(self, "_allowed_origins", self._derive_allowed_origins())
+
+    def _check_token(self) -> None:
+        """`None` means no token. `""` is a token that matches nothing safely.
+
+        An empty string is not None, so it switched the middleware ON with a
+        secret that `compare_digest(b"", b"")` answers True for: a request
+        carrying `Cookie: hitchrail_token=` was served. An operator reaches
+        this by passing an unset shell variable, `--token "$HITCHRAIL_TOKEN"`,
+        and believes they configured authentication.
+
+        The floor is deliberately low rather than a policy. The CLI generates
+        24 bytes; this only has to catch the empty and blank cases that mean
+        "the operator thinks there is a token and there is not".
+        """
+        if self.token is None:
+            return
+        if not self.token.strip():
+            raise ConfigError(
+                "an empty token is not a token: pass a real one, or omit it "
+                "entirely to run on loopback with no authentication"
+            )
 
     def _check_session_prefix(self) -> None:
         """An empty prefix makes the tmux kill guard vacuous.
@@ -300,10 +328,26 @@ class Config:
                     f"not an origin: {entry!r}. Give scheme://host[:port], "
                     "for example https://box.lan:8443"
                 )
-            if parts.path or parts.query or parts.fragment or parts.username:
+            # `username` alone is not enough: for `http://:pass@box.lan`,
+            # urlsplit gives username='' which is falsy, and the entry was
+            # accepted and then could never match anything.
+            if parts.path or parts.query or parts.fragment or parts.username or parts.password:
                 raise ConfigError(
                     f"an origin carries no path, query, fragment or userinfo: {entry!r}"
                 )
+            if candidate.rstrip("]").endswith(":"):
+                # urlsplit reads `http://box.lan:` as port None rather than an
+                # error, so it was accepted and then could never match: a
+                # browser sends `http://box.lan`, never a bare trailing colon.
+                raise ConfigError(f"origin has an empty port: {entry!r}")
+            try:
+                port = parts.port
+            except ValueError as exc:
+                # urlsplit defers parsing the port until it is read, so a
+                # non numeric one only surfaces here.
+                raise ConfigError(f"not a valid port in origin {entry!r}") from exc
+            if port is not None and not (1 <= port <= 65535):
+                raise ConfigError(f"port out of range in origin {entry!r}")
             if not is_valid_host(parts.hostname):
                 raise ConfigError(f"not a valid host in origin {entry!r}")
 
@@ -337,7 +381,7 @@ class Config:
             resolve = self.resolver or local_addresses
             # A reading we could not take degrades to loopback only, which is
             # still a working allowlist. Never widen on a failed lookup.
-            with contextlib.suppress(OSError):
+            with contextlib.suppress(OSError, UnicodeError):
                 hosts.extend(resolve())
         else:
             hosts.append(self.host)
@@ -377,5 +421,13 @@ class Config:
             # bare, because that is what a browser sends in an Origin header.
             bracketed = f"[{host}]" if ":" in host else host
             origins.add(f"http://{bracketed}:{self.port}")
+            if self.port == HTTP_DEFAULT_PORT:
+                # The URL spec serialises an origin WITHOUT the default port
+                # for its scheme, so a browser on port 80 sends
+                # `Origin: http://box.lan` and the explicit form above would
+                # never match. Emitted only when we are actually on port 80,
+                # so this is not the unconditional guess that made any local
+                # HTTPS service a same origin caller.
+                origins.add(f"http://{bracketed}")
         origins.update(o.strip().rstrip("/").lower() for o in self.extra_origins)
         return frozenset(origins)

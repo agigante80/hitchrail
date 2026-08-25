@@ -226,3 +226,32 @@ async def test_no_wildcard_is_honoured_even_if_one_reached_the_allowlist(
         middleware=[Middleware(HostAllowlistMiddleware, allowed_hosts=frozenset({"*"}))],
     )
     assert (await call(app, headers={"host": "evil.example"})).status_code == 400
+
+
+def test_a_repeated_header_keeps_the_first_like_the_rest_of_the_stack() -> None:
+    """Named regression: this collapsed duplicates to the LAST.
+
+    Starlette's `Headers.get` returns the first, so a request carrying two of
+    the same header authenticated differently here than everywhere else that
+    reads it, and a difference like that is where request smuggling lives.
+    """
+    from hitchrail.security import header_map
+
+    scope = {"headers": [(b"host", b"first"), (b"host", b"second")]}
+    assert header_map(scope)["host"] == "first"
+
+
+def test_split_cookie_headers_are_joined_not_dropped() -> None:
+    """Named regression: HTTP/2 may split the cookie jar across fields.
+
+    RFC 9113 lets a client send several Cookie fields, and reverse proxies do
+    it too. Taking one and dropping the rest lost whichever half held the
+    token, so the same two headers in the other order answered differently.
+    """
+    from hitchrail.security import header_map
+
+    scope = {"headers": [(b"cookie", b"a=1"), (b"cookie", b"hitchrail_token=tok")]}
+    assert header_map(scope)["cookie"] == "a=1; hitchrail_token=tok"
+
+    reversed_scope = {"headers": [(b"cookie", b"hitchrail_token=tok"), (b"cookie", b"a=1")]}
+    assert "hitchrail_token=tok" in header_map(reversed_scope)["cookie"]

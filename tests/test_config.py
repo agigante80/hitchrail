@@ -540,3 +540,92 @@ def test_a_resolver_returning_junk_cannot_widen_the_allowlist(tmp_path: Path) ->
         ),
     )
     assert cfg.allowed_hosts == ("localhost", "127.0.0.1", "::1", "10.0.0.2")
+
+
+def test_on_port_80_the_portless_origin_is_accepted(tmp_path: Path) -> None:
+    """Named regression: the URL spec omits the default port from an origin.
+
+    A browser on `http://box.lan/` sends `Origin: http://box.lan`, with no
+    port, so an allowlist holding only `http://box.lan:80` matched nothing and
+    every mutating request was refused while GETs kept working.
+    """
+    cfg = Config(root=tmp_path, host="box.lan", port=80, token="t")
+    assert "http://box.lan" in cfg.allowed_origins
+    assert "http://box.lan:80" in cfg.allowed_origins
+
+
+def test_the_portless_form_appears_only_on_port_80(tmp_path: Path) -> None:
+    # Not the unconditional guess that made any local HTTPS service a same
+    # origin caller: emitted only when we are actually serving that port.
+    cfg = Config(root=tmp_path, host="box.lan", port=8787, token="t")
+    assert "http://box.lan" not in cfg.allowed_origins
+    assert "http://box.lan:8787" in cfg.allowed_origins
+
+
+def test_a_resolver_raising_unicodeerror_does_not_break_startup(tmp_path: Path) -> None:
+    """Named regression: getaddrinfo raises UnicodeError, not OSError.
+
+        socket.getaddrinfo("a" * 70 + ".example", None)
+        UnicodeError: label empty or too long
+
+    UnicodeError is a ValueError, so `suppress(OSError)` did not catch it and
+    Config() died with a raw UnicodeError on any machine, a container or a pod,
+    whose hostname has a label over 63 characters or one that will not encode
+    to IDNA.
+    """
+
+    def bad_label() -> tuple[str, ...]:
+        raise UnicodeError("label empty or too long")
+
+    cfg = Config(root=tmp_path, host="0.0.0.0", token="t", resolver=bad_label)
+    assert "localhost" in cfg.allowed_hosts
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "http://:pass@box.lan",
+        "http://user:pass@box.lan",
+        "http://box.lan:",
+        "https://box.lan:99999",
+        "https://box.lan:0",
+        "https://box.lan:notaport",
+    ],
+    ids=[
+        "password-only",
+        "userinfo",
+        "empty-port",
+        "port-too-high",
+        "port-zero",
+        "port-not-numeric",
+    ],
+)
+def test_an_origin_that_could_never_match_is_refused(tmp_path: Path, bad: str) -> None:
+    """Named regression: silently ignoring operator config is the failure mode
+    this module says it refuses to have.
+
+    `http://:pass@box.lan` slipped through because urlsplit reports
+    `username=''`, which is falsy, and the port was never read at all so an
+    out of range or non numeric one was accepted too.
+    """
+    with pytest.raises(ConfigError):
+        Config(root=tmp_path, extra_origins=(bad,))
+
+
+@pytest.mark.parametrize("bad", ["", "   ", "\t"])
+def test_an_empty_token_is_refused(tmp_path: Path, bad: str) -> None:
+    """Named regression: `""` is not None, so it switched authentication ON
+    with a secret that an empty cookie matches.
+
+    `compare_digest(b"", b"")` is True, so `Cookie: hitchrail_token=` was
+    served. An operator reaches this with `--token "$UNSET_VARIABLE"` and
+    believes they configured authentication.
+    """
+    with pytest.raises(ConfigError, match="empty token"):
+        Config(root=tmp_path, token=bad)
+
+
+def test_no_token_at_all_is_still_allowed_on_loopback(tmp_path: Path) -> None:
+    # None means "no authentication", which is a legitimate loopback choice.
+    # Only the empty string, which looks like a token and is not, is refused.
+    assert Config(root=tmp_path, token=None).token is None

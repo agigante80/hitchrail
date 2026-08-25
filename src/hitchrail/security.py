@@ -51,10 +51,23 @@ def header_map(scope: Scope) -> dict[str, str]:
     Shared because all three middlewares need it and decoding the raw scope
     headers three times per request is work nobody asked for.
     """
-    return {
-        key.decode("latin-1").lower(): value.decode("latin-1")
-        for key, value in scope["headers"]
-    }
+    headers: dict[str, str] = {}
+    for raw_key, raw_value in scope["headers"]:
+        key = raw_key.decode("latin-1").lower()
+        value = raw_value.decode("latin-1")
+        if key == "cookie":
+            # RFC 9113 lets an HTTP/2 client split the cookie jar across
+            # several Cookie fields, and reverse proxies do it too. Joining
+            # them is what the spec says to do; taking one and dropping the
+            # rest loses whichever half held our token.
+            headers[key] = f"{headers[key]}; {value}" if key in headers else value
+        elif key not in headers:
+            # First wins, which is what Starlette's Headers.get returns. Taking
+            # the last meant this middleware authenticated a request
+            # differently from the rest of the stack that reads the same
+            # header, and a difference like that is where smuggling lives.
+            headers[key] = value
+    return headers
 
 
 def parse_host(raw: str) -> str:
@@ -146,7 +159,14 @@ class OriginCheckMiddleware:
         self.allowed = frozenset(o.strip().rstrip("/").lower() for o in allowed_origins)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or scope["method"] in SAFE_METHODS:
+        if scope["type"] not in ("http", "websocket"):  # pragma: no cover - lifespan
+            await self.app(scope, receive, send)
+            return
+        # A websocket handshake has no method and is never safe: it is a long
+        # lived connection, so it is checked rather than waved through. There
+        # is no websocket route today, and adding one later must not silently
+        # arrive unauthenticated because this middleware only knew about http.
+        if scope["type"] == "http" and scope["method"] in SAFE_METHODS:
             await self.app(scope, receive, send)
             return
 
@@ -203,7 +223,12 @@ def _safe_redirect_path(path: str) -> str:
     """
     if not path.startswith("/") or path[1:2] in {"/", "\\"}:
         return "/"
-    return path
+    # ASGI has already percent decoded the path, and RedirectResponse treats
+    # `#` and `?` as safe characters, so a `%23` in the request path became a
+    # real fragment in the Location and the browser silently dropped
+    # everything after it. Verified live: `/p/foo%23bar` redirected to
+    # `/p/foo#bar`. Re-encode both rather than trying to guess intent.
+    return path.replace("%", "%25").replace("#", "%23").replace("?", "%3F")
 
 
 class TokenMiddleware:
@@ -215,9 +240,16 @@ class TokenMiddleware:
     `EventSource` can use; the query grant is how that cookie gets set from a
     link you open on a phone.
 
-    The cookie is `SameSite=Strict`, and the origin check still runs on every
-    mutating request. Either alone would cover the cases we can think of, which
-    is why there are two.
+    The cookie is `SameSite=Lax`, not `Strict`, and the origin check still runs
+    on every mutating request. Either alone would cover the cases we can think
+    of, which is why there are two.
+
+    Lax rather than Strict because Strict is withheld on a cross site TOP LEVEL
+    navigation, which is exactly the phone flow this exists for: grant the
+    cookie once, then later tap a Hitchrail link from a dashboard or a message
+    and be answered 401 by a cookie you do hold, which a reload then fixes. Lax
+    sends it on a top level GET and still withholds it from a cross site POST,
+    and the mutations that matter are behind the origin check regardless.
 
     It is deliberately not `Secure`. Over plain HTTP on a LAN, a documented and
     supported deployment, a `Secure` cookie is never sent and the tool silently
@@ -230,7 +262,7 @@ class TokenMiddleware:
         self.token = token
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or self.token is None:
+        if scope["type"] not in ("http", "websocket") or self.token is None:
             await self.app(scope, receive, send)
             return
 
@@ -249,7 +281,13 @@ class TokenMiddleware:
             await self.app(scope, receive, send)
             return
 
-        if scope["method"] in SAFE_METHODS and await self._maybe_grant(scope, receive, send):
+        # The grant is an HTTP redirect, so it has no meaning for a websocket
+        # handshake; such a connection is refused rather than granted.
+        if (
+            scope["type"] == "http"
+            and scope["method"] in SAFE_METHODS
+            and await self._maybe_grant(scope, receive, send)
+        ):
             return
 
         await deny(401, "unauthorized", "a valid token is required")(scope, receive, send)
@@ -278,7 +316,7 @@ class TokenMiddleware:
             TOKEN_COOKIE,
             self.token,
             httponly=True,
-            samesite="strict",
+            samesite="lax",
             path="/",
             max_age=COOKIE_MAX_AGE,
         )

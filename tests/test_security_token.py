@@ -232,7 +232,12 @@ async def test_the_query_grant_sets_the_cookie_and_redirects(tmp_path: Path) -> 
     cookie = response.headers["set-cookie"]
     assert f"{TOKEN_COOKIE}={TOKEN}" in cookie
     assert "HttpOnly" in cookie
-    assert "samesite=strict" in cookie.lower()
+    # Lax, not Strict. Strict is withheld on a cross site TOP LEVEL navigation,
+    # which is the phone flow this exists for: grant once, then later tap a
+    # Hitchrail link from a dashboard and be answered 401 by a cookie you hold.
+    # Lax sends it on a top level GET and still withholds it from a cross site
+    # POST, and mutations are behind the origin check regardless.
+    assert "samesite=lax" in cookie.lower()
     # Not Secure: over plain HTTP on a LAN, a documented deployment, a Secure
     # cookie is never sent and the tool silently stops working.
     assert "secure" not in cookie.lower()
@@ -362,3 +367,59 @@ async def test_host_checking_happens_before_token_checking(tmp_path: Path) -> No
     assert response.status_code == 400
     assert response.json()["code"] == "host_rejected"
     assert reached == [], "the token comparison ran despite a forged Host"
+
+
+@pytest.mark.parametrize(
+    ("raw_path", "must_not_contain"),
+    [("/p/foo%23bar", "#"), ("/x%3Fa=1", "?a=1"), ("/a%25b", None)],
+    ids=["encoded-hash", "encoded-question", "encoded-percent"],
+)
+async def test_the_grant_reencodes_a_decoded_path(
+    tmp_path: Path, raw_path: str, must_not_contain: str | None
+) -> None:
+    """Named regression: ASGI has already percent decoded scope["path"].
+
+    RedirectResponse treats `#` and `?` as safe, so `%23` in the request path
+    became a real fragment in the Location and the browser silently dropped
+    everything after it. Verified live before the fix:
+    `/p/foo%23bar?token=...` redirected to `/p/foo#bar`.
+    """
+    response = await call(guarded(tmp_path), path=f"{raw_path}?token={TOKEN}", headers=HOST)
+    assert response.status_code == 303
+    location = response.headers["location"]
+    if must_not_contain is not None:
+        assert must_not_contain not in location
+
+
+async def test_a_websocket_handshake_is_not_waved_through(tmp_path: Path) -> None:
+    """Named regression: the token and origin middlewares skipped every non
+    http scope, so a websocket route added later would arrive unauthenticated.
+
+    There is no websocket route today. The host middleware already anticipated
+    the scope type, and the other two did not, which is exactly the kind of
+    gap that is invisible until the day somebody adds the route.
+    """
+    from hitchrail.config import Config
+    from hitchrail.security import TokenMiddleware
+
+    reached: list[int] = []
+
+    async def app(scope: object, receive: object, send: object) -> None:
+        reached.append(1)
+
+    middleware = TokenMiddleware(app, token=TOKEN)
+    sent: list[MutableMapping[str, Any]] = []
+
+    async def receive() -> MutableMapping[str, Any]:
+        return {"type": "websocket.connect"}
+
+    async def send(message: MutableMapping[str, Any]) -> None:
+        sent.append(message)
+
+    await middleware(
+        {"type": "websocket", "path": "/ws", "headers": [(b"host", b"localhost")]},
+        receive,
+        send,
+    )
+    assert reached == [], "an unauthenticated websocket handshake reached the app"
+    assert Config(root=tmp_path).token is None
