@@ -165,9 +165,11 @@ machine. Four tasks.
 Delivers: the tmux adapter carrying its footguns, the process table snapshot,
 the Claude Code quarantine, and the memory guard.
 
-**Done when:** every footgun in the design's section 4.2 has a named regression
-test that fails if its workaround is removed, and nothing in this layer imports
-Starlette.
+**Done when:** each of the four addressing footguns in the design's section 4.2
+(1, 2, 3 and 5) has a named regression test that fails if its workaround is
+removed, and nothing in this layer imports Starlette. Footgun 4, serialising
+concurrent starts, belongs to Phase 4: starting is an engine operation and
+there is nothing in this layer to serialise.
 
 ## Phase 4: The engine
 

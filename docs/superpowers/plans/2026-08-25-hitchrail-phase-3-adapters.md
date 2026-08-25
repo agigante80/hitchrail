@@ -44,7 +44,26 @@ next to the two adapters it will be used with keeps the reading order sensible.
 
 ---
 
-### Task 7: The tmux adapter and its five footguns
+### Task 7: The tmux adapter and its four addressing footguns
+
+**Verified against tmux 3.4 on a private socket before writing this task**, per
+the project's "verify, do not recall" rule, because the whole task rests on
+these being true:
+
+| Claim | Result |
+|---|---|
+| `has-session -t hr-vessel` prefix matches `hr-vessel-social` | confirmed, it matched |
+| `=` anchors it to an exact session | confirmed, `=hr-vessel` refused |
+| `list-panes -t "=name"` ignores the anchor and prefix matches | confirmed: a NONEXISTENT session returned its sibling's pane pid, which is the "stopped project reads as running" symptom exactly |
+| a trailing `:` makes `list-panes` read the target as a session | confirmed, `=name:` then refuses correctly and still resolves a real session |
+
+One correction to the design's wording. Footgun 1 says a session named
+`dotted.site` "can be created but never addressed", which is true, but the
+mechanism is sharper than that: tmux 3.4 does not reject the name, it silently
+stores it as `dotted_site`. So the session exists under a name nobody looked
+for, and `has-session -t "=hr-dotted.site"` fails while the agent is running,
+which presents as the session vanishing. `sanitize` sidesteps this entirely by
+emitting no `.` or `:` at all, so tmux never rewrites anything.
 
 **Files:**
 - Modify: `src/hitchrail/tmux.py`
@@ -1078,7 +1097,7 @@ git commit -m "feat(ram): memory guard deciding on what is left after starting"
 ## Phase 3 exit criteria
 
 - [ ] All five gates green on 3.11, 3.12 and 3.13.
-- [ ] Every footgun in the design's section 4.2 has a named regression test that fails if its workaround is removed, and `sanitize` is proven injective.
+- [ ] Each of the four ADDRESSING footguns in the design's section 4.2 (1, 2, 3 and 5) has a named regression test that fails if its workaround is removed, and `sanitize` is proven injective. Footgun 4, serialising concurrent starts, is deliberately not this phase's: there is nothing here to serialise, because starting is an engine operation. It is Phase 4 Task 13 and carries its own exit criterion there. This criterion used to say "every footgun in section 4.2", which no Phase 3 implementation could satisfy.
 - [ ] `Tmux.pane_pids()` issues exactly one subprocess call regardless of session count.
 - [ ] No method on `Tmux` can reach `kill-server`, and every call carries the configured socket when one is set.
 - [ ] A cyclic process table does not hang `descendants`.
