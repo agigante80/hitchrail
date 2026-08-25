@@ -3,15 +3,17 @@
 A web UI for starting and stopping headless Claude Code sessions across a
 folder of projects. Open it on your phone, tap a folder, get a session link.
 
-**Status: early. Phases 1 and 2 of 7 are built; there is no runnable server yet.**
+**Status: early. Phases 1 and 2 of 7 are built, Phase 3 is in progress, and
+there is no runnable server yet.**
 
 What exists today is the package skeleton with five blocking gates on Python
 3.11, 3.12 and 3.13, the configuration and its refusals, the folder discovery
-that makes the root a hard boundary, and the three security controls that
-stand between a web page and a shell. What does not exist yet is everything you
-would actually use: the HTTP API, the browser interface, and the engine that
-starts and stops sessions. `hitchrail` is not on PyPI, and the install commands
-below will not work until it is.
+that makes the root a hard boundary, the three security controls that stand
+between a web page and a shell, and the first of the adapters: tmux session
+naming and the memory guard. What does not exist yet is everything you would
+actually use: the HTTP API, the browser interface, and the engine that starts
+and stops sessions. `hitchrail` is not on PyPI, and the install commands below
+will not work until it is.
 
 See [`docs/roadmap.md`](docs/roadmap.md) for the order of work,
 [`docs/superpowers/specs/2026-08-25-hitchrail-design.md`](docs/superpowers/specs/2026-08-25-hitchrail-design.md)
@@ -102,6 +104,11 @@ ours.
 hitchrail --root ~/dev --host 0.0.0.0 --allow-host box.lan \
           --allow-origin https://box.lan
 ```
+
+A trailing root dot makes no difference here: `box.lan` and `box.lan.` name the
+same machine, so either spelling is accepted and either is matched. Browsers do
+send the dotted form, because typing `http://box.lan./` is a way to force
+absolute resolution on a split horizon network.
 
 Getting the token onto a phone is a link rather than 32 characters of typing.
 Open `http://<address>:8787/?token=<token>` once: it sets a cookie and

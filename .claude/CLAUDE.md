@@ -76,7 +76,8 @@ and the HTTP layer testable without tmux.
 
 ```
 src/hitchrail/
-  config.py      one canonical form for every host and origin, and the refusals
+  hostnames.py   what a valid host or origin IS: one canonical form for each
+  config.py      the dataclass, its refusals, and the derived allowlists
   discovery.py   root scanning, folder creation, path safety
   tmux.py        the tmux adapter and its footguns
   procs.py       process table snapshot
@@ -90,9 +91,12 @@ src/hitchrail/
   cli.py         argument parsing, config, uvicorn launch
 ```
 
-`config.py` and `security.py` sit at the boundary rather than in the engine, and
-`security.py` is the only module the `.claude/rules/security.md` rules load for
-alongside the four that spawn things.
+`hostnames.py` holds the pure vocabulary `security.py` reaches for on every
+request; `config.py` holds the dataclass and startup refusals built from it. The
+dependency runs one way and a test asserts it. Both sit at the boundary rather
+than in the engine, and `security.py` is the only module the
+`.claude/rules/security.md` rules load for alongside the four that spawn
+things.
 
 Every external surface is injected: tmux, the process table, memory readings,
 the Claude state directory, the clock. That is what makes the engine testable
