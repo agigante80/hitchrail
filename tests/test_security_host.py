@@ -86,16 +86,19 @@ def test_an_unparseable_host_can_never_match(tmp_path: Path) -> None:
 # -- refusals --------------------------------------------------------------
 
 
+@pytest.mark.integration
 async def test_a_known_host_is_served(tmp_path: Path) -> None:
     app = build(Config(root=tmp_path))
     assert (await call(app, headers={"host": "localhost"})).status_code == 200
 
 
+@pytest.mark.integration
 async def test_a_host_with_a_port_still_matches(tmp_path: Path) -> None:
     app = build(Config(root=tmp_path))
     assert (await call(app, headers={"host": "localhost:8787"})).status_code == 200
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "host",
     [
@@ -132,6 +135,7 @@ async def test_a_forged_host_is_rejected(tmp_path: Path, host: str) -> None:
     assert response.json()["code"] == "host_rejected"
 
 
+@pytest.mark.integration
 async def test_the_event_stream_is_behind_the_allowlist_too(tmp_path: Path) -> None:
     # The route people forget, and the one an attacker most wants: a long lived
     # stream of everything happening on the machine.
@@ -143,6 +147,7 @@ async def test_the_event_stream_is_behind_the_allowlist_too(tmp_path: Path) -> N
 # -- IPv6, which is why this is not TrustedHostMiddleware -------------------
 
 
+@pytest.mark.integration
 async def test_an_ipv6_loopback_browser_is_served(tmp_path: Path) -> None:
     """Named regression: Starlette's TrustedHostMiddleware cannot do this.
 
@@ -155,6 +160,7 @@ async def test_an_ipv6_loopback_browser_is_served(tmp_path: Path) -> None:
         assert (await call(app, headers={"host": host})).status_code == 200
 
 
+@pytest.mark.integration
 async def test_an_ipv6_lan_address_is_served_when_allowed(tmp_path: Path) -> None:
     cfg = Config(
         root=tmp_path,
@@ -171,6 +177,7 @@ async def test_an_ipv6_lan_address_is_served_when_allowed(tmp_path: Path) -> Non
     assert response.status_code == 200
 
 
+@pytest.mark.integration
 async def test_stripping_brackets_did_not_become_any_ipv6_is_fine(tmp_path: Path) -> None:
     cfg = Config(
         root=tmp_path,
@@ -188,6 +195,7 @@ async def test_stripping_brackets_did_not_become_any_ipv6_is_fine(tmp_path: Path
 # -- no redirect, ever -----------------------------------------------------
 
 
+@pytest.mark.integration
 async def test_an_unrecognised_host_is_refused_never_redirected(tmp_path: Path) -> None:
     """Named regression: Starlette's www_redirect default does redirect.
 
@@ -202,6 +210,7 @@ async def test_an_unrecognised_host_is_refused_never_redirected(tmp_path: Path) 
     assert "location" not in response.headers
 
 
+@pytest.mark.integration
 async def test_the_refusal_uses_the_api_error_envelope(tmp_path: Path) -> None:
     # One shape for every refusal, so a client parses one thing. Starlette's
     # version answers with a plain text body instead.
@@ -211,6 +220,7 @@ async def test_the_refusal_uses_the_api_error_envelope(tmp_path: Path) -> None:
     assert response.headers["content-type"].startswith("application/json")
 
 
+@pytest.mark.integration
 async def test_no_wildcard_is_honoured_even_if_one_reached_the_allowlist(
     tmp_path: Path,
 ) -> None:
@@ -282,6 +292,7 @@ def test_parse_host_strips_the_root_dot(raw: str, expected: str) -> None:
     assert parse_host(raw) == expected
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("configured", ["box.lan", "box.lan."])
 @pytest.mark.parametrize("sent", ["box.lan", "box.lan."])
 async def test_dotted_and_undotted_hosts_all_match(

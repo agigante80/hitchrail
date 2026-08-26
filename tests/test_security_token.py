@@ -64,6 +64,7 @@ async def call(
 # -- no token configured ---------------------------------------------------
 
 
+@pytest.mark.integration
 async def test_no_token_configured_means_no_token_demanded(tmp_path: Path) -> None:
     app = build(Config(root=tmp_path))
     assert (await call(app, headers=HOST)).status_code == 200
@@ -72,12 +73,14 @@ async def test_no_token_configured_means_no_token_demanded(tmp_path: Path) -> No
 # -- the header carrier ----------------------------------------------------
 
 
+@pytest.mark.integration
 async def test_a_configured_token_is_demanded(tmp_path: Path) -> None:
     response = await call(guarded(tmp_path), headers=HOST)
     assert response.status_code == 401
     assert response.json()["code"] == "unauthorized"
 
 
+@pytest.mark.integration
 async def test_the_right_bearer_token_is_accepted(tmp_path: Path) -> None:
     response = await call(
         guarded(tmp_path), headers={**HOST, "authorization": f"Bearer {TOKEN}"}
@@ -85,6 +88,7 @@ async def test_the_right_bearer_token_is_accepted(tmp_path: Path) -> None:
     assert response.status_code == 200
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("scheme", ["Bearer", "bearer", "BEARER", "BeArEr"])
 async def test_the_bearer_scheme_is_case_insensitive(tmp_path: Path, scheme: str) -> None:
     # RFC 7235: auth schemes are case insensitive. A client sending "bearer" is
@@ -95,6 +99,7 @@ async def test_the_bearer_scheme_is_case_insensitive(tmp_path: Path, scheme: str
     assert response.status_code == 200
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "value",
     ["Bearer wrong", "Bearer ", "Basic abc", TOKEN, "", f"Bearer  {TOKEN}", "Bearer"],
@@ -168,6 +173,7 @@ async def test_a_non_ascii_token_is_a_refusal_not_a_crash(
 # -- the cookie carrier, which is the one EventSource can use --------------
 
 
+@pytest.mark.integration
 async def test_the_cookie_carrier_is_accepted(tmp_path: Path) -> None:
     response = await call(
         guarded(tmp_path), headers={**HOST, "cookie": f"{TOKEN_COOKIE}={TOKEN}"}
@@ -175,6 +181,7 @@ async def test_the_cookie_carrier_is_accepted(tmp_path: Path) -> None:
     assert response.status_code == 200
 
 
+@pytest.mark.integration
 async def test_the_event_stream_authenticates_the_way_eventsource_sends_it(
     tmp_path: Path,
 ) -> None:
@@ -192,11 +199,13 @@ async def test_the_event_stream_authenticates_the_way_eventsource_sends_it(
     assert response.status_code == 200
 
 
+@pytest.mark.integration
 async def test_a_wrong_cookie_is_rejected(tmp_path: Path) -> None:
     response = await call(guarded(tmp_path), headers={**HOST, "cookie": f"{TOKEN_COOKIE}=nope"})
     assert response.status_code == 401
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "cookie",
     [
@@ -225,6 +234,7 @@ async def test_a_malformed_neighbour_cookie_does_not_lose_ours(
 # -- the one time grant ----------------------------------------------------
 
 
+@pytest.mark.integration
 async def test_the_query_grant_sets_the_cookie_and_redirects(tmp_path: Path) -> None:
     response = await call(guarded(tmp_path), path=f"/x?token={TOKEN}", headers=HOST)
     assert response.status_code == 303
@@ -243,6 +253,7 @@ async def test_the_query_grant_sets_the_cookie_and_redirects(tmp_path: Path) -> 
     assert "secure" not in cookie.lower()
 
 
+@pytest.mark.integration
 async def test_the_grant_preserves_other_query_parameters(tmp_path: Path) -> None:
     response = await call(
         guarded(tmp_path), path=f"/x?filter=running&token={TOKEN}", headers=HOST
@@ -251,6 +262,7 @@ async def test_the_grant_preserves_other_query_parameters(tmp_path: Path) -> Non
     assert response.headers["location"] == "/x?filter=running"
 
 
+@pytest.mark.integration
 async def test_the_grant_removes_the_token_from_the_location(tmp_path: Path) -> None:
     # The point of redirecting at all: the token leaves the address bar and the
     # browser history rather than sitting in both.
@@ -258,6 +270,7 @@ async def test_the_grant_removes_the_token_from_the_location(tmp_path: Path) -> 
     assert TOKEN not in response.headers["location"]
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "path",
     ["/\\evil.example", "//evil.example", "/\\\\evil.example"],
@@ -277,12 +290,14 @@ async def test_the_grant_never_redirects_off_the_site(tmp_path: Path, path: str)
     assert location == "/" or not location.startswith(("//", "/\\"))
 
 
+@pytest.mark.integration
 async def test_a_wrong_query_token_grants_nothing(tmp_path: Path) -> None:
     response = await call(guarded(tmp_path), path="/x?token=nope", headers=HOST)
     assert response.status_code == 401
     assert "set-cookie" not in response.headers
 
 
+@pytest.mark.integration
 async def test_the_grant_is_not_available_on_a_mutating_request(tmp_path: Path) -> None:
     # A grant on POST would let a link perform an action, which is the shape of
     # the attack the origin check exists to stop.
@@ -291,6 +306,7 @@ async def test_the_grant_is_not_available_on_a_mutating_request(tmp_path: Path) 
     assert "set-cookie" not in response.headers
 
 
+@pytest.mark.integration
 async def test_a_granted_cookie_authenticates_the_next_request(tmp_path: Path) -> None:
     app = guarded(tmp_path)
     transport = httpx.ASGITransport(app=app)
@@ -309,12 +325,14 @@ async def test_a_granted_cookie_authenticates_the_next_request(tmp_path: Path) -
 # -- leakage and comparison ------------------------------------------------
 
 
+@pytest.mark.integration
 async def test_the_token_never_appears_in_a_refusal(tmp_path: Path) -> None:
     for headers in (HOST, {**HOST, "authorization": "Bearer wrong"}):
         response = await call(guarded(tmp_path), headers=headers)
         assert TOKEN not in response.text
 
 
+@pytest.mark.integration
 async def test_a_wrong_token_and_a_missing_one_are_indistinguishable(
     tmp_path: Path,
 ) -> None:
@@ -343,6 +361,7 @@ def test_the_comparison_is_constant_time(monkeypatch: pytest.MonkeyPatch) -> Non
 # -- ordering --------------------------------------------------------------
 
 
+@pytest.mark.integration
 async def test_host_checking_happens_before_token_checking(tmp_path: Path) -> None:
     """Asserted so that deleting the token middleware would fail this test.
 
@@ -369,6 +388,7 @@ async def test_host_checking_happens_before_token_checking(tmp_path: Path) -> No
     assert reached == [], "the token comparison ran despite a forged Host"
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("raw_path", "must_not_contain"),
     [("/p/foo%23bar", "#"), ("/x%3Fa=1", "?a=1"), ("/a%25b", None)],

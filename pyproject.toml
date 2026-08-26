@@ -94,6 +94,11 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-ra --strict-markers --strict-config"
 markers = [
+  # The tier a test belongs to is a DECLARATION, not an inference from its
+  # imports. Before this, the only way to tell an integration test from a unit
+  # test was whether its file reached for `httpx.ASGITransport`, so a test that
+  # stopped using it silently changed tier. See #37.
+  "integration: drives the real Starlette app through httpx.ASGITransport, no socket",
   "live: binds a real loopback socket on an ephemeral port",
   "live_tmux: drives a real tmux server on a private socket",
 ]

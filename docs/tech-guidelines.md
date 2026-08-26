@@ -215,14 +215,21 @@ two are told apart by what they touch.
 | Tier | Marker | Touches | Can prove |
 |---|---|---|---|
 | Unit | none | nothing outside the process | a function does what its author believed |
-| Integration | none yet, see below | the real Starlette app through `httpx.ASGITransport` | routing, middleware order, status codes, error bodies |
+| Integration | `integration` | the real Starlette app through `httpx.ASGITransport` | routing, middleware order, status codes, error bodies |
 | Live socket | `live` | 127.0.0.1 on an ephemeral port | the DEPLOYED server refuses something |
 | Live tmux | `live_tmux` | a real tmux on a private socket | our beliefs about an external tool are true |
 
-**The integration tier has no marker yet**, so it cannot be selected or
-excluded, and it is only told apart from unit by whether a file imports
-`ASGITransport`. That is a gap rather than a decision, and it is #37, timed for
-the start of Phase 5 before the tier triples in size.
+The integration tier gained its marker in #37, at the start of Phase 5 and
+before the tier tripled in size. Until then it was told apart from unit only by
+whether a file imported `ASGITransport`, so a test that stopped reaching for
+one silently changed tier.
+
+The tiers **partition** the suite: every test is in exactly one, and
+`tests/test_tiers.py` asserts both halves of that. A test carrying two tier
+markers is in neither, because `-m "not integration"` excludes it from a live
+run while `-m live` pulls it into one, so which tier it is depends on how you
+ask. A test that drives a real app and declares nothing lands in the unit tier,
+and the tier people run in a tight loop quietly stops being fast.
 
 **A browser tier does not exist yet.** The design's repository layout names
 `tests/e2e/`, and Playwright arrives with the interface in Phase 6 as #38.

@@ -45,11 +45,13 @@ async def call(
 # -- the deliberate GET exemption ------------------------------------------
 
 
+@pytest.mark.integration
 async def test_a_get_needs_no_origin(tmp_path: Path) -> None:
     app = build(Config(root=tmp_path))
     assert (await call(app, headers=HOST)).status_code == 200
 
 
+@pytest.mark.integration
 async def test_the_event_stream_needs_no_origin(tmp_path: Path) -> None:
     """The exemption is deliberate, and this test exists to say so.
 
@@ -62,6 +64,7 @@ async def test_the_event_stream_needs_no_origin(tmp_path: Path) -> None:
     assert response.status_code == 200
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("method", ["GET", "HEAD", "OPTIONS"])
 async def test_safe_methods_are_exempt(tmp_path: Path, method: str) -> None:
     app = build(Config(root=tmp_path))
@@ -71,6 +74,7 @@ async def test_safe_methods_are_exempt(tmp_path: Path, method: str) -> None:
 # -- refusals --------------------------------------------------------------
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
 async def test_a_mutating_request_without_an_origin_is_rejected(
     tmp_path: Path, method: str
@@ -83,6 +87,7 @@ async def test_a_mutating_request_without_an_origin_is_rejected(
     assert response.json()["code"] == "origin_missing"
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "origin",
     [
@@ -115,6 +120,7 @@ async def test_a_mutating_request_with_a_foreign_origin_is_rejected(
     assert response.json()["code"] in {"origin_rejected", "origin_missing"}
 
 
+@pytest.mark.integration
 async def test_another_local_application_is_not_same_origin(tmp_path: Path) -> None:
     """The reason the comparison is an origin and not a hostname.
 
@@ -131,6 +137,7 @@ async def test_another_local_application_is_not_same_origin(tmp_path: Path) -> N
 # -- what is accepted ------------------------------------------------------
 
 
+@pytest.mark.integration
 async def test_a_mutating_request_with_the_matching_origin_is_served(
     tmp_path: Path,
 ) -> None:
@@ -139,6 +146,7 @@ async def test_a_mutating_request_with_the_matching_origin_is_served(
     assert response.status_code == 200
 
 
+@pytest.mark.integration
 async def test_a_configured_proxy_origin_is_served(tmp_path: Path) -> None:
     # The TLS terminating proxy case. Configured, never derived: the scheme and
     # the port are the proxy's, and only the operator knows either.
@@ -165,6 +173,7 @@ async def test_a_configured_proxy_origin_is_served(tmp_path: Path) -> None:
     assert response.status_code == 200
 
 
+@pytest.mark.integration
 async def test_an_ipv6_origin_is_bracketed_the_way_a_browser_sends_it(
     tmp_path: Path,
 ) -> None:
@@ -174,6 +183,7 @@ async def test_an_ipv6_origin_is_bracketed_the_way_a_browser_sends_it(
     assert response.status_code == 200
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("suffix", ["", "/"])
 async def test_a_trailing_slash_on_the_origin_does_not_change_the_answer(
     tmp_path: Path, suffix: str
@@ -187,6 +197,7 @@ async def test_a_trailing_slash_on_the_origin_does_not_change_the_answer(
     assert response.status_code == 200
 
 
+@pytest.mark.integration
 async def test_origin_matching_is_case_insensitive_on_scheme_and_host(
     tmp_path: Path,
 ) -> None:
@@ -199,6 +210,7 @@ async def test_origin_matching_is_case_insensitive_on_scheme_and_host(
 # -- ordering --------------------------------------------------------------
 
 
+@pytest.mark.integration
 async def test_the_host_check_runs_before_the_origin_check(tmp_path: Path) -> None:
     # A rebound request must not learn which origins this server accepts.
     app = build(Config(root=tmp_path))
@@ -212,6 +224,7 @@ async def test_the_host_check_runs_before_the_origin_check(tmp_path: Path) -> No
 # -- #19: a root dot in the Origin header ----------------------------------
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("configured", ["box.lan", "box.lan."])
 @pytest.mark.parametrize("sent", ["http://box.lan:8787", "http://box.lan.:8787"])
 async def test_a_dotted_origin_matches_an_undotted_entry(
