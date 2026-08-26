@@ -215,14 +215,25 @@ def test_a_real_agent_is_still_detached_after_that_tightening(root: Path) -> Non
     assert state_of(engine, "vessel") is State.DETACHED
 
 
-def test_a_different_agent_binary_still_matches(root: Path) -> None:
-    """The suffix is built from the CONFIGURED binary, so `--agent-binary`
-    must not blind the orphan scan."""
+def test_the_binary_does_not_influence_the_match(root: Path) -> None:
+    """A MISMATCH, because the same binary on both sides proves nothing.
+
+    `[1:]` strips the binary from the suffix, so the match is deliberately
+    binary independent: an operator who changes `--agent-binary` between
+    starting an agent and restarting Hitchrail must not blind the orphan scan,
+    and neither must an `env` wrapper putting something else at argv[0].
+
+    An earlier version of this test passed the SAME binary on both sides and
+    claimed the opposite, that the configured binary shapes the suffix.
+    Mutating `self.config.agent_binary` to a literal, and `[1:]` to `[0:]`,
+    both left it green.
+    """
     tmux = FakeTmux()
     sessions_dir = root / ".sessions"
     sessions_dir.mkdir(exist_ok=True)
-    config = Config(root=root, agent_binary="/opt/claude", sessions_dir=sessions_dir)
-    argv = launch_argv("/opt/claude", "vessel")
+    # Configured with one binary; the running agent was started with another.
+    config = Config(root=root, agent_binary="/opt/new-claude", sessions_dir=sessions_dir)
+    argv = launch_argv("/usr/bin/old-claude", "vessel")
     engine = Engine(
         config,
         tmux=tmux,
@@ -545,3 +556,27 @@ def test_a_session_is_frozen(root: Path) -> None:
     engine, _ = engine_for(root)
     with pytest.raises(AttributeError):
         engine.get("vessel").state = State.RUNNING  # type: ignore[misc]
+
+
+def test_a_tmux_that_cannot_be_run_is_an_unreadable_machine(root: Path) -> None:
+    """The other half of #40's honesty, which the first fix for it broke.
+
+    An empty pane map means no sessions. A tmux that could not be RUN means we
+    do not know, and deriving from it reported a live agent as `detached`:
+    refuses to start, kill has no session, project unstartable.
+    """
+    from hitchrail.tmux import Tmux
+
+    def missing(argv: list[str]) -> object:
+        raise FileNotFoundError(2, "No such file or directory", "tmux")
+
+    sessions_dir = root / ".sessions"
+    sessions_dir.mkdir(exist_ok=True)
+    engine = Engine(
+        Config(root=root, sessions_dir=sessions_dir),
+        tmux=Tmux(prefix="hr-", run=missing),  # type: ignore[arg-type]
+        procs_fn=procs_from(ps_row(PANE, 1) + ps_row(AGENT, PANE, project="vessel")),
+        meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
+    )
+    with pytest.raises(MachineUnreadable):
+        engine.list()

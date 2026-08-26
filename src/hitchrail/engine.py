@@ -32,7 +32,7 @@ from enum import StrEnum
 from hitchrail import claude_ipc, discovery, ram
 from hitchrail.config import Config
 from hitchrail.procs import ProcTable, snapshot
-from hitchrail.tmux import Tmux
+from hitchrail.tmux import Tmux, TmuxUnavailable
 
 
 class EngineError(Exception):
@@ -151,7 +151,14 @@ class Engine:
                 "the process table could not be read, so no session state can "
                 "be determined; this is not the same as nothing running"
             )
-        pane_pids = self.tmux.pane_pids()
+        try:
+            pane_pids = self.tmux.pane_pids()
+        except TmuxUnavailable as exc:
+            # The other half of the same honesty. An empty pane map means no
+            # sessions; a tmux that could not be run means we do not know, and
+            # deriving `stopped` from it would report every running agent as
+            # not running.
+            raise MachineUnreadable(str(exc)) from exc
         owned: set[int] = set()
         for pid in pane_pids.values():
             owned.add(pid)
@@ -216,13 +223,20 @@ class Engine:
         Without this, such a session reads as stopped while it is very much
         alive, and starting again gives you two agents in one folder.
 
-        Matched on the marker followed by the project name at the END of the
-        command line, not on a bare substring: a command line for project `ab`
-        must not satisfy a lookup for `a`, which is the tmux prefix footgun one
-        layer up. **That depends on the project name being the last element of
-        `claude_ipc.launch_argv`.** Append a flag after it and every detached
-        agent becomes invisible, silently. There is a test that builds the
-        process args by CALLING `launch_argv` for exactly that reason.
+        Matched on the argv tail rather than a bare substring: a command line
+        for project `ab` must not satisfy a lookup for `a`, which is the tmux
+        prefix footgun one layer up.
+
+        An earlier version matched only the marker and the name, and warned
+        here that it depended on the project name being last in `launch_argv`.
+        **Building the suffix from `launch_argv` removed that dependency**, so
+        the warning is gone with it: appending a flag after the project name
+        now changes both sides together. The tests build their process rows the
+        same way, so the two cannot drift apart.
+
+        The binary is stripped (`[1:]`) on purpose: an operator who changes
+        `--agent-binary`, or an `env` wrapper at argv[0], must not blind the
+        scan for agents that are already running.
         """
         # The WHOLE argv tail, not just the marker and the name. Matching on
         # those two alone claims any process that happens to mention both: a

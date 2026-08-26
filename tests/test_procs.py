@@ -164,3 +164,30 @@ def test_first_matching_in_tree_finds_a_descendant() -> None:
     table = ProcTable(parse_ps(TABLE))
     found = table.first_matching_in_tree(1, "helper.js")
     assert found is not None and found.pid == 101
+
+
+def test_a_ps_that_cannot_be_executed_is_a_failed_table_not_an_exception() -> None:
+    """`subprocess.run` raises before there is a returncode when the binary is
+    absent: a container without procps, a broken PATH.
+
+    This docstring promises `snapshot` never raises for a failed call, and
+    "could not be executed" is the most failed a call gets. Without it the
+    engine sees a `FileNotFoundError`, which is not an `EngineError`, so the
+    API renders a 500 rather than saying the machine could not be read.
+    """
+
+    def missing(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        raise FileNotFoundError(2, "No such file or directory", argv[0])
+
+    table = snapshot(missing)
+    assert table.procs == []
+    assert table.ok is False, "a missing ps must not read as an idle machine"
+
+
+def test_a_ps_refused_by_permissions_is_also_a_failed_table() -> None:
+    """`PermissionError` is an `OSError` too, and means the same thing here."""
+
+    def refused(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        raise PermissionError(13, "Permission denied", argv[0])
+
+    assert snapshot(refused).ok is False

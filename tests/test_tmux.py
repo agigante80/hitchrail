@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from hitchrail.tmux import NotOurSession, Tmux, sanitize
+from hitchrail.tmux import NotOurSession, Tmux, TmuxUnavailable, sanitize
 
 # -- sanitize --------------------------------------------------------------
 
@@ -365,3 +365,50 @@ def test_no_claude_literal_leaks_into_this_module() -> None:
     source = (Path(__file__).parent.parent / "src" / "hitchrail" / "tmux.py").read_text()
     assert "/exit" not in source
     assert "--remote-control" not in source
+
+
+# -- tmux that cannot be run at all ----------------------------------------
+
+
+def missing_tmux(argv: list[str]) -> subprocess.CompletedProcess[str]:
+    raise FileNotFoundError(2, "No such file or directory", "tmux")
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda t: t.pane_pids(),
+        lambda t: t.has_session("p"),
+        lambda t: t.pane_pid("p"),
+        lambda t: t.capture_pane("p"),
+        lambda t: t.new_session("p", "/srv/p", ["claude"]),
+        lambda t: t.kill_session("p"),
+        lambda t: t.send_keys("p", "C-c"),
+    ],
+    ids=["pane_pids", "has_session", "pane_pid", "capture", "new", "kill", "keys"],
+)
+def test_a_tmux_that_cannot_be_run_raises_rather_than_lying(call: object) -> None:
+    """ "Could not look" must not collapse into "nothing is there".
+
+    An earlier version returned a synthetic non zero code, on the reasoning
+    that every caller treats non zero as "no". That was wrong twice: the write
+    methods discard the return entirely, so a failed start read as a successful
+    one; and for the reads it made a LIVE agent derive as `detached`, which
+    refuses to start and whose kill has no session to kill. The project became
+    unstartable, which is the same outcome `_find_detached` was fixed for.
+    """
+    tmux = Tmux(prefix="hr-", run=missing_tmux)
+    with pytest.raises(TmuxUnavailable):
+        call(tmux)  # type: ignore[operator]
+
+
+def test_a_tmux_that_runs_and_says_no_is_still_just_no() -> None:
+    """The other half. A non zero return is an ANSWER, not a failure, and must
+    keep meaning what it meant: no server running is the ordinary state of a
+    machine with nothing started."""
+    runner = FakeRunner(rc=dict.fromkeys(_VERBS, 1))
+    tmux = Tmux(prefix="hr-", run=runner)
+    assert tmux.pane_pids() == {}
+    assert tmux.has_session("p") is False
+    assert tmux.pane_pid("p") is None
+    assert tmux.capture_pane("p") == ""

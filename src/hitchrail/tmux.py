@@ -34,6 +34,20 @@ class NotOurSession(ValueError):
     """Refusing to touch a session that does not carry the configured prefix."""
 
 
+class TmuxUnavailable(OSError):
+    """tmux could not be EXECUTED, so nothing about sessions can be known.
+
+    Distinct from tmux running and reporting nothing, which is the ordinary
+    state of a machine with nothing started. `procs.ProcTable.ok` draws the
+    same line for the process table, and for the same reason: collapsing the
+    two makes a live agent read as `detached`, which refuses to start and whose
+    kill has no session to kill, so the project becomes unstartable.
+
+    #28's preflight refuses to start at all when tmux is missing. This is what
+    happens if it disappears while running.
+    """
+
+
 def sanitize(name: str) -> str:
     """Make a project name addressable as a tmux session, ONE TO ONE.
 
@@ -168,19 +182,32 @@ class Tmux:
     # -- reading -------------------------------------------------------
 
     def _try(self, argv: list[str]) -> subprocess.CompletedProcess[str]:
-        """Run, treating "could not be executed" as a non zero return.
+        """Run, turning "could not be executed" into a distinct failure.
 
         `subprocess.run` raises before there is a returncode when tmux is
-        absent or not executable. Every caller below already handles a non zero
-        return as "no", so turning the raise into one keeps a machine without
-        tmux reporting no sessions rather than crashing a listing. #28 refuses
-        to start at all in that case; this is what happens if tmux disappears
-        while running.
+        absent or not executable. An earlier version of this method turned that
+        into a non zero return, on the reasoning that every caller already
+        treats non zero as "no".
+
+        **That reasoning was wrong twice.** `new_session`, `kill_session` and
+        `send_keys` discard the return entirely, so they do not treat it as
+        anything: a failed start would have read as a successful one. And for
+        the read methods it collapses "we could not look" into "nothing is
+        there", which made a live agent derive as `detached` when tmux went
+        missing. That is the guard failing open that control 7 forbids, and it
+        is the same unstartable outcome `_find_detached` was just fixed for.
+
+        So it raises instead, and the engine turns it into an honest refusal.
+        A tmux that RUNS and says no still returns non zero, unchanged: that is
+        an answer, not a failure.
         """
         try:
             return self._run(argv)
         except OSError as exc:
-            return subprocess.CompletedProcess(argv, 1, "", str(exc))
+            raise TmuxUnavailable(
+                f"tmux could not be run ({exc}), so no session state can be "
+                "determined; this is not the same as no sessions existing"
+            ) from exc
 
     def has_session(self, project: str) -> bool:
         return (
