@@ -74,10 +74,16 @@ def make_engine(
 
 
 @contextlib.asynccontextmanager
-async def client_for(engine: Engine, config: Config) -> AsyncIterator[httpx.AsyncClient]:
+async def client_for(
+    engine: Engine, config: Config, bus: EventBus | None = None
+) -> AsyncIterator[httpx.AsyncClient]:
     """A client wired to a real app. An async context manager rather than a
-    bare generator, so the transport is actually closed when a test finishes."""
-    app = create_app(engine=engine, config=config, bus=EventBus())
+    bare generator, so the transport is actually closed when a test finishes.
+
+    `bus` is passed in only by the stream tests, which have to watch
+    `subscriber_count` to know when the publisher is actually listening.
+    """
+    app = create_app(engine=engine, config=config, bus=bus or EventBus())
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as c:
         yield c
@@ -606,3 +612,20 @@ async def test_the_sweep_task_is_cancelled_on_shutdown(config: Config) -> None:
         sweeps = [t for t in asyncio.all_tasks() if t is not here and _coro_name(t) == "sweep"]
     assert sweeps, "the sweep never started"
     assert all(t.done() for t in sweeps), "the sweep outlived the app"
+
+
+# -- #44: what the integration tier CAN see of the stream -------------------
+#
+# Not the stream itself. `httpx.ASGITransport` awaits the app to completion and
+# accumulates the body, so an endless SSE generator hangs it forever: the
+# streaming tests are in `tests/test_live_sse.py`, on a real socket. What
+# belongs here is the routing, which does not require reading a body.
+
+
+async def test_the_stream_is_a_get_because_eventsource_cannot_be_anything_else(
+    config: Config, engine: Engine
+) -> None:
+    """`EventSource` issues a GET and cannot set a header: no `Authorization`,
+    no custom anything. A stream behind a POST is one no browser reaches."""
+    async with client_for(engine, config) as c:
+        assert (await c.post("/api/events", headers=HEADERS)).status_code == 405

@@ -10,10 +10,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import functools
+import json
 import logging
 from collections.abc import AsyncIterator, Callable
 from typing import TypeVar
 
+from sse_starlette.sse import EventSourceResponse
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -270,6 +272,58 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
         # showing them as equals. Decided in #29.
         return JSONResponse({"name": name, "url": found.url, "source": found.source})
 
+    async def event_stream(request: Request) -> Response:
+        """The one route `EventSource` can actually reach.
+
+        A GET, because `EventSource` cannot set headers: no `Authorization`,
+        no custom anything. That is why the token has a cookie carrier, and
+        why this route is exempt from the Origin check while every mutating
+        route is not.
+        """
+
+        async def publisher() -> AsyncIterator[dict[str, str]]:
+            with events.subscribe() as queue:
+                while True:
+                    try:
+                        event = await asyncio.wait_for(queue.get(), timeout=1.0)
+                    except TimeoutError:
+                        # Not an error, and it fires constantly on a healthy
+                        # idle stream, which is this system's normal state.
+                        # The bounded wait exists so the loop stays cancellable
+                        # rather than parked forever inside `queue.get()`.
+                        continue
+                    yield {"event": "message", "data": json.dumps(event)}
+
+        # No `request.is_disconnected()` poll in the loop above, deliberately.
+        # It duplicated a job the comment below already assigns to
+        # sse-starlette, and the live tier proves the library does it: removing
+        # the check leaves `test_the_subscriber_slot_is_released_when_a_reader_goes_away`
+        # passing. It was also a second consumer of the same `receive()`
+        # channel sse-starlette listens on for the disconnect, so the two could
+        # race for the message that ends the stream. An unreachable guard is
+        # worse than none; one that can steal another's input is worse again.
+        #
+        # sse-starlette handles ping keepalive, disconnect detection and
+        # generator shutdown, which are the parts of SSE that are awkward to
+        # get right. Note its documented caveat: SSE and GZipMiddleware do not
+        # mix, which is why no gzip middleware appears anywhere in this app.
+        #
+        # This route CANNOT be tested through `httpx.ASGITransport`, and that
+        # is a property of the transport rather than of this code.
+        # `ASGITransport.handle_async_request` awaits the app to COMPLETION and
+        # accumulates the body, so a stream that never ends never returns
+        # headers. An endless generator hangs it forever.
+        #
+        # A draft of this function yielded a `ready` event first, on the
+        # reading that headers were being withheld until the first yield. That
+        # was the transport, not sse-starlette: verified on a real socket that
+        # headers arrive immediately with no such event. The event is gone
+        # rather than kept as a harmless extra, because it would have been a
+        # permanent addition to a documented contract bought by a wrong
+        # diagnosis. The stream's tests live in the `live` tier for the same
+        # reason, which is what `.claude/CLAUDE.md` already says about SSE.
+        return EventSourceResponse(publisher())
+
     @contextlib.asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
         app.state.events = events
@@ -313,6 +367,7 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
             Route("/api/sessions/{name}/kill", kill, methods=["POST"]),
             Route("/api/sessions/{name}/logs", logs, methods=["GET"]),
             Route("/api/sessions/{name}/url", session_url, methods=["GET"]),
+            Route("/api/events", event_stream, methods=["GET"]),
         ],
         middleware=middleware_stack(config),
         lifespan=lifespan,
