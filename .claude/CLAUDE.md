@@ -90,7 +90,7 @@ src/hitchrail/
   procs.py       process table snapshot
   claude_ipc.py  everything that knows Claude Code internals
   ram.py         memory readings and the guard decision
-  events.py      the change feed the SSE stream serves
+  events.py      the change feed the SSE stream serves, dropping slow clients
   engine.py      state derivation, start, stop, log tail
   security.py    host allowlist, origin check, token, in that order
   server.py      Starlette app, routes, middleware, SSE
