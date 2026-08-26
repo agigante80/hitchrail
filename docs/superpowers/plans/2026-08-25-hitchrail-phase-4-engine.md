@@ -27,6 +27,25 @@ Copied verbatim from the spec. Every task inherits these.
 - Defaults: session prefix `hr-`, stop timeout 30 seconds, hard memory floor 1536 MB, soft floor 3072 MB, per session estimate 1536 MB.
 - Tests are hermetic. No test touches a real tmux server, a real Claude process, the network, or the filesystem outside a temporary root.
 
+## Phase 4 tickets, in dependency order
+
+| Ticket | Task | Blocks |
+|---|---|---|
+| #39 | 11, the event bus | nothing here; Phase 5's SSE route consumes it |
+| #40 | 12, four states from two scans | #41, #42 |
+| #41 | 13, starting, the lock, the grace window | #42 |
+| #42 | 14, the stop sequence, expiry, log tail | |
+| #34 | property based tests | best early, so #40 is written with the tool |
+| #36 | three untested refusals and a dead tmux guard | independent |
+
+#40 is large and deliberately not split: the four states come from one
+algorithm run in two directions, and shipping half of it means shipping a
+derivation that is knowingly wrong about `detached`, which is the state the
+whole design exists to get right.
+
+#42 carries the phase's runtime proof, because a real Claude session cannot be
+started, watched, stopped and killed until stop and kill exist.
+
 ## Phase 4 file structure
 
 | File | Responsibility |
@@ -38,6 +57,44 @@ Copied verbatim from the spec. Every task inherits these.
 The event bus comes first because the engine publishes to it. It is a leaf with
 no dependencies, so it could sit anywhere; putting it immediately before its
 only consumer is what makes the phase readable in order.
+
+## Corrections found when validating this plan against the built adapters
+
+This plan was written before Phase 3 existed. Two of its assumptions no longer
+match the adapters it consumes, and both are recorded here because the snippets
+below still show the old shape.
+
+### 1. `_look` must consult `ProcTable.ok`, or a failed `ps` reads as idle
+
+`_look()` calls `self._procs_fn()` and uses the table without asking whether
+the call succeeded. `ProcTable.ok` was added in #24, after this plan was
+written, precisely because an empty table is ambiguous.
+
+If `ps` fails the table is empty, so `first_matching_in_tree` finds nothing and
+the orphan scan finds nothing, and **every running agent derives as `stale` or
+`stopped`**. The interface then shows agents as not running while they are,
+which is a guard failing open and is what `docs/tech-guidelines.md` control 7
+forbids.
+
+The design answers it: "If Hitchrail cannot determine a session's state, it
+says so rather than guessing." An unreadable machine is an ERROR, not a state.
+Raise, and let Phase 5 render it. **Do not add a fifth state**: the design is
+explicit that the table has four and that the in flight stop is an overlay
+rather than a fifth member.
+
+The tmux side is NOT the same and must not be conflated: `pane_pids()`
+returning `{}` when no server is running is legitimately "no sessions", because
+that is the ordinary state of a machine with nothing started. #40 has a test
+for each half so the two cannot be merged later.
+
+### 2. `session_url` returns provenance, not a bare string
+
+Task 14's interface says `Engine.session_url(name) -> str | None` and one of
+its tests asserts a bare URL string. `claude_ipc.session_url` returns
+`SessionUrl(url, source)` where source is `bridge` or `scraped`, decided in
+#29 because a scraped URL can be scrollback from a session that ended hours
+ago: syntactically perfect and semantically stale. #29 records that the
+provenance reaches the API, so `Session` carries it and `as_dict()` exposes it.
 
 ## The three things this phase gets right that a first draft does not
 
