@@ -91,6 +91,7 @@ src/hitchrail/
   procs.py       process table snapshot
   claude_ipc.py  everything that knows Claude Code internals
   ram.py         memory readings and the guard decision
+  sessions.py    what a session IS, and every refusal the engine can make
   events.py      the change feed the SSE stream serves, dropping slow clients
   engine.py      state derivation, start, stop, log tail; an unreadable
                  machine is an error rather than a fifth state

@@ -128,7 +128,17 @@ class FakeClock:
     def advance(self, seconds: float) -> None:
         self.now += seconds
 
+    # An unbounded wait is a real defect, and a test that HANGS on it is
+    # nearly as bad as one that passes: CI stalls until a job timeout with no
+    # useful output. This turns the hang into a failure with a message.
+    max_sleeps = 1000
+
     def sleep(self, seconds: float) -> None:
+        if len(self.slept) >= self.max_sleeps:
+            raise AssertionError(
+                f"slept {len(self.slept)} times without finishing: the wait "
+                "under test is unbounded"
+            )
         self.slept.append(seconds)
         self.advance(seconds)
 

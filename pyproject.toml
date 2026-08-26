@@ -123,6 +123,7 @@ source_modules = [
   "hitchrail.claude_ipc",
   "hitchrail.ram",
   "hitchrail.events",
+  "hitchrail.sessions",
   "hitchrail.engine",
 ]
 forbidden_modules = [

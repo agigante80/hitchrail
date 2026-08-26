@@ -16,10 +16,22 @@ from pathlib import Path
 
 import pytest
 
-from conftest import FakeTmux, procs_from, ps_row
+from conftest import FakeClock, FakeTmux, ScriptedProcs, procs_from, ps_row
 from hitchrail.claude_ipc import launch_argv
 from hitchrail.config import Config
-from hitchrail.engine import Engine, MachineUnreadable, State
+from hitchrail.engine import (
+    AlreadyRunning,
+    Engine,
+    Locked,
+    MachineUnreadable,
+    MemoryNeedsAck,
+    MemoryRefused,
+    NotRunning,
+    Protected,
+    StartFailed,
+    State,
+    UnknownProject,
+)
 from hitchrail.procs import ProcTable
 from hitchrail.tmux import Tmux
 
@@ -581,3 +593,324 @@ def test_a_tmux_that_cannot_be_run_is_an_unreadable_machine(root: Path) -> None:
     )
     with pytest.raises(MachineUnreadable):
         engine.list()
+
+
+# -- #41: starting ---------------------------------------------------------
+
+
+def running_after(name: str = "vessel", blank_reads: int = 2) -> ScriptedProcs:
+    """A table where the agent appears only after a few reads.
+
+    The real one behaves this way: a freshly spawned agent is not in the
+    process table when tmux returns, so a start that reads once sees a session
+    with nothing in it and calls that a failure.
+
+    `blank_reads` is 2 by default because `start` reads the machine BEFORE
+    spawning, to check the current state, and that read consumes a stage. One
+    blank stage would therefore be spent on the pre check and the very first
+    poll would already succeed, which is a grace window that never waits.
+    """
+    empty = ps_row(1001, 1)
+    with_agent = ps_row(1001, 1) + ps_row(AGENT, 1001, project=name)
+    return ScriptedProcs(*([empty] * blank_reads), with_agent)
+
+
+def start_engine(
+    root: Path,
+    *,
+    table: object = None,
+    sessions: dict[str, int] | None = None,
+    mem_mb: int = 8192,
+    self_project: str | None = None,
+) -> tuple[Engine, FakeTmux, FakeClock]:
+    tmux = FakeTmux(sessions=sessions)
+    clock = FakeClock()
+    sessions_dir = root / ".sessions"
+    sessions_dir.mkdir(exist_ok=True)
+    engine = Engine(
+        Config(root=root, sessions_dir=sessions_dir, self_project=self_project),
+        tmux=tmux,
+        procs_fn=table or procs_from(""),  # type: ignore[arg-type]
+        meminfo_fn=lambda: f"MemAvailable: {mem_mb * 1024} kB\n",
+        clock=clock,
+        sleep=clock.sleep,
+    )
+    return engine, tmux, clock
+
+
+def test_starting_spawns_the_agent_in_the_projects_directory(root: Path) -> None:
+    engine, tmux, _ = start_engine(root, table=running_after())
+    session = engine.start("vessel")
+    assert session.state is State.RUNNING
+    name, cwd, argv = tmux.started[-1]
+    assert name == "vessel"
+    assert cwd == str((root / "vessel").resolve())
+    assert argv == launch_argv("claude", "vessel"), "the argv must stay a list"
+
+
+def test_a_start_survives_a_process_table_that_is_empty_at_first(root: Path) -> None:
+    """The grace window, and the reason it exists."""
+    engine, _, clock = start_engine(root, table=running_after())
+    assert engine.start("vessel").state is State.RUNNING
+    assert clock.slept, "it should have waited at least once"
+
+
+def test_the_grace_window_is_bounded(root: Path) -> None:
+    """A regression to an unbounded wait fails here rather than hanging CI."""
+    engine, _, clock = start_engine(root, table=procs_from(ps_row(1001, 1)))
+    with pytest.raises(StartFailed):
+        engine.start("vessel")
+    assert sum(clock.slept) <= engine.start_grace + engine.poll_interval
+
+
+def test_a_failed_start_carries_the_pane_output(root: Path) -> None:
+    """ "It did not start" without the reason is a support request."""
+    engine, tmux, _ = start_engine(root, table=procs_from(ps_row(1001, 1)))
+    tmux.pane_text["vessel"] = "claude: command not found"
+    with pytest.raises(StartFailed) as caught:
+        engine.start("vessel")
+    assert "command not found" in caught.value.output
+
+
+def test_a_second_start_of_the_same_folder_is_refused_immediately(root: Path) -> None:
+    """`Locked`, not a queue. A queued start behind a slow one is a tap the
+    user has forgotten about by the time it fires."""
+    engine, tmux, _ = start_engine(root, table=running_after())
+    engine._starting.add("vessel")
+    with pytest.raises(Locked):
+        engine.start("vessel")
+    assert tmux.started == [], "nothing may be spawned while one is in flight"
+
+
+def test_a_start_of_a_different_folder_is_not_blocked(root: Path) -> None:
+    """The lock is per FOLDER, not global."""
+    engine, _, _ = start_engine(root, table=running_after("ab"))
+    engine._starting.add("vessel")
+    assert engine.start("ab").state is State.RUNNING
+
+
+def test_the_lock_is_released_when_the_start_fails(root: Path) -> None:
+    """A lock that outlives a failed start makes the folder permanently
+    unstartable until Hitchrail restarts."""
+    engine, _, _ = start_engine(root, table=procs_from(ps_row(1001, 1)))
+    with pytest.raises(StartFailed):
+        engine.start("vessel")
+    assert engine._starting == set()
+
+
+def test_the_lock_is_released_when_the_start_is_refused(root: Path) -> None:
+    engine, _, _ = start_engine(root, mem_mb=100)
+    with pytest.raises(MemoryRefused):
+        engine.start("vessel")
+    assert engine._starting == set()
+
+
+def test_memory_below_the_hard_floor_refuses_and_spawns_nothing(root: Path) -> None:
+    """Asserting the exception alone would pass for a refusal that already
+    started something."""
+    engine, tmux, _ = start_engine(root, mem_mb=100)
+    with pytest.raises(MemoryRefused) as caught:
+        engine.start("vessel")
+    assert tmux.started == []
+    assert caught.value.available_mb == 100
+    assert caught.value.needed_mb == 1536
+
+
+def test_memory_between_the_floors_asks_first(root: Path) -> None:
+    """The third outcome. Collapsing SOFT into either neighbour removes the
+    confirmation step the design asks for."""
+    engine, tmux, _ = start_engine(root, table=running_after(), mem_mb=1536 + 2000)
+    with pytest.raises(MemoryNeedsAck) as caught:
+        engine.start("vessel")
+    assert tmux.started == [], "nothing may be spawned while asking"
+    assert caught.value.available_mb == 1536 + 2000
+
+
+def test_an_acknowledged_soft_refusal_proceeds(root: Path) -> None:
+    """A separate engine on purpose: reusing the one that refused would carry
+    its scripted table's read counter forward, and the pre check would then see
+    an agent that was never started."""
+    engine, _, _ = start_engine(root, table=running_after(), mem_mb=1536 + 2000)
+    assert engine.start("vessel", acknowledged=True).state is State.RUNNING
+
+
+def test_starting_a_running_project_is_refused(root: Path) -> None:
+    table = ps_row(PANE, 1) + ps_row(AGENT, PANE, project="vessel")
+    engine, _, _ = start_engine(root, table=procs_from(table), sessions={"vessel": PANE})
+    with pytest.raises(AlreadyRunning):
+        engine.start("vessel")
+
+
+def test_starting_a_detached_project_is_refused(root: Path) -> None:
+    """Two agents in one folder is the outcome the whole design prevents."""
+    engine, _, _ = start_engine(root, table=procs_from(ps_row(ORPHAN, 1, project="vessel")))
+    with pytest.raises(AlreadyRunning):
+        engine.start("vessel")
+
+
+def test_a_stale_session_is_replaced_not_reused(root: Path) -> None:
+    """Reusing it would start in a pane already holding somebody's scrollback."""
+    engine, tmux, _ = start_engine(root, table=running_after(), sessions={"vessel": 1001})
+    engine.start("vessel")
+    assert "vessel" in tmux.killed
+
+
+def test_starting_the_self_project_is_refused(root: Path) -> None:
+    engine, tmux, _ = start_engine(root, self_project="vessel")
+    with pytest.raises(Protected):
+        engine.start("vessel")
+    assert tmux.started == []
+
+
+@pytest.mark.parametrize("name", ["", "../../etc", "no-such-project"])
+def test_starting_something_that_is_not_a_project_is_refused(root: Path, name: str) -> None:
+    engine, tmux, _ = start_engine(root)
+    with pytest.raises(UnknownProject):
+        engine.start(name)
+    assert tmux.started == []
+
+
+# -- #42: the three step stop ----------------------------------------------
+
+
+def live_engine(
+    root: Path, *, self_project: str | None = None
+) -> tuple[Engine, FakeTmux, FakeClock]:
+    """An engine with `vessel` genuinely running."""
+    table = ps_row(PANE, 1) + ps_row(AGENT, PANE, project="vessel")
+    engine, tmux, clock = start_engine(
+        root,
+        table=procs_from(table),
+        sessions={"vessel": PANE},
+        self_project=self_project,
+    )
+    return engine, tmux, clock
+
+
+def test_stopping_asks_and_kills_nothing(root: Path) -> None:
+    engine, tmux, _ = live_engine(root)
+    session = engine.stop("vessel")
+    assert session.stopping is True
+    assert session.state is State.RUNNING, "asking does not change what it is"
+    assert tmux.killed == [], "a graceful stop kills nothing"
+    assert tmux.sent, "it must actually ask"
+
+
+def test_the_stop_sequence_comes_from_the_quarantine(root: Path) -> None:
+    """The engine must not know what a stop physically is."""
+    from hitchrail.claude_ipc import GRACEFUL_STOP_KEYS
+
+    engine, tmux, _ = live_engine(root)
+    engine.stop("vessel")
+    assert [keys for _project, keys in tmux.sent] == list(GRACEFUL_STOP_KEYS)
+
+
+def test_the_engine_source_never_names_the_stop_sequence() -> None:
+    """A grep, because no import contract sees a `for` loop over a constant."""
+    source = (Path(__file__).parent.parent / "src" / "hitchrail" / "engine.py").read_text()
+    assert "GRACEFUL_STOP_KEYS" not in source
+    assert "send_keys" not in source
+
+
+def test_kill_is_reachable_during_a_stop(root: Path) -> None:
+    """The kill control stays within reach for the whole wait."""
+    engine, tmux, _ = live_engine(root)
+    engine.stop("vessel")
+    engine.kill("vessel")
+    assert tmux.killed == ["vessel"]
+    assert engine.stopping_since("vessel") is None, "killing ends the wait"
+
+
+def test_expiry_drops_the_marker_and_does_not_escalate(root: Path) -> None:
+    """The behaviour most likely to be "helpfully" changed later.
+
+    After the timeout Hitchrail stops WAITING. It does not kill: an automatic
+    kill is a destructive action taken while the user was not looking, and the
+    session is still alive so the choice remains theirs.
+
+    Asserting no exception would pass for an implementation that killed
+    quietly, so this asserts the fake recorded no kill.
+    """
+    engine, tmux, clock = live_engine(root)
+    engine.stop("vessel")
+    clock.advance(engine.config.stop_timeout + 1)
+
+    assert engine.expire_stops() == ["vessel"]
+    assert tmux.killed == [], "expiry must never escalate"
+    assert engine.stopping_since("vessel") is None
+    assert engine.get("vessel").state is State.RUNNING, "still alive, still theirs"
+
+
+def test_expiry_leaves_a_stop_that_is_still_within_its_timeout(root: Path) -> None:
+    engine, _, clock = live_engine(root)
+    engine.stop("vessel")
+    clock.advance(engine.config.stop_timeout - 1)
+    assert engine.expire_stops() == []
+    assert engine.stopping_since("vessel") is not None
+
+
+def test_expiry_announces_so_the_interface_can_report_it(root: Path) -> None:
+    """An expiry visible only on the next poll is one the interface cannot
+    report, and somebody is watching that timer."""
+    engine, _, clock = live_engine(root)
+    published: list[dict[str, object]] = []
+
+    class Recorder:
+        def publish(self, event: dict[str, object]) -> None:
+            published.append(event)
+
+    engine.attach_bus(Recorder())  # type: ignore[arg-type]
+    engine.stop("vessel")
+    clock.advance(engine.config.stop_timeout + 1)
+    engine.expire_stops()
+    assert any(e["name"] == "vessel" for e in published)
+
+
+def test_stopping_something_that_is_not_running_is_refused(root: Path) -> None:
+    engine, tmux, _ = start_engine(root)
+    with pytest.raises(NotRunning):
+        engine.stop("vessel")
+    assert tmux.sent == []
+
+
+@pytest.mark.parametrize("action", ["stop", "kill"])
+def test_the_self_project_cannot_be_stopped_or_killed(root: Path, action: str) -> None:
+    """Taking the interface down has no undo."""
+    engine, tmux, _ = live_engine(root, self_project="vessel")
+    with pytest.raises(Protected):
+        getattr(engine, action)("vessel")
+    assert tmux.killed == []
+    assert tmux.sent == []
+
+
+def test_logs_return_the_pane_tail(root: Path) -> None:
+    engine, tmux, _ = live_engine(root)
+    tmux.pane_text["vessel"] = "hello from the agent"
+    assert engine.logs("vessel") == "hello from the agent"
+
+
+def test_session_url_pays_for_the_scrape_and_says_so(root: Path) -> None:
+    """The expensive lookup listing skips, and the only place a scraped source
+    can appear."""
+    engine, tmux, _ = live_engine(root)
+    tmux.pane_text["vessel"] = "open https://claude.ai/code/session_scraped"
+    found = engine.session_url("vessel")
+    assert found is not None
+    assert found.source == "scraped"
+
+
+def test_session_url_is_none_for_a_stopped_project(root: Path) -> None:
+    engine, _, _ = start_engine(root)
+    assert engine.session_url("vessel") is None
+
+
+def test_sessions_does_not_import_engine() -> None:
+    """The dependency runs one way, which is what makes #41's split a seam.
+
+    Phase 5 imports the exceptions to map them to status codes; if `sessions`
+    imported `engine` back, that would drag the whole engine into the API layer
+    and the split would be a cut through a cycle.
+    """
+    source = (Path(__file__).parent.parent / "src" / "hitchrail" / "sessions.py").read_text()
+    assert "import engine" not in source
+    assert "from hitchrail.engine" not in source

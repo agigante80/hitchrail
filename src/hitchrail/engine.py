@@ -1,4 +1,10 @@
-"""State derivation: four states from two independent scans.
+"""State derivation and the session lifecycle.
+
+What a session IS, and every refusal, live in `sessions.py`; this module is
+what derives and drives them. Both are re exported here, so `from
+hitchrail.engine import State` keeps working for the callers that already do.
+
+Four states from two independent scans.
 
 **State is derived on demand and never stored.** There is no database and no
 session registry, so there is nothing to drift.
@@ -24,84 +30,32 @@ This module is in the engine layer and imports nothing from the web layer;
 
 from __future__ import annotations
 
+import builtins
+import contextlib
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from enum import StrEnum
 
 from hitchrail import claude_ipc, discovery, ram
 from hitchrail.config import Config
+from hitchrail.events import EventBus
 from hitchrail.procs import ProcTable, snapshot
+from hitchrail.sessions import (
+    AlreadyRunning,
+    EngineError,
+    Locked,
+    MachineUnreadable,
+    MemoryNeedsAck,
+    MemoryRefused,
+    NotRunning,
+    Protected,
+    Session,
+    StartFailed,
+    State,
+    UnknownProject,
+)
 from hitchrail.tmux import Tmux, TmuxUnavailable
-
-
-class EngineError(Exception):
-    """Anything the engine refuses to do, and the base the API maps from."""
-
-
-class UnknownProject(EngineError):
-    """No such folder in the root."""
-
-
-class MachineUnreadable(EngineError):
-    """The process table could not be read, so no state can be derived.
-
-    An ERROR rather than a state, deliberately. `ProcTable.ok` distinguishes
-    "nothing is running" from "we could not look", and rendering the second as
-    the first tells the user something false about their machine: every running
-    agent would appear as `stale` or `stopped`. The design settles it, "if
-    Hitchrail cannot determine a session's state, it says so rather than
-    guessing", and it must not become a fifth state, because the table below
-    has four and the in flight stop is an overlay rather than a member.
-
-    Note this is NOT the same as tmux returning no sessions. An empty pane map
-    is the ordinary state of a machine with nothing started.
-    """
-
-
-class State(StrEnum):
-    """A `StrEnum` so the wire format is the NAME.
-
-    An `IntEnum` would put the ordering into the API, and inserting a fifth
-    member later would change what an old client reads.
-    """
-
-    RUNNING = "running"
-    STALE = "stale"
-    DETACHED = "detached"
-    STOPPED = "stopped"
-
-
-@dataclass(frozen=True)
-class Session:
-    """One project's derived state. Frozen: nothing holds one and mutates it."""
-
-    name: str
-    state: State
-    pid: int | None = None
-    ram_mb: int = 0
-    uptime_s: int = 0
-    url: str | None = None
-    stopping: bool = False
-    protected: bool = False
-
-    def as_dict(self) -> dict[str, object]:
-        """Serialising a session is not HTTP knowledge.
-
-        The engine needs this to publish events, the import contract forbids
-        borrowing a formatter from the server, and a second copy of this shape
-        would drift from the first.
-        """
-        return {
-            "name": self.name,
-            "state": str(self.state),
-            "pid": self.pid,
-            "ram_mb": self.ram_mb,
-            "uptime_s": self.uptime_s,
-            "url": self.url,
-            "stopping": self.stopping,
-            "protected": self.protected,
-        }
 
 
 @dataclass(frozen=True)
@@ -128,7 +82,7 @@ class Engine:
         meminfo_fn: Callable[[], str] | None = None,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
-        bus: object | None = None,
+        bus: EventBus | None = None,
     ) -> None:
         self.config = config
         self.tmux = tmux or Tmux(prefix=config.session_prefix, socket=config.tmux_socket)
@@ -136,10 +90,19 @@ class Engine:
         self._meminfo_fn = meminfo_fn or ram.read_meminfo
         self._clock = clock
         self._sleep = sleep
-        self._bus = bus
+        self._bus: EventBus | None = bus
         # The one piece of state that is not derived. Memory only, and lost on
         # restart on purpose: see the module docstring.
         self._stopping: dict[str, float] = {}
+        # Per FOLDER, never global: starting one project must not block
+        # starting another. Guarded because start runs on worker threads, which
+        # is the whole reason the lock exists.
+        self._starting: set[str] = set()
+        self._starting_guard = threading.Lock()
+        # Generous on purpose. Being too eager reports a working start as a
+        # failure; being too patient is only a slow error message.
+        self.start_grace = 8.0
+        self.poll_interval = 0.25
 
     # -- reading -------------------------------------------------------
 
@@ -273,3 +236,231 @@ class Engine:
             stopping=name in self._stopping,
             protected=protected,
         )
+
+    # -- the lifecycle -------------------------------------------------
+
+    def attach_bus(self, bus: EventBus) -> None:
+        """Wired after construction, because the API owns the bus's lifetime."""
+        self._bus = bus
+
+    def _announce(self, session: Session) -> None:
+        """Never blocks and never raises, whatever the bus does.
+
+        Called from engine code on worker threads. `EventBus.publish` already
+        guarantees this; the guard means a future bus with a different contract
+        cannot turn an announcement into a failed stop.
+        """
+        if self._bus is None:
+            return
+        # Deliberately broad. This is the last line of defence around a
+        # notification: a bus that raised would turn a SUCCESSFUL stop into a
+        # failed one, and the user would be told their agent did not stop when
+        # it did. `EventBus.publish` already guarantees it does not raise; this
+        # holds if a future bus does not.
+        with contextlib.suppress(Exception):  # pragma: no cover - defensive
+            self._bus.publish(session.as_dict())
+
+    def _require_live(self, name: str) -> Session:
+        """Unknown, protected and not running are three different answers.
+
+        Collapsing them gives the interface one message for three situations a
+        user would act on differently.
+        """
+        session = self.get(name)
+        if session.protected:
+            raise Protected(name)
+        if session.state is State.STOPPED:
+            raise NotRunning(name)
+        return session
+
+    def start(self, name: str, acknowledged: bool = False) -> Session:
+        """Start an agent in a folder, once, with the machine's consent."""
+        try:
+            path = discovery.project_path(self.config.root, name)
+        except (
+            discovery.InvalidName,
+            discovery.NoSuchProject,
+            discovery.OutsideRoot,
+        ) as exc:
+            raise UnknownProject(name) from exc
+
+        with self._starting_guard:
+            if name in self._starting:
+                raise Locked(name)
+            self._starting.add(name)
+        try:
+            return self._start_locked(name, str(path), acknowledged)
+        finally:
+            # In a finally, always. A lock that outlives a failed start makes
+            # the folder permanently unstartable until Hitchrail restarts.
+            with self._starting_guard:
+                self._starting.discard(name)
+
+    def _start_locked(self, name: str, path_str: str, acknowledged: bool) -> Session:
+        current = self.get(name)
+        if current.protected:
+            raise Protected(name)
+        if current.state in (State.RUNNING, State.DETACHED):
+            # DETACHED counts. Starting over an agent that outlived its
+            # terminal is exactly the two-agents-in-one-folder outcome the
+            # whole design exists to prevent.
+            raise AlreadyRunning(name)
+
+        available = self.available_mb()
+        verdict = ram.guard(
+            available,
+            need_mb=self.config.session_mb,
+            hard_mb=self.config.hard_floor_mb,
+            soft_mb=self.config.soft_floor_mb,
+        )
+        if verdict is ram.Verdict.HARD:
+            raise MemoryRefused(available, self.config.session_mb)
+        if verdict is ram.Verdict.SOFT and not acknowledged:
+            raise MemoryNeedsAck(available, self.config.session_mb)
+
+        try:
+            if current.state is State.STALE:
+                # A terminal with no agent in it. Reusing it would start the
+                # new session in a pane already holding old scrollback.
+                self.tmux.kill_session(name)
+            self.tmux.new_session(
+                name, path_str, claude_ipc.launch_argv(self.config.agent_binary, name)
+            )
+        except TmuxUnavailable as exc:
+            raise MachineUnreadable(str(exc)) from exc
+        return self._await_running(name)
+
+    def _await_running(self, name: str) -> Session:
+        """Poll until the agent appears, or the grace window runs out.
+
+        A freshly spawned agent is not in the process table yet, so the first
+        look after `new-session` finds nothing and the start looks failed. The
+        window is BOUNDED and driven by the injected clock and sleep: a test
+        that really waits is a test somebody deletes when the suite gets slow.
+
+        It does not trust `new_session` having returned. tmux reports a failed
+        `new-session` through a return code the write path discards, so the
+        only reliable evidence a start worked is the agent appearing.
+        """
+        deadline = self._clock() + self.start_grace
+        while True:
+            started = self.get(name)
+            if started.state is State.RUNNING:
+                self._announce(started)
+                return started
+            if self._clock() >= deadline:
+                raise StartFailed(self._safe_capture(name))
+            self._sleep(self.poll_interval)
+
+    def _safe_capture(self, name: str) -> str:
+        """Pane output for an error message, never an error of its own.
+
+        This runs while raising `StartFailed`, and a tmux that has gone away
+        must not replace "your session did not start, here is why" with a
+        different exception entirely.
+        """
+        try:
+            return self.tmux.capture_pane(name, lines=40)
+        except TmuxUnavailable:
+            return ""
+
+    def stop(self, name: str) -> Session:
+        """Ask the agent to finish. Nothing is killed."""
+        self._require_live(name)
+        self._stopping[name] = self._clock()
+        # One call, and the engine does not learn what a stop physically is.
+        # Iterating the key sequence here would teach it three Claude Code
+        # facts: that stopping is keystrokes, that it is a sequence of them,
+        # and that they travel through a pane. The engine owns the policy, the
+        # timeout, the marker and the refusal to escalate; the adapter owns the
+        # mechanism.
+        try:
+            claude_ipc.request_stop(self.tmux, name)
+        except TmuxUnavailable as exc:
+            self._stopping.pop(name, None)
+            raise MachineUnreadable(str(exc)) from exc
+        updated = self.get(name)
+        self._announce(updated)
+        return updated
+
+    def kill(self, name: str) -> Session:
+        """The backstop, reachable at any point during a graceful wait.
+
+        Deliberately not agent specific: killing the tmux session works
+        whatever is running in it, which is exactly why it is reliable.
+        """
+        self._require_live(name)
+        self._stopping.pop(name, None)
+        try:
+            self.tmux.kill_session(name)
+        except TmuxUnavailable as exc:
+            raise MachineUnreadable(str(exc)) from exc
+        updated = self.get(name)
+        self._announce(updated)
+        return updated
+
+    # `builtins.list`, not `list`. This class defines a method called `list`,
+    # which shadows the builtin for every annotation after it, and mypy reads
+    # the bare form as "returns Engine.list". The design names that method
+    # `list`, so the qualified builtin is the smaller compromise.
+    def expire_stops(self) -> builtins.list[str]:
+        """Drop stop markers older than the timeout, and say so.
+
+        Expiry means "we stopped waiting", never "escalate". The session is
+        still alive and the decision to kill it belongs to a person: an
+        automatic kill is a destructive action taken while they were not
+        looking.
+
+        It announces, because the person watching the timer has to learn the
+        wait ended. An expiry visible only on the next poll is one the
+        interface cannot report.
+        """
+        now = self._clock()
+        expired = [
+            name
+            for name, began in self._stopping.items()
+            if now - began >= self.config.stop_timeout
+        ]
+        for name in expired:
+            self._stopping.pop(name, None)
+            self._announce(self.get(name))
+        return expired
+
+    def logs(self, name: str, lines: int = 40) -> str:
+        """The tail of a pane."""
+        self.get(name)  # so an unknown project is not silently empty output
+        try:
+            return self.tmux.capture_pane(name, lines=lines)
+        except TmuxUnavailable as exc:
+            raise MachineUnreadable(str(exc)) from exc
+
+    def session_url(self, name: str) -> claude_ipc.SessionUrl | None:
+        """The link, paid for on demand.
+
+        The EXPENSIVE lookup listing deliberately skips: it captures a pane.
+        Returns the source alongside the URL, because a scraped one can be
+        scrollback from a session that ended hours ago.
+        """
+        session = self.get(name)
+        if session.pid is None:
+            return None
+        return claude_ipc.session_url(
+            session.pid, self.config.sessions_dir, self._safe_capture(name)
+        )
+
+
+__all__ = [
+    "AlreadyRunning",
+    "Engine",
+    "EngineError",
+    "Locked",
+    "MachineUnreadable",
+    "MemoryNeedsAck",
+    "MemoryRefused",
+    "NotRunning",
+    "Protected",
+    "Session",
+    "StartFailed",
+    "State",
+    "UnknownProject",
+]
