@@ -926,8 +926,34 @@ def test_session_url_pays_for_the_scrape_and_says_so(root: Path) -> None:
     assert found.source == "scraped"
 
 
-def test_session_url_is_none_for_a_stopped_project(root: Path) -> None:
+def test_session_url_tells_three_answers_apart(root: Path) -> None:
+    """Reverses an earlier decision, so the reason is here rather than in the log.
+
+    This used to assert `None` for a stopped project, on the reasoning that a
+    missing link is a missing link. Phase 5 showed what that costs: the route
+    turns `None` into `url_pending`, which tells a client to "ask again
+    shortly". For a typo that is a lie it will keep believing, and for a real
+    project that is not running it is the wrong instruction, because the answer
+    is start it.
+
+    So there are three answers, not one. A name the root has never heard of is
+    `UnknownProject`, a real project that is not running is `NotRunning`, and a
+    RUNNING one that has not published a link yet is `None`, which is the only
+    case where "ask again shortly" is true. See #47.
+    """
     engine, _, _ = start_engine(root)
+    with pytest.raises(NotRunning):
+        engine.session_url("vessel")
+    with pytest.raises(UnknownProject):
+        engine.session_url("no-such-project")
+
+
+def test_session_url_is_none_only_while_a_running_session_has_no_link(
+    root: Path,
+) -> None:
+    """The `url_pending` case, which must stay `None` rather than raising."""
+    engine, _, _ = live_engine(root)
+    assert engine.get("vessel").state is State.RUNNING
     assert engine.session_url("vessel") is None
 
 
@@ -1477,3 +1503,15 @@ def test_a_listing_decides_the_names_so_one_answer_cannot_contradict_itself(
         "the engine used the live root instead of the listing it was given"
     )
     assert sorted(s.name for s in engine.list()) == ["alpha", "beta"]
+
+
+def test_session_url_is_none_for_a_stale_session(root: Path) -> None:
+    """A tmux session with no agent in it: there is a pane but no pid.
+
+    Not `NotRunning`, because something IS there and the shell can still be
+    attached to. Not an error either: there is simply no link, which is the
+    `url_pending` case the route reports.
+    """
+    engine, _ = engine_for(root, sessions={"vessel": PANE}, table=ps_row(PANE, 1))
+    assert engine.get("vessel").state is State.STALE
+    assert engine.session_url("vessel") is None

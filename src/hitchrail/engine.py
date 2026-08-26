@@ -255,8 +255,28 @@ class Engine:
         if session.protected:
             raise Protected(name)
         if session.state is State.STOPPED:
+            self._reject_if_not_a_project(name)
             raise NotRunning(name)
         return session
+
+    def _reject_if_not_a_project(self, name: str) -> None:
+        """Nothing live here, so the listing decides which refusal this is.
+
+        Consulted ONLY on the way to a refusal, never on the way to an action,
+        and that ordering is the whole design. Checking the listing first is
+        what made a live session unreachable the moment its name stopped being
+        listed (#42): a leftover `hr-alpha`, or a folder renamed under a
+        running agent, could no longer be stopped at all.
+
+        Asking last costs a scan on an error path and keeps both answers
+        honest. A name with a live session behind it never reaches here, so it
+        stays actionable whatever the listing says. A name with nothing behind
+        it is `unknown_project` if the root has never heard of it, and
+        `not_running` if it is a real project that simply is not running, which
+        is a 404 and a 409 the interface has to tell apart (#47).
+        """
+        if name not in discovery.list_projects(self.config.root):
+            raise UnknownProject(name)
 
     def start(self, name: str, acknowledged: bool = False) -> Session:
         """Start an agent in a folder, once, with the machine's consent."""
@@ -495,6 +515,7 @@ class Engine:
             # different answers. Without it a name with nothing behind it
             # returns "", which a client cannot tell from a pane that has
             # printed nothing yet.
+            self._reject_if_not_a_project(name)
             raise NotRunning(name)
         try:
             return self.tmux.capture_pane(name, lines=lines)
@@ -511,6 +532,14 @@ class Engine:
         self._require_addressable(name)
         session = self.get(name)
         if session.pid is None:
+            # Three answers, not two. A name the root has never heard of is a
+            # 404; a real project that is not running is a 409; a running one
+            # that has not published a link yet is `None`, which the route
+            # turns into `url_pending`. Returning `None` for all three told a
+            # client to "ask again shortly" about a typo.
+            self._reject_if_not_a_project(name)
+            if session.state is State.STOPPED:
+                raise NotRunning(name)
             return None
         return claude_ipc.session_url(
             session.pid, self.config.sessions_dir, self._safe_capture(name)
