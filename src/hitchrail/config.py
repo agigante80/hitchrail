@@ -26,6 +26,7 @@ from hitchrail.hostnames import (
     normalise_origin,
     origin_forms,
 )
+from hitchrail.projectnames import explain_name
 
 # Re exported for the modules and tests that already import these from here.
 # The owner is `hostnames`; this keeps one import site working rather than
@@ -115,6 +116,7 @@ class Config:
         self._check_bind_host()
         self._check_extra_hosts()
         self._check_extra_origins()
+        self._check_self_project()
 
         if not self.is_loopback and not self.token:
             raise ConfigError(
@@ -231,6 +233,47 @@ class Config:
                     "no port, scheme or path, because the Host header is compared "
                     "with the port already stripped"
                 )
+
+    def _check_self_project(self) -> None:
+        """A protection that silently does not apply is worse than none.
+
+        `protected` is plain string equality, so a value that can never match
+        disables the lock with nothing said anywhere: the operator believes the
+        session hosting Hitchrail cannot be stopped, and its stop control
+        behaves like any other. There is no undo, and it takes the interface
+        down with it.
+
+        Shape AND existence, because shape alone leaves the likeliest mistakes
+        in place. `./hitchrail` and `hitchrail/` are refused by shape;
+        `Hitchrail` and `hitchrai` are well shaped and still never match, and a
+        capital letter and a typo are exactly what a person gets wrong.
+
+        Existence costs a filesystem read at construction, which this class
+        otherwise avoids. The argument for paying it: this flag cannot be
+        satisfied by a folder that is not there, because it names the project
+        Hitchrail runs in. If it is absent, the flag was meaningless whatever
+        we do, and refusing says so where accepting hides it.
+
+        Reached through `projectnames`, not `discovery`, so the rule is the one
+        the rest of the project uses and the dependency stays one way, exactly
+        as `config` reaches for `hostnames`. Past `explain_name` a name holds
+        no separator and no leading dot, so `root / name` is a direct child by
+        construction.
+        """
+        if self.self_project is None:
+            return
+        reason = explain_name(self.self_project)
+        if reason is not None:
+            raise ConfigError(
+                f"--self-project {self.self_project!r} is not a project name: {reason}"
+            )
+        if not (self.root / self.self_project).is_dir():
+            raise ConfigError(
+                f"--self-project {self.self_project!r} is not a folder in "
+                f"{self.root}. The protection is a name comparison, so a name "
+                "that is not there never matches and the session hosting "
+                "Hitchrail would be stoppable with nothing to say so"
+            )
 
     def _check_extra_origins(self) -> None:
         """An origin is a scheme, a host and a port, and nothing else.

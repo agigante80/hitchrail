@@ -871,7 +871,17 @@ def test_every_module_is_under_the_size_guideline() -> None:
     #
     # Raise this only for a change that adds behaviour, and say what in the
     # commit. If it passes roughly 550, look for a seam again with fresh eyes.
-    caps = {"engine.py": 534}  # +_await_gone, +list(listing=...)
+    caps = {
+        "engine.py": 534,  # +_await_gone, +list(listing=...)
+        # 413, and thirteen lines over the guideline is not a second job. #18
+        # already took the host vocabulary out of this file, and what is left
+        # is one dataclass and its startup refusals, which is one thing. The
+        # growth is #48's `_check_self_project`, whose comment is longer than
+        # its code on purpose: a filesystem read in a config constructor looks
+        # wrong, and the reason it is not belongs next to it. Split only if a
+        # NEW responsibility arrives, never to reclaim these lines.
+        "config.py": 413,
+    }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"
     sizes = {p.name: len(p.read_text().splitlines()) for p in sorted(src.glob("*.py"))}
@@ -956,3 +966,76 @@ def test_the_import_contract_covers_every_engine_layer_module() -> None:
         "Add them to `source_modules` in pyproject.toml, or to `web` here if "
         "they are genuinely part of the web layer."
     )
+
+
+# -- #48: a protection that cannot match is not a protection ----------------
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["./hitchrail", "hitchrail/", "../hitchrail", ".hidden", "-flag", "", "a b", "a" * 300],
+)
+def test_a_self_project_that_could_never_be_a_project_is_refused(
+    tmp_path: Path, value: str
+) -> None:
+    """Shape. Each of these is accepted by string equality and matches nothing."""
+    with pytest.raises(ConfigError) as exc:
+        Config(root=tmp_path, self_project=value)
+    assert "--self-project" in str(exc.value)
+
+
+@pytest.mark.parametrize("value", ["Hitchrail", "hitchrai", "hitchrail2"])
+def test_a_well_shaped_self_project_that_is_not_there_is_refused(
+    tmp_path: Path, value: str
+) -> None:
+    """The half a shape check cannot reach, and the likelier mistake.
+
+    A capital letter and a typo are what a person actually gets wrong, and both
+    pass every pattern. Without the existence check this ticket would have
+    closed while the guard stayed broken for its two commonest failures.
+    """
+    (tmp_path / "hitchrail").mkdir()
+    with pytest.raises(ConfigError) as exc:
+        Config(root=tmp_path, self_project=value)
+    assert "is not a folder in" in str(exc.value)
+
+
+def test_a_self_project_that_is_really_there_is_accepted(tmp_path: Path) -> None:
+    (tmp_path / "hitchrail").mkdir()
+    assert Config(root=tmp_path, self_project="hitchrail").self_project == "hitchrail"
+
+
+def test_no_self_project_protects_nothing_and_that_is_fine(tmp_path: Path) -> None:
+    """Optional. Absence must not become a startup failure."""
+    assert Config(root=tmp_path).self_project is None
+
+
+def test_a_file_is_not_a_self_project(tmp_path: Path) -> None:
+    """`is_dir`, not `exists`: Hitchrail cannot be running inside a file."""
+    (tmp_path / "hitchrail").write_text("not a folder")
+    with pytest.raises(ConfigError):
+        Config(root=tmp_path, self_project="hitchrail")
+
+
+def test_the_refusal_names_the_flag_and_the_root(tmp_path: Path) -> None:
+    """The operator has to be able to act on it without reading the source."""
+    (tmp_path / "real").mkdir()
+    with pytest.raises(ConfigError) as exc:
+        Config(root=tmp_path, self_project="typo")
+    message = str(exc.value)
+    assert "--self-project" in message and "typo" in message and str(tmp_path) in message
+
+
+def test_projectnames_does_not_import_config() -> None:
+    """The dependency runs one way, the same seam `hostnames` has.
+
+    `config` imports `projectnames` for #48. If `projectnames` ever imports
+    `config` back, the split stops being a seam and becomes a cut through a
+    cycle, and the next person to tidy up will reasonably merge them.
+    """
+    source = (
+        Path(__file__).parent.parent / "src" / "hitchrail" / "projectnames.py"
+    ).read_text()
+    assert "import config" not in source
+    assert "from hitchrail.config" not in source
+    assert "from .config" not in source
