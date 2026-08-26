@@ -10,6 +10,7 @@ neighbours.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -17,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from conftest import FakeClock, FakeTmux, ScriptedProcs, procs_from, ps_row
+from hitchrail import discovery
 from hitchrail.claude_ipc import GRACEFUL_STOP_KEYS, launch_argv
 from hitchrail.config import Config
 from hitchrail.engine import (
@@ -1230,3 +1232,38 @@ def test_an_unreadable_machine_does_not_kill_the_expiry_ticker(tmp_path: Path) -
     assert engine.stopping_since("alpha") is None
     # The ticker is still usable, which is the whole point.
     assert engine.expire_stops() == []
+
+
+def test_a_project_that_vanishes_between_the_listing_and_the_path_is_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The race the `except` in `_require_startable` exists for.
+
+    The gate asks the listing first and resolves the path second, so a folder
+    deleted between those two calls reaches `project_path` after passing the
+    listing. Without the guard that surfaces as a raw `NoSuchProject` from the
+    discovery layer, which the API has no code for and would return as a 500.
+
+    Worth a test because a guard nobody can reach is worse than no guard: a
+    reader who finds one stops trusting the rest. This one is reachable, and
+    this is the door.
+    """
+    (tmp_path / "alpha").mkdir()
+    sessions_dir = tmp_path / ".sessions"
+    sessions_dir.mkdir()
+    engine = Engine(
+        Config(root=tmp_path, sessions_dir=sessions_dir),
+        tmux=FakeTmux(sessions={}),
+        procs_fn=procs_from(""),
+        meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
+        sleep=lambda _s: None,
+    )
+    real = discovery.project_path
+
+    def vanishing(root: Path, name: str) -> Path:
+        shutil.rmtree(tmp_path / "alpha", ignore_errors=True)
+        return real(root, name)
+
+    monkeypatch.setattr(discovery, "project_path", vanishing)
+    with pytest.raises(UnknownProject):
+        engine.start("alpha")
