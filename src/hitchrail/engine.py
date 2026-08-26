@@ -102,6 +102,11 @@ class Engine:
         # Generous on purpose. Being too eager reports a working start as a
         # failure; being too patient is only a slow error message.
         self.start_grace = 8.0
+        # Much shorter than `start_grace`: a killed process is already gone in
+        # the normal case, and this only covers the moment between tmux
+        # returning and the kernel reaping. Waiting longer would block a caller
+        # to hide a state that, past a second or two, is genuinely true.
+        self.kill_grace = 2.0
         self.poll_interval = 0.25
 
     # -- reading -------------------------------------------------------
@@ -363,9 +368,39 @@ class Engine:
         # as though nobody had asked.
         with self._stopping_guard:
             self._stopping.pop(name, None)
-        updated = self.get(name)
+        updated = self._await_gone(name)
         self._announce(updated)
         return updated
+
+    def _await_gone(self, name: str) -> Session:
+        """Poll until the killed agent actually leaves the process table.
+
+        `tmux kill-session` returns before the process finishes dying, so the
+        pane map is already empty while the agent is still listed. Derivation
+        is right to call that `detached`: it is describing the machine
+        accurately. It is a terrible thing to hand back from `kill`, though,
+        because the user asked to kill and is told they now have a detached
+        agent with a pid, which reads as the kill having failed and orphaned
+        something.
+
+        So the wait is here rather than in derivation, which stays honest, and
+        it is the same shape as `_await_running`: BOUNDED, and driven by the
+        injected clock and sleep so no test really waits.
+
+        A timeout returns whatever is true rather than raising. If the process
+        genuinely will not die, `detached` with its pid is the correct answer
+        and the user needs to see it: that is the state the design surfaces on
+        purpose so a person can act on it. This decision belongs to the stop
+        sequence and was raised against it on #49.
+        """
+        deadline = self._clock() + self.kill_grace
+        while True:
+            settled = self.get(name)
+            if settled.state is not State.DETACHED:
+                return settled
+            if self._clock() >= deadline:
+                return settled
+            self._sleep(self.poll_interval)
 
     # `builtins.list`, not `list`. This class defines a method called `list`,
     # which shadows the builtin for every annotation after it, and mypy reads

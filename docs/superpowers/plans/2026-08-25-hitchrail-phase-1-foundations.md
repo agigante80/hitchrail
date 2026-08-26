@@ -59,7 +59,7 @@ The stubs matter. import-linter fails when a contract names a module that does n
 - Consumes: nothing.
 - Produces: `hitchrail.__version__: str`. A working `uv run` environment. Five gates every later task must keep green: `uv run ruff check`, `uv run ruff format --check`, `uv run mypy`, `uv run lint-imports`, `uv run pytest`.
 
-- [ ] **Step 1: Write `pyproject.toml`**
+- [x] **Step 1: Write `pyproject.toml`**
 
 ```toml
 [project]
@@ -175,7 +175,7 @@ forbidden_modules = [
 
 `S603` is ruff's warning about subprocess calls. It is silenced only in the two modules that legitimately run subprocesses, so the exception is visible rather than global. `hitchrail.security` is deliberately **not** in `source_modules`: it is part of the web layer and imports Starlette on purpose.
 
-- [ ] **Step 2: Create the package files and every module stub**
+- [x] **Step 2: Create the package files and every module stub**
 
 `.python-version`:
 
@@ -273,7 +273,7 @@ in.
 """Command line entry point."""
 ```
 
-- [ ] **Step 3: Write the failing smoke test**
+- [x] **Step 3: Write the failing smoke test**
 
 `tests/test_smoke.py`:
 
@@ -311,12 +311,12 @@ def test_every_module_named_in_the_import_contract_exists() -> None:
         assert importlib.import_module(f"hitchrail.{name}") is not None
 ```
 
-- [ ] **Step 4: Run to verify failure**
+- [x] **Step 4: Run to verify failure**
 
 Run: `uv sync && uv run pytest tests/test_smoke.py -v`
 Expected: FAIL. Before `uv sync` installs the package, `__version__` is `"0.0.0+unknown"` and the first test fails. Once synced it passes, which is the point of the assertion: it proves the distribution is installed rather than the working tree being on `sys.path`.
 
-- [ ] **Step 5: Run every gate**
+- [x] **Step 5: Run every gate**
 
 ```bash
 uv sync
@@ -329,7 +329,7 @@ uv run lint-imports
 
 Expected: pytest passes with 2 tests. All five gates pass, `lint-imports` included, because every module in the contract exists.
 
-- [ ] **Step 6: Write the CI workflow**
+- [x] **Step 6: Write the CI workflow**
 
 `.github/workflows/ci.yml`:
 
@@ -379,7 +379,7 @@ stale) and `astral-sh/setup-uv` was at v10.0.1 with no moving major tag past
 v7, which is why one is pinned to a major and the other to an exact version.
 Check both again rather than trusting these numbers.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add pyproject.toml uv.lock .python-version src tests .github
@@ -424,7 +424,7 @@ the allowlist defends. DNS rebinding works through an attacker controlled
 **name**; a browser only sends `Host: 192.168.1.10` when a person typed that
 address.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/test_config.py`:
 
@@ -550,12 +550,12 @@ def test_allowed_origins_include_the_default_port_forms(tmp_path: Path) -> None:
     assert "http://192.168.1.10" in cfg.allowed_origins
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `uv run pytest tests/test_config.py -v`
 Expected: FAIL with `ImportError: cannot import name 'Config' from 'hitchrail.config'` (the stub has no names in it yet).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `src/hitchrail/config.py`:
 
@@ -706,12 +706,12 @@ class Config:
         return frozenset(origins)
 ```
 
-- [ ] **Step 4: Run to verify passing**
+- [x] **Step 4: Run to verify passing**
 
 Run: `uv run pytest tests/test_config.py -v`
 Expected: PASS, 19 tests (four functions are parametrised: 4 loopback forms, 2 wildcard forms, and 13 plain functions).
 
-- [ ] **Step 5: Gates and commit**
+- [x] **Step 5: Gates and commit**
 
 ```bash
 uv run ruff check && uv run ruff format --check && uv run mypy && uv run lint-imports
@@ -744,7 +744,7 @@ check. In the first draft `create_project` validated the name and then called
 `mkdir` without resolving, while `project_path` resolved. Two paths into the
 same filesystem with different guards is how the weaker one gets found.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/test_discovery.py`:
 
@@ -858,12 +858,12 @@ def test_a_refused_creation_leaves_nothing_behind(tmp_path: Path) -> None:
     assert not (tmp_path.parent / "evil").exists()
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `uv run pytest tests/test_discovery.py -v`
 Expected: FAIL with `ImportError: cannot import name 'AlreadyExists' from 'hitchrail.discovery'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `src/hitchrail/discovery.py`:
 
@@ -944,7 +944,7 @@ def create_project(root: Path, name: str) -> Path:
 `Path.exists()` follows symlinks: a dangling symlink inside the root reports
 `False` on the resolved path while very much occupying the name.
 
-- [ ] **Step 4: Run to verify passing**
+- [x] **Step 4: Run to verify passing**
 
 Run: `uv run pytest tests/test_discovery.py -v`
 Expected: PASS, 22 tests (10 plain functions plus one parametrised case with 13 values, minus the two that share the parametrised body: 9 plain + 13 parametrised).
@@ -952,7 +952,7 @@ Expected: PASS, 22 tests (10 plain functions plus one parametrised case with 13 
 Count them from the output rather than trusting this line. If the number
 disagrees, a test was dropped in transcription, which is worth finding now.
 
-- [ ] **Step 5: Gates and commit**
+- [x] **Step 5: Gates and commit**
 
 ```bash
 uv run ruff check && uv run ruff format --check && uv run mypy && uv run lint-imports
@@ -961,6 +961,17 @@ git commit -m "feat(discovery): list and create folders behind one shared bounda
 ```
 
 ---
+
+
+## How these tasks were executed
+
+The steps above are ticked from the outcome rather than from a stopwatch. The
+phase ran through the ticket workflow rather than strictly top to bottom, so
+the commits do not map one to one onto the numbered steps. What was verified
+before ticking is that every deliverable each task names exists, is imported by
+the code that uses it, and has tests that fail when it is removed: the five
+gates, the CI workflow, the configuration and its refusals, and the discovery
+layer with its path safety.
 
 ## Phase 1 exit criteria
 

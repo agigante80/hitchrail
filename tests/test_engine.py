@@ -1344,3 +1344,74 @@ def test_the_overlay_survives_while_the_agent_is_still_running(root: Path) -> No
     for _ in range(3):
         assert engine.get("vessel").stopping, "a stop in flight was reconciled away"
     assert engine.stopping_since("vessel") is not None
+
+
+def _killing_engine(tmp_path: Path, polls_until_reaped: int) -> tuple[Engine, list[float]]:
+    """An engine whose agent keeps running for a while after the tmux session
+    goes, which is what really happens: `kill-session` returns before the
+    kernel has reaped anything."""
+    (tmp_path / "alpha").mkdir()
+    sessions_dir = tmp_path / ".sessions"
+    sessions_dir.mkdir()
+    table = [ps_row(600, 1) + ps_row(601, 600, project="alpha")]
+    remaining = [polls_until_reaped]
+    tmux = FakeTmux(sessions={"alpha": 600})
+
+    def killed(project: str) -> None:
+        tmux.sessions.pop(project, None)
+        # Orphaned but alive: no pane owns it, so derivation sees `detached`.
+        table[0] = ps_row(601, 1, project="alpha")
+
+    tmux.kill_session = killed  # type: ignore[method-assign]
+    now = [0.0]
+
+    def procs() -> ProcTable:
+        if remaining[0] <= 0:
+            table[0] = ""
+        remaining[0] -= 1
+        return procs_from(table[0])()
+
+    engine = Engine(
+        Config(root=tmp_path, sessions_dir=sessions_dir),
+        tmux=tmux,
+        procs_fn=procs,
+        meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
+        clock=lambda: now[0],
+        sleep=lambda s: now.__setitem__(0, now[0] + s),
+    )
+    return engine, now
+
+
+def test_kill_does_not_report_a_dying_agent_as_detached(tmp_path: Path) -> None:
+    """`kill` used to hand back `detached` with a pid.
+
+    `tmux kill-session` returns before the process finishes dying, so the pane
+    map is empty while the agent is still in the table. Derivation is right to
+    call that detached; handing it back from `kill` is not, because the user
+    asked to kill and is told they now have a detached agent, which reads as
+    the kill having failed and orphaned something.
+
+    Raised against the stop sequence on #49 and decided here.
+    """
+    engine, now = _killing_engine(tmp_path, polls_until_reaped=2)
+    session = engine.kill("alpha")
+    assert session.state is State.STOPPED, "a dying agent was reported detached"
+    assert session.pid is None
+    assert now[0] <= 2.0, "the wait must stay inside the grace window"
+
+
+def test_kill_still_surfaces_an_agent_that_genuinely_will_not_die(
+    tmp_path: Path,
+) -> None:
+    """The wait is a courtesy, not a cover up.
+
+    Past the grace window `detached` with its pid is the correct answer and the
+    user needs it: that is the state the design surfaces on purpose so a person
+    can act on it. Returning `stopped` here would be the lie the whole
+    derivation exists to avoid.
+    """
+    engine, now = _killing_engine(tmp_path, polls_until_reaped=10_000)
+    session = engine.kill("alpha")
+    assert session.state is State.DETACHED
+    assert session.pid == 601
+    assert now[0] == pytest.approx(engine.kill_grace), "the wait must be bounded"

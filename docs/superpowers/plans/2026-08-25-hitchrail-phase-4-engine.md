@@ -146,7 +146,7 @@ regression test whose fake table is deliberately empty on the first look.
 - Consumes: nothing.
 - Produces: type alias `Event = dict[str, object]`; class `EventBus(maxsize: int = 32)` with `subscribe() -> AbstractContextManager[asyncio.Queue[Event]]`, `publish(event: Event) -> None`, property `subscriber_count: int`, property `dropped: int`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/test_events.py`:
 
@@ -219,12 +219,12 @@ async def test_one_slow_subscriber_does_not_starve_a_fast_one() -> None:
         assert slow.qsize() == 1
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `uv run pytest tests/test_events.py -v`
 Expected: FAIL with `ImportError: cannot import name 'EventBus' from 'hitchrail.events'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Replace the stub `src/hitchrail/events.py` with:
 
@@ -280,12 +280,12 @@ class EventBus:
                 self._dropped += 1
 ```
 
-- [ ] **Step 4: Run to verify passing**
+- [x] **Step 4: Run to verify passing**
 
 Run: `uv run pytest tests/test_events.py -v`
 Expected: PASS, 7 tests.
 
-- [ ] **Step 5: Gates and commit**
+- [x] **Step 5: Gates and commit**
 
 ```bash
 uv run ruff check && uv run ruff format --check && uv run mypy && uv run lint-imports
@@ -315,7 +315,7 @@ serialising a session is not HTTP knowledge and the engine needs it to publish
 events. The import contract forbids the engine from reaching into the server to
 borrow a formatter.
 
-- [ ] **Step 1: Write the shared fixtures**
+- [x] **Step 1: Write the shared fixtures**
 
 `tests/conftest.py`:
 
@@ -449,7 +449,7 @@ def plenty_of_memory() -> Callable[[], str]:
     return lambda: "MemAvailable:   25198592 kB\n"
 ```
 
-- [ ] **Step 2: Write the failing state tests**
+- [x] **Step 2: Write the failing state tests**
 
 `tests/test_engine.py`:
 
@@ -622,12 +622,12 @@ def test_a_session_serialises_to_the_shape_the_api_sends(config, plenty_of_memor
 
 Add `import pytest` to the top of the file for the helper above.
 
-- [ ] **Step 3: Run to verify failure**
+- [x] **Step 3: Run to verify failure**
 
 Run: `uv run pytest tests/test_engine.py -v`
 Expected: FAIL with `ImportError: cannot import name 'Engine' from 'hitchrail.engine'`.
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 Replace the stub `src/hitchrail/engine.py` with:
 
@@ -824,12 +824,12 @@ class Engine:
             self._bus.publish({"kind": "session", "session": session.as_dict()})
 ```
 
-- [ ] **Step 5: Run to verify passing**
+- [x] **Step 5: Run to verify passing**
 
 Run: `uv run pytest tests/test_engine.py -v`
 Expected: PASS, 15 tests.
 
-- [ ] **Step 6: Gates and commit**
+- [x] **Step 6: Gates and commit**
 
 ```bash
 uv run ruff check && uv run ruff format --check && uv run mypy && uv run lint-imports
@@ -849,7 +849,7 @@ git commit -m "feat(engine): derive four states from two snapshots, detached inc
 - Consumes: everything from Task 12.
 - Produces: `Engine.start(name: str, acknowledged: bool = False) -> Session`; exceptions `EngineError`, `UnknownProject`, `AlreadyRunning`, `NotRunning`, `Protected`, `Locked`, `StartFailed(output: str)`, `MemoryRefused(available_mb, needed_mb)`, `MemoryNeedsAck(available_mb, needed_mb)`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/test_engine.py`:
 
@@ -1088,12 +1088,12 @@ def test_a_stale_session_is_cleaned_up_before_restarting(config) -> None:
     assert tmux.started != []
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `uv run pytest tests/test_engine.py -v`
 Expected: FAIL with `ImportError: cannot import name 'AlreadyRunning' from 'hitchrail.engine'`.
 
-- [ ] **Step 3: Add the exceptions to `src/hitchrail/engine.py`**
+- [x] **Step 3: Add the exceptions to `src/hitchrail/engine.py`**
 
 Insert after the `State` enum:
 
@@ -1148,7 +1148,7 @@ class MemoryNeedsAck(_MemoryVerdict):
     """Below the soft threshold. The caller must confirm."""
 ```
 
-- [ ] **Step 4: Add the start machinery to `Engine`**
+- [x] **Step 4: Add the start machinery to `Engine`**
 
 Add `import threading` at the top. Add to `__init__`, after `self._stopping`:
 
@@ -1227,12 +1227,12 @@ Then these methods:
             self._sleep(self.poll_interval)
 ```
 
-- [ ] **Step 5: Run to verify passing**
+- [x] **Step 5: Run to verify passing**
 
 Run: `uv run pytest tests/test_engine.py -v`
 Expected: PASS, 17 tests.
 
-- [ ] **Step 6: Gates and commit**
+- [x] **Step 6: Gates and commit**
 
 ```bash
 uv run ruff check && uv run ruff format --check && uv run mypy && uv run lint-imports
@@ -1257,7 +1257,7 @@ back to capturing the pane when Claude has not written its state file yet. The
 API route in Phase 5 calls it, and returns the design's `url_pending` code when
 it comes back empty.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/test_engine.py`:
 
@@ -1447,12 +1447,12 @@ def test_session_url_of_a_stopped_session_is_refused(config) -> None:
         engine.session_url("network")
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `uv run pytest tests/test_engine.py -v`
 Expected: FAIL with `AttributeError: 'Engine' object has no attribute 'stop'`.
 
-- [ ] **Step 3: Implement in `src/hitchrail/engine.py`**
+- [x] **Step 3: Implement in `src/hitchrail/engine.py`**
 
 ```python
     # -- stopping ------------------------------------------------------
@@ -1545,12 +1545,12 @@ Expected: FAIL with `AttributeError: 'Engine' object has no attribute 'stop'`.
         return session
 ```
 
-- [ ] **Step 4: Run to verify passing**
+- [x] **Step 4: Run to verify passing**
 
 Run: `uv run pytest tests/test_engine.py -v`
 Expected: PASS, 17 tests.
 
-- [ ] **Step 5: Prove it against a real machine**
+- [x] **Step 5: Prove it against a real machine**
 
 This is the step that makes Phase 4 done. Tests passing is not this step, and
 there is still no web server involved.
@@ -1591,7 +1591,7 @@ the URL appears within a few seconds, `stop` leaves the session alive and marked
 where the session is visibly running, the grace window in Task 13 is too short
 for that machine and the number, not the design, is what to change.
 
-- [ ] **Step 6: Gates and commit**
+- [x] **Step 6: Gates and commit**
 
 ```bash
 uv run ruff check && uv run ruff format --check && uv run mypy && uv run lint-imports && uv run pytest
@@ -1628,6 +1628,20 @@ does not tell you. What this phase specifically owes:
 - **A live tier for the engine is NOT required.** Phase 4's exit criteria
   already demand a real Claude session started, watched, gracefully stopped and
   killed from a Python session, which is the runtime proof 7.3 asks for.
+
+## How these tasks were executed
+
+The steps above are ticked from the outcome rather than from a stopwatch. The
+phase ran through the ticket workflow (#34, #36, #39, #40, #41, #42, #50)
+rather than strictly top to bottom, so the commits do not map one to one onto
+the numbered steps, and several steps were satisfied by work filed under a
+different ticket. What was verified before ticking is that every deliverable
+each task names exists, is imported by the code that uses it, and has tests
+that fail when it is removed.
+
+Task 14's step 5, proving it against a real machine, is the exception worth
+naming: it was run twice, and it is the step that found the stale `stopping`
+marker every fake had missed.
 
 ## Phase 4 exit criteria
 
