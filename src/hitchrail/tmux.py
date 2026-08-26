@@ -254,12 +254,25 @@ class Tmux:
     def kill_session(self, project: str) -> None:
         """Scoped, always. No code path here reaches `kill-server`.
 
-        The refusal happens before the subprocess call, not after it, so a
-        refused kill cannot have already sent anything.
+        **The scoping is enforced in `__init__`, not here**, and that is worth
+        stating because the obvious guard in this method is a tautology. A
+        version of this read:
+
+            name = self.session_name(project)
+            if not name.startswith(self.prefix):
+                raise NotOurSession(project)
+
+        `session_name` builds the name FROM `self.prefix`, so the condition can
+        never be true. Mutating `.prefix` after construction does not reach it
+        either, because both sides read the same attribute. It was removed
+        rather than left as decoration: a guard that looks meaningful and
+        cannot execute is worse than none, because a reader concludes this
+        method is defended and stops looking.
+
+        What actually protects the developer's tmux server is the empty prefix
+        refusal in `__init__`, which fires, is tested, and is the case that
+        would otherwise make every session on the server look like ours.
         """
-        name = self.session_name(project)
-        if not name.startswith(self.prefix):
-            raise NotOurSession(project)
         self._run(self._argv("kill-session", "-t", self.session_target(project)))
 
     def send_keys(self, project: str, *keys: str) -> None:

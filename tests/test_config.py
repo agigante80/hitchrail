@@ -883,3 +883,32 @@ def test_a_malformed_bracketed_origin_is_a_config_error(tmp_path: Path, bad: str
     """
     with pytest.raises(ConfigError, match="not an origin"):
         Config(root=tmp_path, extra_origins=(bad,))
+
+
+# -- #36: refusals nobody exercised ----------------------------------------
+
+
+@pytest.mark.parametrize("field", ["hard_floor_mb", "soft_floor_mb", "session_mb"])
+def test_a_negative_memory_figure_is_refused(tmp_path: Path, field: str) -> None:
+    """Every field, not the one that happened to be tested.
+
+    A negative floor makes the guard's arithmetic meaningless: `remaining <
+    hard_mb` is true for any remaining when the floor is below zero, so the
+    guard either refuses everything or approves everything depending on which
+    figure went negative.
+    """
+    with pytest.raises(ConfigError, match=f"{field} must not be negative"):
+        Config(root=tmp_path, **{field: -1})  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("origin", ["http://-bad-.example", "http://a..b", "http://x-.y"])
+def test_an_origin_whose_host_is_not_a_host_is_refused(tmp_path: Path, origin: str) -> None:
+    """`urlsplit` is happy to hand back a hostname that is not one.
+
+    A leading or trailing hyphen in a label and an empty label are both refused
+    by HOSTNAME_PATTERN, and without this check the entry lands in the
+    allowlist and can never match: the accepted-then-never-matches shape this
+    module exists to refuse.
+    """
+    with pytest.raises(ConfigError, match="not a valid host in origin"):
+        Config(root=tmp_path, extra_origins=(origin,))

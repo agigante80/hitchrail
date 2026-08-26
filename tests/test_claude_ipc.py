@@ -285,3 +285,32 @@ def test_the_pid_cannot_traverse(tmp_path: Path) -> None:
 
     sig = inspect.signature(claude_ipc.bridge_url)
     assert sig.parameters["pid"].annotation in ("int", int)
+
+
+def test_the_bridge_wins_when_no_pane_was_captured(tmp_path: Path) -> None:
+    """The common production path, and it was the one not covered.
+
+    Listing never captures a pane, so `session_url` is normally called with
+    `pane_text=None`. The disagreement branch must be skipped rather than
+    comparing against nothing.
+    """
+    write_session(tmp_path, 30, {"bridgeSessionId": "session_only"})
+    found = claude_ipc.session_url(30, tmp_path)
+    assert found is not None
+    assert found.source == "bridge"
+    assert found.url.endswith("session_only")
+
+
+def test_a_pane_agreeing_with_the_bridge_logs_nothing(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Only a DISAGREEMENT is worth a line. Logging every agreement is noise
+    that trains people to ignore the log."""
+    import logging
+
+    write_session(tmp_path, 31, {"bridgeSessionId": "session_same"})
+    with caplog.at_level(logging.DEBUG, logger="hitchrail.claude_ipc"):
+        claude_ipc.session_url(
+            31, tmp_path, pane_text="https://claude.ai/code/session_same"
+        )
+    assert not [r for r in caplog.records if "differ" in r.message]

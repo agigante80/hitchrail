@@ -301,3 +301,14 @@ async def test_dotted_and_undotted_hosts_all_match(
     )
     response = await call(build(cfg), headers={"host": sent, "authorization": "Bearer t"})
     assert response.status_code == 200
+
+
+@pytest.mark.parametrize("raw", ["[::1]junk", "[::1]x", "[2001:db8::5]/path", "[::1]]"])
+def test_junk_after_the_closing_bracket_can_never_match(raw: str) -> None:
+    """Anything following `]` must be a port, or the header is not a host.
+
+    Returning the bracketed part regardless would accept
+    `Host: [::1]@evil.example` as `::1`, which is a host we serve. Refusing
+    outright is what makes the allowlist a whitelist rather than a prefix test.
+    """
+    assert parse_host(raw) == ""
