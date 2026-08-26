@@ -233,8 +233,10 @@ Claude session.
 
 ## Phase 6: Interface
 
+**Plan: [`superpowers/plans/2026-08-27-hitchrail-phase-6-interface.md`](superpowers/plans/2026-08-27-hitchrail-phase-6-interface.md)**
+
 The browser interface from the design canvas, and the end to end tier that
-proves it.
+proves it. Six tasks, 18 to 23.
 
 Delivers: the single page and its assets, the list with search and filter, the
 start and stop flows including the escalation, the log drawer, the new folder
