@@ -27,6 +27,29 @@ Copied verbatim from the spec. Every task inherits these.
 - Defaults: session prefix `hr-`, hard memory floor 1536 MB, soft floor 3072 MB, per session estimate 1536 MB.
 - Tests are hermetic. No test touches a real tmux server, a real Claude process, the network, or the filesystem outside a temporary root.
 
+## Phase 3 progress
+
+Not complete. Two of the four adapter modules exist, and `procs.py` and
+`claude_ipc.py` are still one line stubs.
+
+| Task | Ticket | State |
+|---|---|---|
+| 7a naming and target specs | #22 | done, `b2254d5` and `3aadc32` |
+| 7b adapter operations | #23 | **open** |
+| 8 process table | #24 | **open** |
+| 9a launch and stop | #25 | **open** |
+| 9b the session link | #29 | **open** |
+| 10 memory guard | #26 | done, `c1ad4a0` |
+| prove tmux for real | #27 | **open** |
+| carried in: one directory one project | #11 | done, `b131bab` and `4d7f648` |
+| carried in: the FQDN root dot | #19 | done, `712da0a` |
+| carried in: split `config.py` | #18 | done, `7cbc874` |
+| found during the batch | #31 | **open** |
+
+**One of the ten exit criteria below is met** (`guard(0, ...)` is `HARD`). The
+rest need `procs`, `claude_ipc`, the tmux operations, or the live tmux tier,
+none of which exist yet. The phase does not close until they do.
+
 ## Phase 3 tickets, in dependency order
 
 The four tasks below became nine tickets on review. Task 7 split, because
@@ -782,6 +805,13 @@ argument for reviewing it on its own rather than as an appendix to a launch
 ticket. They share a file, so 9a lands first.
 
 #### Task 9a: launch and stop
+
+**The step block below was written before the split and still covers BOTH
+halves**: the `bridge_url` and `session_url` tests and code in it belong to 9b
+(#29), not here. The tickets are the authority on the boundary, not this block.
+9a is the marker, `launch_argv`, `GRACEFUL_STOP_KEYS`, `request_stop` and the
+`Pane` protocol; everything about a session link is 9b. Splitting the snippets
+was not worth the risk of losing content, so the boundary is stated instead.
 
 **Files:**
 - Modify: `src/hitchrail/claude_ipc.py`

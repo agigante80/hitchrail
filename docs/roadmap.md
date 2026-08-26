@@ -171,6 +171,13 @@ removed, and nothing in this layer imports Starlette. Footgun 4, serialising
 concurrent starts, belongs to Phase 4: starting is an engine operation and
 there is nothing in this layer to serialise.
 
+**In progress.** The naming and target specs (#22) and the memory guard (#26)
+are built, along with three tickets carried in from earlier phases (#11, #18,
+#19). The tmux operations (#23), the process table (#24), the Claude Code
+quarantine (#25 and #29), the live tmux tier (#27) and #31 are open, and
+`procs.py` and `claude_ipc.py` are still stubs. One of ten exit criteria is
+met. The plan carries the task by task state.
+
 ## Phase 4: The engine
 
 **Plan: [`superpowers/plans/2026-08-25-hitchrail-phase-4-engine.md`](superpowers/plans/2026-08-25-hitchrail-phase-4-engine.md)**
