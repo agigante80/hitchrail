@@ -193,9 +193,13 @@ tickets. Three things worth carrying forward:
   by anyone who can create a folder. Injective by construction beat injective
   by hash.
 
-## Phase 4: The engine
+## Phase 4: The engine (done)
 
 **Plan: [`superpowers/plans/2026-08-25-hitchrail-phase-4-engine.md`](superpowers/plans/2026-08-25-hitchrail-phase-4-engine.md)**
+
+All nine exit criteria in the plan are ticked with the evidence that closed
+them. The last one, driving a real agent with no web server involved, is the
+one that found the stale `stopping` marker that every fake had missed.
 
 State derivation and the session lifecycle, with no HTTP anywhere. Four tasks.
 

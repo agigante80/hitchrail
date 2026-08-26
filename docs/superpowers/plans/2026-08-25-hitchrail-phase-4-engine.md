@@ -1631,14 +1631,14 @@ does not tell you. What this phase specifically owes:
 
 ## Phase 4 exit criteria
 
-- [ ] All five gates green on 3.11, 3.12 and 3.13.
-- [ ] All four states in the design's section 4.1 have a passing test, `detached` included, and a Claude inside one of our own panes is never also reported detached.
-- [ ] `list()` issues exactly one tmux call and one `ps` call regardless of project count, and captures no pane.
-- [ ] `start` succeeds against a process table that is empty on the first look, and the grace window is bounded.
-- [ ] A second start of the same folder raises `Locked` immediately; a start of a different folder is unaffected; the lock is released on failure.
-- [ ] The engine asks for a stop and does not know what one is: `grep -rn '"/exit"' src/` returns only `claude_ipc.py`, AND `grep -rn 'GRACEFUL_STOP_KEYS\|send_keys' src/hitchrail/engine.py` returns nothing. The first half alone passes while the engine still iterates the sequence, which is the leak the design's section 4.3 exists to prevent.
-- [ ] Expiry drops the marker, announces it, and never escalates.
-- [ ] A fresh `Engine` reports no session as `stopping`.
-- [ ] A real Claude session has been started, watched, gracefully stopped and killed from a Python session, with no web server involved.
+- [x] All five gates green on 3.11, 3.12 and 3.13. 693 tests, CI green on all three.
+- [x] All four states in the design's section 4.1 have a passing test, `detached` included, and a Claude inside one of our own panes is never also reported detached. `test_engine.py` state matrix, plus the `owned` set test that fails if the orphan scan stops excluding our own panes.
+- [x] `list()` issues exactly one tmux call and one `ps` call regardless of project count, and captures no pane. `test_list_issues_one_tmux_call_and_one_ps_call` is parametrised over project counts; `test_list_captures_no_pane` pins the second half.
+- [x] `start` succeeds against a process table that is empty on the first look, and the grace window is bounded by `start_grace`, which a fake clock proves cannot spin forever.
+- [x] A second start of the same folder raises `Locked` immediately; a start of a different folder is unaffected; the lock is released on failure. The lock is per folder, never global.
+- [x] The engine asks for a stop and does not know what one is: `grep -rn '"/exit"' src/` returns only `claude_ipc.py`, AND `grep -rn 'GRACEFUL_STOP_KEYS\|send_keys' src/hitchrail/engine.py` returns nothing. The first half alone passes while the engine still iterates the sequence, which is the leak the design's section 4.3 exists to prevent. Both greps verified: `/exit` appears in no module but `claude_ipc.py`, and `engine.py` names neither `GRACEFUL_STOP_KEYS` nor `send_keys`. `test_the_stop_sequence_comes_from_the_quarantine` pins it, and 972c5a3 added the missing guard for the LAUNCH flags.
+- [x] Expiry drops the marker, announces it, and never escalates. It also survives a machine it cannot read (4f3978c), and no longer reports a stop that WORKED as a timeout (61fbb27).
+- [x] A fresh `Engine` reports no session as `stopping`, which is the point of holding that state in memory: a `stopping` marker that outlived the process would be a lie.
+- [x] A real Claude session has been started, watched, gracefully stopped and killed from a Python session, with no web server involved, on a private tmux socket under `env -u TMUX`. Both paths were driven: a graceful request the agent obeyed in about a second, and a kill with no graceful request first, which took down the process and the tmux session together. This is the criterion that found the stale `stopping` marker fixed in 61fbb27, which every fake had missed.
 
 When these hold, start Phase 5 from `docs/roadmap.md`.
