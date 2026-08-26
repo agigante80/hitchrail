@@ -1525,6 +1525,34 @@ git commit -m "feat(engine): three step stop with an announced, non persisted ma
 
 ---
 
+## Test coverage for this phase
+
+`docs/tech-guidelines.md` 7.4 and 7.5 define the tiers and say what coverage
+does not tell you. What this phase specifically owes:
+
+- **Every state in the table gets a test, `detached` included.** That state is
+  the one a naive implementation gets wrong, and it is the reason derivation
+  runs in two directions. A suite that covers `running` and `stopped` and calls
+  it done has tested the easy half.
+- **The stop sequence is tested through the ENGINE, not through the adapter.**
+  `claude_ipc.request_stop` already has its own test; what this phase must
+  prove is the policy around it, which is the timeout, the in flight marker,
+  the kill staying reachable throughout, and the refusal to escalate on its
+  own.
+- **The in flight stop marker is the one piece of state that is not derived**,
+  so it needs a test that a fresh `Engine` reports nothing as `stopping`. A
+  marker that outlived its process would be a lie, and nothing else in the
+  suite can catch that.
+- **The grace window and the lock need a fake clock**, not a sleep. A test that
+  waits is a test somebody deletes when the suite gets slow.
+- **#34's property based tests belong on state derivation first.** Four states derived from two independent scans is an invariant
+  problem: no process table and tmux listing should ever produce a session that
+  is both `running` and `stopped`, and that is a property rather than an
+  example.
+- **A live tier for the engine is NOT required.** Phase 4's exit criteria
+  already demand a real Claude session started, watched, gracefully stopped and
+  killed from a Python session, which is the runtime proof 7.3 asks for.
+
 ## Phase 4 exit criteria
 
 - [ ] All five gates green on 3.11, 3.12 and 3.13.

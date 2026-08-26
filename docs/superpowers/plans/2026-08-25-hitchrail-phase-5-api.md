@@ -1207,6 +1207,28 @@ git commit -m "feat(cli): serve command with a generated token and a link a phon
 
 ---
 
+## Test coverage for this phase
+
+`docs/tech-guidelines.md` 7.4 and 7.5 define the tiers. What this phase owes:
+
+- **This phase is where the integration tier grows**, so it is where the
+  missing marker starts to hurt. Mark it, and the tiers become selectable
+  instead of being told apart by which file imports `ASGITransport`.
+- **Every route gets its success path AND every documented refusal**, each with
+  the stable error `code` it returns. A route tested only for 200 is a route
+  whose error contract is undefined, and the interface in Phase 6 is written
+  against those codes.
+- **The SSE stream needs a test that a slow subscriber is dropped rather than
+  blocking**, which no unit test of the event bus can see.
+- **The CLI preflight (#28) is tested with the lookup injected**, never by
+  mutating a real `PATH`, and its refusal messages are asserted for the NAME of
+  the missing binary rather than only for a non zero exit. A test that checks
+  the exit code passes for a message that says nothing, and the whole value of
+  that ticket is in the wording.
+- **The token in the access log (#20) is proven on the live socket tier**, not
+  through `ASGITransport`. uvicorn writes that line, so a transport test
+  structurally cannot see it: that is exactly how the leak survived Phase 2.
+
 ## Phase 5 exit criteria
 
 - [ ] All five gates green on 3.11, 3.12 and 3.13.

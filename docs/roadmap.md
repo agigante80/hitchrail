@@ -240,7 +240,25 @@ see: SSE reconnecting after a backgrounded tab, the stop escalation reaching the
 kill control in the state the user is really in, the layout holding at a phone
 viewport, and a forged `Host` being rejected on a live socket.
 
+
+**Test coverage:** this is where the browser tier arrives. `tests/e2e/` does
+not exist yet, and nothing in the project drives a browser until it does, so
+`docs/tech-guidelines.md` 7.4 describes it as absent rather than in the present
+tense. Playwright lands here, against the real server on a temporary root with
+a fake `claude` shim, and it drives a PRIVATE tmux server for the same reason
+the live tmux tier does. It is the only tier that can see SSE reconnection
+after a backgrounded tab, the stop escalation in the state the user is really
+in, and the layout holding at a phone viewport. That is #38.
+
 ## Phase 7: Release
+
+**Test coverage:** before shipping something that spawns
+`claude --dangerously-skip-permissions`, prove the security tests actually
+assert. Mutation testing scoped to the five modules standing between a web page
+and a shell is the check that the suite would NOTICE a changed line, which
+coverage cannot tell you: three defects in this project shipped green at 98%
+branch coverage. That is #35.
+
 
 Delivers: PyPI publication as `hitchrail`, a tagged GitHub release, a README
 that a stranger can follow, and a security policy telling people how to report

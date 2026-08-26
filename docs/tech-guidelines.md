@@ -206,11 +206,71 @@ see, including the SSE stream reconnecting, the stop escalation arriving in the
 state the user is really in, the layout holding at a phone viewport, and the
 host allowlist rejecting a forged `Host` on a live socket.
 
-### 7.4 Standing rules
+### 7.4 The tiers, and what each one can prove
+
+Four tiers, and each exists because the one below it structurally cannot make
+the claim. Two carry a marker so they can be selected or excluded; the other
+two are told apart by what they touch.
+
+| Tier | Marker | Touches | Can prove |
+|---|---|---|---|
+| Unit | none | nothing outside the process | a function does what its author believed |
+| Integration | none yet, see below | the real Starlette app through `httpx.ASGITransport` | routing, middleware order, status codes, error bodies |
+| Live socket | `live` | 127.0.0.1 on an ephemeral port | the DEPLOYED server refuses something |
+| Live tmux | `live_tmux` | a real tmux on a private socket | our beliefs about an external tool are true |
+
+**The integration tier has no marker yet**, so it cannot be selected or
+excluded, and it is only told apart from unit by whether a file imports
+`ASGITransport`. That is a gap rather than a decision, and it is #37, timed for
+the start of Phase 5 before the tier triples in size.
+
+**A browser tier does not exist yet.** The design's repository layout names
+`tests/e2e/`, and Playwright arrives with the interface in Phase 6 as #38.
+Until then nothing in this project drives a browser, and no phrasing here
+should imply otherwise.
+
+The distinction that matters most is the bottom two rows. A fake encodes the
+same belief the code does, so a test built on one proves the implementation
+matches the intention and can never falsify the intention. Every tmux test in
+the hermetic tier asserted the argv the adapter sent; all of them passed while
+nobody had checked that `list-panes` without a trailing colon returns a
+sibling's pane. Assume this gap exists wherever a fake stands in for an
+external tool, and close it with a live tier rather than more fakes.
+
+### 7.5 Coverage, and what it does not tell you
+
+Coverage is measured on every CI run, branch coverage included, and reported
+rather than gated. The reason is in 7.6: a percentage is satisfied by executing
+lines without asserting on them.
+
+What the number is good for is finding a REFUSAL nobody exercised. Four of the
+first eight uncovered statements in this project were `raise` or an early
+`return ""`, which is exactly the shape section 5's "test the refusals" rule
+cares about. Read the missing lines; do not read the percentage.
+
+What it is not good for is confidence. Three defects in this project shipped
+green at 98% branch coverage, and every one was the precise failure the code
+under test existed to prevent:
+
+- `sanitize` was not injective, so two folders shared one tmux session.
+- The deduplication tie break renamed a running project when a link appeared.
+- A teardown assertion ran after its socket was deleted and could not fail.
+
+Coverage saw all three as covered, because the lines ran. The tools that catch
+this class are property based tests, which assert an invariant rather than
+examples, and mutation testing, which measures whether the assertions would
+notice a changed line at all. Both are tracked as tickets rather than adopted by assertion here: #34 for
+property based tests, in Phase 4, and #35 for mutation testing scoped to the
+five security modules, in Phase 7.
+
+### 7.6 Standing rules
 
 - Tests are hermetic. No test touches a real tmux server, a real Claude
   process, the network, or the filesystem outside a temporary root.
-- **One documented exception: `tests/test_live_socket.py`.** It binds 127.0.0.1
+- **Two documented exceptions, both marked so they can be deselected:**
+  `tests/test_live_tmux.py`, which drives a real tmux on a private socket under
+  the `live_tmux` marker and is described in 7.4, and the socket tier below.
+- **`tests/test_live_socket.py`.** It binds 127.0.0.1
   on an ephemeral port, talks to itself, and shuts down, and it is marked
   `live` so it can be deselected. It exists because section 5 asks for a forged
   `Host` to be refused on a live socket, and an `ASGITransport` test cannot
