@@ -26,6 +26,9 @@ async def settle() -> None:
     same step reads it too early. That is the contract, not a wart: see the
     module docstring for what publishing inline actually does across threads.
     """
+    # Only valid when the publisher was on THIS loop. A cross thread publish
+    # has to reach the loop first, and one sleep(0) does not wait for that;
+    # test_publish_from_a_worker_thread_arrives_promptly awaits with a timeout.
     await asyncio.sleep(0)
 
 
@@ -152,25 +155,18 @@ async def test_publish_survives_a_subscriber_leaving_mid_publish() -> None:
     Verified to fail when the snapshot is removed.
     """
     bus = EventBus()
-    loop = asyncio.get_running_loop()
 
-    class UnsubscribesASibling(asyncio.Queue):  # type: ignore[type-arg]
-        def __init__(self) -> None:
-            super().__init__(maxsize=4)
+    class ClearsTheSetWhenScheduled:
+        """Stands in for a loop, and unsubscribes everyone the moment
+        `publish` reaches it: the mutation the snapshot has to survive."""
 
-        def put_nowait(self, item: object) -> None:
-            super().put_nowait(item)
+        def call_soon_threadsafe(self, *args: object) -> None:
+            bus._subscribers.clear()
 
     with bus.subscribe():
-        saboteur = _Subscriber(queue=UnsubscribesASibling(), loop=loop)
-
-        class Evil:
-            """Mutates the set the moment `publish` looks at its loop."""
-
-            def call_soon_threadsafe(self, *args: object) -> None:
-                bus._subscribers.clear()
-
-        bus._subscribers.add(_Subscriber(queue=saboteur.queue, loop=Evil()))  # type: ignore[arg-type]
+        bus._subscribers.add(
+            _Subscriber(queue=asyncio.Queue(maxsize=4), loop=ClearsTheSetWhenScheduled())  # type: ignore[arg-type]
+        )
         bus.publish({"n": 1})  # must not raise RuntimeError
 
 

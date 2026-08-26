@@ -34,9 +34,15 @@ settings.load_profile("hitchrail")
 # Names as `discovery` would produce them, plus the characters that make tmux
 # targets ambiguous, so generation is biased toward the interesting cases
 # rather than random unicode.
-# Created once at import and reused by every example. Config only requires
-# that it is a directory, and nothing here writes to it.
-_SHARED_ROOT = Path(tempfile.mkdtemp(prefix="hrprop"))
+# Not a fresh directory at all. `Config` only calls `root.is_dir()` and nothing
+# here writes, so the system temp directory serves and leaks nothing.
+#
+# This started as `mkdtemp()` inside the test body, which left four hundred
+# empty directories per invocation. Hoisting it to module scope cut that to
+# one, but module scope runs at COLLECTION, so even `pytest -k something_else`
+# leaked a directory. Needing no directory of our own is the version with no
+# leak to trade off.
+_SHARED_ROOT = Path(tempfile.gettempdir())
 
 names = st.text(alphabet="abcxyz.:-_0129", min_size=0, max_size=12)
 hosts = st.text(alphabet="abcx.-_0129:[]", min_size=0, max_size=16)

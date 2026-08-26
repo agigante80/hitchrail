@@ -75,16 +75,18 @@ class EventBus:
 
     @property
     def dropped(self) -> int:
-        """Events discarded because a subscriber was full.
+        """Events a subscriber never received: a full queue, or a closed loop.
 
         Observable on purpose. A drop that nobody can see is a bug report that
         says "it sometimes misses updates" with nothing to go on.
 
-        **Eventually consistent**, because delivery is scheduled on the
-        subscriber's loop rather than performed inline. A publish from a worker
-        thread increments this once that loop runs the callback, so reading it
-        immediately after a cross thread publish can see the old value. That is
-        the price of the hop, and the hop is not optional.
+        **Eventually consistent, for every publisher.** Delivery is scheduled
+        on the subscriber's loop rather than performed inline, so this
+        increments once that loop runs the callback even when the publisher was
+        already on it. An earlier version of this docstring said "from a worker
+        thread", which reads as though same loop publishes were still
+        synchronous; they are not, and every same loop test here has to let the
+        loop run before reading a queue.
         """
         return self._dropped
 
@@ -131,7 +133,14 @@ class EventBus:
                 # The loop is closed, so the subscriber is gone and simply
                 # never had this event. Raising here would break the contract
                 # over a client that has already disconnected.
+                #
+                # Dropped AND removed. A closed loop is terminal, so keeping
+                # the subscriber would count a phantom drop on every publish
+                # forever and leave `subscriber_count` reporting a client that
+                # cannot exist. Safe to mutate here: the loop above iterates a
+                # snapshot.
                 self._dropped += 1
+                self._subscribers.discard(subscriber)
 
     def _deliver(self, subscriber: _Subscriber, event: Event) -> None:
         """Runs on the subscriber's loop, so `put_nowait` is safe here."""
