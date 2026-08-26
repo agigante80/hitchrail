@@ -92,9 +92,19 @@ async def _routing_error(request: Request, exc: Exception) -> Response:
     so a client parsing JSON on any non 2xx got a parse error instead of a
     code. The interface meets this on the first mistyped URL.
     """
-    status = exc.status_code if isinstance(exc, HTTPException) else 500
-    detail = exc.detail if isinstance(exc, HTTPException) else "internal error"
-    return _error(status, _ROUTING_CODES.get(status, "error"), str(detail))
+    # An assert rather than two `isinstance ... else` arms. Starlette types a
+    # handler's second argument as `Exception`, so the narrowing has to happen
+    # somewhere; written as ternaries it produced two branches that cannot run,
+    # because this handler is registered for `HTTPException` and nothing else.
+    # If that registration ever changes, this fails loudly instead of quietly
+    # answering 500 with a code nobody documented.
+    assert isinstance(exc, HTTPException), f"registered for HTTPException, got {type(exc)}"
+    # `error` covers a status Starlette raises that is not in the table. It is
+    # a real possibility rather than a dead default: routing raises 404 and 405
+    # today, and a generic code with the right status beats a crash.
+    return _error(
+        exc.status_code, _ROUTING_CODES.get(exc.status_code, "error"), str(exc.detail)
+    )
 
 
 def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:

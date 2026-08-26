@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator, Callable
 
 import httpx
 import pytest
+from starlette.responses import Response
 
 from conftest import FakeClock, FakeTmux, ScriptedProcs, failing_procs, procs_from
 from hitchrail import server
@@ -669,3 +670,28 @@ async def test_a_routing_failure_names_no_path_and_no_traceback(
     assert r.status_code == 404
     assert str(config.root) not in r.text
     assert "Traceback" not in r.text
+
+
+async def test_an_unlisted_http_status_still_gets_an_envelope(
+    config: Config, engine: Engine
+) -> None:
+    """The `error` fallback is a real path, not a dead default.
+
+    Routing raises 404 and 405 today. A handler or a future Starlette raising
+    any other `HTTPException` must still produce a code and the right status
+    rather than a crash or a `text/plain` body.
+    """
+    from starlette.exceptions import HTTPException
+    from starlette.routing import Route
+
+    async def teapot(request: httpx.Request) -> Response:
+        raise HTTPException(status_code=418, detail="short and stout")
+
+    app = create_app(engine=engine, config=config, bus=EventBus())
+    app.router.routes.append(Route("/teapot", teapot, methods=["GET"]))
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as c:
+        r = await c.get("/teapot", headers=HEADERS)
+    assert r.status_code == 418
+    assert r.headers["content-type"].startswith("application/json")
+    assert r.json() == {"code": "error", "message": "short and stout"}
