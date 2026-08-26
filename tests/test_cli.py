@@ -10,6 +10,24 @@ from hitchrail.cli import banner, build_config, main, parse_args, preflight
 from hitchrail.config import Config, is_loopback_host
 
 
+@pytest.fixture(autouse=True)
+def _prerequisites_are_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The unit tier must not depend on what is installed on this machine.
+
+    #28 put a preflight in front of the bind, so every test that calls `main`
+    started depending on whether tmux and the agent binary happen to be on the
+    developer's PATH. They are on mine and they are not on CI, which installs
+    tmux and has no reason to install Claude Code: the whole suite passed here
+    and every interpreter failed there, on a test about a token banner that
+    had nothing to do with the preflight.
+
+    Tests that are ABOUT the preflight override this, either by injecting
+    `which` directly or by patching it again inside the test, which runs after
+    an autouse fixture and therefore wins.
+    """
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+
+
 def test_root_is_required_to_be_a_real_directory(tmp_path: Path) -> None:
     args = parse_args(["--root", str(tmp_path)])
     assert build_config(args).root == tmp_path
