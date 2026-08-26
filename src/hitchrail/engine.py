@@ -31,7 +31,7 @@ This module is in the engine layer and imports nothing from the web layer;
 from __future__ import annotations
 
 import builtins
-import contextlib
+import logging
 import threading
 import time
 from collections.abc import Callable
@@ -71,6 +71,9 @@ class _Machine:
     owned: frozenset[int]
 
 
+logger = logging.getLogger(__name__)
+
+
 class Engine:
     """Derivation, and in later tickets the session lifecycle."""
 
@@ -94,6 +97,11 @@ class Engine:
         # The one piece of state that is not derived. Memory only, and lost on
         # restart on purpose: see the module docstring.
         self._stopping: dict[str, float] = {}
+        # Guarded for the same reason `_starting` is: stop, kill and the
+        # expiry ticker all run on worker threads. Without it, iterating in
+        # `expire_stops` while `stop` adds raises "dictionary changed size
+        # during iteration", and that raise kills the ticker.
+        self._stopping_guard = threading.Lock()
         # Per FOLDER, never global: starting one project must not block
         # starting another. Guarded because start runs on worker threads, which
         # is the whole reason the lock exists.
@@ -145,7 +153,8 @@ class Engine:
 
     def stopping_since(self, name: str) -> float | None:
         """When a graceful stop was requested, or None. Memory only."""
-        return self._stopping.get(name)
+        with self._stopping_guard:
+            return self._stopping.get(name)
 
     # -- derivation ----------------------------------------------------
 
@@ -257,8 +266,52 @@ class Engine:
         # failed one, and the user would be told their agent did not stop when
         # it did. `EventBus.publish` already guarantees it does not raise; this
         # holds if a future bus does not.
-        with contextlib.suppress(Exception):  # pragma: no cover - defensive
+        try:
             self._bus.publish(session.as_dict())
+        except Exception:
+            # Deliberately broad, and deliberately logged. This is the last
+            # line of defence around a NOTIFICATION: a bus that raised would
+            # turn a successful stop into a failed one, and the user would be
+            # told their agent did not stop when it did. Silent, though, meant
+            # "events stopped arriving" was unfalsifiable.
+            logger.exception("could not announce %s", session.name)
+
+    def _require_project(self, name: str) -> str:
+        """The name must be one `scan` actually LISTS, and its directory.
+
+        Two guarantees, and the first is the one that matters.
+
+        **Identity is the folder, not the name.** `discovery.resolve_child`
+        deliberately allows a symlink that stays inside the root, so `alpha`
+        and `zebra` can be two names for one directory. #11 deduplicates them
+        in `scan`, but `start` took a name directly and bypassed that: starting
+        both spawned two agents in the same checkout, each invisible to the
+        other's `AlreadyRunning` check, because `get("alpha")` looks up
+        `hr-alpha` and scans for a command line naming `alpha`. That is the
+        outcome the whole design exists to prevent, reached from the start path
+        instead of the list path. Requiring a LISTED name closes it, because
+        the listing is where the deduplication happens.
+
+        And it makes "unknown" a distinct answer. Without it, `stop` on a name
+        that is not a project reported `NotRunning`, which the interface cannot
+        tell from a real stopped project, and Phase 5 could not map to 404
+        rather than 409.
+        """
+        try:
+            path = discovery.project_path(self.config.root, name)
+        except (
+            discovery.InvalidName,
+            discovery.NoSuchProject,
+            discovery.OutsideRoot,
+            # A symlink loop. `Path.resolve` raises this, `scan` reports the
+            # folder as unsupported, and without it here a loop shows in the
+            # listing and then escapes as a bare RuntimeError when tapped.
+            RuntimeError,
+        ) as exc:
+            raise UnknownProject(name) from exc
+        if name not in discovery.list_projects(self.config.root):
+            raise UnknownProject(name)
+        return str(path)
 
     def _require_live(self, name: str) -> Session:
         """Unknown, protected and not running are three different answers.
@@ -266,6 +319,7 @@ class Engine:
         Collapsing them gives the interface one message for three situations a
         user would act on differently.
         """
+        self._require_project(name)
         session = self.get(name)
         if session.protected:
             raise Protected(name)
@@ -275,26 +329,23 @@ class Engine:
 
     def start(self, name: str, acknowledged: bool = False) -> Session:
         """Start an agent in a folder, once, with the machine's consent."""
-        try:
-            path = discovery.project_path(self.config.root, name)
-        except (
-            discovery.InvalidName,
-            discovery.NoSuchProject,
-            discovery.OutsideRoot,
-        ) as exc:
-            raise UnknownProject(name) from exc
+        path_str = self._require_project(name)
 
+        # Keyed on the resolved DIRECTORY, not the name. Two names for one
+        # folder must not both hold a start, and the listing check above
+        # already refuses the alias; this is the belt to that braces, because
+        # the listing is recomputed per call and could change between them.
         with self._starting_guard:
-            if name in self._starting:
+            if path_str in self._starting:
                 raise Locked(name)
-            self._starting.add(name)
+            self._starting.add(path_str)
         try:
-            return self._start_locked(name, str(path), acknowledged)
+            return self._start_locked(name, path_str, acknowledged)
         finally:
             # In a finally, always. A lock that outlives a failed start makes
             # the folder permanently unstartable until Hitchrail restarts.
             with self._starting_guard:
-                self._starting.discard(name)
+                self._starting.discard(path_str)
 
     def _start_locked(self, name: str, path_str: str, acknowledged: bool) -> Session:
         current = self.get(name)
@@ -367,7 +418,8 @@ class Engine:
     def stop(self, name: str) -> Session:
         """Ask the agent to finish. Nothing is killed."""
         self._require_live(name)
-        self._stopping[name] = self._clock()
+        with self._stopping_guard:
+            self._stopping[name] = self._clock()
         # One call, and the engine does not learn what a stop physically is.
         # Iterating the key sequence here would teach it three Claude Code
         # facts: that stopping is keystrokes, that it is a sequence of them,
@@ -377,7 +429,8 @@ class Engine:
         try:
             claude_ipc.request_stop(self.tmux, name)
         except TmuxUnavailable as exc:
-            self._stopping.pop(name, None)
+            with self._stopping_guard:
+                self._stopping.pop(name, None)
             raise MachineUnreadable(str(exc)) from exc
         updated = self.get(name)
         self._announce(updated)
@@ -390,11 +443,15 @@ class Engine:
         whatever is running in it, which is exactly why it is reliable.
         """
         self._require_live(name)
-        self._stopping.pop(name, None)
         try:
             self.tmux.kill_session(name)
         except TmuxUnavailable as exc:
             raise MachineUnreadable(str(exc)) from exc
+        # AFTER the kill, not before. Popping first meant a kill that failed
+        # took the indicator with it, so a graceful stop still in flight looked
+        # as though nobody had asked.
+        with self._stopping_guard:
+            self._stopping.pop(name, None)
         updated = self.get(name)
         self._announce(updated)
         return updated
@@ -416,19 +473,41 @@ class Engine:
         interface cannot report.
         """
         now = self._clock()
-        expired = [
-            name
-            for name, began in self._stopping.items()
-            if now - began >= self.config.stop_timeout
-        ]
+        with self._stopping_guard:
+            # A snapshot, taken under the lock. Iterating the live dict while
+            # `stop` adds on another thread raises, and that raise kills the
+            # ticker Phase 5 drives this from.
+            candidates = [
+                (name, began)
+                for name, began in self._stopping.items()
+                if now - began >= self.config.stop_timeout
+            ]
+            # No "is it still the same stop" check, deliberately. The
+            # snapshot and the removal are inside ONE lock, so nothing can
+            # install a fresh marker between them, and a guard against that
+            # would be a condition that cannot be false. This module removed
+            # one of those from `Tmux.kill_session` for the same reason: a
+            # guard that looks meaningful and cannot execute is worse than
+            # none, because a reader stops looking.
+            #
+            # If the announce loop below is ever moved inside the lock, or the
+            # snapshot taken outside it, that stops being true.
+            expired = [name for name, _began in candidates]
+            for name in expired:
+                del self._stopping[name]
+        # Announced outside the lock: `get` does two subprocess calls, and
+        # holding a lock across those would serialise every stop behind them.
         for name in expired:
-            self._stopping.pop(name, None)
             self._announce(self.get(name))
         return expired
 
     def logs(self, name: str, lines: int = 40) -> str:
         """The tail of a pane."""
-        self.get(name)  # so an unknown project is not silently empty output
+        # A real guard now. This read `self.get(name)` with a comment saying it
+        # stopped an unknown project returning empty output; `get` cannot
+        # raise, so it did nothing but spend two subprocess calls arriving
+        # there.
+        self._require_project(name)
         try:
             return self.tmux.capture_pane(name, lines=lines)
         except TmuxUnavailable as exc:
@@ -441,6 +520,7 @@ class Engine:
         Returns the source alongside the URL, because a scraped one can be
         scrollback from a session that ended hours ago.
         """
+        self._require_project(name)
         session = self.get(name)
         if session.pid is None:
             return None

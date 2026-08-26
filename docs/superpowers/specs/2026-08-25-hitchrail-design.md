@@ -172,8 +172,17 @@ not know about them.
 3. `list-panes` takes a pane target, ignores a leading `=`, and falls back to
    prefix matching. It needs a trailing `:` to be read as a session. Getting
    this wrong makes a stopped project read as running on a sibling's process.
-4. Concurrent starts must serialize behind a lock. A web UI makes double
-   submission far easier than a CLI does.
+4. Concurrent starts must be mutually excluded, per FOLDER. A web UI makes
+   double submission far easier than a CLI does.
+
+   **Amended in Phase 4: refused, not queued, and keyed on the directory.**
+   This originally said "serialize behind a lock". Holding the second request
+   open ties up a worker thread to say something already known, and by the time
+   it fires the user has forgotten the tap, so the second start answers
+   `Locked` immediately. And the key is the RESOLVED directory rather than the
+   project name: `resolve_child` allows a symlink inside the root, so two names
+   can be one folder, and starting both spawned two agents into the same
+   checkout with neither visible to the other.
 5. Never issue a bare `tmux kill-server`. Never kill a session Hitchrail did not
    create. Every tmux invocation is scoped explicitly.
 

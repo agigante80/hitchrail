@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from conftest import FakeClock, FakeTmux, ScriptedProcs, procs_from, ps_row
-from hitchrail.claude_ipc import launch_argv
+from hitchrail.claude_ipc import GRACEFUL_STOP_KEYS, launch_argv
 from hitchrail.config import Config
 from hitchrail.engine import (
     AlreadyRunning,
@@ -33,7 +33,7 @@ from hitchrail.engine import (
     UnknownProject,
 )
 from hitchrail.procs import ProcTable
-from hitchrail.tmux import Tmux
+from hitchrail.tmux import Tmux, TmuxUnavailable
 
 PANE = 500
 AGENT = 501
@@ -676,7 +676,9 @@ def test_a_second_start_of_the_same_folder_is_refused_immediately(root: Path) ->
     """`Locked`, not a queue. A queued start behind a slow one is a tap the
     user has forgotten about by the time it fires."""
     engine, tmux, _ = start_engine(root, table=running_after())
-    engine._starting.add("vessel")
+    # Keyed on the resolved DIRECTORY, not the name, because two names can be
+    # one folder and starting both is the outcome the design exists to prevent.
+    engine._starting.add(str((root / "vessel").resolve()))
     with pytest.raises(Locked):
         engine.start("vessel")
     assert tmux.started == [], "nothing may be spawned while one is in flight"
@@ -685,7 +687,7 @@ def test_a_second_start_of_the_same_folder_is_refused_immediately(root: Path) ->
 def test_a_start_of_a_different_folder_is_not_blocked(root: Path) -> None:
     """The lock is per FOLDER, not global."""
     engine, _, _ = start_engine(root, table=running_after("ab"))
-    engine._starting.add("vessel")
+    engine._starting.add(str((root / "vessel").resolve()))
     assert engine.start("ab").state is State.RUNNING
 
 
@@ -914,3 +916,230 @@ def test_sessions_does_not_import_engine() -> None:
     source = (Path(__file__).parent.parent / "src" / "hitchrail" / "sessions.py").read_text()
     assert "import engine" not in source
     assert "from hitchrail.engine" not in source
+
+
+def test_an_alias_cannot_start_a_second_agent_in_the_same_folder(
+    tmp_path: Path,
+) -> None:
+    """The outcome the whole design exists to prevent, from the start path.
+
+    `resolve_child` deliberately allows a symlink inside the root, so `alpha`
+    and `zebra` are two names for one directory. #11 deduplicates them in
+    `scan`, and `start` took a name directly and bypassed that: both spawned,
+    into the same checkout, each invisible to the other's `AlreadyRunning`
+    check because `get("alpha")` looks up `hr-alpha` and scans for a command
+    line naming `alpha`.
+
+    No race is needed. Sequential calls were enough.
+    """
+    (tmp_path / "zebra").mkdir()
+    (tmp_path / "alpha").symlink_to(tmp_path / "zebra", target_is_directory=True)
+    engine, tmux, _ = start_engine(tmp_path, table=running_after("zebra"))
+
+    assert engine.start("zebra").state is State.RUNNING
+    with pytest.raises(UnknownProject):
+        engine.start("alpha")
+    assert len(tmux.started) == 1
+    assert len({cwd for _n, cwd, _a in tmux.started}) == 1
+
+
+def test_the_start_lock_is_keyed_on_the_folder_not_the_name(tmp_path: Path) -> None:
+    """Belt to the listing check's braces: the listing is recomputed per call."""
+    (tmp_path / "zebra").mkdir()
+    engine, _, _ = start_engine(tmp_path, table=running_after("zebra"))
+    engine._starting.add(str((tmp_path / "zebra").resolve()))
+    with pytest.raises(Locked):
+        engine.start("zebra")
+
+
+@pytest.mark.parametrize("action", ["stop", "kill", "logs", "session_url"])
+@pytest.mark.parametrize("name", ["no-such-project", "../../etc", ""])
+def test_every_entry_point_refuses_a_name_that_is_not_a_project(
+    root: Path, action: str, name: str
+) -> None:
+    """Unknown and not running are different answers, and were the same one.
+
+    Phase 5 needs 404 rather than 409, and a name that is not a project
+    reported `NotRunning`, which an interface cannot tell from a real stopped
+    project. `logs` was worse: it returned empty output behind a comment
+    claiming to guard against exactly that.
+    """
+    engine, _, _ = live_engine(root)
+    with pytest.raises(UnknownProject):
+        getattr(engine, action)(name)
+
+
+def test_a_symlink_loop_is_an_engine_error_not_a_runtime_error(tmp_path: Path) -> None:
+    """`scan` reports a loop as unsupported, so it appears in the listing.
+
+    Without this it escaped `start` as a bare `RuntimeError` from
+    `Path.resolve`, which is not an `EngineError`, so Phase 5 would answer 500
+    for a row the interface had just drawn.
+    """
+    (tmp_path / "a").symlink_to(tmp_path / "b", target_is_directory=True)
+    (tmp_path / "b").symlink_to(tmp_path / "a", target_is_directory=True)
+    engine, _, _ = start_engine(tmp_path)
+    with pytest.raises(UnknownProject):
+        engine.start("a")
+
+
+# -- tmux vanishing mid run ------------------------------------------------
+
+
+class VanishingTmux(FakeTmux):
+    """A tmux that disappears after a chosen number of calls.
+
+    #28 refuses to start at all when tmux is missing. This is the other case:
+    it was there and now is not, mid session, which is what an upgrade or a
+    container restart looks like.
+    """
+
+    def __init__(self, fail_after: int = 0, **kw: object) -> None:
+        super().__init__(**kw)  # type: ignore[arg-type]
+        self.fail_after = fail_after
+        self.calls = 0
+
+    def _maybe_vanish(self) -> None:
+        self.calls += 1
+        if self.calls > self.fail_after:
+            raise TmuxUnavailable("tmux is gone")
+
+    def kill_session(self, project: str) -> None:
+        self._maybe_vanish()
+        super().kill_session(project)
+
+    def new_session(self, project: str, cwd: str, argv: list[str]) -> None:
+        self._maybe_vanish()
+        super().new_session(project, cwd, argv)
+
+    def capture_pane(self, project: str, lines: int = 40) -> str:
+        self._maybe_vanish()
+        return super().capture_pane(project, lines)
+
+    def send_keys(self, project: str, *keys: str) -> None:
+        self._maybe_vanish()
+        super().send_keys(project, *keys)
+
+
+def vanishing_engine(root: Path, *, fail_after: int = 0, live: bool = True) -> Engine:
+    sessions_dir = root / ".sessions"
+    sessions_dir.mkdir(exist_ok=True)
+    table = ps_row(PANE, 1) + ps_row(AGENT, PANE, project="vessel") if live else ps_row(PANE, 1)
+    clock = FakeClock()
+    return Engine(
+        Config(root=root, sessions_dir=sessions_dir),
+        tmux=VanishingTmux(fail_after=fail_after, sessions={"vessel": PANE}),
+        procs_fn=procs_from(table),
+        meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
+        clock=clock,
+        sleep=clock.sleep,
+    )
+
+
+@pytest.mark.parametrize("action", ["stop", "kill", "logs"])
+def test_a_tmux_that_vanishes_is_an_honest_refusal_not_a_500(root: Path, action: str) -> None:
+    """Every path that touches tmux must map `TmuxUnavailable`.
+
+    This is the invariant the module argues for hardest, and every one of these
+    mappings was written with no test: coverage named exactly those five lines
+    as the only misses in the file. An unmapped one escapes as a raw `OSError`,
+    which is not an `EngineError`, so Phase 5 answers 500 instead of saying the
+    machine could not be read.
+    """
+    engine = vanishing_engine(root)
+    with pytest.raises(MachineUnreadable):
+        getattr(engine, action)("vessel")
+
+
+def test_a_tmux_that_vanishes_during_a_start_is_an_honest_refusal(root: Path) -> None:
+    engine = vanishing_engine(root, live=False)
+    with pytest.raises(MachineUnreadable):
+        engine.start("vessel")
+
+
+def test_a_failed_stop_does_not_leave_a_phantom_marker(root: Path) -> None:
+    """The wait must not outlive the request that could not be sent."""
+    engine = vanishing_engine(root)
+    with pytest.raises(MachineUnreadable):
+        engine.stop("vessel")
+    assert engine.stopping_since("vessel") is None
+
+
+def test_a_failed_kill_keeps_the_stop_indicator(root: Path) -> None:
+    """The pop moved AFTER the kill. Popping first meant a kill that failed
+    took the indicator with it, so a graceful stop still in flight looked as
+    though nobody had asked."""
+    # Three, because the stop sequence is three key groups and each is one
+    # call: the kill is the fourth. A smaller number breaks the stop instead,
+    # which is a different test.
+    engine = vanishing_engine(root, fail_after=len(GRACEFUL_STOP_KEYS))
+    engine.stop("vessel")
+    assert engine.stopping_since("vessel") is not None
+    with pytest.raises(MachineUnreadable):
+        engine.kill("vessel")
+    assert engine.stopping_since("vessel") is not None
+
+
+def test_a_start_that_fails_still_reports_why_when_tmux_is_gone(root: Path) -> None:
+    """`_safe_capture` exists solely for this branch, and nothing entered it.
+
+    A tmux that went away must not replace "your session did not start, here is
+    why" with a different exception entirely.
+    """
+    engine = vanishing_engine(root, fail_after=1, live=False)
+    engine.start_grace = 0.0
+    with pytest.raises((StartFailed, MachineUnreadable)):
+        engine.start("vessel")
+
+
+def test_a_bus_that_raises_does_not_fail_the_stop(root: Path, caplog: object) -> None:
+    """A successful stop must not be reported as a failed one.
+
+    `EventBus.publish` guarantees it does not raise; this holds if a future bus
+    does not. Silent would make "events stopped arriving" unfalsifiable, so it
+    logs.
+    """
+    import logging
+
+    engine, _, _ = live_engine(root)
+
+    class Exploding:
+        def publish(self, event: dict[str, object]) -> None:
+            raise RuntimeError("the bus is on fire")
+
+    engine.attach_bus(Exploding())  # type: ignore[arg-type]
+    with caplog.at_level(logging.ERROR, logger="hitchrail.engine"):  # type: ignore[attr-defined]
+        session = engine.stop("vessel")
+
+    assert session.stopping is True, "the stop succeeded and must be reported so"
+    assert any("could not announce" in r.message for r in caplog.records)  # type: ignore[attr-defined]
+
+
+def test_a_failed_start_reports_why_even_when_the_pane_cannot_be_read(
+    root: Path,
+) -> None:
+    """`_safe_capture`'s whole reason to exist, and nothing entered it.
+
+    While raising `StartFailed`, a tmux that has gone away must not replace
+    "your session did not start, here is why" with a different exception.
+    """
+    sessions_dir = root / ".sessions"
+    sessions_dir.mkdir(exist_ok=True)
+
+    class CaptureFails(FakeTmux):
+        def capture_pane(self, project: str, lines: int = 40) -> str:
+            raise TmuxUnavailable("tmux is gone")
+
+    clock = FakeClock()
+    engine = Engine(
+        Config(root=root, sessions_dir=sessions_dir),
+        tmux=CaptureFails(),
+        procs_fn=procs_from(ps_row(1001, 1)),
+        meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
+        clock=clock,
+        sleep=clock.sleep,
+    )
+    engine.start_grace = 0.0
+    with pytest.raises(StartFailed) as caught:
+        engine.start("vessel")
+    assert caught.value.output == "", "an unreadable pane is empty output, not a crash"
