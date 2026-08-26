@@ -58,6 +58,7 @@ uv run pytest tests/test_engine.py::test_detached_is_not_stopped
 uv run pytest -m live             # binds a real loopback socket
 uv run pytest -m live_tmux        # drives a real tmux on a private socket
 uv run pytest -m "not live_tmux"  # skip it, on a machine without tmux
+uv run pytest tests/test_properties.py   # the invariants, via hypothesis
 uv run pytest -k detached
 ```
 

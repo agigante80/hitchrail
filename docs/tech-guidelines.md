@@ -259,9 +259,18 @@ under test existed to prevent:
 Coverage saw all three as covered, because the lines ran. The tools that catch
 this class are property based tests, which assert an invariant rather than
 examples, and mutation testing, which measures whether the assertions would
-notice a changed line at all. Both are tracked as tickets rather than adopted by assertion here: #34 for
-property based tests, in Phase 4, and #35 for mutation testing scoped to the
-five security modules, in Phase 7.
+notice a changed line at all. Property based tests are adopted: `tests/test_properties.py` expresses the
+invariants with `hypothesis`, under a derandomized profile so a green run is
+reproducible. **Every property there is verified to FAIL against a
+deliberately broken implementation**, and that check is not ceremony: two of
+the first four passed against broken code and had to be reformulated. One
+compared two independently generated strings, which almost never draws a
+colliding pair, and one asserted three things about host normalisation that a
+one sided strip satisfies. A property that cannot fail is the same trap as a
+teardown assertion that runs after its socket is deleted.
+
+Mutation testing is still a ticket, #35, scoped to the five security modules
+in Phase 7.
 
 ### 7.6 Standing rules
 
