@@ -1,6 +1,8 @@
 ---
 paths:
   - "src/hitchrail/security.py"
+  - "src/hitchrail/hostnames.py"
+  - "src/hitchrail/config.py"
   - "src/hitchrail/server.py"
   - "src/hitchrail/tmux.py"
   - "src/hitchrail/discovery.py"

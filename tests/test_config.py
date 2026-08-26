@@ -843,3 +843,19 @@ def test_both_modules_are_under_the_size_guideline() -> None:
     for name in ("config.py", "hostnames.py"):
         lines = len((src / name).read_text().splitlines())
         assert lines < 400, f"{name} is {lines} lines"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["http://[::1].", "http://[::1", "http://[", "http://[::1]]", "http://[::1].:8787"],
+)
+def test_a_malformed_bracketed_origin_is_a_config_error(tmp_path: Path, bad: str) -> None:
+    """`urlsplit` validates bracketed netlocs itself and raises before we do.
+
+    So these came out as a bare `ValueError: Invalid IPv6 URL` with no mention
+    of which entry caused it. `http://[::1].` is the first thing somebody
+    testing the new trailing dot behaviour on IPv6 would type, and a startup
+    refusal has to name what it refused.
+    """
+    with pytest.raises(ConfigError, match="not an origin"):
+        Config(root=tmp_path, extra_origins=(bad,))

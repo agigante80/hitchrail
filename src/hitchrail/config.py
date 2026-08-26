@@ -245,7 +245,18 @@ class Config:
                 raise ConfigError(
                     f"a wildcard origin defeats the point of the check: {entry!r}"
                 )
-            parts = urlsplit(candidate)
+            try:
+                parts = urlsplit(candidate)
+            except ValueError as exc:
+                # urlsplit validates bracketed netlocs itself and raises before
+                # any refusal in this function runs, so `http://[::1].` came
+                # out as a bare `Invalid IPv6 URL` rather than a ConfigError
+                # naming the entry. The port is already wrapped below for the
+                # same class of deferred failure; this is the other half.
+                raise ConfigError(
+                    f"not an origin: {entry!r}. Give scheme://host[:port], "
+                    "for example https://box.lan:8443"
+                ) from exc
             if parts.scheme not in {"http", "https"} or not parts.hostname:
                 raise ConfigError(
                     f"not an origin: {entry!r}. Give scheme://host[:port], "

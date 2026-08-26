@@ -130,3 +130,33 @@ def test_verdict_serialises_as_its_name() -> None:
     assert Verdict.SOFT.value == "soft"
     assert Verdict.HARD.value == "hard"
     assert f"{Verdict.HARD}" == "hard"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "MemAvailable: 2097152 B\n",
+        "MemAvailable: 2097152\n",
+        "MemAvailable: 2097152 mB\n",
+        "MemAvailable: 2097152 kB extra\n",
+    ],
+)
+def test_a_value_in_the_wrong_unit_is_refused(text: str) -> None:
+    """Belt and braces, and the failure direction is why it is worth a line.
+
+    A value in bytes read as kB over reports memory by 1024x, which approves a
+    start on a machine that is already exhausted. The kernel has always written
+    kB, so this should never fire; if it ever does, refusing is the behaviour
+    this module argues for everywhere else.
+    """
+    with pytest.raises(ValueError, match="MemAvailable"):
+        available_mb(text)
+
+
+def test_guard_does_not_shadow_the_parser() -> None:
+    """The parameter was named `available_mb`, same as the module function.
+
+    Harmless while `guard` does not call it, and a trap for the next edit that
+    wants to. Asserted by calling both in one expression.
+    """
+    assert guard(available_mb(MEMINFO), NEED, HARD, SOFT) is Verdict.OK

@@ -59,7 +59,13 @@ def available_mb(meminfo_text: str) -> int:
         if field.strip() != "MemAvailable":
             continue
         parts = rest.split()
-        if not parts:
+        # The unit is asserted rather than assumed. The kernel has always
+        # written kB and hardcodes it, so this is belt and braces, but it is
+        # one line and the failure direction matters: a value in bytes read as
+        # kB over reports memory by 1024x and approves a start on an exhausted
+        # machine. This function's whole argument is that it refuses rather
+        # than guesses when it cannot read its input.
+        if len(parts) != 2 or parts[1] != "kB":
             break
         try:
             return int(parts[0]) // _KB_PER_MB
@@ -68,20 +74,25 @@ def available_mb(meminfo_text: str) -> int:
     raise ValueError("MemAvailable is missing or unreadable in /proc/meminfo")
 
 
-def guard(available_mb: int, need_mb: int, hard_mb: int, soft_mb: int) -> Verdict:
+def guard(available: int, need_mb: int, hard_mb: int, soft_mb: int) -> Verdict:
     """Decide against what would be LEFT after starting, not what is free now.
 
     Starting an agent consumes `need_mb`, so the question is whether the
-    machine is still habitable afterwards. Comparing `available_mb` directly
-    against the floors would approve a start that lands exactly on the floor
-    and leaves nothing.
+    machine is still habitable afterwards. Comparing the available figure
+    directly against the floors would approve a start that lands exactly on the
+    floor and leaves nothing.
+
+    The parameter is `available` rather than `available_mb` deliberately: the
+    latter shadows the module level parser of that name, which makes it
+    unreachable from this scope and sets a trap for the next edit that wants
+    it.
 
     `Config` already refuses a soft floor below the hard floor, so the order is
     assumed here rather than revalidated. If that refusal is ever removed this
     silently loses its middle step: the SOFT band becomes unreachable and every
     confirmation gate disappears. There is a test saying so.
     """
-    remaining = available_mb - need_mb
+    remaining = available - need_mb
     if remaining < hard_mb:
         return Verdict.HARD
     if remaining < soft_mb:

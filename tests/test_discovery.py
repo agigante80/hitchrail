@@ -663,7 +663,8 @@ def test_an_intra_root_alias_yields_one_project(tmp_path: Path) -> None:
     (tmp_path / "real").mkdir()
     (tmp_path / "alias").symlink_to(tmp_path / "real", target_is_directory=True)
     listing = scan(tmp_path)
-    assert listing.projects == ("alias",)
+    # The REAL directory survives, not the alphabetically first name.
+    assert listing.projects == ("real",)
 
 
 def test_the_dropped_alias_is_reported_not_hidden(tmp_path: Path) -> None:
@@ -677,17 +678,22 @@ def test_the_dropped_alias_is_reported_not_hidden(tmp_path: Path) -> None:
     (tmp_path / "real").mkdir()
     (tmp_path / "alias").symlink_to(tmp_path / "real", target_is_directory=True)
     listing = scan(tmp_path)
-    dropped = [u for u in listing.unsupported if u.name == "real"]
+    dropped = [u for u in listing.unsupported if u.name == "alias"]
     assert len(dropped) == 1
-    assert "alias" in dropped[0].reason
+    assert "real" in dropped[0].reason
 
 
-def test_the_surviving_name_is_deterministic(tmp_path: Path) -> None:
-    """Not filesystem order dependent, so two machines agree.
+def test_the_real_directory_outranks_an_alias(tmp_path: Path) -> None:
+    """Stable across machines AND over time, which name order alone was not.
 
-    A session is keyed off the surviving name, so if the choice varied by
-    listing order the same folder would get different sessions on different
-    machines, or after a remount.
+    A session is keyed off the surviving name. Sorting by name alone made that
+    name change when somebody added a link: a running `zebra` would lose the
+    tie to a new `alpha`, vanish from the list, reappear as a project with no
+    session, and a tap would start a second agent in the directory the first
+    was still working in.
+
+    A real directory's name cannot be changed by creating a link to it, so
+    preferring it is what makes the choice durable.
     """
     first = tmp_path / "one"
     first.mkdir()
@@ -699,9 +705,35 @@ def test_the_surviving_name_is_deterministic(tmp_path: Path) -> None:
     (second / "alpha").mkdir()
     (second / "zebra").symlink_to(second / "alpha", target_is_directory=True)
 
-    # Whichever is the real directory, the alphabetically first name wins.
-    assert scan(first).projects == ("alpha",)
+    # The real directory wins in both, though the names sort oppositely.
+    assert scan(first).projects == ("zebra",)
     assert scan(second).projects == ("alpha",)
+
+
+def test_adding_an_alias_does_not_rename_a_running_project(tmp_path: Path) -> None:
+    """Named regression for the tie break that sorted by name alone.
+
+    This is the sequence that made it worse than no deduplication: the project
+    the user is actually running must keep its name when a link appears beside
+    it, or the interface offers to start a second agent in a busy directory.
+    """
+    (tmp_path / "zebra").mkdir()
+    assert scan(tmp_path).projects == ("zebra",)
+
+    (tmp_path / "alpha").symlink_to(tmp_path / "zebra", target_is_directory=True)
+    assert scan(tmp_path).projects == ("zebra",)
+
+
+def test_aliases_alone_fall_back_to_name_order(tmp_path: Path) -> None:
+    """Two links and no real directory in the root: still deterministic."""
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "target").mkdir()
+    (root / "zlink").symlink_to(root / "target", target_is_directory=True)
+    (root / "alink").symlink_to(root / "target", target_is_directory=True)
+    assert scan(root).projects == ("target",)
 
 
 def test_three_names_for_one_directory_keep_one(tmp_path: Path) -> None:
@@ -709,7 +741,7 @@ def test_three_names_for_one_directory_keep_one(tmp_path: Path) -> None:
     (tmp_path / "a1").symlink_to(tmp_path / "real", target_is_directory=True)
     (tmp_path / "a2").symlink_to(tmp_path / "real", target_is_directory=True)
     listing = scan(tmp_path)
-    assert listing.projects == ("a1",)
+    assert listing.projects == ("real",)
     assert listing.unsupported_total == 2
 
 
