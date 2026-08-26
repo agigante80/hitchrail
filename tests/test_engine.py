@@ -506,20 +506,18 @@ def test_protected_survives_in_every_state(
         (RUNNING_MACHINE, State.RUNNING),
         (STALE_MACHINE, State.STALE),
         (DETACHED_MACHINE, State.DETACHED),
-        (STOPPED_MACHINE, State.STOPPED),
     ],
-    ids=["running", "stale", "detached", "stopped"],
+    ids=["running", "stale", "detached"],
 )
-def test_the_stopping_overlay_applies_to_every_state(
+def test_the_stopping_overlay_applies_to_every_live_state(
     root: Path, machine: Machine, expected: State
 ) -> None:
     """An overlay, not a fifth state, and it must not change what is underneath.
 
-    Nothing pinned this: removing `stopping=` from the STALE branch, the
-    STOPPED branch or `_live` each left the whole suite green, because
-    `_stopping` is only populated by the stop path in a later ticket. A section
-    headed "the overlay applies to every state" containing one test that
-    asserts nothing IS stopping is not coverage.
+    Nothing pinned this: removing `stopping=` from the STALE branch or `_live`
+    each left the whole suite green, because `_stopping` is only populated by
+    the stop path. A section headed "the overlay applies to every state"
+    containing one test that asserts nothing IS stopping is not coverage.
     """
     sessions, table = machine
     engine, _ = engine_for(root, sessions=sessions, table=table)
@@ -531,6 +529,31 @@ def test_the_stopping_overlay_applies_to_every_state(
     assert engine.stopping_since("vessel") == 1234.0
     # And it is per session, not global.
     assert engine.get("ab").stopping is False
+
+
+def test_the_overlay_does_not_apply_to_a_stopped_session(root: Path) -> None:
+    """STOPPED is the exception, and this reverses an earlier decision.
+
+    The parametrised test above used to cover STOPPED too, on the reasoning
+    that an overlay applying everywhere is simpler to describe. Running a real
+    agent showed what that meant: it obeyed the graceful request in about a
+    second, and because the marker lives until the timeout, the session read
+    `stopped` and `stopping` together for the next twenty nine. The interface
+    shows a spinner on something that is already gone, and the expiry then
+    announces a timeout for a stop that worked.
+
+    An overlay needs something underneath it. Once nothing is running there is
+    nothing to overlay, and the marker is dropped on read, which is the only
+    moment the transition is visible.
+    """
+    sessions, table = STOPPED_MACHINE
+    engine, _ = engine_for(root, sessions=sessions, table=table)
+    engine._stopping["vessel"] = 1234.0
+
+    session = engine.get("vessel")
+    assert session.state is State.STOPPED
+    assert session.stopping is False, "an overlay on a session that is not there"
+    assert engine.stopping_since("vessel") is None, "the marker outlived the session"
 
 
 def test_the_url_comes_from_the_bridge_file(root: Path, tmp_path: Path) -> None:
@@ -1267,3 +1290,57 @@ def test_a_project_that_vanishes_between_the_listing_and_the_path_is_unknown(
     monkeypatch.setattr(discovery, "project_path", vanishing)
     with pytest.raises(UnknownProject):
         engine.start("alpha")
+
+
+def test_a_stop_that_worked_is_not_reported_as_a_timeout(tmp_path: Path) -> None:
+    """Found by running a real agent, which no fake had caught.
+
+    The agent obeyed the graceful request in about a second. The marker lived
+    for the full thirty, so the session read `stopped` and `stopping` at the
+    same time, and the expiry then announced a timeout for a stop that had
+    worked. The user is told their agent would not stop, after it already had.
+    """
+    (tmp_path / "alpha").mkdir()
+    sessions_dir = tmp_path / ".sessions"
+    sessions_dir.mkdir()
+    now = [0.0]
+    table = [ps_row(600, 1) + ps_row(601, 600, project="alpha")]
+    tmux = FakeTmux(sessions={"alpha": 600})
+    engine = Engine(
+        Config(root=tmp_path, sessions_dir=sessions_dir, stop_timeout=30.0),
+        tmux=tmux,
+        procs_fn=lambda: procs_from(table[0])(),
+        meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
+        clock=lambda: now[0],
+        sleep=lambda _s: None,
+    )
+    engine.stop("alpha")
+    assert engine.get("alpha").stopping, "the overlay should show while it is alive"
+
+    # The agent obeys and exits.
+    now[0] = 1.0
+    table[0] = ""
+    tmux.sessions = {}
+
+    session = engine.get("alpha")
+    assert session.state is State.STOPPED
+    assert not session.stopping, "an overlay on a session that is not there"
+    assert engine.stopping_since("alpha") is None, "the marker outlived the stop"
+
+    # ...so the expiry has nothing to report thirty seconds later.
+    now[0] = 31.0
+    assert engine.expire_stops() == []
+
+
+def test_the_overlay_survives_while_the_agent_is_still_running(root: Path) -> None:
+    """The other half: reconciling on read must not drop a stop in flight.
+
+    Clearing the marker whenever it is convenient would make the spinner
+    vanish the moment anybody refreshed, which is the failure the fix above
+    could easily have introduced.
+    """
+    engine, _, _ = live_engine(root)
+    engine.stop("vessel")
+    for _ in range(3):
+        assert engine.get("vessel").stopping, "a stop in flight was reconciled away"
+    assert engine.stopping_since("vessel") is not None

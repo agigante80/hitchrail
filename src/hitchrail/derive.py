@@ -86,10 +86,17 @@ def derive(
     if orphan is not None:
         return live(name, orphan, machine, State.DETACHED, protected, config, stopping)
 
+    # Never `stopping` here, whatever the marker says. The graceful stop is an
+    # OVERLAY on a live session, and once nothing is running there is nothing
+    # to overlay: the request either succeeded or the process died anyway, and
+    # both are just "stopped". Reporting it left a real agent that obeyed in
+    # one second showing a spinner until the marker expired thirty seconds
+    # later. The engine drops the marker when it sees this, so the expiry does
+    # not go on to report a stop that worked as a timeout.
     return Session(
         name=name,
         state=State.STOPPED,
-        stopping=name in stopping,
+        stopping=False,
         protected=protected,
     )
 

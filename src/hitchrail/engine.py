@@ -112,7 +112,16 @@ class Engine:
     def _derive(self, name: str, machine: Machine) -> Session:
         # `self._stopping` is passed unguarded on purpose: see the note on
         # `_stopping_guard`. `derive` only asks `name in stopping`.
-        return derive.derive(name, machine, self.config, self.tmux, self._stopping)
+        session = derive.derive(name, machine, self.config, self.tmux, self._stopping)
+        if session.state is State.STOPPED:
+            # Reconciled on read, which is the only place the transition is
+            # visible: nothing calls us when an agent exits. Without this the
+            # marker survives a stop that WORKED, and `expire_stops` reports it
+            # as a timeout thirty seconds later, telling the user their agent
+            # would not stop when it had already gone.
+            with self._stopping_guard:
+                self._stopping.pop(name, None)
+        return session
 
     def list(self) -> list[Session]:
         machine = self._look()
