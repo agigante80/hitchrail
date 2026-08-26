@@ -97,14 +97,19 @@ returning `{}` when no server is running is legitimately "no sessions", because
 that is the ordinary state of a machine with nothing started. #40 has a test
 for each half so the two cannot be merged later.
 
-### 2. `session_url` returns provenance, not a bare string
+### 2. `Engine.session_url` returns provenance; `Session.url` does not
 
-Task 14's interface says `Engine.session_url(name) -> str | None` and one of
-its tests asserts a bare URL string. `claude_ipc.session_url` returns
-`SessionUrl(url, source)` where source is `bridge` or `scraped`, decided in
-#29 because a scraped URL can be scrollback from a session that ended hours
-ago: syntactically perfect and semantically stale. #29 records that the
-provenance reaches the API, so `Session` carries it and `as_dict()` exposes it.
+Task 14's interface says `Engine.session_url(name) -> str | None`, and
+`claude_ipc.session_url` returns `SessionUrl(url, source)` since #29, so that
+interface line is stale and #42 corrects it.
+
+**`Session.url` stays a bare `str | None`, and the plan is right about that.**
+`_live` calls `bridge_url`, not `session_url`, deliberately: the latter
+captures a pane, which is a subprocess per running row on every list. Because
+the list path uses only the bridge, its URL is always authoritative and there
+is no provenance to disambiguate. An earlier version of this correction said
+`Session` should carry the source; it should not, and the source would be a
+constant.
 
 ## The three things this phase gets right that a first draft does not
 
@@ -295,10 +300,14 @@ git commit -m "feat(events): lossy fan out so a stalled tab cannot slow the mach
 **Files:**
 - Modify: `src/hitchrail/engine.py`
 - Test: `tests/conftest.py`
-- Test: `tests/test_engine_state.py`
+- Test: `tests/test_engine.py`
 
 **Interfaces:**
 - Consumes: `Config` (Phase 1), `Tmux`, `ProcTable`, `snapshot`, `claude_ipc`, `discovery`, `ram` (Phase 3), `EventBus` (Task 11).
+- **Note on `bus`:** the implementation of #40 typed it `object | None`, which
+  collapses to `object` and checks nothing. `events.py` is inside the same
+  import contract, so `EventBus | None` costs nothing and is what #41 and #42
+  need when they call `_announce`. Fix it when the first announce lands.
 - Produces: `StrEnum State` with `RUNNING`, `STALE`, `DETACHED`, `STOPPED`; frozen dataclass `Session(name, state, pid, ram_mb, uptime_s, url, stopping, protected)` with `as_dict() -> dict[str, object]`; class `Engine(config, tmux=None, procs_fn=None, meminfo_fn=None, clock=time.monotonic, sleep=time.sleep, bus=None)` with `list() -> list[Session]`, `get(name: str) -> Session`, `available_mb() -> int`. Tasks 13 and 14 add `start`, `stop`, `kill`, `logs`, `session_url`, `stopping_since` and `expire_stops` to the same class.
 
 `Session.as_dict` lives on the dataclass rather than in the server, because
@@ -442,7 +451,7 @@ def plenty_of_memory() -> Callable[[], str]:
 
 - [ ] **Step 2: Write the failing state tests**
 
-`tests/test_engine_state.py`:
+`tests/test_engine.py`:
 
 ```python
 from __future__ import annotations
@@ -615,7 +624,7 @@ Add `import pytest` to the top of the file for the helper above.
 
 - [ ] **Step 3: Run to verify failure**
 
-Run: `uv run pytest tests/test_engine_state.py -v`
+Run: `uv run pytest tests/test_engine.py -v`
 Expected: FAIL with `ImportError: cannot import name 'Engine' from 'hitchrail.engine'`.
 
 - [ ] **Step 4: Implement**
@@ -817,14 +826,14 @@ class Engine:
 
 - [ ] **Step 5: Run to verify passing**
 
-Run: `uv run pytest tests/test_engine_state.py -v`
+Run: `uv run pytest tests/test_engine.py -v`
 Expected: PASS, 15 tests.
 
 - [ ] **Step 6: Gates and commit**
 
 ```bash
 uv run ruff check && uv run ruff format --check && uv run mypy && uv run lint-imports
-git add src/hitchrail/engine.py tests/conftest.py tests/test_engine_state.py
+git add src/hitchrail/engine.py tests/conftest.py tests/test_engine.py
 git commit -m "feat(engine): derive four states from two snapshots, detached included"
 ```
 
@@ -834,7 +843,7 @@ git commit -m "feat(engine): derive four states from two snapshots, detached inc
 
 **Files:**
 - Modify: `src/hitchrail/engine.py`
-- Test: `tests/test_engine_start.py`
+- Test: `tests/test_engine.py`
 
 **Interfaces:**
 - Consumes: everything from Task 12.
@@ -842,7 +851,7 @@ git commit -m "feat(engine): derive four states from two snapshots, detached inc
 
 - [ ] **Step 1: Write the failing tests**
 
-`tests/test_engine_start.py`:
+`tests/test_engine.py`:
 
 ```python
 from __future__ import annotations
@@ -1081,7 +1090,7 @@ def test_a_stale_session_is_cleaned_up_before_restarting(config) -> None:
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `uv run pytest tests/test_engine_start.py -v`
+Run: `uv run pytest tests/test_engine.py -v`
 Expected: FAIL with `ImportError: cannot import name 'AlreadyRunning' from 'hitchrail.engine'`.
 
 - [ ] **Step 3: Add the exceptions to `src/hitchrail/engine.py`**
@@ -1220,14 +1229,14 @@ Then these methods:
 
 - [ ] **Step 5: Run to verify passing**
 
-Run: `uv run pytest tests/test_engine_start.py -v`
+Run: `uv run pytest tests/test_engine.py -v`
 Expected: PASS, 17 tests.
 
 - [ ] **Step 6: Gates and commit**
 
 ```bash
 uv run ruff check && uv run ruff format --check && uv run mypy && uv run lint-imports
-git add src/hitchrail/engine.py tests/test_engine_start.py
+git add src/hitchrail/engine.py tests/test_engine.py
 git commit -m "feat(engine): start waits for claude to appear, and locks per folder"
 ```
 
@@ -1237,7 +1246,7 @@ git commit -m "feat(engine): start waits for claude to appear, and locks per fol
 
 **Files:**
 - Modify: `src/hitchrail/engine.py`
-- Test: `tests/test_engine_stop.py`
+- Test: `tests/test_engine.py`
 
 **Interfaces:**
 - Consumes: everything from Tasks 12 and 13.
@@ -1250,7 +1259,7 @@ it comes back empty.
 
 - [ ] **Step 1: Write the failing tests**
 
-`tests/test_engine_stop.py`:
+`tests/test_engine.py`:
 
 ```python
 from __future__ import annotations
@@ -1440,7 +1449,7 @@ def test_session_url_of_a_stopped_session_is_refused(config) -> None:
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `uv run pytest tests/test_engine_stop.py -v`
+Run: `uv run pytest tests/test_engine.py -v`
 Expected: FAIL with `AttributeError: 'Engine' object has no attribute 'stop'`.
 
 - [ ] **Step 3: Implement in `src/hitchrail/engine.py`**
@@ -1538,7 +1547,7 @@ Expected: FAIL with `AttributeError: 'Engine' object has no attribute 'stop'`.
 
 - [ ] **Step 4: Run to verify passing**
 
-Run: `uv run pytest tests/test_engine_stop.py -v`
+Run: `uv run pytest tests/test_engine.py -v`
 Expected: PASS, 17 tests.
 
 - [ ] **Step 5: Prove it against a real machine**
@@ -1586,7 +1595,7 @@ for that machine and the number, not the design, is what to change.
 
 ```bash
 uv run ruff check && uv run ruff format --check && uv run mypy && uv run lint-imports && uv run pytest
-git add src/hitchrail/engine.py tests/test_engine_stop.py
+git add src/hitchrail/engine.py tests/test_engine.py
 git commit -m "feat(engine): three step stop with an announced, non persisted marker"
 ```
 
