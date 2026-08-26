@@ -210,9 +210,13 @@ window and a start lock, and the three step stop with its non persisted marker.
 Claude session, watches it become `running`, gracefully stops it, and kills it.
 All four states have a passing test, `detached` included.
 
-## Phase 5: The HTTP API and the CLI
+## Phase 5: The HTTP API and the CLI (done)
 
 **Plan: [`superpowers/plans/2026-08-25-hitchrail-phase-5-api.md`](superpowers/plans/2026-08-25-hitchrail-phase-5-api.md)**
+
+All twelve exit criteria are ticked with the evidence that closed them. A real
+Claude agent was started, watched, gracefully stopped and killed through the
+API by hand, which is what the "not done if" clause below asks for.
 
 The thin layer on top. Three tasks.
 

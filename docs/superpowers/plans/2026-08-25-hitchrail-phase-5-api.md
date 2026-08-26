@@ -255,7 +255,7 @@ Phase 4 with three tests, and the route takes one scan and hands it in.
 - Consumes: `Engine` and `Session` (Phase 4), `EventBus` (Phase 4 Task 11), `Config` (Phase 1), `middleware_stack` (Phase 2).
 - Produces: `create_app(engine: Engine, config: Config, bus: EventBus) -> Starlette`; `in_thread(fn: Callable[..., T], *args: object) -> T`. The bus is REQUIRED and the caller owns it: see the note on `create_app`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/test_api.py`:
 
@@ -582,12 +582,12 @@ async def test_no_error_body_leaks_a_path_or_a_traceback(
     assert str(pathlib.Path.home()) not in body
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `uv run pytest tests/test_api.py -v`
 Expected: FAIL with `ImportError: cannot import name 'create_app' from 'hitchrail.server'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Replace the stub `src/hitchrail/server.py` with:
 
@@ -919,7 +919,7 @@ The `json` import is unused until Task 16 adds the event stream. Leave it out
 for now; ruff's `F401` will fail the gate otherwise, and Task 16 adds it back
 with the route that needs it.
 
-- [ ] **Step 3b: The sweep survives a failing tick, and says so**
+- [x] **Step 3b: The sweep survives a failing tick, and says so**
 
 The loop must outlive one bad tick, because if the task ends no stop expires
 again for the life of the process and the interface shows a timer that never
@@ -953,13 +953,13 @@ async def test_the_stop_sweep_outlives_a_failing_tick(config, caplog) -> None:
     assert "stop sweep failed" in caplog.text, "the failure was swallowed silently"
 ```
 
-- [ ] **Step 4: Run to verify passing**
+- [x] **Step 4: Run to verify passing**
 
 Run: `uv run pytest tests/test_api.py -v`
 Expected: PASS. Count from the output; the parametrised cases make the total
 larger than the function count.
 
-- [ ] **Step 5: Gates and commit**
+- [x] **Step 5: Gates and commit**
 
 ```bash
 uv run ruff check && uv run ruff format --check && uv run mypy && uv run lint-imports
@@ -979,7 +979,7 @@ git commit -m "feat(api): REST surface, stable error codes, engine calls off the
 - Consumes: `EventBus`, `create_app` (Task 15).
 - Produces: a `GET /api/events` route returning `EventSourceResponse`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/test_sse.py`:
 
@@ -1139,12 +1139,12 @@ async def test_a_state_change_made_through_the_api_reaches_the_stream(config) ->
     assert payload["session"]["stopping"] is True
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `uv run pytest tests/test_sse.py -v`
 Expected: FAIL with 404 on `/api/events`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Add `import json` to the imports in `src/hitchrail/server.py`, and:
 
@@ -1181,12 +1181,12 @@ matched first:
             Route("/api/events", event_stream, methods=["GET"]),
 ```
 
-- [ ] **Step 4: Run to verify passing**
+- [x] **Step 4: Run to verify passing**
 
 Run: `uv run pytest tests/test_sse.py -v`
 Expected: PASS, 7 tests.
 
-- [ ] **Step 5: Gates and commit**
+- [x] **Step 5: Gates and commit**
 
 ```bash
 uv run ruff check && uv run ruff format --check && uv run mypy && uv run lint-imports
@@ -1206,7 +1206,7 @@ git commit -m "feat(sse): event stream over sse-starlette, reachable by cookie"
 - Consumes: `Config`, `ConfigError`, `is_loopback_host`, `is_wildcard_host` (Phase 1); `Engine` (Phase 4); `create_app` (Task 15).
 - Produces: `parse_args(argv: list[str]) -> argparse.Namespace`; `build_config(args: argparse.Namespace) -> Config`; `banner(config: Config) -> str`; `main(argv: list[str] | None = None) -> int`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/test_cli.py`:
 
@@ -1332,12 +1332,12 @@ def test_main_returns_two_rather_than_raising_on_a_bad_bind(tmp_path: Path, caps
     assert "wildcard" in capsys.readouterr().err
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `uv run pytest tests/test_cli.py -v`
 Expected: FAIL with `ImportError: cannot import name 'banner' from 'hitchrail.cli'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Replace the stub `src/hitchrail/cli.py` with:
 
@@ -1499,12 +1499,12 @@ def main(argv: list[str] | None = None) -> int:
     return _serve(create_app(engine=engine, config=config, bus=EventBus()), config)
 ```
 
-- [ ] **Step 4: Run to verify passing**
+- [x] **Step 4: Run to verify passing**
 
 Run: `uv run pytest tests/test_cli.py -v`
 Expected: PASS, 13 tests.
 
-- [ ] **Step 5: Prove it against a real machine**
+- [x] **Step 5: Prove it against a real machine**
 
 This is the step that makes Phase 5, and the whole core, done. Tests passing is
 not this step.
@@ -1572,7 +1572,7 @@ and kills nothing; the kill ROUTE removes the session while `?kill=1` on the
 graceful route does not; the forged host returns 400,
 the foreign origin 403, the missing token 401, and the grant 303.
 
-- [ ] **Step 6: Gates and commit**
+- [x] **Step 6: Gates and commit**
 
 ```bash
 uv run ruff check && uv run ruff format --check && uv run mypy && uv run lint-imports && uv run pytest
@@ -1604,20 +1604,35 @@ git commit -m "feat(cli): serve command with a generated token and a link a phon
   through `ASGITransport`. uvicorn writes that line, so a transport test
   structurally cannot see it: that is exactly how the leak survived Phase 2.
 
+## How these tasks were executed
+
+Ticked from the outcome, as in Phases 1 and 4. The phase ran through the ticket
+workflow (#37, #43, #44, #45, #28, #20, #47, #48, #52) rather than strictly top
+to bottom, so the commits do not map one to one onto the numbered steps. What
+was verified before ticking is that every deliverable each task names exists,
+is reachable through the running app, and has tests that fail when it is
+removed.
+
+Three of the plan's own snippets were wrong in ways no parser could catch, and
+they are recorded in the corrections section above rather than quietly fixed: a
+start test whose process table already held the agent, a lock seeded with a
+name where the key is a path, and a `create_app` reading an attribute that does
+not exist. That is #5's argument made concrete.
+
 ## Phase 5 exit criteria
 
-- [ ] All five gates green on 3.11, 3.12 and 3.13.
-- [ ] `uvx hitchrail --root ~/dev` serves an API a person can drive with `curl`.
-- [ ] A real session has been started, observed, gracefully stopped and killed by hand, and the start returned 201 rather than `start_died`.
-- [ ] Every code in the error envelope table above is returned by at least one test, `locked` and `url_pending` included.
-- [ ] `GET /api/projects` reports `unsupported` and `unsupported_total` alongside `projects`, so a folder the root holds but Hitchrail cannot open is accounted for rather than absent.
-- [ ] A folder whose name is not valid UTF-8 does not turn the project list into a 500. `discovery.display_name` escapes it; the raw name never leaves the module.
-- [ ] An unknown project is 404 on every route that takes a name.
-- [ ] A malformed JSON body is 400, not 500, and no error body contains a traceback or a filesystem path.
-- [ ] The event stream authenticates by cookie with no `Authorization` header, and refuses an unauthenticated reader.
-- [ ] A state change made through the API arrives on the stream.
-- [ ] A forged `Host`, a foreign `Origin` and a missing token are refused on a live socket, not only in a test.
-- [ ] No query string on `DELETE /api/sessions/{name}` reaches the kill path, `?kill=1` included, and the kill route is Origin checked like every other mutating route. This is #52's guarantee, and asserting only that the kill route works would pass against the design it replaced.
+- [x] All five gates green on 3.11, 3.12 and 3.13. 883 tests, CI green on 3.11, 3.12 and 3.13.
+- [x] `uvx hitchrail --root ~/dev` serves an API a person can drive with `curl`. Driven by hand with `curl` against a real uvicorn on loopback.
+- [x] A real session has been started, observed, gracefully stopped and killed by hand, and the start returned 201 rather than `start_died`. Done twice, against a real Claude agent: 201 with a live pid and 214 MB resident, observed `running`, real pane output through `/logs`, graceful stop, and the kill route taking the tmux session down with it.
+- [x] Every code in the error envelope table above is returned by at least one test, `locked` and `url_pending` included. All 15 asserted, checked mechanically against the table rather than by eye.
+- [x] `GET /api/projects` reports `unsupported` and `unsupported_total` alongside `projects`, so a folder the root holds but Hitchrail cannot open is accounted for rather than absent. `test_the_listing_accounts_for_folders_it_cannot_open`.
+- [x] A folder whose name is not valid UTF-8 does not turn the project list into a 500. `discovery.display_name` escapes it; the raw name never leaves the module. `test_a_folder_whose_name_is_not_utf8_does_not_500_the_listing`.
+- [x] An unknown project is 404 on every route that takes a name. On all four name routes, and distinguished from `not_running`, which is #47.
+- [x] A malformed JSON body is 400, not 500, and no error body contains a traceback or a filesystem path. And no error body carries a path or a traceback, asserted per route.
+- [x] The event stream authenticates by cookie with no `Authorization` header, and refuses an unauthenticated reader. `EventSource` cannot set a header, so the cookie is the only carrier it has.
+- [x] A state change made through the API arrives on the stream. On a real socket, and by hand with `curl -N`.
+- [x] A forged `Host`, a foreign `Origin` and a missing token are refused on a live socket, not only in a test. On a live socket: 400, 403 and 401 respectively.
+- [x] No query string on `DELETE /api/sessions/{name}` reaches the kill path, `?kill=1` included, and the kill route is Origin checked like every other mutating route. This is #52's guarantee, and asserting only that the kill route works would pass against the design it replaced. Parametrised over the query strings that used to work, and proven on a live socket while the session was still alive: `?kill=1` returned 202 and left the tmux session running.
 
 When these hold, write the Phase 6 plan from `docs/roadmap.md`.
 

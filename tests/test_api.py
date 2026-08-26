@@ -695,3 +695,43 @@ async def test_an_unlisted_http_status_still_gets_an_envelope(
     assert r.status_code == 418
     assert r.headers["content-type"].startswith("application/json")
     assert r.json() == {"code": "error", "message": "short and stout"}
+
+
+# -- exit criteria that only the API can show -------------------------------
+
+
+async def test_the_listing_accounts_for_folders_it_cannot_open(
+    client: httpx.AsyncClient, config: Config
+) -> None:
+    """A folder the root holds but Hitchrail cannot use must be ACCOUNTED for,
+    not absent. Dropping them silently made a folder called `my app` look like
+    one Hitchrail could not see, which is issue #7."""
+    (config.root / "my app").mkdir()
+    (config.root / ".hidden").mkdir()
+    body = (await client.get("/api/projects", headers=HEADERS)).json()
+
+    assert "unsupported" in body and "unsupported_total" in body
+    names = {u["name"] for u in body["unsupported"]}
+    assert "my app" in names
+    assert all(u["reason"] for u in body["unsupported"]), "a reason is the point"
+    assert body["unsupported_total"] >= len(body["unsupported"])
+    assert "my app" not in {p["name"] for p in body["projects"]}
+
+
+async def test_a_folder_whose_name_is_not_utf8_does_not_500_the_listing(
+    client: httpx.AsyncClient, config: Config
+) -> None:
+    """The raw name never leaves `discovery`, so the JSON encoder never meets
+    a byte it cannot represent. Without that this route is a 500 that any user
+    can cause by naming a directory, and the whole page goes with it."""
+    try:
+        (config.root / b"caf\xe9-broken".decode("latin-1")).mkdir()
+    except OSError:  # pragma: no cover - filesystem refused the name
+        pytest.skip("this filesystem will not create the name")
+
+    response = await client.get("/api/projects", headers=HEADERS)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert isinstance(body["projects"], list)
+    assert "\udce9" not in response.text, "a lone surrogate reached the response"
