@@ -43,6 +43,16 @@ algorithm run in two directions, and shipping half of it means shipping a
 derivation that is knowingly wrong about `detached`, which is the state the
 whole design exists to get right.
 
+**Because it is not split, its tests carry the weight the second reviewer
+would have**, and #40 spells them out: every cell of the state matrix rather
+than the diagonal, both directions of orphan attribution rather than one, and
+the coupling to `launch_argv`'s argument ORDER that would otherwise break
+`detached` silently. That last one is worth reading before implementing:
+`_find_detached` matches on the project name being the LAST element of the
+command line, so a flag appended after it makes every detached agent invisible
+with no other test failing. The fake process table builds its `args` by calling
+`launch_argv` for exactly that reason.
+
 #42 carries the phase's runtime proof, because a real Claude session cannot be
 started, watched, stopped and killed until stop and kill exist.
 
