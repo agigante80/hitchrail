@@ -224,7 +224,16 @@ class Engine:
         agent becomes invisible, silently. There is a test that builds the
         process args by CALLING `launch_argv` for exactly that reason.
         """
-        suffix = f"{claude_ipc.REMOTE_CONTROL_MARKER} {name}"
+        # The WHOLE argv tail, not just the marker and the name. Matching on
+        # those two alone claims any process that happens to mention both: a
+        # `grep -r` for the marker across a project directory derived as a
+        # detached agent for that project. Since a detached row refuses to
+        # start, and a kill has no tmux session to kill, the project stayed
+        # unstartable until the unrelated process exited.
+        #
+        # Built by calling `launch_argv`, so this cannot drift from what we
+        # actually spawn, and the flags stay inside the quarantine.
+        suffix = " ".join(claude_ipc.launch_argv(self.config.agent_binary, name)[1:])
         for proc in machine.table.matching(claude_ipc.REMOTE_CONTROL_MARKER):
             if proc.pid in machine.owned:
                 continue

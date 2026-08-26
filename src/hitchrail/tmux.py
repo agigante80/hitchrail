@@ -167,9 +167,24 @@ class Tmux:
 
     # -- reading -------------------------------------------------------
 
+    def _try(self, argv: list[str]) -> subprocess.CompletedProcess[str]:
+        """Run, treating "could not be executed" as a non zero return.
+
+        `subprocess.run` raises before there is a returncode when tmux is
+        absent or not executable. Every caller below already handles a non zero
+        return as "no", so turning the raise into one keeps a machine without
+        tmux reporting no sessions rather than crashing a listing. #28 refuses
+        to start at all in that case; this is what happens if tmux disappears
+        while running.
+        """
+        try:
+            return self._run(argv)
+        except OSError as exc:
+            return subprocess.CompletedProcess(argv, 1, "", str(exc))
+
     def has_session(self, project: str) -> bool:
         return (
-            self._run(self._argv("has-session", "-t", self.session_target(project))).returncode
+            self._try(self._argv("has-session", "-t", self.session_target(project))).returncode
             == 0
         )
 
@@ -185,7 +200,7 @@ class Tmux:
         A non zero return means no server is running, which is the ordinary
         state of a machine with nothing started, not an error.
         """
-        result = self._run(self._argv("list-panes", "-a", "-F", "#{session_name} #{pane_pid}"))
+        result = self._try(self._argv("list-panes", "-a", "-F", "#{session_name} #{pane_pid}"))
         if result.returncode != 0:
             return {}
         found: dict[str, int] = {}
@@ -205,7 +220,7 @@ class Tmux:
 
     def pane_pid(self, project: str) -> int | None:
         """One session's pane pid. For detail paths; `pane_pids` for lists."""
-        result = self._run(
+        result = self._try(
             self._argv("list-panes", "-t", self.pane_target(project), "-F", "#{pane_pid}")
         )
         if result.returncode != 0:
@@ -225,7 +240,7 @@ class Tmux:
         as the terminal's arbitrary column count. `-S -<lines>` bounds the
         history: without it this returns the whole scrollback.
         """
-        result = self._run(
+        result = self._try(
             self._argv(
                 "capture-pane",
                 "-p",
@@ -247,7 +262,7 @@ class Tmux:
         passing an anchored string to `-s` would create a session whose name
         begins with an equals sign.
         """
-        self._run(
+        self._try(
             self._argv("new-session", "-d", "-s", self.session_name(project), "-c", cwd, *argv)
         )
 
@@ -273,7 +288,7 @@ class Tmux:
         refusal in `__init__`, which fires, is tested, and is the case that
         would otherwise make every session on the server look like ours.
         """
-        self._run(self._argv("kill-session", "-t", self.session_target(project)))
+        self._try(self._argv("kill-session", "-t", self.session_target(project)))
 
     def send_keys(self, project: str, *keys: str) -> None:
         """Each key is its own argument, deliberately.
@@ -288,4 +303,4 @@ class Tmux:
         semantics in the tmux adapter, where a second agent could not replace
         them.
         """
-        self._run(self._argv("send-keys", "-t", self.pane_target(project), *keys))
+        self._try(self._argv("send-keys", "-t", self.pane_target(project), *keys))

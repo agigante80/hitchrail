@@ -158,10 +158,18 @@ def snapshot(run: Runner | None = None) -> ProcTable:
 
     A failed `ps` yields an empty table with `ok=False` rather than an
     exception, so one bad call does not take the whole listing with it, and the
-    caller can still tell that apart from an idle machine.
+    caller can still tell that apart from an idle machine. That includes a `ps`
+    that could not be EXECUTED, which raises rather than returning a code.
     """
     runner = run or _default_runner
-    result = runner(PS_ARGV)
+    try:
+        result = runner(PS_ARGV)
+    except OSError:
+        # `subprocess.run` raises before there is a returncode when the binary
+        # is absent or not executable: a container without procps, a broken
+        # PATH. The docstring promises this never raises for a failed call, and
+        # "could not be executed" is the most failed a call gets.
+        return ProcTable([], ok=False)
     if result.returncode != 0:
         return ProcTable([], ok=False)
     return ProcTable(parse_ps(result.stdout))

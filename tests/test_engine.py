@@ -27,6 +27,19 @@ HELPER = 502
 ORPHAN = 900
 
 
+# The four machines, named once and reused by the parametrised state tests, so
+# a row reads as the SITUATION it describes rather than as a wall of columns.
+Machine = tuple[dict[str, int], str]
+
+RUNNING_MACHINE: Machine = (
+    {"vessel": PANE},
+    ps_row(PANE, 1) + ps_row(AGENT, PANE, project="vessel"),
+)
+STALE_MACHINE: Machine = ({"vessel": PANE}, ps_row(PANE, 1))
+DETACHED_MACHINE: Machine = ({}, ps_row(ORPHAN, 1, project="vessel"))
+STOPPED_MACHINE: Machine = ({}, "")
+
+
 @pytest.fixture
 def root(tmp_path: Path) -> Path:
     for name in ("vessel", "vessel-social", "a", "ab", "dotted.site"):
@@ -43,7 +56,15 @@ def engine_for(
     self_project: str | None = None,
 ) -> tuple[Engine, FakeTmux]:
     tmux = FakeTmux(sessions=sessions)
-    config = Config(root=root, self_project=self_project)
+    # Pinned INSIDE the temporary root. Without it `Config` defaults to
+    # ~/.claude/sessions, and `bridge_url` reads the developer's real session
+    # files: verified opening /home/<user>/.claude/sessions/501.json during a
+    # running derivation. That breaks the hermetic rule outright, and it makes
+    # the suite's result depend on whose home directory ran it and on pid
+    # collisions with real sessions.
+    sessions_dir = root / ".sessions"
+    sessions_dir.mkdir(exist_ok=True)
+    config = Config(root=root, self_project=self_project, sessions_dir=sessions_dir)
     return (
         Engine(
             config,
@@ -162,6 +183,53 @@ def test_attribution_matches_what_launch_argv_actually_produces(root: Path) -> N
     assert argv[-1] == "vessel", "attribution depends on the project name being last"
     engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, args=" ".join(argv)))
     assert state_of(engine, "vessel") is State.DETACHED
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        "grep -r --remote-control vessel",
+        "vim notes.txt --remote-control vessel",
+        "less /var/log/thing --remote-control vessel",
+        "echo --remote-control vessel",
+    ],
+)
+def test_an_unrelated_process_is_not_a_detached_agent(root: Path, args: str) -> None:
+    """Matching the marker and the name alone claimed any process mentioning both.
+
+    `grep -r --remote-control vessel` derived as a detached agent. That is not
+    a cosmetic mislabel: a detached row refuses to start, and a kill has no
+    tmux session to kill, so **the project stays unstartable until that
+    unrelated process exits**.
+
+    The fix compares the whole argv tail from `launch_argv`, which also keeps
+    the flags inside the quarantine rather than spelling them here.
+    """
+    engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, args=args))
+    assert state_of(engine, "vessel") is State.STOPPED
+
+
+def test_a_real_agent_is_still_detached_after_that_tightening(root: Path) -> None:
+    """The positive case, without which refusing everything would pass."""
+    engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, project="vessel"))
+    assert state_of(engine, "vessel") is State.DETACHED
+
+
+def test_a_different_agent_binary_still_matches(root: Path) -> None:
+    """The suffix is built from the CONFIGURED binary, so `--agent-binary`
+    must not blind the orphan scan."""
+    tmux = FakeTmux()
+    sessions_dir = root / ".sessions"
+    sessions_dir.mkdir(exist_ok=True)
+    config = Config(root=root, agent_binary="/opt/claude", sessions_dir=sessions_dir)
+    argv = launch_argv("/opt/claude", "vessel")
+    engine = Engine(
+        config,
+        tmux=tmux,
+        procs_fn=procs_from(ps_row(ORPHAN, 1, args=" ".join(argv))),
+        meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
+    )
+    assert engine.get("vessel").state is State.DETACHED
 
 
 # -- 4. tree walking, not child walking ------------------------------------
@@ -372,6 +440,70 @@ def test_protected_is_true_only_for_the_self_project(root: Path) -> None:
     engine, _ = engine_for(root, self_project="vessel")
     assert engine.get("vessel").protected is True
     assert engine.get("ab").protected is False
+
+
+@pytest.mark.parametrize(
+    ("machine", "expected"),
+    [
+        (RUNNING_MACHINE, State.RUNNING),
+        (STALE_MACHINE, State.STALE),
+        (DETACHED_MACHINE, State.DETACHED),
+        (STOPPED_MACHINE, State.STOPPED),
+    ],
+    ids=["running", "stale", "detached", "stopped"],
+)
+def test_protected_survives_in_every_state(
+    root: Path, machine: Machine, expected: State
+) -> None:
+    """The safety flag, asserted where it MATTERS rather than where it is easy.
+
+    The single earlier test used an empty machine, so it only ever reached the
+    STOPPED branch: the one state where the lock is irrelevant. Mutating
+    `protected` out of `_live` and out of the STALE branch left the whole suite
+    green.
+
+    This is the flag that turns the stop control into a lock for the session
+    hosting Hitchrail, so it has to hold in the states where somebody might
+    actually tap stop.
+    """
+    sessions, table = machine
+    engine, _ = engine_for(root, sessions=sessions, table=table, self_project="vessel")
+    session = engine.get("vessel")
+    assert session.state is expected
+    assert session.protected is True
+
+
+@pytest.mark.parametrize(
+    ("machine", "expected"),
+    [
+        (RUNNING_MACHINE, State.RUNNING),
+        (STALE_MACHINE, State.STALE),
+        (DETACHED_MACHINE, State.DETACHED),
+        (STOPPED_MACHINE, State.STOPPED),
+    ],
+    ids=["running", "stale", "detached", "stopped"],
+)
+def test_the_stopping_overlay_applies_to_every_state(
+    root: Path, machine: Machine, expected: State
+) -> None:
+    """An overlay, not a fifth state, and it must not change what is underneath.
+
+    Nothing pinned this: removing `stopping=` from the STALE branch, the
+    STOPPED branch or `_live` each left the whole suite green, because
+    `_stopping` is only populated by the stop path in a later ticket. A section
+    headed "the overlay applies to every state" containing one test that
+    asserts nothing IS stopping is not coverage.
+    """
+    sessions, table = machine
+    engine, _ = engine_for(root, sessions=sessions, table=table)
+    engine._stopping["vessel"] = 1234.0
+
+    session = engine.get("vessel")
+    assert session.stopping is True
+    assert session.state is expected, "the marker must not change the derived state"
+    assert engine.stopping_since("vessel") == 1234.0
+    # And it is per session, not global.
+    assert engine.get("ab").stopping is False
 
 
 def test_the_url_comes_from_the_bridge_file(root: Path, tmp_path: Path) -> None:
