@@ -202,7 +202,7 @@ def drive_every_method(tmux: Tmux) -> None:
     tmux.pane_pids()
     tmux.pane_pid("p")
     tmux.capture_pane("p")
-    tmux.new_session("p", "/tmp", ["claude"])
+    tmux.new_session("p", "/srv/p", ["claude"])
     tmux.send_keys("p", "C-c")
     tmux.kill_session("p")
 
@@ -302,9 +302,9 @@ def test_no_method_can_reach_kill_server() -> None:
 def test_the_socket_is_carried_on_every_call() -> None:
     """A method that builds argv by hand and forgets -S talks to another server."""
     runner = FakeRunner()
-    drive_every_method(Tmux(prefix="hr-", socket="/tmp/hr.sock", run=runner))
+    drive_every_method(Tmux(prefix="hr-", socket="/run/hr/hr.sock", run=runner))
     for argv in runner.calls:
-        assert argv[:3] == ["tmux", "-S", "/tmp/hr.sock"], argv
+        assert argv[:3] == ["tmux", "-S", "/run/hr/hr.sock"], argv
 
 
 def test_no_socket_means_no_socket_flag() -> None:
