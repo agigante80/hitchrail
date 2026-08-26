@@ -75,6 +75,11 @@ Two orderings are not preferences:
 - **#19 before #18.** #18 is a pure move whose diff must contain no behaviour
   change, and that property cannot survive #19 landing at the same time.
 
+**The E2E tmux socket must live somewhere with a SHORT path.** `tmux -S` fails
+with `File name too long` past the ~108 byte `sockaddr_un` limit, and a natural
+`tmp_path` on this machine is already 146 bytes. Use `mktemp -d /tmp/hr.XXXX`
+rather than deriving the socket from `tmp_path`. #27 carries the detail.
+
 **#27 is new and is the reason this list is longer than the plan.** Every tmux
 test in Tasks 7a and 7b drives a `FakeRunner` and asserts the argv we sent,
 which proves the code builds the target we intended and cannot prove the target
