@@ -92,6 +92,11 @@ in Phase 4 exists precisely because two taps land on two threads.
 | #45 | 17, the command line entry point | needs #43's `create_app` |
 | #28 | the startup preflight | lands inside #45; separate because its value is entirely in the wording of its refusals |
 | #20 | the grant token in the access log | touches the `log_level` decision #45 makes |
+| #48 | `self_project` is never validated | **before #43**: the `self_protected` refusal on three routes protects nothing while the name can be wrong |
+| #47 | `get()` answers for names that are not projects | with or just after #43, which is the first caller to take a name from a URL |
+
+Added on the 2026-08-26 re validation. #47 and #48 were filed during Phase 4
+reviews, after this table was written.
 
 ## Corrections found when validating this plan
 
@@ -128,6 +133,88 @@ Worth deciding rather than defaulting: `--stop-timeout` and the three memory
 floors are documented in `.claude/CLAUDE.md` as defaults, and a default that
 cannot be changed is a constant. The design does not require them as flags, so
 this plan should either add them or say why they stay fixed.
+
+### 3. Re validated after Phase 4, 2026-08-26
+
+The instruction above says to re validate when Phase 5 actually starts. Phase 4
+is closed, so this is that pass. Corrections 1 and 2 above still stand and are
+still unfixed in the snippets. What follows is new.
+
+#### 3a. `?kill=1` contradicts the rule it is written next to
+
+The design's section 6 table specifies `DELETE /api/sessions/{name}?kill=1`,
+and the paragraph directly beneath it says the kill "is a distinct call rather
+than a flag on the same one ... so a kill is never a query parameter away from
+a client that meant to be gentle". Those cannot both hold. `.claude/CLAUDE.md`
+carries the prose version as a non negotiable; this plan implements the table
+version; ticket #43 states the rule and then specifies the flag, in the same
+paragraph.
+
+Nobody introduced this. It has been copied forward four times because each copy
+looked like the source. **Filed as #52, because it changes an operator
+visible contract and the call is not this plan's to make.** Settle #52 before
+#43 implements either side.
+
+#### 3b. `MachineUnreadable` is caught nowhere, so an unreadable machine is a 500
+
+Every engine read goes through `_look`, which raises `MachineUnreadable` when
+the process table cannot be read or tmux cannot be run. That is deliberate in
+Phase 4: an unreadable machine is an error rather than a fifth state, because
+deriving `stopped` from it reports every running agent as not running.
+
+No route in this plan catches it and the envelope has no code for it, so a
+machine without tmux answers every request with a 500 and an empty body. The
+one state the engine works hardest to report honestly is the one the API turns
+into a crash. Needs a code, a status, and a handler on every route that reads.
+`503` alongside `root_unavailable` is the natural shape: both mean "ask again",
+neither is the caller's fault.
+
+#### 3c. Two `except eng.Protected` handlers cannot fire
+
+Phase 4 settled which methods refuse the self project, and it is not the set
+this plan assumes. Verified against the built engine:
+
+```
+start        -> raises Protected
+stop         -> raises Protected
+kill         -> raises Protected
+logs         -> no Protected
+session_url  -> no Protected
+```
+
+`logs` deliberately does not refuse the self project: reading the log of the
+session hosting Hitchrail is harmless and occasionally the only way to see what
+it is doing. So the `except eng.Protected` on the `logs` and `session_url`
+routes is dead code, and this project treats a guard that cannot execute as
+worse than none, because a reader who finds one stops trusting the rest.
+
+#### 3d. The `start` route does not catch `Protected`, and `start` raises it
+
+The mirror of 3c. `POST /api/sessions/{self_project}` returns a 500 rather than
+the documented `423 self_protected`. That is the route where the protection
+matters most: it is the one that would put a second agent in Hitchrail's own
+folder.
+
+#### 3e. The ticket table is missing #47 and #48
+
+Both were filed during Phase 4 reviews, after this plan was written, and both
+are milestoned Phase 5. #47 is `get()` answering for names that are not
+projects; #48 is `self_project` never being validated, so the protection in 3c
+and 3d silently protects nothing when the name is wrong. #48 in particular is a
+prerequisite for 3d being worth anything.
+
+#### 3f. Phase 4 changes this plan predates
+
+- `engine.logs` now raises `NotRunning` for a name with no session rather than
+  returning empty output. The plan's `logs` route already maps that to 409, so
+  this one is aligned and needs no change. Recorded so the next reader does not
+  re-derive it.
+- `engine.kill` now waits a bounded 2 seconds for the process to leave the
+  table, so the route's `in_thread(engine.kill)` can block for that long. It is
+  already off the event loop, so nothing changes here either.
+- The `stopping` overlay no longer applies to a `stopped` session. The two
+  places this plan asserts `stopping is True` are both on live sessions, so
+  they still hold.
 
 ### Task 15: The REST surface and the error envelope
 
