@@ -128,11 +128,26 @@ class Engine:
                 self._stopping.pop(name, None)
         return session
 
-    def list(self) -> list[Session]:
+    def list(self, listing: discovery.Listing | None = None) -> list[Session]:
+        """Every project, derived from one look at the machine.
+
+        `listing` is for a caller that has already scanned the root and needs
+        the unsupported folders too. `discovery.list_projects` IS
+        `scan(root).projects`, so without this the API walked the root twice
+        for one response: once here, once for its own `scan`. The cost is the
+        smaller half. The two walks could DISAGREE, so a folder created between
+        them appeared in one answer and not the other, in the same JSON body.
+
+        Passing nothing keeps the plain behaviour, which is what every caller
+        that only wants sessions should do.
+        """
         machine = self._look()
-        return [
-            self._derive(name, machine) for name in discovery.list_projects(self.config.root)
-        ]
+        names = (
+            discovery.list_projects(self.config.root)
+            if listing is None
+            else list(listing.projects)
+        )
+        return [self._derive(name, machine) for name in names]
 
     def get(self, name: str) -> Session:
         return self._derive(name, self._look())

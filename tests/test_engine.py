@@ -1415,3 +1415,65 @@ def test_kill_still_surfaces_an_agent_that_genuinely_will_not_die(
     assert session.state is State.DETACHED
     assert session.pid == 601
     assert now[0] == pytest.approx(engine.kill_grace), "the wait must be bounded"
+
+
+def test_list_accepts_a_listing_and_does_not_scan_the_root_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The API walks the root once per response, not twice.
+
+    `discovery.list_projects` is `scan(root).projects`, so a caller that also
+    needs the unsupported folders used to walk the root a second time for its
+    own `scan`. Passing the listing in collapses that.
+    """
+    for name in ("alpha", "beta"):
+        (tmp_path / name).mkdir()
+    sessions_dir = tmp_path / ".sessions"
+    sessions_dir.mkdir()
+    engine, _, _ = start_engine(tmp_path, table=procs_from(""))
+
+    scans = []
+    real = discovery.scan
+
+    def counting(root: Path) -> discovery.Listing:
+        scans.append(root)
+        return real(root)
+
+    monkeypatch.setattr(discovery, "scan", counting)
+
+    listing = discovery.scan(tmp_path)
+    scans.clear()
+    sessions = engine.list(listing=listing)
+    assert scans == [], "the root was walked again despite being handed a listing"
+    assert sorted(s.name for s in sessions) == ["alpha", "beta"]
+
+
+def test_list_without_a_listing_still_scans_for_itself(tmp_path: Path) -> None:
+    """The plain form is what every caller that only wants sessions uses."""
+    (tmp_path / "alpha").mkdir()
+    (tmp_path / ".sessions").mkdir()
+    engine, _, _ = start_engine(tmp_path, table=procs_from(""))
+    assert [s.name for s in engine.list()] == ["alpha"]
+
+
+def test_a_listing_decides_the_names_so_one_answer_cannot_contradict_itself(
+    tmp_path: Path,
+) -> None:
+    """The consistency half, which is the real reason for the seam.
+
+    A folder created between the caller's scan and the engine's own would
+    appear in one half of a single JSON body and not the other. Handed one
+    listing, both halves describe the same instant.
+    """
+    (tmp_path / "alpha").mkdir()
+    (tmp_path / ".sessions").mkdir()
+    engine, _, _ = start_engine(tmp_path, table=procs_from(""))
+    listing = discovery.scan(tmp_path)
+
+    # The root changes after the listing was taken.
+    (tmp_path / "beta").mkdir()
+
+    assert [s.name for s in engine.list(listing=listing)] == ["alpha"], (
+        "the engine used the live root instead of the listing it was given"
+    )
+    assert sorted(s.name for s in engine.list()) == ["alpha", "beta"]

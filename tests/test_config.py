@@ -871,7 +871,7 @@ def test_every_module_is_under_the_size_guideline() -> None:
     #
     # Raise this only for a change that adds behaviour, and say what in the
     # commit. If it passes roughly 550, look for a seam again with fresh eyes.
-    caps = {"engine.py": 519}  # +_await_gone, the kill wait
+    caps = {"engine.py": 534}  # +_await_gone, +list(listing=...)
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"
     sizes = {p.name: len(p.read_text().splitlines()) for p in sorted(src.glob("*.py"))}

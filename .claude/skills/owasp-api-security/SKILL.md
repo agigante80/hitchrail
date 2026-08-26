@@ -48,7 +48,7 @@ thorough; state that they are N/A and why.
 | POST | `/api/projects` |
 | POST | `/api/sessions/{name}` |
 | DELETE | `/api/sessions/{name}` |
-| DELETE | `/api/sessions/{name}?kill=1` |
+| POST | `/api/sessions/{name}/kill` |
 | GET | `/api/sessions/{name}/logs` |
 | GET | `/api/events` |
 

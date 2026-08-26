@@ -342,17 +342,29 @@ Documented in the README rather than hidden:
 | POST | `/api/projects` | create a folder |
 | POST | `/api/sessions/{name}` | start a session |
 | DELETE | `/api/sessions/{name}` | begin a graceful stop, returns immediately |
-| DELETE | `/api/sessions/{name}?kill=1` | kill now, valid at any point |
+| POST | `/api/sessions/{name}/kill` | kill now, valid at any point |
 | GET | `/api/sessions/{name}/logs` | tail of the pane |
+| GET | `/api/sessions/{name}/url` | the session's link, once it has one |
 | GET | `/api/events` | SSE stream of state changes |
 
 The two stop calls are separate on purpose. The graceful one returns as soon as
 the request is sent, marks the session `stopping`, and never blocks the
 connection for 30 seconds; progress arrives over SSE like every other state
-change. The kill is a distinct call rather than a flag on the same one, so that
+change. The kill is a distinct ROUTE rather than a flag on the same one, so that
 "escalate the stop I already started" and "stop this thing" cannot be confused
 at the call site, and so a kill is never a query parameter away from a client
-that meant to be gentle.
+that meant to be gentle. An earlier version of this table said
+`DELETE /api/sessions/{name}?kill=1`, which is exactly the flag this paragraph
+forbids, and the contradiction was copied into six other documents before
+anybody read the two together. See #52.
+
+The rule that settles it, and that the table should be read against: **a
+duration is a parameter, an action is a route.** Docker draws the line in the
+same place, with `t` as a query parameter on `POST /containers/{id}/stop` and a
+separate `POST /containers/{id}/kill`. Here there is not even a duration to
+pass, because the wait is `stop_timeout` in the configuration rather than a per
+request value, so nothing belongs in the query string at all. Jenkins and
+GitHub Actions both give the forced variant its own path for the same reason.
 
 A kill is accepted whether or not a graceful stop preceded it. The requirement
 that you try gently first is a property of the interface, not of the API: a CLI

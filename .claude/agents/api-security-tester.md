@@ -30,7 +30,7 @@ untested, and generating that is worse than generating nothing, because it looks
 | POST | `/api/projects` | creates a folder. Name validation lives here |
 | POST | `/api/sessions/{name}` | spawns a process. The highest value target |
 | DELETE | `/api/sessions/{name}` | begins a graceful stop, returns immediately |
-| DELETE | `/api/sessions/{name}?kill=1` | kill now, valid at any point |
+| POST | `/api/sessions/{name}/kill` | kill now, valid at any point |
 | GET | `/api/sessions/{name}/logs` | tail of the pane |
 | GET | `/api/events` | SSE stream. Frequently forgotten by middleware tests |
 

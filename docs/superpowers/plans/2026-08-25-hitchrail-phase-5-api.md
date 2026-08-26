@@ -43,6 +43,7 @@ first draft of this plan quietly dropped:
 |---|---|---|
 | `invalid_name` | 400 | the name is not one we will turn into a path |
 | `root_unavailable` | 503 | the configured root cannot be read right now |
+| `machine_unreadable` | 503 | tmux or the process table could not be read, so no state can be determined |
 | `unknown_project` | 404 | no such folder under the root |
 | `already_running` | 409 | a session is already live there |
 | `already_exists` | 409 | a folder of that name is already there |
@@ -100,13 +101,18 @@ reviews, after this table was written.
 
 ## Corrections found when validating this plan
 
-Written before Phases 3 and 4, and it drifted in two places. Both are recorded
-here because the snippets below still show the old shape. **Re validate this
-plan again when Phase 5 actually starts**: Phase 4's engine will settle
-questions this plan currently guesses at, and the last two plans each drifted
-from the phase built after them.
+Written before Phases 3 and 4, and it drifted. Everything in this section has
+now been **applied to the snippets below**, on 2026-08-26, after Phase 4
+closed. The findings are kept rather than deleted, because a plan that looks
+like it was always right teaches the next reader nothing about how it went
+wrong.
 
-### 1. `session_url` no longer returns a string
+The instruction that produced this section is worth keeping too: **re validate
+this plan again before Phase 6**, and again before Phase 7. The last three
+plans each drifted from the phase built after them, and this one drifted in
+nine separate places.
+
+### 1. `session_url` no longer returns a string (APPLIED)
 
 The route does `JSONResponse({"name": name, "url": url})`, where `url` came
 from `engine.session_url`. That now returns `SessionUrl(url, source)`, decided
@@ -118,7 +124,7 @@ differently from a known good one instead of showing them as equals. A
 dataclass handed to `JSONResponse` unchanged is not serialisable, so this
 fails loudly rather than silently, which is the one mercy.
 
-### 2. The CLI is missing flags the README already promises
+### 2. The CLI is missing flags the README already promises (APPLIED)
 
 `parse_args` defines `--root`, `--host`, `--port`, `--token`, `--allow-host`,
 `--allow-origin` and `--self-project`. `Config` has fifteen settable fields.
@@ -140,7 +146,7 @@ The instruction above says to re validate when Phase 5 actually starts. Phase 4
 is closed, so this is that pass. Corrections 1 and 2 above still stand and are
 still unfixed in the snippets. What follows is new.
 
-#### 3a. `?kill=1` contradicts the rule it is written next to
+#### 3a. `?kill=1` contradicts the rule it is written next to (APPLIED, #52 decided: separate route)
 
 The design's section 6 table specifies `DELETE /api/sessions/{name}?kill=1`,
 and the paragraph directly beneath it says the kill "is a distinct call rather
@@ -155,7 +161,7 @@ looked like the source. **Filed as #52, because it changes an operator
 visible contract and the call is not this plan's to make.** Settle #52 before
 #43 implements either side.
 
-#### 3b. `MachineUnreadable` is caught nowhere, so an unreadable machine is a 500
+#### 3b. `MachineUnreadable` is caught nowhere, so an unreadable machine is a 500 (APPLIED)
 
 Every engine read goes through `_look`, which raises `MachineUnreadable` when
 the process table cannot be read or tmux cannot be run. That is deliberate in
@@ -169,7 +175,7 @@ into a crash. Needs a code, a status, and a handler on every route that reads.
 `503` alongside `root_unavailable` is the natural shape: both mean "ask again",
 neither is the caller's fault.
 
-#### 3c. Two `except eng.Protected` handlers cannot fire
+#### 3c. Two `except eng.Protected` handlers cannot fire (APPLIED)
 
 Phase 4 settled which methods refuse the self project, and it is not the set
 this plan assumes. Verified against the built engine:
@@ -188,20 +194,33 @@ it is doing. So the `except eng.Protected` on the `logs` and `session_url`
 routes is dead code, and this project treats a guard that cannot execute as
 worse than none, because a reader who finds one stops trusting the rest.
 
-#### 3d. The `start` route does not catch `Protected`, and `start` raises it
+#### 3d. The `start` route does not catch `Protected`, and `start` raises it (APPLIED)
 
 The mirror of 3c. `POST /api/sessions/{self_project}` returns a 500 rather than
 the documented `423 self_protected`. That is the route where the protection
 matters most: it is the one that would put a second agent in Hitchrail's own
 folder.
 
-#### 3e. The ticket table is missing #47 and #48
+#### 3e. The ticket table is missing #47 and #48 (APPLIED)
 
 Both were filed during Phase 4 reviews, after this plan was written, and both
 are milestoned Phase 5. #47 is `get()` answering for names that are not
 projects; #48 is `self_project` never being validated, so the protection in 3c
 and 3d silently protects nothing when the name is wrong. #48 in particular is a
 prerequisite for 3d being worth anything.
+
+#### 3g. `/api/projects` walked the root twice, and could contradict itself
+
+Found while applying 3b. The route called `engine.list()` and
+`discovery.scan()` separately, and `engine.list` resolves its names through
+`discovery.list_projects`, which IS `scan(root).projects`. Two walks of the
+root per request, on the route the interface polls hardest, and measured rather
+than assumed: two `scan` calls and three thread hops for one response.
+
+The cost is the smaller half. The two walks can DISAGREE, so a folder created
+between them appeared in `unsupported` while being absent from `projects`, in
+the same JSON body. `Engine.list` now takes an optional `listing`, added in
+Phase 4 with three tests, and the route takes one scan and hands it in.
 
 #### 3f. Phase 4 changes this plan predates
 
@@ -224,7 +243,7 @@ prerequisite for 3d being worth anything.
 
 **Interfaces:**
 - Consumes: `Engine` and `Session` (Phase 4), `EventBus` (Phase 4 Task 11), `Config` (Phase 1), `middleware_stack` (Phase 2).
-- Produces: `create_app(engine: Engine, config: Config, bus: EventBus | None = None) -> Starlette`; `in_thread(fn: Callable[..., T], *args: object) -> T`.
+- Produces: `create_app(engine: Engine, config: Config, bus: EventBus) -> Starlette`; `in_thread(fn: Callable[..., T], *args: object) -> T`. The bus is REQUIRED and the caller owns it: see the note on `create_app`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -233,7 +252,9 @@ prerequisite for 3d being worth anything.
 ```python
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import logging
 import pathlib
 from collections.abc import AsyncIterator
 
@@ -241,7 +262,8 @@ import httpx
 import pytest
 
 from hitchrail.engine import Engine
-from hitchrail.server import create_app
+from hitchrail.events import EventBus
+from hitchrail.server import SWEEP_INTERVAL_S, create_app
 
 from .conftest import FakeClock, FakeTmux, ScriptedProcs, procs_from
 
@@ -275,7 +297,7 @@ def make_engine(config, tmux, procs, mem: str = PLENTY) -> Engine:
 async def client_for(engine: Engine, config) -> AsyncIterator[httpx.AsyncClient]:
     """A client wired to a real app. An async context manager rather than a
     bare generator, so the transport is actually closed when a test finishes."""
-    app = create_app(engine=engine, config=config)
+    app = create_app(engine=engine, config=config, bus=EventBus())
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as c:
         yield c
@@ -420,15 +442,49 @@ async def test_delete_begins_a_graceful_stop_and_kills_nothing(client, engine) -
     assert engine.tmux.killed == []
 
 
-async def test_delete_with_kill_kills(client, engine) -> None:
-    r = await client.delete("/api/sessions/vessel?kill=1", headers=HEADERS)
+async def test_the_kill_route_kills(client, engine) -> None:
+    r = await client.post("/api/sessions/vessel/kill", headers=HEADERS)
     assert r.status_code == 200
     assert engine.tmux.killed == ["vessel"]
 
 
+@pytest.mark.parametrize(
+    "query", ["", "?kill=1", "?kill=true", "?force=1", "?kill=1&acknowledged=1"]
+)
+async def test_delete_never_kills_whatever_the_query_string(
+    client, engine, query: str
+) -> None:
+    """The regression test this whole design decision exists for.
+
+    An earlier draft read `?kill=1` off the DELETE and picked the engine method
+    from it, so a graceful stop and a kill differed by four characters in a
+    query string: a templating mistake, a copied `curl`, or a UI building the
+    URL from a variable turns "ask nicely" into "kill now" with no type error
+    and no 404. `?kill=1` is in this list on purpose, because it is the exact
+    string that used to work.
+    """
+    r = await client.delete(f"/api/sessions/vessel{query}", headers=HEADERS)
+    assert r.status_code == 202
+    assert engine.tmux.killed == [], "a query parameter reached the kill path"
+
+
 async def test_kill_without_a_preceding_stop_is_accepted_by_the_api(client, engine) -> None:
-    await client.delete("/api/sessions/vessel?kill=1", headers=HEADERS)
+    """Etiquette is a property of the interface, not of the API."""
+    await client.post("/api/sessions/vessel/kill", headers=HEADERS)
     assert engine.tmux.killed == ["vessel"]
+
+
+async def test_the_kill_route_is_origin_checked_like_every_mutating_route(
+    client, engine
+) -> None:
+    """A kill route accidentally treated as a GET exemption would be strictly
+    worse than the flag design it replaced."""
+    r = await client.post(
+        "/api/sessions/vessel/kill",
+        headers={**HEADERS, "origin": "http://evil.example"},
+    )
+    assert r.status_code == 403
+    assert engine.tmux.killed == []
 
 
 async def test_the_protected_project_is_423(root, config) -> None:
@@ -579,20 +635,50 @@ def _error(status: int, code: str, message: str, **extra: object) -> JSONRespons
     return JSONResponse({"code": code, "message": message, **extra}, status_code=status)
 
 
-def create_app(engine: eng.Engine, config: Config, bus: EventBus | None = None) -> Starlette:
-    # One bus, shared. If the engine announces to a different object than the
-    # stream reads from, every state change is published into a void.
-    events = bus if bus is not None else (engine.bus or EventBus())
-    if engine.bus is not events:
-        engine.attach_bus(events)
+def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
+    """The bus is REQUIRED, and the caller owns it.
+
+    An earlier draft took it optionally and reconciled it against `engine.bus`.
+    There is no such attribute: `Engine` has a private `_bus` and
+    `attach_bus()`, so that draft raised `AttributeError` on this line. Worth
+    more than the typo, though, is that it was reading two sources of truth to
+    decide which bus wins, which is precisely how the "published into a void"
+    bug it warned about gets written. One owner, passed in, attached once.
+    """
+    engine.attach_bus(bus)
+    events = bus
 
     async def list_projects(request: Request) -> Response:
-        sessions = await in_thread(engine.list)
-        available = await in_thread(engine.available_mb)
+        # ONE scan, one thread hop, one consistent answer.
+        #
+        # An earlier draft called `engine.list()` and `discovery.scan()`
+        # separately. `engine.list` resolves its names through
+        # `discovery.list_projects`, which IS `scan(root).projects`, so the
+        # root was walked twice per request on the route the interface polls
+        # hardest. Worse than the cost: the two walks can disagree, so a folder
+        # created between them appeared in `unsupported` while being absent
+        # from `projects`, or the reverse.
+        #
         # `unsupported` is the folders under the root that cannot be projects,
         # each with the rule it broke. Dropping them silently made a folder
         # called `my app` look like one Hitchrail could not see. See issue #7.
-        listing = await in_thread(discovery.scan, config.root)
+        def read() -> tuple[discovery.Listing, list[eng.Session], int]:
+            listing = discovery.scan(config.root)
+            return listing, engine.list(listing=listing), engine.available_mb()
+
+        try:
+            listing, sessions, available = await in_thread(read)
+        except discovery.RootUnavailable as exc:
+            # The root going away, an unmounted drive or a deleted directory,
+            # is not "no projects". Reporting an empty list would be a lie the
+            # interface cannot tell from a genuinely empty root.
+            return _error(503, "root_unavailable", str(exc))
+        except eng.MachineUnreadable as exc:
+            # Same honesty, one layer down. Phase 4 makes an unreadable machine
+            # an error rather than a fifth state precisely so this is not
+            # derived as `stopped`, and answering 500 here would throw that
+            # away on the one route that renders the whole table.
+            return _error(503, "machine_unreadable", str(exc))
         return JSONResponse(
             {
                 "projects": [s.as_dict() for s in sessions],
@@ -660,20 +746,61 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus | None = None) 
             )
         except eng.StartFailed as exc:
             return _error(502, "start_died", str(exc), output=exc.output)
+        except eng.Protected as exc:
+            # `start` raises this and an earlier draft did not catch it, so the
+            # one route where the protection matters most, the one that would
+            # put a SECOND agent in Hitchrail's own folder, answered 500.
+            return _error(423, "self_protected", str(exc))
+        except eng.MachineUnreadable as exc:
+            return _error(503, "machine_unreadable", str(exc))
         return JSONResponse(session.as_dict(), status_code=201)
 
     async def stop(request: Request) -> Response:
+        """The graceful one. NOTHING in the query string reaches `kill`.
+
+        The two used to be one handler picking a method from `?kill=1`, which
+        contradicted the design paragraph it was written next to. See #52: a
+        duration is a parameter, an action is a route, and there is not even a
+        duration here because the wait is `stop_timeout` in the configuration.
+        """
         name = request.path_params["name"]
-        kill = request.query_params.get("kill") in {"1", "true"}
         try:
-            session = await in_thread(engine.kill if kill else engine.stop, name)
+            session = await in_thread(engine.stop, name)
         except eng.UnknownProject as exc:
             return _error(404, "unknown_project", str(exc))
         except eng.Protected as exc:
             return _error(423, "self_protected", str(exc))
         except eng.NotRunning as exc:
             return _error(409, "not_running", str(exc))
-        return JSONResponse(session.as_dict(), status_code=200 if kill else 202)
+        except eng.MachineUnreadable as exc:
+            return _error(503, "machine_unreadable", str(exc))
+        return JSONResponse(session.as_dict(), status_code=202)
+
+    async def kill(request: Request) -> Response:
+        """The destructive one, on its own path and its own method.
+
+        Accepted whether or not a graceful stop preceded it: the requirement to
+        try gently first is a property of the interface, not of the API. A CLI
+        user has a legitimate need to kill outright, and enforcing etiquette in
+        the transport would only invite working around it.
+
+        200 rather than 202 because, unlike the graceful stop, this one has
+        already happened by the time it answers. `engine.kill` waits a bounded
+        two seconds for the process to actually leave the table, so the session
+        in the body is settled rather than in flight.
+        """
+        name = request.path_params["name"]
+        try:
+            session = await in_thread(engine.kill, name)
+        except eng.UnknownProject as exc:
+            return _error(404, "unknown_project", str(exc))
+        except eng.Protected as exc:
+            return _error(423, "self_protected", str(exc))
+        except eng.NotRunning as exc:
+            return _error(409, "not_running", str(exc))
+        except eng.MachineUnreadable as exc:
+            return _error(503, "machine_unreadable", str(exc))
+        return JSONResponse(session.as_dict(), status_code=200)
 
     async def logs(request: Request) -> Response:
         name = request.path_params["name"]
@@ -686,10 +813,15 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus | None = None) 
             text = await in_thread(engine.logs, name, lines)
         except eng.UnknownProject as exc:
             return _error(404, "unknown_project", str(exc))
-        except eng.Protected as exc:
-            return _error(423, "self_protected", str(exc))
         except eng.NotRunning as exc:
             return _error(409, "not_running", str(exc))
+        except eng.MachineUnreadable as exc:
+            return _error(503, "machine_unreadable", str(exc))
+        # No `Protected` arm, and that is not an oversight. `engine.logs`
+        # deliberately does not refuse the self project: reading the log of the
+        # session hosting Hitchrail is harmless and occasionally the only way
+        # to see what it is doing. An arm here could never fire, and this
+        # project treats a guard that cannot execute as worse than none.
         return JSONResponse({"name": name, "text": text})
 
     async def session_url(request: Request) -> Response:
@@ -701,16 +833,28 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus | None = None) 
         """
         name = request.path_params["name"]
         try:
-            url = await in_thread(engine.session_url, name)
+            found = await in_thread(engine.session_url, name)
         except eng.UnknownProject as exc:
             return _error(404, "unknown_project", str(exc))
-        except eng.Protected as exc:
-            return _error(423, "self_protected", str(exc))
         except eng.NotRunning as exc:
             return _error(409, "not_running", str(exc))
-        if url is None:
+        except eng.MachineUnreadable as exc:
+            return _error(503, "machine_unreadable", str(exc))
+        # No `Protected` arm here either, for the same reason as `logs`:
+        # `engine.session_url` gates on the name only, so it cannot fire.
+        if found is None:
             return _error(409, "url_pending", "the session has not published a link yet")
-        return JSONResponse({"name": name, "url": url})
+        # BOTH fields. `engine.session_url` returns `SessionUrl(url, source)`,
+        # not a string, and handing the dataclass to `JSONResponse` unchanged
+        # is a TypeError rather than a wrong answer, which is the one mercy.
+        #
+        # `source` travels because a scraped link can be scrollback from a
+        # session that ended hours ago, while a bridge link is known good. The
+        # interface has to be able to present those differently instead of
+        # showing them as equals. Decided in #29.
+        return JSONResponse(
+            {"name": name, "url": found.url, "source": found.source}
+        )
 
     @contextlib.asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
@@ -751,6 +895,8 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus | None = None) 
             Route("/api/projects", create_project, methods=["POST"]),
             Route("/api/sessions/{name}", start, methods=["POST"]),
             Route("/api/sessions/{name}", stop, methods=["DELETE"]),
+            # Its own route, deliberately. #52 and the design's section 6.
+            Route("/api/sessions/{name}/kill", kill, methods=["POST"]),
             Route("/api/sessions/{name}/logs", logs, methods=["GET"]),
             Route("/api/sessions/{name}/url", session_url, methods=["GET"]),
         ],
@@ -796,9 +942,6 @@ async def test_the_stop_sweep_outlives_a_failing_tick(config, caplog) -> None:
     assert len(calls) >= 2, "the sweep stopped after the failing tick"
     assert "stop sweep failed" in caplog.text, "the failure was swallowed silently"
 ```
-
-This needs `import asyncio`, `import logging` and
-`from hitchrail.server import SWEEP_INTERVAL_S` at the top of the test file.
 
 - [ ] **Step 4: Run to verify passing**
 
@@ -1201,8 +1344,10 @@ from pathlib import Path
 import uvicorn
 from starlette.applications import Starlette
 
+from hitchrail import __version__
 from hitchrail.config import Config, ConfigError, is_loopback_host, is_wildcard_host
 from hitchrail.engine import Engine
+from hitchrail.events import EventBus
 from hitchrail.server import create_app
 
 
@@ -1238,6 +1383,30 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--self-project", default=None, help="a project that must never be stopped"
     )
+    # Promised by the README's prerequisites table and required by #28, which
+    # refuses to start when this binary is missing and names it in the message.
+    # A flag the README documents and the CLI does not accept is a bug the
+    # first user finds.
+    #
+    # `--agent-binary`, never `--claude-binary`: no vendor name enters the
+    # operator contract. The quarantine is a seam, not an abstraction.
+    parser.add_argument(
+        "--agent-binary",
+        default="claude",
+        help="the agent executable to run; must be on PATH or an absolute path",
+    )
+    # A documented default that cannot be changed is a constant, and this one
+    # is the wait a person actually watches. The three memory floors stay fixed
+    # in v1 deliberately: they are a safety net rather than a preference, and
+    # an operator who wants a different one is usually asking for a machine
+    # with more memory.
+    parser.add_argument(
+        "--stop-timeout",
+        default=30,
+        type=int,
+        help="seconds to wait for a graceful stop before reporting it timed out",
+    )
+    parser.add_argument("--version", action="version", version=f"hitchrail {__version__}")
     return parser.parse_args(argv)
 
 
@@ -1256,6 +1425,8 @@ def build_config(args: argparse.Namespace) -> Config:
         extra_hosts=tuple(args.allow_hosts),
         extra_origins=tuple(args.allow_origins),
         self_project=args.self_project,
+        agent_binary=args.agent_binary,
+        stop_timeout=args.stop_timeout,
     )
 
 
@@ -1314,7 +1485,8 @@ def main(argv: list[str] | None = None) -> int:
         print(text)
 
     engine = Engine(config=config)
-    return _serve(create_app(engine=engine, config=config), config)
+    # One bus, built here and owned here, because the CLI owns the process.
+    return _serve(create_app(engine=engine, config=config, bus=EventBus()), config)
 ```
 
 - [ ] **Step 4: Run to verify passing**
@@ -1352,9 +1524,15 @@ curl -s -X DELETE -H 'Host: localhost' -H 'Origin: http://localhost:8787' \
   localhost:8787/api/sessions/demo-project | python3 -m json.tool
 tmux list-sessions | grep hr-   # still there: nothing was killed
 
-# escalate
-curl -s -X DELETE -H 'Host: localhost' -H 'Origin: http://localhost:8787' \
-  'localhost:8787/api/sessions/demo-project?kill=1' | python3 -m json.tool
+# prove the graceful route cannot be talked into killing, while it is still alive
+curl -s -o /dev/null -w 'delete with ?kill=1: %{http_code}\n' \
+  -X DELETE -H 'Host: localhost' -H 'Origin: http://localhost:8787' \
+  'localhost:8787/api/sessions/demo-project?kill=1'
+tmux list-sessions | grep hr-   # STILL THERE: the flag does nothing now
+
+# escalate. A DIFFERENT route and a different method, not a flag on the one above
+curl -s -X POST -H 'Host: localhost' -H 'Origin: http://localhost:8787' \
+  'localhost:8787/api/sessions/demo-project/kill' | python3 -m json.tool
 tmux list-sessions | grep hr- || echo "gone, correct"
 
 # the rebinding refusal, on a live socket
@@ -1380,7 +1558,8 @@ kill %1
 Expected: the list shows `demo-project`; starting it produces a real tmux
 session with Claude inside and returns 201 rather than `start_died`; the URL
 route eventually returns a `claude.ai/code` link; the graceful stop returns 202
-and kills nothing; the kill removes the session; the forged host returns 400,
+and kills nothing; the kill ROUTE removes the session while `?kill=1` on the
+graceful route does not; the forged host returns 400,
 the foreign origin 403, the missing token 401, and the grant 303.
 
 - [ ] **Step 6: Gates and commit**

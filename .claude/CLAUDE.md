@@ -138,10 +138,13 @@ the truth; a `stopping` marker that outlived the process would be a lie.
 
 Stopping is a sequence: confirm, graceful request, kill available throughout the
 wait, then a 30 second timeout that reports and **does not escalate on its own**.
-The API keeps graceful and kill as separate calls rather than one call with a
+The API keeps graceful and kill as separate ROUTES rather than one call with a
 flag, so a client that meant to be gentle is never one query parameter from a
-kill. The etiquette of trying gently first is a property of the interface, not
-of the API.
+kill: `DELETE /api/sessions/{name}` is the graceful one, `POST
+/api/sessions/{name}/kill` is the other. A duration is a parameter, an action
+is a route, and there is not even a duration here because the wait is
+`stop_timeout` in the configuration. The etiquette of trying gently first is a
+property of the interface, not of the API.
 
 Defaults: session prefix `hr-`, stop timeout 30s, hard memory floor 1536 MB,
 soft floor 3072 MB, per session estimate 1536 MB, port 8787.
