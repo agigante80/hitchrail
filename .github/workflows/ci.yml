@@ -30,6 +30,11 @@ jobs:
           enable-cache: true
       # --locked asserts uv.lock is current rather than quietly updating it,
       # so a forgotten lock change fails here instead of drifting.
+      # tmux is a RUNTIME prerequisite of Hitchrail and a test prerequisite of
+      # the live_tmux tier. Installed explicitly rather than relied on, because
+      # that tier skips when tmux is absent and a tier that skips on every
+      # runner looks like coverage while proving less than no tier at all.
+      - run: sudo apt-get update && sudo apt-get install -y tmux
       - run: uv sync --locked --python ${{ matrix.python }}
       - run: uv run ruff check
       - run: uv run ruff format --check
@@ -41,3 +46,15 @@ jobs:
       # The five gates above are the blocking ones.
       - run: uv run coverage run -m pytest
       - run: uv run coverage report
+      # Assert the live_tmux tier actually RAN. Without this the suite stays
+      # green while that tier silently skips, which is the failure the tier was
+      # written to prevent: it exists because the hermetic tmux tests encode
+      # the same belief the code does and cannot falsify it.
+      - name: the live tmux tier must not have skipped
+        run: |
+          uv run pytest -m live_tmux -q --no-header | tee /tmp/live_tmux.txt
+          grep -qE '[0-9]+ passed' /tmp/live_tmux.txt
+          if grep -qE '[0-9]+ skipped' /tmp/live_tmux.txt; then
+            echo "::error::the live_tmux tier skipped; tmux is missing on this runner"
+            exit 1
+          fi

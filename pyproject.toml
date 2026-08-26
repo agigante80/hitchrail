@@ -94,6 +94,7 @@ asyncio_mode = "auto"
 addopts = "-ra --strict-markers --strict-config"
 markers = [
   "live: binds a real loopback socket on an ephemeral port",
+  "live_tmux: drives a real tmux server on a private socket",
 ]
 
 [tool.coverage.run]
