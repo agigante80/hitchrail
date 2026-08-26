@@ -952,21 +952,72 @@ def test_the_start_lock_is_keyed_on_the_folder_not_the_name(tmp_path: Path) -> N
         engine.start("zebra")
 
 
-@pytest.mark.parametrize("action", ["stop", "kill", "logs", "session_url"])
-@pytest.mark.parametrize("name", ["no-such-project", "../../etc", ""])
-def test_every_entry_point_refuses_a_name_that_is_not_a_project(
-    root: Path, action: str, name: str
-) -> None:
-    """Unknown and not running are different answers, and were the same one.
+@pytest.mark.parametrize("action", ["start", "stop", "kill", "logs", "session_url"])
+@pytest.mark.parametrize("name", ["../../etc", "", ".hidden", "a b"])
+def test_every_entry_point_refuses_a_malformed_name(root: Path, action: str, name: str) -> None:
+    """A name that could not be a project is `UnknownProject` everywhere.
 
-    Phase 5 needs 404 rather than 409, and a name that is not a project
+    Phase 5 needs 404 rather than 409, and before this every one of these
     reported `NotRunning`, which an interface cannot tell from a real stopped
-    project. `logs` was worse: it returned empty output behind a comment
-    claiming to guard against exactly that.
+    project.
     """
     engine, _, _ = live_engine(root)
     with pytest.raises(UnknownProject):
         getattr(engine, action)(name)
+
+
+@pytest.mark.parametrize("action", ["stop", "kill", "logs"])
+def test_a_well_formed_name_with_nothing_behind_it_is_not_running(
+    root: Path, action: str
+) -> None:
+    """Not `UnknownProject`: there is nothing to stop, which is a different
+    thing from a name that could never be a project."""
+    engine, _, _ = live_engine(root)
+    with pytest.raises(NotRunning):
+        getattr(engine, action)("ab")
+
+
+@pytest.mark.parametrize("action", ["stop", "kill", "logs"])
+def test_a_live_session_stays_actionable_when_its_name_is_not_listed(
+    tmp_path: Path, action: str
+) -> None:
+    """The regression the first version of the gate introduced.
+
+    A leftover `hr-alpha` is exactly what the alias bug produced, so gating
+    the destructive path on the listing meant anybody who hit that bug could
+    no longer clean it up through Hitchrail. A folder renamed under a running
+    agent had the same shape.
+
+    Creating and destroying are not the same question: identity must be unique
+    where a NEW agent is created, and destroying must stay reachable, because
+    the design keeps the kill backstop available throughout.
+    """
+    (tmp_path / "zebra").mkdir()
+    (tmp_path / "alpha").symlink_to(tmp_path / "zebra", target_is_directory=True)
+    sessions_dir = tmp_path / ".sessions"
+    sessions_dir.mkdir()
+    rows = ps_row(600, 1) + ps_row(601, 600, project="alpha")
+    tmux = FakeTmux(sessions={"alpha": 600})
+    engine = Engine(
+        Config(root=tmp_path, sessions_dir=sessions_dir),
+        tmux=tmux,
+        procs_fn=procs_from(rows),
+        meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
+    )
+    # `scan` deduplicates the alias away, so the name is not listed...
+    assert "alpha" not in [s.name for s in engine.list()]
+    # ...and the engine can still see the agent, so it must remain actionable.
+    assert engine.get("alpha").state is State.RUNNING
+    getattr(engine, action)("alpha")
+
+
+def test_an_unlisted_name_still_cannot_start_a_second_agent(tmp_path: Path) -> None:
+    """The other half: destroying stays open, creating stays closed."""
+    (tmp_path / "zebra").mkdir()
+    (tmp_path / "alpha").symlink_to(tmp_path / "zebra", target_is_directory=True)
+    engine, _, _ = start_engine(tmp_path, table=running_after("zebra"))
+    with pytest.raises(UnknownProject):
+        engine.start("alpha")
 
 
 def test_a_symlink_loop_is_an_engine_error_not_a_runtime_error(tmp_path: Path) -> None:

@@ -101,6 +101,12 @@ class Engine:
         # expiry ticker all run on worker threads. Without it, iterating in
         # `expire_stops` while `stop` adds raises "dictionary changed size
         # during iteration", and that raise kills the ticker.
+        #
+        # The lock covers MUTATION and ITERATION. `_derive` reads
+        # `name in self._stopping` without it, deliberately: a membership test
+        # is atomic under the GIL and cannot see a torn dict, and taking the
+        # lock there would put it on the path of every derived row, which is
+        # once per project per listing.
         self._stopping_guard = threading.Lock()
         # Per FOLDER, never global: starting one project must not block
         # starting another. Guarded because start runs on worker threads, which
@@ -276,10 +282,33 @@ class Engine:
             # "events stopped arriving" was unfalsifiable.
             logger.exception("could not announce %s", session.name)
 
-    def _require_project(self, name: str) -> str:
-        """The name must be one `scan` actually LISTS, and its directory.
+    def _require_addressable(self, name: str) -> None:
+        """A name that could name a project. Nothing more.
 
-        Two guarantees, and the first is the one that matters.
+        Used by the paths that ACT on a session that already exists, and
+        deliberately weaker than `_require_startable`.
+
+        A first version gated these on the listing too, and that made a LIVE
+        session unkillable the moment its name stopped being listed. The worst
+        case is a migration one: a leftover `hr-alpha` is exactly what the
+        alias bug produced, so anybody who hit it could no longer clean it up
+        through Hitchrail. A folder renamed under a running agent did the same.
+
+        Creating and destroying are not the same question. Identity has to be
+        unique where a NEW agent is created, or two land in one folder.
+        Destroying has to stay reachable, because the design keeps the kill
+        backstop available throughout and surfaces `detached` precisely so a
+        person can act on it. So this checks the name is safe and stops there;
+        a name with nothing behind it still reaches `NotRunning`, which is the
+        honest answer rather than a refusal.
+        """
+        try:
+            discovery.validate_name(name)
+        except discovery.InvalidName as exc:
+            raise UnknownProject(name) from exc
+
+    def _require_startable(self, name: str) -> str:
+        """A name the listing actually RETURNS, and its directory.
 
         **Identity is the folder, not the name.** `discovery.resolve_child`
         deliberately allows a symlink that stays inside the root, so `alpha`
@@ -287,31 +316,31 @@ class Engine:
         in `scan`, but `start` took a name directly and bypassed that: starting
         both spawned two agents in the same checkout, each invisible to the
         other's `AlreadyRunning` check, because `get("alpha")` looks up
-        `hr-alpha` and scans for a command line naming `alpha`. That is the
-        outcome the whole design exists to prevent, reached from the start path
-        instead of the list path. Requiring a LISTED name closes it, because
-        the listing is where the deduplication happens.
+        `hr-alpha` and scans for a command line naming `alpha`. Requiring a
+        LISTED name closes it, because the listing is where the deduplication
+        happens.
 
-        And it makes "unknown" a distinct answer. Without it, `stop` on a name
-        that is not a project reported `NotRunning`, which the interface cannot
-        tell from a real stopped project, and Phase 5 could not map to 404
-        rather than 409.
+        The listing is checked FIRST so a root that has gone away reports
+        `RootUnavailable` here as it does from `list()`, rather than being
+        flattened into "no such project" by the existence check below.
         """
+        if name not in discovery.list_projects(self.config.root):
+            raise UnknownProject(name)
         try:
-            path = discovery.project_path(self.config.root, name)
+            return str(discovery.project_path(self.config.root, name))
         except (
             discovery.InvalidName,
             discovery.NoSuchProject,
             discovery.OutsideRoot,
-            # A symlink loop. `Path.resolve` raises this, `scan` reports the
-            # folder as unsupported, and without it here a loop shows in the
-            # listing and then escapes as a bare RuntimeError when tapped.
+            # A symlink loop. `Path.resolve` raises `RuntimeError` for one on
+            # 3.11 and 3.12; 3.13 reimplemented it over `os.path.realpath` and
+            # returns the path unchanged, so the loop arrives as
+            # `NoSuchProject` there instead. `OSError` covers the filesystem
+            # failing underneath. All three mean the same thing to a caller.
             RuntimeError,
+            OSError,
         ) as exc:
             raise UnknownProject(name) from exc
-        if name not in discovery.list_projects(self.config.root):
-            raise UnknownProject(name)
-        return str(path)
 
     def _require_live(self, name: str) -> Session:
         """Unknown, protected and not running are three different answers.
@@ -319,7 +348,7 @@ class Engine:
         Collapsing them gives the interface one message for three situations a
         user would act on differently.
         """
-        self._require_project(name)
+        self._require_addressable(name)
         session = self.get(name)
         if session.protected:
             raise Protected(name)
@@ -329,7 +358,7 @@ class Engine:
 
     def start(self, name: str, acknowledged: bool = False) -> Session:
         """Start an agent in a folder, once, with the machine's consent."""
-        path_str = self._require_project(name)
+        path_str = self._require_startable(name)
 
         # Keyed on the resolved DIRECTORY, not the name. Two names for one
         # folder must not both hold a start, and the listing check above
@@ -506,8 +535,19 @@ class Engine:
         # A real guard now. This read `self.get(name)` with a comment saying it
         # stopped an unknown project returning empty output; `get` cannot
         # raise, so it did nothing but spend two subprocess calls arriving
-        # there.
-        self._require_project(name)
+        # there. Addressable rather than startable: reading a pane must keep
+        # working for a session whose folder is gone.
+        self._require_addressable(name)
+        if self.get(name).state is State.STOPPED:
+            # Not `_require_live`: that also refuses the self project, and
+            # reading the log of the session hosting Hitchrail is harmless and
+            # occasionally the only way to see what it is doing.
+            #
+            # The point of the check is that empty output and no session are
+            # different answers. Without it a name with nothing behind it
+            # returns "", which a client cannot tell from a pane that has
+            # printed nothing yet.
+            raise NotRunning(name)
         try:
             return self.tmux.capture_pane(name, lines=lines)
         except TmuxUnavailable as exc:
@@ -520,7 +560,7 @@ class Engine:
         Returns the source alongside the URL, because a scraped one can be
         scrollback from a session that ended hours ago.
         """
-        self._require_project(name)
+        self._require_addressable(name)
         session = self.get(name)
         if session.pid is None:
             return None
