@@ -18,11 +18,11 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from hypothesis import HealthCheck, example, given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from hitchrail.claude_ipc import URL_BASE, _valid_bridge_id
-from hitchrail.config import Config
+from hitchrail.config import Config, ConfigError
 from hitchrail.hostnames import is_valid_host, normalise_host, normalise_origin
 from hitchrail.procs import ProcTable, parse_ps
 from hitchrail.security import parse_host
@@ -34,6 +34,10 @@ settings.load_profile("hitchrail")
 # Names as `discovery` would produce them, plus the characters that make tmux
 # targets ambiguous, so generation is biased toward the interesting cases
 # rather than random unicode.
+# Created once at import and reused by every example. Config only requires
+# that it is a directory, and nothing here writes to it.
+_SHARED_ROOT = Path(tempfile.mkdtemp(prefix="hrprop"))
+
 names = st.text(alphabet="abcxyz.:-_0129", min_size=0, max_size=12)
 hosts = st.text(alphabet="abcx.-_0129:[]", min_size=0, max_size=16)
 
@@ -207,7 +211,6 @@ def test_descendants_terminates_on_any_parent_map(rows: list[tuple[int, int]]) -
 
 
 @given(extra=st.lists(hosts, max_size=4))
-@settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
 def test_every_accepted_host_is_stored_matchable(extra: list[str]) -> None:
     """The accepted-then-never-matches shape, as a property.
 
@@ -215,17 +218,22 @@ def test_every_accepted_host_is_stored_matchable(extra: list[str]) -> None:
     header can equal after `parse_host`. An entry that cannot be matched is
     worse than a refusal, because the operator believes it took effect.
     """
-    root = Path(tempfile.mkdtemp())
+    # One directory for the whole property, not one per example. A first
+    # version called mkdtemp inside the body with no cleanup and leaked 400
+    # empty directories into /tmp per invocation.
     try:
         cfg = Config(
-            root=root,
+            root=_SHARED_ROOT,
             host="0.0.0.0",
             token="t",
             extra_hosts=tuple(extra),
             resolver=lambda: (),
         )
-    except Exception:
-        return  # refused, which is a fine outcome; this is about acceptance
+    except ConfigError:
+        # Narrow on purpose. A bare `except Exception` would hide a TypeError
+        # or AttributeError as though it were an ordinary refusal, and this
+        # property is about what ACCEPTANCE guarantees.
+        return
     for entry in cfg.allowed_hosts:
         # The stored form is CANONICAL, which for IPv6 is bare. A bare IPv6 is
         # not a legal Host header, so the invariant is not that the entry is

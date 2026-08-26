@@ -263,21 +263,23 @@ def test_pane_pid_is_none_when_it_cannot_be_read(stdout: str, rc: int) -> None:
     assert Tmux(prefix="hr-", run=runner).pane_pid("vessel") is None
 
 
-def test_killing_a_session_without_our_prefix_is_refused_before_the_call() -> None:
-    """The refusal must happen BEFORE the subprocess, not after it.
-
-    An empty prefix is what makes this guard vacuous: every session name then
-    starts with it. `Config` refuses one for exactly this reason, and this
-    module refuses it too rather than trusting its caller went through Config.
-    """
-    runner = FakeRunner()
-    with pytest.raises(NotOurSession):
-        Tmux(prefix="", run=runner).kill_session("someone-elses-session")
-    assert runner.calls == []
-
-
 def test_an_empty_prefix_is_refused_at_construction() -> None:
-    with pytest.raises(NotOurSession):
+    """The scoping guard, and it lives HERE rather than in `kill_session`.
+
+    An empty prefix is the case that matters: every session name then starts
+    with it, so every session on the server looks like ours. `Config` refuses
+    one for exactly this reason, and this module refuses it too rather than
+    trusting its caller came through Config.
+
+    There was a second test named for `kill_session` refusing an unprefixed
+    name. It constructed `Tmux(prefix="")` inside `pytest.raises`, so the
+    refusal came from here anyway and its `runner.calls == []` was trivially
+    true because no object was ever built. It duplicated this one under a name
+    asserting a defence that does not exist, which is the exact failure
+    `kill_session`'s docstring cites as the reason its tautological guard was
+    removed.
+    """
+    with pytest.raises(NotOurSession, match="prefix is required"):
         Tmux(prefix="")
 
 

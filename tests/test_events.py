@@ -9,10 +9,24 @@ constantly. A silent drop is indistinguishable from nothing having happened.
 from __future__ import annotations
 
 import asyncio
+import threading
+import time
 
 import pytest
 
-from hitchrail.events import EventBus
+from hitchrail.events import EventBus, _Subscriber
+
+
+async def settle() -> None:
+    """Let the loop run the callbacks `publish` scheduled.
+
+    Delivery hops to each subscriber's loop, because `asyncio.Queue` is not
+    thread safe and the engine publishes from worker threads. So a publish is
+    scheduled rather than performed, and a test that reads the queue in the
+    same step reads it too early. That is the contract, not a wart: see the
+    module docstring for what publishing inline actually does across threads.
+    """
+    await asyncio.sleep(0)
 
 
 def test_a_new_bus_has_no_subscribers() -> None:
@@ -24,6 +38,7 @@ async def test_every_subscriber_receives_a_published_event() -> None:
     bus = EventBus()
     with bus.subscribe() as one, bus.subscribe() as two:
         bus.publish({"kind": "state", "name": "vessel"})
+        await settle()
         assert one.get_nowait() == {"kind": "state", "name": "vessel"}
         assert two.get_nowait() == {"kind": "state", "name": "vessel"}
 
@@ -45,6 +60,7 @@ async def test_a_full_queue_drops_rather_than_blocking() -> None:
         bus.publish({"n": 1})
         bus.publish({"n": 2})
         bus.publish({"n": 3})  # would block if this awaited
+        await settle()
         assert queue.qsize() == 2
         assert bus.dropped == 1
 
@@ -55,6 +71,7 @@ async def test_drops_are_counted_not_swallowed() -> None:
     with bus.subscribe():
         for n in range(5):
             bus.publish({"n": n})
+        await settle()
     assert bus.dropped == 4
 
 
@@ -66,9 +83,11 @@ async def test_a_slow_subscriber_does_not_starve_a_fast_one() -> None:
     bus = EventBus(maxsize=1)
     with bus.subscribe() as slow, bus.subscribe() as fast:
         bus.publish({"n": 1})
+        await settle()
         # The fast one drains; the slow one does not.
         assert fast.get_nowait() == {"n": 1}
         bus.publish({"n": 2})
+        await settle()
         assert fast.get_nowait() == {"n": 2}
         assert slow.qsize() == 1
         assert bus.dropped == 1
@@ -99,6 +118,7 @@ async def test_subscribers_are_independent() -> None:
     bus = EventBus()
     with bus.subscribe() as one, bus.subscribe() as two:
         bus.publish({"n": 1})
+        await settle()
         one.get_nowait()
         assert two.qsize() == 1
 
@@ -109,6 +129,7 @@ async def test_a_subscriber_added_after_an_event_does_not_receive_it() -> None:
     bus = EventBus()
     bus.publish({"n": 1})
     with bus.subscribe() as queue:
+        await settle()
         assert queue.qsize() == 0
 
 
@@ -128,28 +149,73 @@ async def test_publish_survives_a_subscriber_leaving_mid_publish() -> None:
     set under the iteration and raises `RuntimeError`, from a function whose
     documented contract is that it never raises.
 
-    The real scenario is threaded: `publish` is called from engine code on a
-    worker thread while the event loop unsubscribes a client that has just
-    disconnected. That race is hard to schedule deterministically, so this
-    provokes the same mutation from inside the loop instead: a queue that
-    unsubscribes a sibling the moment it is written to.
-
     Verified to fail when the snapshot is removed.
     """
+    bus = EventBus()
+    loop = asyncio.get_running_loop()
 
     class UnsubscribesASibling(asyncio.Queue):  # type: ignore[type-arg]
-        def __init__(self, bus: EventBus) -> None:
+        def __init__(self) -> None:
             super().__init__(maxsize=4)
-            self._bus = bus
 
         def put_nowait(self, item: object) -> None:
-            # Whatever else is subscribed leaves, right now, mid iteration.
-            for other in list(self._bus._subscribers):
-                if other is not self:
-                    self._bus._subscribers.discard(other)
             super().put_nowait(item)
 
-    bus = EventBus()
     with bus.subscribe():
-        bus._subscribers.add(UnsubscribesASibling(bus))
+        saboteur = _Subscriber(queue=UnsubscribesASibling(), loop=loop)
+
+        class Evil:
+            """Mutates the set the moment `publish` looks at its loop."""
+
+            def call_soon_threadsafe(self, *args: object) -> None:
+                bus._subscribers.clear()
+
+        bus._subscribers.add(_Subscriber(queue=saboteur.queue, loop=Evil()))  # type: ignore[arg-type]
         bus.publish({"n": 1})  # must not raise RuntimeError
+
+
+async def test_publish_from_a_worker_thread_arrives_promptly() -> None:
+    """The contract the module docstring makes, and the one it did not keep.
+
+    `asyncio.Queue` is not thread safe. Publishing inline from another thread
+    puts the value in the queue and wakes the getter through `loop.call_soon`,
+    which never writes the self pipe, so a sleeping loop is not woken. Measured
+    before the fix: published at 0.30s, delivered at 2.00s when an unrelated
+    timeout fired. With an idle loop the delay is unbounded, which for SSE
+    means a state change arrives whenever the next unrelated thing happens.
+
+    Phase 5 routes every blocking engine call through `in_thread`, so this is
+    the path the product actually uses rather than a hypothetical.
+    """
+    published_at = 0.2
+    bus = EventBus()
+
+    def worker() -> None:
+        # The delay is load bearing. Publishing immediately can land BEFORE the
+        # loop parks on `get()`, and then even the broken inline version works,
+        # because no wakeup was ever needed. A first version of this test did
+        # exactly that and passed against the defect it was written for.
+        time.sleep(published_at)
+        bus.publish({"n": 1})
+
+    with bus.subscribe() as queue:
+        threading.Thread(target=worker, daemon=True).start()
+        start = time.monotonic()
+        event = await asyncio.wait_for(queue.get(), timeout=3.0)
+        elapsed = time.monotonic() - start
+
+    assert event == {"n": 1}
+    # Delivered when it was published, not when something else happened to
+    # wake the loop. The inline version delivered at the timeout instead.
+    assert elapsed < published_at + 1.0, f"delivered late, after {elapsed:.2f}s"
+
+
+async def test_a_closed_loop_subscriber_is_a_drop_not_a_raise() -> None:
+    """A client whose loop has gone never had the event, and `publish` still
+    must not raise: its contract holds even for a subscriber that vanished."""
+    bus = EventBus()
+    dead = asyncio.new_event_loop()
+    dead.close()
+    bus._subscribers.add(_Subscriber(queue=asyncio.Queue(), loop=dead))
+    bus.publish({"n": 1})
+    assert bus.dropped == 1

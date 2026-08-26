@@ -308,12 +308,16 @@ def test_new_session_passes_argv_as_a_list_and_never_a_shell_string() -> None:
     assert all(isinstance(a, str) for a in argv)
 
 
-def test_kill_session_refuses_a_name_that_is_not_ours() -> None:
+def test_an_empty_prefix_is_refused_at_construction() -> None:
     # Footgun 5: never kill a session we did not create.
-    runner = FakeRunner()
+    #
+    # NOT AS SHIPPED. This asserted that kill_session refuses "../someone-else"
+    # with a non empty prefix, which is FALSE: that name is sanitized and
+    # prefixed like any other, so the session targeted is `hr-...` and the
+    # guard could never fire. #36 replaced it with the case that can: an empty
+    # prefix, which would make every session on the server look like ours.
     with pytest.raises(NotOurSession):
-        Tmux(prefix="hr-", run=runner).kill_session("../someone-else")
-    assert runner.calls == []
+        Tmux(prefix="")
 
 
 def test_kill_session_targets_only_the_named_session() -> None:
@@ -517,10 +521,15 @@ class Tmux:
         )
 
     def kill_session(self, project: str) -> None:
-        """Scoped, always. There is no code path here that reaches kill-server."""
-        name = self.session_name(project)
-        if not name.startswith(self.prefix) or "/" in project:
-            raise NotOurSession(project)
+        """Scoped, always. There is no code path here that reaches kill-server.
+
+        NOT AS SHIPPED. The guard this snippet shows is a tautology and was
+        removed in #36: `session_name` builds the name FROM `self.prefix`, so
+        `name.startswith(self.prefix)` can never be false, and mutating
+        `.prefix` afterwards does not reach it either because both sides read
+        the same attribute. What actually enforces the scoping is the empty
+        prefix refusal in `__init__`, which fires and is tested.
+        """
         self._run(self._argv("kill-session", "-t", self.session_target(project)))
 
     def send_keys(self, project: str, *keys: str) -> None:
