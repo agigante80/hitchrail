@@ -191,15 +191,22 @@ class Tmux:
 
         **That reasoning was wrong twice.** `new_session`, `kill_session` and
         `send_keys` discard the return entirely, so they do not treat it as
-        anything: a failed start would have read as a successful one. And for
-        the read methods it collapses "we could not look" into "nothing is
-        there", which made a live agent derive as `detached` when tmux went
-        missing. That is the guard failing open that control 7 forbids, and it
-        is the same unstartable outcome `_find_detached` was just fixed for.
+        anything. And for the read methods it collapses "we could not look"
+        into "nothing is there", which made a live agent derive as `detached`
+        when tmux went missing. That is the guard failing open that control 7
+        forbids, and it is the same unstartable outcome `_find_detached` was
+        just fixed for.
 
         So it raises instead, and the engine turns it into an honest refusal.
         A tmux that RUNS and says no still returns non zero, unchanged: that is
         an answer, not a failure.
+
+        **This closes only the "could not execute" half.** A tmux that ran and
+        FAILED still returns non zero, and the three write methods still
+        discard it: a duplicate session name, or a `-c` directory that does not
+        exist, is silently nothing. That is pre existing and belongs to the
+        ticket that owns start failures, because reporting it needs somewhere
+        for the output to go.
         """
         try:
             return self._run(argv)

@@ -10,6 +10,7 @@ neighbours.
 from __future__ import annotations
 
 import json
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from hitchrail.claude_ipc import launch_argv
 from hitchrail.config import Config
 from hitchrail.engine import Engine, MachineUnreadable, State
 from hitchrail.procs import ProcTable
+from hitchrail.tmux import Tmux
 
 PANE = 500
 AGENT = 501
@@ -565,16 +567,15 @@ def test_a_tmux_that_cannot_be_run_is_an_unreadable_machine(root: Path) -> None:
     do not know, and deriving from it reported a live agent as `detached`:
     refuses to start, kill has no session, project unstartable.
     """
-    from hitchrail.tmux import Tmux
 
-    def missing(argv: list[str]) -> object:
+    def missing(argv: list[str]) -> subprocess.CompletedProcess[str]:
         raise FileNotFoundError(2, "No such file or directory", "tmux")
 
     sessions_dir = root / ".sessions"
     sessions_dir.mkdir(exist_ok=True)
     engine = Engine(
         Config(root=root, sessions_dir=sessions_dir),
-        tmux=Tmux(prefix="hr-", run=missing),  # type: ignore[arg-type]
+        tmux=Tmux(prefix="hr-", run=missing),
         procs_fn=procs_from(ps_row(PANE, 1) + ps_row(AGENT, PANE, project="vessel")),
         meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
     )
