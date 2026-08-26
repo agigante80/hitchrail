@@ -38,7 +38,7 @@ does not vendor or install any of them.
 | Needed | Why | Checked |
 |---|---|---|
 | **tmux** | every session Hitchrail starts lives in a tmux session; this is the whole mechanism, not an option | `tmux -V` |
-| **Claude Code on `PATH`** | it is what Hitchrail runs. Configurable with `--claude-binary` | `claude --version` |
+| **Claude Code on `PATH`** | it is what Hitchrail runs. Configurable with `--agent-binary` | `claude --version` |
 | **Linux** | memory pressure is read from `/proc/meminfo`, and the process table from `ps`. macOS has neither in this form, which is why the package declares `Operating System :: POSIX :: Linux` | |
 | **Python 3.11+** | `uvx` and `pipx` handle this for you | `python3 --version` |
 

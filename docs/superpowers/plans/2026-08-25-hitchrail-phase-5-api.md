@@ -82,6 +82,53 @@ in Phase 4 exists precisely because two taps land on two threads.
 
 ---
 
+## Phase 5 tickets, in dependency order
+
+| Ticket | Task | Note |
+|---|---|---|
+| #37 | mark the integration tier | first, before the tier triples and marking becomes a large mechanical diff |
+| #43 | 15, the REST surface and the error envelope | |
+| #44 | 16, the event stream | needs #43's app and #39's bus |
+| #45 | 17, the command line entry point | needs #43's `create_app` |
+| #28 | the startup preflight | lands inside #45; separate because its value is entirely in the wording of its refusals |
+| #20 | the grant token in the access log | touches the `log_level` decision #45 makes |
+
+## Corrections found when validating this plan
+
+Written before Phases 3 and 4, and it drifted in two places. Both are recorded
+here because the snippets below still show the old shape. **Re validate this
+plan again when Phase 5 actually starts**: Phase 4's engine will settle
+questions this plan currently guesses at, and the last two plans each drifted
+from the phase built after them.
+
+### 1. `session_url` no longer returns a string
+
+The route does `JSONResponse({"name": name, "url": url})`, where `url` came
+from `engine.session_url`. That now returns `SessionUrl(url, source)`, decided
+in #29 because a scraped URL can be scrollback from a session that ended hours
+ago, and #29 records that the provenance reaches the API.
+
+So the response carries both, and the interface can present a scraped link
+differently from a known good one instead of showing them as equals. A
+dataclass handed to `JSONResponse` unchanged is not serialisable, so this
+fails loudly rather than silently, which is the one mercy.
+
+### 2. The CLI is missing flags the README already promises
+
+`parse_args` defines `--root`, `--host`, `--port`, `--token`, `--allow-host`,
+`--allow-origin` and `--self-project`. `Config` has fifteen settable fields.
+
+Not every field needs a flag, and `sessions_dir` and `tmux_socket` are
+reasonable to leave out of v1. But **`--agent-binary` is promised in the
+README's prerequisites table** and required by #28, which refuses to start when
+that binary is missing and names it in the message. A flag the README documents
+and the CLI does not accept is a bug the first user finds.
+
+Worth deciding rather than defaulting: `--stop-timeout` and the three memory
+floors are documented in `.claude/CLAUDE.md` as defaults, and a default that
+cannot be changed is a constant. The design does not require them as flags, so
+this plan should either add them or say why they stay fixed.
+
 ### Task 15: The REST surface and the error envelope
 
 **Files:**
