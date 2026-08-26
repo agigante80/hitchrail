@@ -310,7 +310,5 @@ def test_a_pane_agreeing_with_the_bridge_logs_nothing(
 
     write_session(tmp_path, 31, {"bridgeSessionId": "session_same"})
     with caplog.at_level(logging.DEBUG, logger="hitchrail.claude_ipc"):
-        claude_ipc.session_url(
-            31, tmp_path, pane_text="https://claude.ai/code/session_same"
-        )
+        claude_ipc.session_url(31, tmp_path, pane_text="https://claude.ai/code/session_same")
     assert not [r for r in caplog.records if "differ" in r.message]
