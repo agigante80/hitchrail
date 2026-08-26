@@ -82,13 +82,28 @@ def _needs_encoding(name: str) -> bool:
     return any(sep in name for sep in _SEPARATORS) or name.startswith(_ENCODED_PREFIX)
 
 
+def _default_runner(argv: list[str]) -> subprocess.CompletedProcess[str]:
+    """The real one. An argument list, never a shell, and never checked.
+
+    `check=False` because a non zero return is normal here: `has-session` says
+    no that way, and `list-panes` fails when no server is running at all. The
+    callers below decide what each failure means.
+    """
+    # S603 is ignored for this module in pyproject.toml, not inline: every
+    # call here is an argument list built by `_argv`, and there is no shell.
+    return subprocess.run(argv, capture_output=True, text=True, check=False)
+
+
 class Tmux:
-    """Target addressing for one prefix. The operations arrive with #23.
+    """One prefix, one optional socket, and every tmux call this project makes.
 
     The display name and the tmux name are deliberately different things. A
     caller passes the project name it got from `discovery`; everything sent to
     tmux goes through `sanitize` first, so nothing outside this class needs to
-    know that the two can differ.
+    know the two can differ.
+
+    The runner is injected and defaults to the real one, which is the seam that
+    lets the whole engine be tested without a machine.
     """
 
     def __init__(
@@ -97,9 +112,31 @@ class Tmux:
         socket: str | None = None,
         run: Runner | None = None,
     ) -> None:
+        if not prefix:
+            # Refused here, not only in `Config`. Every guard in this class is
+            # "does the name carry our prefix", and an empty prefix makes every
+            # name on the server carry it, including the developer's own. The
+            # module holding the dangerous operation enforces its own
+            # precondition rather than trusting the caller came through Config.
+            raise NotOurSession(
+                "a tmux session prefix is required: without one, every session "
+                "on the server looks like ours and the kill guard is vacuous"
+            )
         self.prefix = prefix
         self.socket = socket
-        self._run = run
+        self._run: Runner = run or _default_runner
+
+    def _argv(self, *args: str) -> list[str]:
+        """Every call goes through here, which is what keeps the socket on.
+
+        A method that assembles its own argv and forgets `-S` talks to a
+        different server than the rest of the class, which presents as a
+        session that exists and does not.
+        """
+        base = ["tmux"]
+        if self.socket:
+            base += ["-S", self.socket]
+        return [*base, *args]
 
     def session_name(self, project: str) -> str:
         """The name a session is CREATED with. Not a target: see below."""
@@ -127,3 +164,115 @@ class Tmux:
         regression test for it.
         """
         return f"={self.session_name(project)}:"
+
+    # -- reading -------------------------------------------------------
+
+    def has_session(self, project: str) -> bool:
+        return (
+            self._run(self._argv("has-session", "-t", self.session_target(project))).returncode
+            == 0
+        )
+
+    def pane_pids(self) -> dict[str, int]:
+        """Every session we own, mapped to its first pane's pid, in ONE call.
+
+        The engine asks this once per list, not once per project. A call per
+        project is a subprocess spawn per row, and at the row counts the design
+        draws that is the difference between a page load and a stall. There is
+        a test asserting the single call, because the cost of losing it is
+        invisible until the folder is large.
+
+        A non zero return means no server is running, which is the ordinary
+        state of a machine with nothing started, not an error.
+        """
+        result = self._run(self._argv("list-panes", "-a", "-F", "#{session_name} #{pane_pid}"))
+        if result.returncode != 0:
+            return {}
+        found: dict[str, int] = {}
+        for line in result.stdout.splitlines():
+            name, _, raw_pid = line.partition(" ")
+            # Sessions we did not create are none of our business, and a
+            # session already seen keeps its FIRST pane: a window split must
+            # not change which pid a project reports.
+            if not name.startswith(self.prefix) or name in found:
+                continue
+            try:
+                found[name] = int(raw_pid)
+            except ValueError:
+                # One malformed line must not lose the well formed ones.
+                continue
+        return found
+
+    def pane_pid(self, project: str) -> int | None:
+        """One session's pane pid. For detail paths; `pane_pids` for lists."""
+        result = self._run(
+            self._argv("list-panes", "-t", self.pane_target(project), "-F", "#{pane_pid}")
+        )
+        if result.returncode != 0:
+            return None
+        fields = result.stdout.split()
+        if not fields:
+            return None
+        try:
+            return int(fields[0])
+        except ValueError:
+            return None
+
+    def capture_pane(self, project: str, lines: int = 40) -> str:
+        """The tail of a pane. Empty when it cannot be read, never an exception.
+
+        `-J` joins wrapped lines, so a long line reads as one line rather than
+        as the terminal's arbitrary column count. `-S -<lines>` bounds the
+        history: without it this returns the whole scrollback.
+        """
+        result = self._run(
+            self._argv(
+                "capture-pane",
+                "-p",
+                "-J",
+                "-S",
+                f"-{lines}",
+                "-t",
+                self.pane_target(project),
+            )
+        )
+        return result.stdout if result.returncode == 0 else ""
+
+    # -- writing -------------------------------------------------------
+
+    def new_session(self, project: str, cwd: str, argv: list[str]) -> None:
+        """Detached, in the project's directory, running the given argv.
+
+        Created with the plain session NAME. Only targets carry the `=` anchor;
+        passing an anchored string to `-s` would create a session whose name
+        begins with an equals sign.
+        """
+        self._run(
+            self._argv("new-session", "-d", "-s", self.session_name(project), "-c", cwd, *argv)
+        )
+
+    def kill_session(self, project: str) -> None:
+        """Scoped, always. No code path here reaches `kill-server`.
+
+        The refusal happens before the subprocess call, not after it, so a
+        refused kill cannot have already sent anything.
+        """
+        name = self.session_name(project)
+        if not name.startswith(self.prefix):
+            raise NotOurSession(project)
+        self._run(self._argv("kill-session", "-t", self.session_target(project)))
+
+    def send_keys(self, project: str, *keys: str) -> None:
+        """Each key is its own argument, deliberately.
+
+        tmux distinguishes `C-c` the key from `C-c` the literal text by
+        argument position, never by quoting, so joining them sends the
+        characters instead of the keystroke.
+
+        This method knows nothing about what it is sending. What to send in
+        order to stop an agent is Claude Code's business and lives in
+        `claude_ipc`; a `stop()` convenience here would put the agent's
+        semantics in the tmux adapter, where a second agent could not replace
+        them.
+        """
+        self._run(self._argv("send-keys", "-t", self.pane_target(project), *keys))
