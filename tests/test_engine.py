@@ -1194,3 +1194,39 @@ def test_a_failed_start_reports_why_even_when_the_pane_cannot_be_read(
     with pytest.raises(StartFailed) as caught:
         engine.start("vessel")
     assert caught.value.output == "", "an unreadable pane is empty output, not a crash"
+
+
+def test_an_unreadable_machine_does_not_kill_the_expiry_ticker(tmp_path: Path) -> None:
+    """Phase 5 drives `expire_stops` from a ticker, and a raise ends it.
+
+    The announce loop runs outside the lock, so `get` can fail there, and by
+    then the markers are already dropped. Uncaught, one tmux hiccup means no
+    stop expires again for the life of the process. Losing an announcement is
+    a stale timer on one page; losing the ticker is every timer, forever.
+    """
+    (tmp_path / "alpha").mkdir()
+    sessions_dir = tmp_path / ".sessions"
+    sessions_dir.mkdir()
+    now = [0.0]
+    tmux = FakeTmux(sessions={"alpha": 600})
+    engine = Engine(
+        Config(root=tmp_path, sessions_dir=sessions_dir, stop_timeout=1.0),
+        tmux=tmux,
+        procs_fn=procs_from(ps_row(600, 1) + ps_row(601, 600, project="alpha")),
+        meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
+        clock=lambda: now[0],
+        sleep=lambda _s: None,
+    )
+    engine.stop("alpha")
+    now[0] = 99.0
+
+    def gone() -> dict[str, int]:
+        raise TmuxUnavailable("tmux is gone")
+
+    tmux.pane_pids = gone  # type: ignore[method-assign]
+    # Reports the expiry rather than raising it...
+    assert engine.expire_stops() == ["alpha"]
+    # ...and the marker is gone, so the next tick does not re-expire it.
+    assert engine.stopping_since("alpha") is None
+    # The ticker is still usable, which is the whole point.
+    assert engine.expire_stops() == []

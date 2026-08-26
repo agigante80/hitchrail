@@ -146,19 +146,13 @@ class Engine:
         """
         if self._bus is None:
             return
-        # Deliberately broad. This is the last line of defence around a
-        # notification: a bus that raised would turn a SUCCESSFUL stop into a
-        # failed one, and the user would be told their agent did not stop when
-        # it did. `EventBus.publish` already guarantees it does not raise; this
-        # holds if a future bus does not.
         try:
             self._bus.publish(session.as_dict())
         except Exception:
-            # Deliberately broad, and deliberately logged. This is the last
-            # line of defence around a NOTIFICATION: a bus that raised would
-            # turn a successful stop into a failed one, and the user would be
-            # told their agent did not stop when it did. Silent, though, meant
-            # "events stopped arriving" was unfalsifiable.
+            # Deliberately broad, and deliberately logged. A bus that raised
+            # would turn a SUCCESSFUL stop into a failed one, and the user
+            # would be told their agent did not stop when it did. Silent,
+            # though, made "events stopped arriving" unfalsifiable.
             logger.exception("could not announce %s", session.name)
 
     def _require_addressable(self, name: str) -> None:
@@ -405,8 +399,24 @@ class Engine:
                 del self._stopping[name]
         # Announced outside the lock: `get` does two subprocess calls, and
         # holding a lock across those would serialise every stop behind them.
+        #
+        # Outside the lock also means `get` can fail out here, and the markers
+        # are already gone by then. `_announce` cannot raise, but `get` can:
+        # it reads the machine, and a tmux that has gone away is exactly the
+        # MachineUnreadable case. Uncaught, that raise leaves the ticker dead,
+        # so no stop expires again for the life of the process, which is the
+        # failure this method's own docstring says it guards against. Losing
+        # one announcement is a stale timer on a page; losing the ticker is
+        # every timer, forever.
         for name in expired:
-            self._announce(self.get(name))
+            try:
+                self._announce(self.get(name))
+            except MachineUnreadable:
+                logger.warning(
+                    "stop timer for %s expired but the machine could not be "
+                    "read, so no event was sent; the marker is already dropped",
+                    name,
+                )
         return expired
 
     def logs(self, name: str, lines: int = 40) -> str:
