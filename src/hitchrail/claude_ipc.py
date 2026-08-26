@@ -20,12 +20,28 @@ This module is in the engine layer and imports nothing from the web layer.
 
 from __future__ import annotations
 
-from typing import Protocol
+import json
+import logging
+import re
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal, Protocol
 
 # How the agent is found in the process table. State derivation matches this as
 # a substring of a command line, so it has to be something no other process on
 # the machine carries by accident.
 REMOTE_CONTROL_MARKER = "--remote-control"
+
+# Where a session link points. The bridge id is appended verbatim.
+URL_BASE = "https://claude.ai/code/"
+
+# What a bridge id is allowed to look like. An ALLOWLIST of shape, not a
+# denylist of bad strings: the value comes from a file another process wrote
+# and ends up in a link the interface renders, so anything not obviously a
+# single path segment is refused rather than sanitised into one.
+_BRIDGE_ID = re.compile(r"\A[A-Za-z0-9._~-]{1,128}\Z")
+
+logger = logging.getLogger(__name__)
 
 # What to type at a running agent to ask it to finish, as a sequence of key
 # GROUPS. Each group is one send_keys call, because tmux distinguishes a key
@@ -85,3 +101,111 @@ def request_stop(pane: Pane, project: str) -> None:
     """
     for keys in GRACEFUL_STOP_KEYS:
         pane.send_keys(project, *keys)
+
+
+@dataclass(frozen=True)
+class SessionUrl:
+    """A session link and WHERE IT CAME FROM.
+
+    The source is carried rather than a confidence score. We know exactly why a
+    scraped URL is uncertain, so naming the mechanism lets the interface say
+    "found in the terminal output, may be from an earlier session" instead of
+    "low confidence", which tells the user nothing they can act on.
+    """
+
+    url: str
+    source: Literal["bridge", "scraped"]
+
+
+def _valid_bridge_id(value: object) -> str | None:
+    """A bridge id, or None. Every refusal here is deliberate.
+
+    The file is written by another process and its contents are guaranteed to
+    be nothing in particular, while the value ends up in a link somebody taps.
+    A separator would let it climb out of the path segment it belongs in; a
+    scheme would point it at another host entirely, which is an open redirect
+    rendered by our own interface.
+
+    The pattern refuses both without enumerating them, along with control
+    characters, empty strings and anything absurdly long.
+    """
+    # No bool guard here on purpose: bool subclasses int, not str, so `True`
+    # is already refused by the str check. Adding one reads as defensive and
+    # is unreachable, which mypy says out loud.
+    if not isinstance(value, str):
+        return None
+    return value if _BRIDGE_ID.match(value) else None
+
+
+def bridge_url(pid: int, sessions_dir: Path) -> str | None:
+    """The session link from `<sessions_dir>/<pid>.json`, or None.
+
+    `bridgeSessionId` is an undocumented internal, it is not written for every
+    session, and it may be caught mid write. Every one of those is None rather
+    than an exception, because the interface shows `pending` for None and a
+    missing link is honest while a wrong one is not.
+
+    `pid` is an `int`, so the filename cannot traverse. Keep it that way:
+    accepting a `str` for convenience reintroduces that through the filename.
+    """
+    path = sessions_dir / f"{pid}.json"
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    bridge_id = _valid_bridge_id(payload.get("bridgeSessionId"))
+    if bridge_id is None:
+        return None
+    # Verbatim, including the session_ prefix. The value IS the path segment.
+    return f"{URL_BASE}{bridge_id}"
+
+
+def _scrape(pane_text: str) -> str | None:
+    """A claude.ai/code URL from terminal output, validated the same way.
+
+    Pane text is attacker influenceable: anybody who can write to the pane can
+    put a URL in the scrollback, so the segment gets the same allowlist the
+    JSON value does.
+    """
+    match = re.search(rf"{re.escape(URL_BASE)}(\S+)", pane_text)
+    if match is None:
+        return None
+    bridge_id = _valid_bridge_id(match.group(1))
+    return None if bridge_id is None else f"{URL_BASE}{bridge_id}"
+
+
+def session_url(
+    pid: int, sessions_dir: Path, pane_text: str | None = None
+) -> SessionUrl | None:
+    """The best link available, saying which it is, or None for `pending`.
+
+    **The bridge value always wins**, following the ordinary treatment of an
+    observed fact against a self reported one: the authoritative source
+    decides, and the disagreement is itself a signal.
+
+    The scrape exists because the JSON is not written for every session, and it
+    cannot be trusted because three things produce a match and only one is
+    right. The nastiest is scrollback from a PREVIOUS session in the same pane:
+    a perfectly well formed URL pointing at a session that ended hours ago.
+    Nothing about the string looks wrong, so no amount of parsing separates it
+    from a good one and the only honest response is to say where it came from.
+    """
+    from_bridge = bridge_url(pid, sessions_dir)
+    from_pane = _scrape(pane_text) if pane_text else None
+
+    if from_bridge is not None:
+        if from_pane is not None and from_pane != from_bridge:
+            # Good evidence the pane is showing stale scrollback, and exactly
+            # the diagnostic somebody wants when a link misbehaves.
+            logger.debug(
+                "session %s: pane URL %s differs from the bridge URL %s, "
+                "the pane is probably showing an earlier session",
+                pid,
+                from_pane,
+                from_bridge,
+            )
+        return SessionUrl(from_bridge, "bridge")
+
+    return SessionUrl(from_pane, "scraped") if from_pane is not None else None
