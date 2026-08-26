@@ -16,11 +16,18 @@ from typing import Any
 import httpx
 import pytest
 from starlette.applications import Starlette
+from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
+from starlette.types import Scope
 
 from hitchrail.config import Config
-from hitchrail.security import TOKEN_COOKIE, _token_matches, middleware_stack
+from hitchrail.security import (
+    GRANT_PARAM,
+    TOKEN_COOKIE,
+    _token_matches,
+    middleware_stack,
+)
 
 TOKEN = "s3cret-token-value"
 HOST = {"host": "localhost"}
@@ -485,3 +492,164 @@ async def test_a_query_string_with_a_high_byte_is_a_refusal_not_a_crash(
     )
     start = next(m for m in sent if m["type"] == "http.response.start")
     assert start["status"] == 401
+
+
+# -- #20: the token must not reach the access log on ANY path ---------------
+#
+# The scrub used to live inside `_maybe_grant`, which is only reached when no
+# valid header and no valid cookie were presented AND the method is safe.
+# Three reachable paths therefore still logged the token in cleartext.
+
+
+def _scope_seen_by(app_scope: list[Scope]) -> Scope:
+    assert app_scope, "the request never reached the application"
+    return app_scope[-1]
+
+
+def _recording_app(config: Config) -> tuple[Starlette, list[Scope]]:
+    """An app that keeps the scope it was handed.
+
+    uvicorn builds its access line from this same dict after the app returns,
+    so what the application sees here is what the logger prints. Asserting on
+    the scope is the hermetic half of the live socket test that pins the real
+    logger.
+    """
+    seen: list[Scope] = []
+
+    async def ok(request: Request) -> JSONResponse:
+        seen.append(request.scope)
+        return JSONResponse({"ok": True})
+
+    app = Starlette(
+        routes=[Route("/x", ok, methods=["GET", "POST"])],
+        middleware=middleware_stack(config),
+    )
+    return app, seen
+
+
+@pytest.mark.integration
+async def test_a_cookie_holder_reopening_the_link_does_not_log_the_token(
+    tmp_path: Path,
+) -> None:
+    """The row that matters, and the ordinary use of the intended flow.
+
+    The README's phone link is a link: pasted into a note, bookmarked, sent to
+    yourself. A tab restore, the back button or re tapping it sends the cookie
+    set the first time AND the still present `?token=`, so the request is
+    served 200 by the cookie and never reaches the grant.
+    """
+    config = Config(root=tmp_path, token=TOKEN)
+    app, seen = _recording_app(config)
+    response = await call(
+        app,
+        path=f"/x?{GRANT_PARAM}={TOKEN}",
+        headers={"host": "localhost", "cookie": f"{TOKEN_COOKIE}={TOKEN}"},
+    )
+    assert response.status_code == 200
+    assert TOKEN not in _scope_seen_by(seen)["query_string"].decode("latin-1")
+
+
+@pytest.mark.integration
+async def test_a_bearer_holder_carrying_the_query_token_does_not_log_it(
+    tmp_path: Path,
+) -> None:
+    config = Config(root=tmp_path, token=TOKEN)
+    app, seen = _recording_app(config)
+    response = await call(
+        app,
+        path=f"/x?{GRANT_PARAM}={TOKEN}",
+        headers={"host": "localhost", "authorization": f"Bearer {TOKEN}"},
+    )
+    assert response.status_code == 200
+    assert TOKEN not in _scope_seen_by(seen)["query_string"].decode("latin-1")
+
+
+@pytest.mark.integration
+async def test_a_refused_request_does_not_log_the_token_either(
+    tmp_path: Path,
+) -> None:
+    """A mutating request cannot be granted, so it is refused. The token it
+    carried is still a token, and a 401 line in a log is still a log line."""
+    config = Config(root=tmp_path, token=TOKEN)
+    app, _ = _recording_app(config)
+    response = await call(
+        app,
+        method="POST",
+        path=f"/x?{GRANT_PARAM}={TOKEN}",
+        headers={"host": "localhost", "origin": "http://localhost:8787"},
+    )
+    assert response.status_code == 401
+    assert TOKEN not in response.text
+
+
+@pytest.mark.integration
+async def test_the_scrub_keeps_every_other_query_parameter(tmp_path: Path) -> None:
+    """Stripping the token must not quietly eat the caller's own parameters."""
+    config = Config(root=tmp_path, token=TOKEN)
+    app, seen = _recording_app(config)
+    await call(
+        app,
+        path=f"/x?lines=80&{GRANT_PARAM}={TOKEN}&kill=0",
+        headers={"host": "localhost", "cookie": f"{TOKEN_COOKIE}={TOKEN}"},
+    )
+    query = _scope_seen_by(seen)["query_string"].decode("latin-1")
+    assert "lines=80" in query and "kill=0" in query
+    assert TOKEN not in query
+
+
+@pytest.mark.integration
+async def test_no_route_ever_sees_an_auth_token_as_query_data(
+    tmp_path: Path,
+) -> None:
+    """The reason the scrub is central rather than per route.
+
+    A handler that can read the token can reflect it into a response body or a
+    log of its own, and every future handler would have to remember not to.
+    """
+    config = Config(root=tmp_path, token=TOKEN)
+    app, seen = _recording_app(config)
+    await call(
+        app,
+        path=f"/x?{GRANT_PARAM}={TOKEN}",
+        headers={"host": "localhost", "cookie": f"{TOKEN_COOKIE}={TOKEN}"},
+    )
+    scope = _scope_seen_by(seen)
+    assert GRANT_PARAM not in scope["query_string"].decode("latin-1")
+
+
+@pytest.mark.integration
+async def test_a_wrong_query_token_is_still_scrubbed(tmp_path: Path) -> None:
+    """A guess is as sensitive as the real thing: it is what somebody typed,
+    and logging failed attempts in cleartext is how a near miss gets reused."""
+    config = Config(root=tmp_path, token=TOKEN)
+    app, _ = _recording_app(config)
+    response = await call(
+        app, path=f"/x?{GRANT_PARAM}=nearly-right", headers={"host": "localhost"}
+    )
+    assert response.status_code == 401
+    assert "nearly-right" not in response.text
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "query",
+    ["mytoken=abc", "x=token", "token_id=7", "atokenb=1"],
+)
+async def test_a_parameter_that_merely_contains_the_word_is_left_alone(
+    tmp_path: Path, query: str
+) -> None:
+    """The cheap containment check is a pre filter, not the decision.
+
+    `GRANT_PARAM in raw` is a fast reject for the common case of no token at
+    all. Acting on it alone would strip `?mytoken=` or rewrite a query string
+    that merely mentions the word, and a caller's parameters are not ours to
+    edit.
+    """
+    config = Config(root=tmp_path, token=TOKEN)
+    app, seen = _recording_app(config)
+    await call(
+        app,
+        path=f"/x?{query}",
+        headers={"host": "localhost", "cookie": f"{TOKEN_COOKIE}={TOKEN}"},
+    )
+    assert _scope_seen_by(seen)["query_string"].decode("latin-1") == query

@@ -881,6 +881,12 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # wrong, and the reason it is not belongs next to it. Split only if a
         # NEW responsibility arrives, never to reclaim these lines.
         "config.py": 413,
+        # 421. #20 moved the grant token scrub out of the grant path, where it
+        # only ran when no carrier matched, into a helper every request goes
+        # through. The growth is that helper and the comment recording which
+        # three paths used to leak, which is the part a reader cannot recover
+        # from the code.
+        "security.py": 443,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

@@ -292,3 +292,62 @@ def test_the_grant_keeps_the_token_out_of_the_access_log(tmp_path: Path) -> None
     logged = "\n".join(records)
     assert TOKEN not in logged, f"the token reached the access log: {logged}"
     assert "keep=1" in logged
+
+
+@pytest.mark.parametrize(
+    ("label", "headers", "method", "expect"),
+    [
+        ("cookie holder", {"Cookie": f"{TOKEN_COOKIE}={TOKEN}"}, "GET", 200),
+        ("bearer holder", {"Authorization": f"Bearer {TOKEN}"}, "GET", 200),
+        ("refused mutation", {"Origin": "http://127.0.0.1"}, "POST", 401),
+    ],
+)
+def test_no_carrier_path_writes_the_token_to_the_access_log(
+    tmp_path: Path, label: str, headers: dict[str, str], method: str, expect: int
+) -> None:
+    """#20: the three paths the original scrub never reached.
+
+    It lived inside `_maybe_grant`, which runs only when no valid header and no
+    valid cookie were presented AND the method is safe. The cookie row is the
+    one that matters: the README's phone link is a link, so a tab restore or
+    the back button sends the cookie set the first time and the still present
+    `?token=`, and ordinary re use of the intended flow logged the token.
+
+    A live socket, because a scope assertion cannot prove what uvicorn's
+    logger prints, and the fixture's own default of log_level="warning" is
+    exactly why the suite could not see the original leak.
+    """
+    port = free_port()
+    config = Config(root=tmp_path, host="127.0.0.1", port=port, token=TOKEN)
+    server = LiveServer(make_app(config), port, log_level="info")
+
+    records: list[str] = []
+
+    class Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record.getMessage())
+
+    handler = Capture()
+    access = logging.getLogger("uvicorn.access")
+    server.start()
+    access.addHandler(handler)
+    try:
+        response = httpx.request(
+            method,
+            f"{server.base}/x?token={TOKEN}&keep=1",
+            headers={"Host": "127.0.0.1", **headers},
+            follow_redirects=False,
+            timeout=TIMEOUT,
+        )
+        assert response.status_code == expect, label
+        deadline = time.monotonic() + TIMEOUT
+        while time.monotonic() < deadline and not records:
+            time.sleep(0.05)
+    finally:
+        access.removeHandler(handler)
+        server.stop()
+
+    assert records, "uvicorn wrote no access line, so this test proves nothing"
+    logged = "\n".join(records)
+    assert TOKEN not in logged, f"{label}: the token reached the access log: {logged}"
+    assert "keep=1" in logged, "the fix must not be to throw the query away"

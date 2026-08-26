@@ -245,6 +245,38 @@ def _safe_redirect_path(path: str) -> str:
     return path.replace("%", "%25").replace("#", "%23").replace("?", "%3F")
 
 
+def _scrub_grant_param(scope: Scope) -> str | None:
+    """Remove the grant token from the scope and RETURN it, keeping the rest.
+
+    Returning it is what lets the scrub happen first. The grant still needs the
+    value, and reading it back out of the scope afterwards would mean either
+    not scrubbing yet or scrubbing twice.
+
+    uvicorn writes its access line AFTER the app returns and builds it from
+    this same dict, so overwriting the value here is what the logger ends up
+    printing. That depends on a uvicorn implementation detail rather than on
+    anything ASGI guarantees, which is the same dependency `_maybe_grant`
+    already carries a warning about.
+
+    latin-1 for the reason `header_map` spells out: an attacker picks these
+    bytes, and a strict `.decode()` raises `UnicodeDecodeError` on anything
+    over 0x7f, which would be an unauthenticated 500 rather than a refusal.
+    """
+    raw = scope.get("query_string", b"")
+    if not raw or GRANT_PARAM.encode("latin-1") not in raw:
+        return None
+    params = parse_qsl(raw.decode("latin-1"), keep_blank_values=True)
+    offered = next((v for k, v in params if k == GRANT_PARAM), None)
+    if offered is None:
+        # The name appeared as a substring of some other key or value. Nothing
+        # to remove, and re encoding would needlessly rewrite the caller's
+        # query string.
+        return None
+    kept = [(k, v) for k, v in params if k != GRANT_PARAM]
+    scope["query_string"] = urlencode(kept).encode("latin-1")
+    return str(offered)
+
+
 class TokenMiddleware:
     """One shared token, over three carriers.
 
@@ -280,6 +312,31 @@ class TokenMiddleware:
             await self.app(scope, receive, send)
             return
 
+        # BEFORE the three carrier checks below, not inside `_maybe_grant`.
+        #
+        # The grant path already scrubbed the token from the scope, but it is
+        # only reached when no valid header and no valid cookie were presented
+        # AND the method is safe. Three reachable paths therefore still logged
+        # the token in cleartext, and the one that matters is ordinary re use
+        # of the intended flow: the README's phone link is a link, so a tab
+        # restore, the back button or re tapping a bookmark sends the cookie
+        # set the first time AND the still present `?token=`, and uvicorn logs
+        # the query string.
+        #
+        # Rewriting the scope for requests that go on to reach the application
+        # is deliberate rather than collateral. No route should ever see an
+        # auth token as query data, so stripping it centrally also guarantees
+        # no future handler can reflect it into a response body or a log of its
+        # own. See #20.
+        #
+        # NOT a complete fix, and it must not be described as one. The README
+        # recommends a TLS terminating proxy, and nginx's default combined
+        # format logs the query string, so in the recommended deployment the
+        # token still lands in the proxy's log whatever we do here. #21 moves
+        # the grant into a URL fragment, which is never sent to any server, and
+        # is the actual fix.
+        offered_grant = _scrub_grant_param(scope)
+
         headers = header_map(scope)
 
         presented = _bearer(headers.get("authorization", ""))
@@ -300,13 +357,15 @@ class TokenMiddleware:
         if (
             scope["type"] == "http"
             and scope["method"] in SAFE_METHODS
-            and await self._maybe_grant(scope, receive, send)
+            and await self._maybe_grant(scope, receive, send, offered_grant)
         ):
             return
 
         await deny(401, "unauthorized", "a valid token is required")(scope, receive, send)
 
-    async def _maybe_grant(self, scope: Scope, receive: Receive, send: Send) -> bool:
+    async def _maybe_grant(
+        self, scope: Scope, receive: Receive, send: Send, offered: str | None
+    ) -> bool:
         """Trade `?token=` for a cookie, then redirect the token out of the URL.
 
         Safe methods only. A grant on a mutating request would let a link
@@ -316,18 +375,15 @@ class TokenMiddleware:
         Returns True when it answered the request.
         """
         assert self.token is not None
-        # latin-1, for the reason header_map spells out: an attacker picks
-        # these bytes, and `.decode()` strict throws UnicodeDecodeError on a
-        # byte over 0x7f, which is an unauthenticated 500 rather than a 401.
-        # Starlette's own QueryParams uses latin-1 too. This trap was fixed for
-        # headers and missed here, one function away.
-        query = scope.get("query_string", b"").decode("latin-1")
-        params = parse_qsl(query, keep_blank_values=True)
-        offered = next((v for k, v in params if k == GRANT_PARAM), None)
+        # `offered` was taken by `_scrub_grant_param` before any carrier check
+        # ran, and the scope no longer holds it. Re reading it here would mean
+        # either scrubbing later, which is the leak #20 is about, or scrubbing
+        # twice.
         if offered is None or not _token_matches(offered, self.token):
             return False
 
-        remaining = urlencode([(k, v) for k, v in params if k != GRANT_PARAM])
+        # Already scrubbed, so this IS the remaining query string.
+        remaining = scope.get("query_string", b"").decode("latin-1")
         path = _safe_redirect_path(scope["path"])
         location = f"{path}?{remaining}" if remaining else path
 
