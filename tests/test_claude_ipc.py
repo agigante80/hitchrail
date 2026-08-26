@@ -111,6 +111,39 @@ def test_the_marker_lives_only_here() -> None:
     assert leaked == []
 
 
+def test_the_launch_flags_live_only_here() -> None:
+    """The other half of the quarantine, and it was missing.
+
+    The greps above cover the stop keys and the marker, so a module that
+    hardcoded the LAUNCH flags leaked past all of them. That is the same
+    failure with a worse blast radius: the flags are what turn a spawn into
+    "run anything as this user", and a second copy is a second thing to find
+    when Claude Code renames one.
+
+    Derived from `launch_argv` rather than spelled out, so the guard cannot
+    drift from what is actually spawned, and so this test does not itself
+    become the second copy it exists to forbid.
+    """
+    # The marker is itself `--` prefixed and has its own test above. Leaving
+    # it in made `flags` impossible to empty, so the vacuity assert below
+    # could never fire and this test silently re-checked the marker instead of
+    # the launch flags it is named for.
+    flags = [
+        a
+        for a in claude_ipc.launch_argv("claude", "p")
+        if a.startswith("--") and a != REMOTE_CONTROL_MARKER
+    ]
+    assert flags, "launch_argv grew no flags, so this guard checks nothing"
+    leaked = {
+        p.name: f
+        for p in SRC.glob("*.py")
+        if p.name != "claude_ipc.py"
+        for f in flags
+        if f in p.read_text()
+    }
+    assert leaked == {}, f"launch flags outside the quarantine: {leaked}"
+
+
 def test_the_engine_never_iterates_the_stop_keys() -> None:
     """A usage pattern, not an import, so no contract can enforce it.
 

@@ -1,9 +1,10 @@
 """The controls that stand between a web page and a shell on this machine.
 
-Hitchrail spawns `claude --dangerously-skip-permissions`. Anyone who can drive
-this API can run arbitrary code as the user who started it, so each control
-below is a refusal, and each has a test that asserts the refusal rather than
-the success path.
+Hitchrail spawns the agent with its permission prompts disabled, which is
+what `claude_ipc.launch_argv` builds and the only place the flags are named.
+Anyone who can drive this API can therefore run arbitrary code as the user who
+started it, so each control below is a refusal, and each has a test that
+asserts the refusal rather than the success path.
 
 The host allowlist is not optional. CVE-2026-32632 (GHSA-hhcg-r27j-fhv9) hit
 Glances, a localhost and LAN monitoring web UI, for exactly this gap: no host
