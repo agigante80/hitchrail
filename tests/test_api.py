@@ -629,3 +629,43 @@ async def test_the_stream_is_a_get_because_eventsource_cannot_be_anything_else(
     no custom anything. A stream behind a POST is one no browser reaches."""
     async with client_for(engine, config) as c:
         assert (await c.post("/api/events", headers=HEADERS)).status_code == 405
+
+
+# -- the envelope is universal, including the failures routing produces ------
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "status", "code"),
+    [
+        ("GET", "/nope", 404, "not_found"),
+        ("GET", "/", 404, "not_found"),
+        ("POST", "/api/events", 405, "method_not_allowed"),
+        ("PUT", "/api/projects", 405, "method_not_allowed"),
+        ("PATCH", "/api/sessions/vessel", 405, "method_not_allowed"),
+        ("GET", "/api/sessions/vessel/kill", 405, "method_not_allowed"),
+    ],
+)
+async def test_routing_failures_use_the_error_envelope_too(
+    client: httpx.AsyncClient, method: str, path: str, status: int, code: str
+) -> None:
+    """The contract said every failure is `{code, message}`, and it held for
+    every failure a HANDLER produced and none of the ones routing produced.
+
+    A typo in a path or a wrong method returned `text/plain` saying "Not
+    Found", so a client parsing JSON on any non 2xx got a parse error rather
+    than a code. The interface meets this on the first mistyped URL.
+    """
+    r = await client.request(method, path, headers=HEADERS)
+    assert r.status_code == status
+    assert r.headers["content-type"].startswith("application/json")
+    assert r.json()["code"] == code
+
+
+async def test_a_routing_failure_names_no_path_and_no_traceback(
+    client: httpx.AsyncClient, config: Config
+) -> None:
+    """Rendering Starlette's detail must not start leaking what it knows."""
+    r = await client.get("/api/sessions/vessel/nope", headers=HEADERS)
+    assert r.status_code == 404
+    assert str(config.root) not in r.text
+    assert "Traceback" not in r.text

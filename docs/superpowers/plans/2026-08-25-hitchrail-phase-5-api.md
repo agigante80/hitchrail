@@ -42,6 +42,16 @@ first draft of this plan quietly dropped:
 | Code | Status | Meaning |
 |---|---|---|
 | `invalid_name` | 400 | the name is not one we will turn into a path |
+| `not_found` | 404 | no such ROUTE on this server, as opposed to no such project |
+| `method_not_allowed` | 405 | the route exists and does not accept this method |
+
+A request body over `MAX_BODY_BYTES` is refused `413` with a `text/plain`
+body, and it is the ONE failure outside this table. Starlette installs its
+body limit outside the exception handlers, so it answers before the
+application exists. Documented rather than worked around: the check that
+would have answered in the envelope first could never execute.
+
+
 | `root_unavailable` | 503 | the configured root cannot be read right now |
 | `machine_unreadable` | 503 | tmux or the process table could not be read, so no state can be determined |
 | `unknown_project` | 404 | no such folder under the root |

@@ -17,6 +17,7 @@ from typing import TypeVar
 
 from sse_starlette.sse import EventSourceResponse
 from starlette.applications import Starlette
+from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
@@ -30,6 +31,29 @@ from hitchrail.security import middleware_stack
 T = TypeVar("T")
 
 SWEEP_INTERVAL_S = 1.0
+
+# The only route that reads a body takes {"name": <a project name>}, and a
+# project name is capped at 64 characters, so this is three orders of magnitude
+# more than the contract needs.
+#
+# **413 is the one failure that is not the documented envelope**, and that is a
+# property of where Starlette installs the limit rather than a decision here.
+# `RequestBodyLimitMiddleware` goes OUTSIDE `ExceptionMiddleware`, so it
+# answers before the application exists and its `text/plain` body cannot be
+# rewritten by this app's exception handlers. A draft added a `content-length`
+# check inside the create route to answer in the envelope first; it is gone,
+# because the middleware wins even against a client that lies about the length,
+# verified, so the check could never execute. A guard that cannot run is worse
+# than none.
+#
+# Starlette 1.x defaults `max_body_size` to None, meaning unlimited, and
+# `request.json()` runs INSIDE the handler: a 50 MB body was read into memory
+# in full and then refused as an invalid name. On loopback with no token
+# configured, which is the documented default, any local process could do that
+# in a loop. Filling the machine's memory through the API of a tool whose
+# entire job is refusing to start agents when memory is short is a poor way to
+# find out the limit was never set.
+MAX_BODY_BYTES = 64 * 1024
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +75,26 @@ async def in_thread(fn: Callable[..., T], *args: object, **kwargs: object) -> T:
 
 def _error(status: int, code: str, message: str, **extra: object) -> JSONResponse:
     return JSONResponse({"code": code, "message": message, **extra}, status_code=status)
+
+
+# Routing level failures, which never reach a handler. Distinct from
+# `unknown_project`: that means the root has no such folder, these mean this
+# server has no such ROUTE or does not accept that method there.
+_ROUTING_CODES = {404: "not_found", 405: "method_not_allowed"}
+
+
+async def _routing_error(request: Request, exc: Exception) -> Response:
+    """Render Starlette's own 404 and 405 in the documented envelope.
+
+    Without this the contract "every failure is {code, message}" held for every
+    failure a handler produced and for none of the ones routing produced: a
+    typo in a path or a wrong method returned `text/plain` saying "Not Found",
+    so a client parsing JSON on any non 2xx got a parse error instead of a
+    code. The interface meets this on the first mistyped URL.
+    """
+    status = exc.status_code if isinstance(exc, HTTPException) else 500
+    detail = exc.detail if isinstance(exc, HTTPException) else "internal error"
+    return _error(status, _ROUTING_CODES.get(status, "error"), str(detail))
 
 
 def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
@@ -370,5 +414,7 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
             Route("/api/events", event_stream, methods=["GET"]),
         ],
         middleware=middleware_stack(config),
+        exception_handlers={HTTPException: _routing_error},
+        max_body_size=MAX_BODY_BYTES,
         lifespan=lifespan,
     )

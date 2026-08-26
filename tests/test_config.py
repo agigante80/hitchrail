@@ -887,6 +887,12 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # three paths used to leak, which is the part a reader cannot recover
         # from the code.
         "security.py": 443,
+        # 413. The HTTP layer: routes, the error envelope, the SSE stream and
+        # the lifespan sweeper, which is one job described four ways. Most of
+        # the length above the guideline is the comments recording what the
+        # transport does rather than what this code does, and those are the
+        # part a reader cannot recover from the source.
+        "server.py": 420,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"
