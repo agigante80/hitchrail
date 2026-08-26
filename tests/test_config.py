@@ -833,16 +833,28 @@ def test_hostnames_does_not_import_config() -> None:
     assert "from .config" not in source
 
 
-def test_both_modules_are_under_the_size_guideline() -> None:
+def test_every_module_is_under_the_size_guideline() -> None:
     """The reason #18 existed. Asserted so it does not silently regress.
 
     `.claude/CLAUDE.md` says a file past roughly 400 lines is doing more than
-    one thing. config.py reached 502 before this split.
+    one thing. config.py reached 502 before its split.
+
+    Every module, not the two that #18 touched. Naming those two let
+    discovery.py drift to 409 unnoticed while this test passed, which is the
+    same shape of gap as testing three hand picked pairs for injectivity.
     """
+    # One known exception, tracked as #33, recorded here rather than excused by
+    # loosening the threshold. Written as an exact size so the debt cannot grow
+    # quietly either: this fails if discovery.py gets bigger OR if #33 lands and
+    # the entry is left behind.
+    known = {"discovery.py": 403}
+
     src = Path(__file__).parent.parent / "src" / "hitchrail"
-    for name in ("config.py", "hostnames.py"):
-        lines = len((src / name).read_text().splitlines())
-        assert lines < 400, f"{name} is {lines} lines"
+    sizes = {p.name: len(p.read_text().splitlines()) for p in sorted(src.glob("*.py"))}
+    oversize = {n: c for n, c in sizes.items() if c >= 400}
+    assert oversize == known, (
+        f"past the guideline: {oversize}, expected only the tracked exception {known}"
+    )
 
 
 @pytest.mark.parametrize(

@@ -1031,7 +1031,7 @@ actually built rather than what is in flight.
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `read_meminfo(path: Path = Path("/proc/meminfo")) -> str`; `available_mb(meminfo_text: str) -> int`; `StrEnum Verdict` with members `OK`, `SOFT`, `HARD`; `guard(available_mb: int, need_mb: int, hard_mb: int, soft_mb: int) -> Verdict`.
+- Produces: `read_meminfo(path: Path = Path("/proc/meminfo")) -> str`; `available_mb(meminfo_text: str) -> int`; `StrEnum Verdict` with members `OK`, `SOFT`, `HARD`; `guard(available: int, need_mb: int, hard_mb: int, soft_mb: int) -> Verdict`.
 
 - [x] **Step 1: Write the failing tests**
 
@@ -1154,7 +1154,7 @@ def available_mb(meminfo_text: str) -> int:
     return int(match.group(1)) // 1024 if match else 0
 
 
-def guard(available_mb: int, need_mb: int, hard_mb: int, soft_mb: int) -> Verdict:
+def guard(available: int, need_mb: int, hard_mb: int, soft_mb: int) -> Verdict:
     """Decide against what would be LEFT after starting, not what is free now."""
     remaining = available_mb - need_mb
     if remaining < hard_mb:

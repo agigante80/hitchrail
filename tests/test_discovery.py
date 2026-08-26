@@ -724,16 +724,51 @@ def test_adding_an_alias_does_not_rename_a_running_project(tmp_path: Path) -> No
     assert scan(tmp_path).projects == ("zebra",)
 
 
-def test_aliases_alone_fall_back_to_name_order(tmp_path: Path) -> None:
-    """Two links and no real directory in the root: still deterministic."""
-    outside = tmp_path / "elsewhere"
-    outside.mkdir()
+def test_links_to_an_unlistable_target_fall_back_to_name_order(tmp_path: Path) -> None:
+    """The residual case the symlink tie break does NOT close. See #32.
+
+    When the shared target is itself unlistable, here because the allowlist
+    refuses a name with a space, every candidate is a symlink and there is no
+    durable name to prefer. The tie falls back to name order, and adding a link
+    that sorts earlier still renames the project.
+
+    Asserted so the gap is visible and measured rather than discovered later:
+    if #32 changes this, this test is the one that should fail and be rewritten.
+    """
     root = tmp_path / "root"
     root.mkdir()
-    (root / "target").mkdir()
-    (root / "zlink").symlink_to(root / "target", target_is_directory=True)
-    (root / "alink").symlink_to(root / "target", target_is_directory=True)
-    assert scan(root).projects == ("target",)
+    (root / "my app").mkdir()  # real, and refused by NAME_PATTERN
+    (root / "zebra").symlink_to(root / "my app", target_is_directory=True)
+    assert scan(root).projects == ("zebra",)
+
+    (root / "alpha").symlink_to(root / "my app", target_is_directory=True)
+    # Known gap: the running project is renamed. #32.
+    assert scan(root).projects == ("alpha",)
+
+
+def test_an_unsearchable_entry_does_not_take_the_whole_root_down(tmp_path: Path) -> None:
+    """`_dedup_order` runs inside the sorted() whose OSError is fatal.
+
+    A root that is readable but not searchable makes `is_symlink()` raise
+    PermissionError, which pathlib re-raises rather than swallowing. Without the
+    guard that becomes RootUnavailable and the entire listing fails, instead of
+    the per entry "cannot be read" the module already has for this.
+
+    Not a racing unlink: that is ENOENT, which pathlib treats as "does not
+    exist" and returns False for, so it never reaches the guard at all.
+    """
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "sub").mkdir()
+    # Readable, so iterdir() succeeds and yields the entry, but not searchable,
+    # so lstat on that entry is refused. Exactly the split the guard exists for.
+    root.chmod(0o600)
+    try:
+        listing = scan(root)
+    finally:
+        root.chmod(0o700)
+    assert listing.projects == ()
+    assert [u.reason for u in listing.unsupported] == ["cannot be read: Permission denied"]
 
 
 def test_three_names_for_one_directory_keep_one(tmp_path: Path) -> None:

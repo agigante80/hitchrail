@@ -257,32 +257,26 @@ def _dedup_order(entry: Path) -> tuple[int, str]:
     """Real directories before symlinks, then by name.
 
     `scan` keeps the FIRST name it accepts for a resolved directory, so this
-    ordering is what decides which of several names for one directory survives.
+    decides which of several names for one directory survives.
 
-    Sorting by name alone was the first attempt and it was wrong, in a way that
-    only shows up over time rather than across machines. A root holding `zebra`
-    lists it, the user starts it, and the engine creates the session `hr-zebra`.
-    Somebody then adds `alpha -> zebra`, a `ln -s` for convenience or a restored
-    backup, and `zebra` loses the tie to `alpha`. The running project vanishes
-    from the list and reappears under a name that has no session, so it reads as
-    stopped; tapping start puts a SECOND agent in that directory while the first
-    is still working in it. That is the outcome this deduplication exists to
-    prevent, reached from the other side, and it is worse than not deduplicating
-    at all for that sequence.
+    Name order alone was wrong, and the failure shows up over time rather than
+    across machines: a running `zebra` loses the tie the moment somebody adds
+    `alpha -> zebra`, so it vanishes from the list, reappears under a name with
+    no session, reads as stopped, and a tap puts a second agent in the
+    directory the first is working in. A real directory's name is durable,
+    because creating a link cannot change it. See #11.
 
-    A real directory's name is durable: creating a link to it cannot change it.
-    Ordering by that first makes the surviving name stable over time as well as
-    across machines, and it makes the "another name for X" reason point at the
-    name that will still be there tomorrow.
+    This does NOT close the case where every candidate is a symlink, which
+    happens when the shared target is unlistable. See #32.
 
-    A raising `is_symlink` is treated as "not a symlink" rather than allowed to
-    propagate: this runs inside the `sorted()` call whose OSError becomes
-    `RootUnavailable`, and one unreadable entry must not take the whole root
-    down.
+    A raising `is_symlink` is caught rather than allowed to propagate: this runs
+    inside the `sorted()` whose OSError becomes `RootUnavailable`, and one
+    unreadable entry must not take the whole root down. The reachable case is
+    EACCES; a racing unlink is ENOENT, which pathlib swallows before this.
     """
     try:
         is_link = entry.is_symlink()
-    except OSError:  # pragma: no cover - needs a racing unlink to reach
+    except OSError:
         is_link = False
     return (1 if is_link else 0, entry.name)
 
@@ -312,8 +306,8 @@ def scan(root: Path) -> Listing:
     projects: list[str] = []
     unsupported: list[Unsupported] = []
     # Resolved directory -> the name already accepted for it. Two names for one
-    # directory means two rows that both start an agent in it, and a session is
-    # keyed off the NAME, so both rows would start their own.
+    # directory means two rows that each start their own agent in it, because a
+    # session is keyed off the name. `_dedup_order` decides which name wins.
     seen: dict[Path, str] = {}
 
     # Only failing to read the root itself is fatal. Everything below is per
@@ -336,10 +330,10 @@ def scan(root: Path) -> Listing:
                     seen[resolved] = name
                     projects.append(name)
                     continue
-                # Reported, never dropped in silence. The alias is a folder the
-                # user can see, and a folder that simply vanishes reads as
-                # Hitchrail being unable to see it, which is the bug `scan`
-                # exists to avoid. Name the survivor so the row is explicable.
+                # Reported, never dropped in silence: a folder that vanishes
+                # reads as Hitchrail being unable to see it, which is the bug
+                # `scan` exists to avoid. Name the survivor so the row explains
+                # itself.
                 reason = f"another name for {display_name(first)}, already listed"
         except OutsideRoot:
             reason = "points outside the root, so it is not safe to open"
