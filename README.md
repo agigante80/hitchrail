@@ -3,14 +3,13 @@
 A web UI for starting and stopping headless Claude Code sessions across a
 folder of projects. Open it on your phone, tap a folder, get a session link.
 
-**Status: early. Phases 1 and 2 of 7 are built, Phase 3 is in progress, and
-there is no runnable server yet.**
+**Status: early. Phases 1 to 3 of 7 are built; there is no runnable server yet.**
 
 What exists today is the package skeleton with five blocking gates on Python
 3.11, 3.12 and 3.13, the configuration and its refusals, the folder discovery
 that makes the root a hard boundary, the three security controls that stand
-between a web page and a shell, and the first of the adapters: tmux session
-naming and the memory guard. What does not exist yet is everything you would
+between a web page and a shell, and the adapters: tmux, the process table, the
+Claude Code quarantine and the memory guard. What does not exist yet is everything you would
 actually use: the HTTP API, the browser interface, and the engine that starts
 and stops sessions. `hitchrail` is not on PyPI, and the install commands below
 will not work until it is.

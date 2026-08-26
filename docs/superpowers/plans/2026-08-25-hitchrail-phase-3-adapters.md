@@ -29,26 +29,27 @@ Copied verbatim from the spec. Every task inherits these.
 
 ## Phase 3 progress
 
-Not complete. Two of the four adapter modules exist, and `procs.py` and
-`claude_ipc.py` are still one line stubs.
+**Complete.** All four adapter modules exist, all eleven tickets are closed, and
+every exit criterion below was verified against running code rather than
+against the tickets.
 
 | Task | Ticket | State |
 |---|---|---|
 | 7a naming and target specs | #22 | done, `b2254d5` and `3aadc32` |
-| 7b adapter operations | #23 | **open** |
-| 8 process table | #24 | **open** |
-| 9a launch and stop | #25 | **open** |
-| 9b the session link | #29 | **open** |
+| 7b adapter operations | #23 | done |
+| 8 process table | #24 | done |
+| 9a launch and stop | #25 | done |
+| 9b the session link | #29 | done |
 | 10 memory guard | #26 | done, `c1ad4a0` |
-| prove tmux for real | #27 | **open** |
+| prove tmux for real | #27 | done |
 | carried in: one directory one project | #11 | done, `b131bab` and `4d7f648` |
 | carried in: the FQDN root dot | #19 | done, `712da0a` |
 | carried in: split `config.py` | #18 | done, `7cbc874` |
-| found during the batch | #31 | **open** |
+| found during the batch | #31 | done |
 
-**One of the ten exit criteria below is met** (`guard(0, ...)` is `HARD`). The
-rest need `procs`, `claude_ipc`, the tmux operations, or the live tmux tier,
-none of which exist yet. The phase does not close until they do.
+**All ten exit criteria below are met**, each ticked with the named tests that
+hold it up. They were re-verified by driving the built modules rather than by
+reading the tickets, because a ticket says what somebody intended.
 
 ## Phase 3 tickets, in dependency order
 
@@ -180,7 +181,7 @@ runs once per project while deriving state. At the fifty rows the design draws,
 that is hundreds of subprocess spawns per page load. `list-panes -a` answers
 the whole question once.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/test_tmux.py`:
 
@@ -366,12 +367,12 @@ def test_send_keys_passes_each_key_as_its_own_argument() -> None:
     ]
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `uv run pytest tests/test_tmux.py -v`
 Expected: FAIL with `ImportError: cannot import name 'NotOurSession' from 'hitchrail.tmux'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Replace the stub `src/hitchrail/tmux.py` with:
 
@@ -529,12 +530,12 @@ class Tmux:
         self._run(self._argv("send-keys", "-t", self.pane_target(project), *keys))
 ```
 
-- [ ] **Step 4: Run to verify passing**
+- [x] **Step 4: Run to verify passing**
 
 Run: `uv run pytest tests/test_tmux.py -v`
 Expected: PASS, 20 tests. Count them from the output rather than trusting this line.
 
-- [ ] **Step 5: Gates and commit**
+- [x] **Step 5: Gates and commit**
 
 ```bash
 uv run ruff check && uv run ruff format --check && uv run mypy && uv run lint-imports
@@ -554,7 +555,7 @@ git commit -m "feat(tmux): adapter with injective naming and a one call pane map
 - Consumes: `Runner` from `hitchrail.tmux` (Task 7).
 - Produces: frozen dataclass `Proc(pid: int, ppid: int, rss_kb: int, etime_s: int, args: str)`; `parse_ps(text: str) -> list[Proc]`; `snapshot(run: Runner | None = None) -> ProcTable`; class `ProcTable(procs: list[Proc])` with `by_pid: dict[int, Proc]`, `children(pid: int) -> list[Proc]`, `descendants(pid: int) -> list[Proc]`, `tree_rss_mb(pid: int) -> int`, `matching(marker: str) -> list[Proc]`, `first_matching_in_tree(pid: int, marker: str) -> Proc | None`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/test_procs.py`:
 
@@ -666,12 +667,12 @@ def test_snapshot_of_a_failing_ps_is_empty_not_an_exception() -> None:
     assert snapshot(run=runner).procs == []
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `uv run pytest tests/test_procs.py -v`
 Expected: FAIL with `ImportError: cannot import name 'Proc' from 'hitchrail.procs'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Replace the stub `src/hitchrail/procs.py` with:
 
@@ -780,12 +781,12 @@ def snapshot(run: Runner | None = None) -> ProcTable:
 The cycle guard adds `pid` itself to `seen` before walking, which is why the
 cyclic test expects the walk to return both rows once and then stop.
 
-- [ ] **Step 4: Run to verify passing**
+- [x] **Step 4: Run to verify passing**
 
 Run: `uv run pytest tests/test_procs.py -v`
 Expected: PASS, 13 tests.
 
-- [ ] **Step 5: Gates and commit**
+- [x] **Step 5: Gates and commit**
 
 ```bash
 uv run ruff check && uv run ruff format --check && uv run mypy && uv run lint-imports
@@ -833,7 +834,7 @@ literal `"/exit"` in `engine.py`, which is exactly the boundary this module
 exists to hold, and the import contract cannot catch it because it is a string
 rather than an import.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/test_claude_ipc.py`:
 
@@ -939,12 +940,12 @@ def test_no_url_anywhere_is_none(tmp_path: Path) -> None:
     assert session_url(9, tmp_path, "nothing here") is None
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `uv run pytest tests/test_claude_ipc.py -v`
 Expected: FAIL with `ImportError: cannot import name 'GRACEFUL_STOP_KEYS' from 'hitchrail.claude_ipc'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Replace the stub `src/hitchrail/claude_ipc.py` with:
 
@@ -1033,12 +1034,12 @@ def session_url(pid: int, sessions_dir: Path, pane_text: str | None = None) -> s
     return found[-1] if found else None
 ```
 
-- [ ] **Step 4: Run to verify passing**
+- [x] **Step 4: Run to verify passing**
 
 Run: `uv run pytest tests/test_claude_ipc.py -v`
 Expected: PASS, 14 tests.
 
-- [ ] **Step 5: Gates and commit**
+- [x] **Step 5: Gates and commit**
 
 ```bash
 uv run ruff check && uv run ruff format --check && uv run mypy && uv run lint-imports
@@ -1050,10 +1051,8 @@ git commit -m "feat(claude-ipc): quarantine the bridge lookup and the stop seque
 
 ### Task 10: The memory guard
 
-**Done in c1ad4a0 (#26).** Task 7 is half done: 7a, the naming and target
-specs, landed in b2254d5 (#22); 7b, the operations, is #23 and open. Tasks 8
-and 9 are open. Only the boxes below are ticked, so the plan says what is
-actually built rather than what is in flight.
+**Done in c1ad4a0 (#26).** Every task in this phase is now complete; see the
+progress table near the top for the ticket and commit behind each.
 
 **Files:**
 - Modify: `src/hitchrail/ram.py`
@@ -1215,15 +1214,15 @@ git commit -m "feat(ram): memory guard deciding on what is left after starting"
 
 ## Phase 3 exit criteria
 
-- [ ] All five gates green on 3.11, 3.12 and 3.13.
-- [ ] Each of the four ADDRESSING footguns in the design's section 4.2 (1, 2, 3 and 5) has a named regression test that fails if its workaround is removed, and `sanitize` is proven injective. Footgun 4, serialising concurrent starts, is deliberately not this phase's: there is nothing here to serialise, because starting is an engine operation. It is Phase 4 Task 13 and carries its own exit criterion there. This criterion used to say "every footgun in section 4.2", which no Phase 3 implementation could satisfy.
-- [ ] `Tmux.pane_pids()` issues exactly one subprocess call regardless of session count.
-- [ ] No method on `Tmux` can reach `kill-server`, and every call carries the configured socket when one is set.
-- [ ] A cyclic process table does not hang `descendants`.
-- [ ] A failed `ps` yields an empty table rather than an exception, and never reads as "nothing is running".
-- [ ] `bridge_url` refuses a non string, a separator, and a scheme in `bridgeSessionId`.
-- [ ] `GRACEFUL_STOP_KEYS` lives in `claude_ipc` and nowhere else, and nothing outside it iterates the sequence: `grep -rn '"/exit"' src/` returns one file AND `request_stop` is the only way the keys are sent. The grep alone passes while a caller still loops, which is the leak the design's section 4.3 exists to prevent.
-- [ ] `request_stop` accepts any object with `send_keys`, proven by a test that passes something which is not a `Tmux`. If the annotation is ever tightened to the concrete class, that test fails, which is the point: naming `Tmux` there puts the channel assumption back.
-- [ ] `guard(0, ...)` is `HARD`.
+- [x] All five gates green on 3.11, 3.12 and 3.13. verified locally and in CI on 3.11, 3.12 and 3.13.
+- [x] Each of the four ADDRESSING footguns in the design's section 4.2 (1, 2, 3 and 5) has a named regression test that fails if its workaround is removed, and `sanitize` is proven injective. Footgun 4, serialising concurrent starts, is deliberately not this phase's: there is nothing here to serialise, because starting is an engine operation. It is Phase 4 Task 13 and carries its own exit criterion there. This criterion used to say "every footgun in section 4.2", which no Phase 3 implementation could satisfy. `tests/test_tmux.py` for the workarounds and `tests/test_live_tmux.py` for the premises they rest on; `sanitize` is injective by construction and proven by exhaustion over a generated corpus.
+- [x] `Tmux.pane_pids()` issues exactly one subprocess call regardless of session count. `test_the_pane_map_is_one_call_whatever_the_session_count`.
+- [x] No method on `Tmux` can reach `kill-server`, and every call carries the configured socket when one is set. `test_no_method_can_reach_kill_server` and `test_the_socket_is_carried_on_every_call`, both sweeping the whole public surface.
+- [x] A cyclic process table does not hang `descendants`. `test_a_cyclic_table_terminates` and `test_a_process_that_is_its_own_parent_terminates`; reverting the guard hangs the suite.
+- [x] A failed `ps` yields an empty table rather than an exception, and never reads as "nothing is running". `test_a_failed_ps_is_an_empty_table_rather_than_an_exception` and `test_an_empty_table_is_distinguishable_from_a_failure`, which is what `ProcTable.ok` exists for.
+- [x] `bridge_url` refuses a non string, a separator, and a scheme in `bridgeSessionId`. `test_a_non_string_bridge_id_is_refused`, `test_a_bridge_id_with_a_separator_is_refused`, `test_a_bridge_id_with_a_scheme_is_refused`.
+- [x] `GRACEFUL_STOP_KEYS` lives in `claude_ipc` and nowhere else, and nothing outside it iterates the sequence: `grep -rn '"/exit"' src/` returns one file AND `request_stop` is the only way the keys are sent. The grep alone passes while a caller still loops, which is the leak the design's section 4.3 exists to prevent. `test_the_stop_keys_live_only_here` and `test_the_engine_never_iterates_the_stop_keys`, both greps, because no import contract sees a string or a for loop.
+- [x] `request_stop` accepts any object with `send_keys`, proven by a test that passes something which is not a `Tmux`. If the annotation is ever tightened to the concrete class, that test fails, which is the point: naming `Tmux` there puts the channel assumption back. `test_request_stop_takes_anything_shaped_like_a_pane`; tightening the annotation to `Tmux` makes mypy reject it.
+- [x] `guard(0, ...)` is `HARD`. `test_no_memory_at_all_is_hard`.
 
 When these hold, start Phase 4 from `docs/roadmap.md`.

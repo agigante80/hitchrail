@@ -171,12 +171,27 @@ removed, and nothing in this layer imports Starlette. Footgun 4, serialising
 concurrent starts, belongs to Phase 4: starting is an engine operation and
 there is nothing in this layer to serialise.
 
-**In progress.** The naming and target specs (#22) and the memory guard (#26)
-are built, along with three tickets carried in from earlier phases (#11, #18,
-#19). The tmux operations (#23), the process table (#24), the Claude Code
-quarantine (#25 and #29), the live tmux tier (#27) and #31 are open, and
-`procs.py` and `claude_ipc.py` are still stubs. One of ten exit criteria is
-met. The plan carries the task by task state.
+All of it held. The four adapters are built and every one of the ten exit
+criteria was verified by driving the modules rather than by reading the
+tickets. Three things worth carrying forward:
+
+- **The hermetic tmux tests could not have caught a wrong belief.** Every one
+  asserts the argv the adapter sent, which proves the code builds what we
+  intended and can never falsify the intention, because the fake encodes the
+  same belief. `tests/test_live_tmux.py` runs the real thing, and all four
+  addressing premises reproduce on tmux 3.4. This is the same gap Phase 2
+  closed with a live socket, and it is worth assuming it exists wherever a
+  fake stands in for an external tool.
+- **That live tier leaked four tmux servers before it caught itself**, through
+  the exact footgun it exists to prove: teardown killed the name it asked for,
+  and tmux had stored a different one. Its first leak check was vacuous
+  because it ran after the socket was deleted. A teardown assertion that
+  cannot fail is worse than none, because it reads as proof.
+- **`sanitize` was not injective**, which was its only requirement, and the
+  digest design in this plan is what made it so. A project literally named
+  `a-b-<the digest of a.b>` collided with `a.b`, and that name is computable
+  by anyone who can create a folder. Injective by construction beat injective
+  by hash.
 
 ## Phase 4: The engine
 

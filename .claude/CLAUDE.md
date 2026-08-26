@@ -3,14 +3,15 @@
 A web UI for starting and stopping headless Claude Code sessions across a folder
 of projects. Phone first. Python, standalone, no bash dependency.
 
-## Status: phases 1 and 2 of 7 are built
+## Status: phases 1 to 3 of 7 are built
 
-What exists: the package skeleton with five blocking gates, `config.py`,
-`discovery.py` and `security.py`, and 316 tests. What does not exist yet is
-everything you would actually run: the HTTP API, the browser interface, and the
-engine that starts and stops sessions. The remaining modules listed under
-Architecture are one line placeholders, so an import of them succeeds and tells
-you nothing. Phase 3 is the next work; read `docs/roadmap.md` first.
+What exists: the package skeleton with five blocking gates, the configuration
+and its refusals, the folder discovery, the three security controls, all four
+adapters, and 519 tests. What does not exist yet is everything you would
+actually run: the HTTP API, the browser interface, and the engine that starts
+and stops sessions. `engine.py`, `events.py`, `server.py` and `cli.py` are one
+line placeholders, so importing them succeeds and tells you nothing. Phase 4 is
+the next work; read `docs/roadmap.md` first.
 
 ## Where things are
 
@@ -54,9 +55,15 @@ One test, one file, one tier:
 
 ```sh
 uv run pytest tests/test_engine.py::test_detached_is_not_stopped
-uv run pytest tests/e2e -x        # slow tier, needs a fake claude shim
+uv run pytest -m live             # binds a real loopback socket
+uv run pytest -m live_tmux        # drives a real tmux on a private socket
+uv run pytest -m "not live_tmux"  # skip it, on a machine without tmux
 uv run pytest -k detached
 ```
+
+The `live_tmux` tier needs tmux installed. It skips without it, and CI installs
+tmux and fails if the tier skipped, because a tier that skips everywhere looks
+like coverage while proving less than none.
 
 Three tiers, and the choice is not a matter of taste. Unit is hermetic with
 every external surface faked. Integration drives the real Starlette app through
