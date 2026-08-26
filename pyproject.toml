@@ -124,6 +124,7 @@ source_modules = [
   "hitchrail.ram",
   "hitchrail.events",
   "hitchrail.sessions",
+  "hitchrail.derive",
   "hitchrail.engine",
 ]
 forbidden_modules = [

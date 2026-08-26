@@ -7,6 +7,7 @@ socket.
 
 from __future__ import annotations
 
+import tomllib
 from collections.abc import Callable
 from pathlib import Path
 
@@ -855,7 +856,14 @@ def test_every_module_is_under_the_size_guideline() -> None:
     # mechanism retires its own exceptions.
     # Tracked, not excused. #50 splits derivation out of engine.py; the
     # vocabulary already moved to sessions.py, which took it from 555 to 466.
-    caps = {"engine.py": 586}  # #50, being done next
+    # engine.py holds the lifecycle and nothing else since #50 took the
+    # derivation out into `derive.py`. It sits over the guideline rather than
+    # under it, which is a judgement and not an oversight: the next real seam
+    # is the graceful-stop overlay (`_stopping`, its guard, `stop`, `kill`,
+    # `expire_stops`), and cutting it now would buy about a hundred lines at
+    # the price of splitting one sequence across two files. Cut there if this
+    # grows again, rather than raising the number.
+    caps = {"engine.py": 465}
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"
     sizes = {p.name: len(p.read_text().splitlines()) for p in sorted(src.glob("*.py"))}
@@ -914,3 +922,29 @@ def test_an_origin_whose_host_is_not_a_host_is_refused(tmp_path: Path, origin: s
     """
     with pytest.raises(ConfigError, match="not a valid host in origin"):
         Config(root=tmp_path, extra_origins=(origin,))
+
+
+def test_the_import_contract_covers_every_engine_layer_module() -> None:
+    """A new module is unguarded until somebody remembers to list it.
+
+    `lint-imports` checks the modules it is given and says nothing about the
+    ones it is not, so it passes just as loudly with a gap in it. Splitting
+    `derive` out of `engine` at #50 opened exactly that gap: the new module
+    could have imported Starlette and the contract would still have reported
+    "1 kept, 0 broken".
+
+    The web layer is the exception list below, and it is spelled out rather
+    than inferred, so adding a module to it is a deliberate act.
+    """
+    web = {"server.py", "cli.py", "security.py", "__init__.py"}
+    src = Path(__file__).resolve().parents[1] / "src" / "hitchrail"
+    engine_layer = {f"hitchrail.{p.stem}" for p in src.glob("*.py") if p.name not in web}
+    contract = tomllib.loads(
+        (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text()
+    )["tool"]["importlinter"]["contracts"][0]
+    missing = engine_layer - set(contract["source_modules"])
+    assert not missing, (
+        f"engine layer modules outside the import contract: {sorted(missing)}. "
+        "Add them to `source_modules` in pyproject.toml, or to `web` here if "
+        "they are genuinely part of the web layer."
+    )

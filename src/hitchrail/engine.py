@@ -35,10 +35,10 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
 
-from hitchrail import claude_ipc, discovery, ram
+from hitchrail import claude_ipc, derive, discovery, ram
 from hitchrail.config import Config
+from hitchrail.derive import Machine
 from hitchrail.events import EventBus
 from hitchrail.procs import ProcTable, snapshot
 from hitchrail.sessions import (
@@ -56,20 +56,6 @@ from hitchrail.sessions import (
     UnknownProject,
 )
 from hitchrail.tmux import Tmux, TmuxUnavailable
-
-
-@dataclass(frozen=True)
-class _Machine:
-    """One consistent look at the machine, taken once per read.
-
-    Two subprocess calls answer every project. Asking tmux per project is a
-    spawn per row, and the design draws fifty rows.
-    """
-
-    table: ProcTable
-    pane_pids: dict[str, int]
-    owned: frozenset[int]
-
 
 logger = logging.getLogger(__name__)
 
@@ -120,30 +106,13 @@ class Engine:
 
     # -- reading -------------------------------------------------------
 
-    def _look(self) -> _Machine:
-        """One tmux call and one `ps` call, whatever the project count."""
-        table = self._procs_fn()
-        if not table.ok:
-            raise MachineUnreadable(
-                "the process table could not be read, so no session state can "
-                "be determined; this is not the same as nothing running"
-            )
-        try:
-            pane_pids = self.tmux.pane_pids()
-        except TmuxUnavailable as exc:
-            # The other half of the same honesty. An empty pane map means no
-            # sessions; a tmux that could not be run means we do not know, and
-            # deriving `stopped` from it would report every running agent as
-            # not running.
-            raise MachineUnreadable(str(exc)) from exc
-        owned: set[int] = set()
-        for pid in pane_pids.values():
-            owned.add(pid)
-            # Descendants, not children: a shell usually sits between the pane
-            # and the agent, and an agent one level down that is not counted as
-            # owned is reported as somebody else's orphan.
-            owned.update(p.pid for p in table.descendants(pid))
-        return _Machine(table=table, pane_pids=pane_pids, owned=frozenset(owned))
+    def _look(self) -> Machine:
+        return derive.look(self._procs_fn, self.tmux)
+
+    def _derive(self, name: str, machine: Machine) -> Session:
+        # `self._stopping` is passed unguarded on purpose: see the note on
+        # `_stopping_guard`. `derive` only asks `name in stopping`.
+        return derive.derive(name, machine, self.config, self.tmux, self._stopping)
 
     def list(self) -> list[Session]:
         machine = self._look()
@@ -161,96 +130,6 @@ class Engine:
         """When a graceful stop was requested, or None. Memory only."""
         with self._stopping_guard:
             return self._stopping.get(name)
-
-    # -- derivation ----------------------------------------------------
-
-    def _derive(self, name: str, machine: _Machine) -> Session:
-        protected = self.config.self_project is not None and name == self.config.self_project
-        # The SANITIZED name, because that is what tmux stored. Looking up the
-        # raw name finds nothing and reports stopped while the agent runs.
-        pane_pid = machine.pane_pids.get(self.tmux.session_name(name))
-
-        if pane_pid is not None:
-            agent = machine.table.first_matching_in_tree(
-                pane_pid, claude_ipc.REMOTE_CONTROL_MARKER
-            )
-            if agent is not None:
-                return self._live(name, agent.pid, machine, State.RUNNING, protected)
-            # A session with no agent in it. Not stopped: the shell is there.
-            return Session(
-                name=name,
-                state=State.STALE,
-                stopping=name in self._stopping,
-                protected=protected,
-            )
-
-        orphan = self._find_detached(name, machine)
-        if orphan is not None:
-            return self._live(name, orphan, machine, State.DETACHED, protected)
-
-        return Session(
-            name=name,
-            state=State.STOPPED,
-            stopping=name in self._stopping,
-            protected=protected,
-        )
-
-    def _find_detached(self, name: str, machine: _Machine) -> int | None:
-        """An agent that outlived its terminal.
-
-        Without this, such a session reads as stopped while it is very much
-        alive, and starting again gives you two agents in one folder.
-
-        Matched on the argv tail rather than a bare substring: a command line
-        for project `ab` must not satisfy a lookup for `a`, which is the tmux
-        prefix footgun one layer up.
-
-        An earlier version matched only the marker and the name, and warned
-        here that it depended on the project name being last in `launch_argv`.
-        **Building the suffix from `launch_argv` removed that dependency**, so
-        the warning is gone with it: appending a flag after the project name
-        now changes both sides together. The tests build their process rows the
-        same way, so the two cannot drift apart.
-
-        The binary is stripped (`[1:]`) on purpose: an operator who changes
-        `--agent-binary`, or an `env` wrapper at argv[0], must not blind the
-        scan for agents that are already running.
-        """
-        # The WHOLE argv tail, not just the marker and the name. Matching on
-        # those two alone claims any process that happens to mention both: a
-        # `grep -r` for the marker across a project directory derived as a
-        # detached agent for that project. Since a detached row refuses to
-        # start, and a kill has no tmux session to kill, the project stayed
-        # unstartable until the unrelated process exited.
-        #
-        # Built by calling `launch_argv`, so this cannot drift from what we
-        # actually spawn, and the flags stay inside the quarantine.
-        suffix = " ".join(claude_ipc.launch_argv(self.config.agent_binary, name)[1:])
-        for proc in machine.table.matching(claude_ipc.REMOTE_CONTROL_MARKER):
-            if proc.pid in machine.owned:
-                continue
-            if proc.args.rstrip().endswith(suffix):
-                return proc.pid
-        return None
-
-    def _live(
-        self, name: str, pid: int, machine: _Machine, state: State, protected: bool
-    ) -> Session:
-        proc = machine.table.by_pid.get(pid)
-        return Session(
-            name=name,
-            state=state,
-            pid=pid,
-            ram_mb=machine.table.tree_rss_mb(pid),
-            uptime_s=proc.etime_s if proc else 0,
-            # `bridge_url` reads a file. `session_url` would capture a pane,
-            # which is a subprocess per running row on every list. The link is
-            # simply absent until the agent writes it, and the API's /url route
-            # pays for the fallback when somebody actually asks for a link.
-            url=claude_ipc.bridge_url(pid, self.config.sessions_dir),
-            stopping=name in self._stopping,
-            protected=protected,
-        )
 
     # -- the lifecycle -------------------------------------------------
 
