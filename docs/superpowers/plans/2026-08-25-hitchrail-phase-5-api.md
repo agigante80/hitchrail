@@ -1607,6 +1607,7 @@ git commit -m "feat(cli): serve command with a generated token and a link a phon
 - [ ] The event stream authenticates by cookie with no `Authorization` header, and refuses an unauthenticated reader.
 - [ ] A state change made through the API arrives on the stream.
 - [ ] A forged `Host`, a foreign `Origin` and a missing token are refused on a live socket, not only in a test.
+- [ ] No query string on `DELETE /api/sessions/{name}` reaches the kill path, `?kill=1` included, and the kill route is Origin checked like every other mutating route. This is #52's guarantee, and asserting only that the kill route works would pass against the design it replaced.
 
 When these hold, write the Phase 6 plan from `docs/roadmap.md`.
 
