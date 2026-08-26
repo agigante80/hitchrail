@@ -451,6 +451,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import functools
+import logging
 from collections.abc import AsyncIterator, Callable
 from typing import TypeVar
 
@@ -468,6 +469,8 @@ from hitchrail.security import middleware_stack
 T = TypeVar("T")
 
 SWEEP_INTERVAL_S = 1.0
+
+logger = logging.getLogger(__name__)
 
 
 async def in_thread(fn: Callable[..., T], *args: object, **kwargs: object) -> T:
@@ -629,11 +632,23 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus | None = None) 
 
         async def sweep() -> None:
             """Expire stop markers on a timer, so a timeout the user is
-            watching resolves without waiting for the next poll."""
+            watching resolves without waiting for the next poll.
+
+            The loop must outlive any single failure, because if this task
+            ends no stop expires again for the life of the process, and the
+            interface shows a timer that never resolves. It must NOT do that
+            silently, though: a bare suppress here makes "expiry stopped
+            working" unfalsifiable, and this ran for a whole phase before
+            anybody would notice. The engine already logs the expected
+            operational case (a machine it cannot read); this catches the
+            unexpected one and says so.
+            """
             while True:
                 await asyncio.sleep(SWEEP_INTERVAL_S)
-                with contextlib.suppress(Exception):
+                try:
                     await in_thread(engine.expire_stops)
+                except Exception:
+                    logger.exception("stop sweep failed; the timer continues")
 
         task = asyncio.create_task(sweep())
         try:
@@ -660,6 +675,43 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus | None = None) 
 The `json` import is unused until Task 16 adds the event stream. Leave it out
 for now; ruff's `F401` will fail the gate otherwise, and Task 16 adds it back
 with the route that needs it.
+
+- [ ] **Step 3b: The sweep survives a failing tick, and says so**
+
+The loop must outlive one bad tick, because if the task ends no stop expires
+again for the life of the process and the interface shows a timer that never
+resolves. Add to `tests/test_api.py`:
+
+```python
+async def test_the_stop_sweep_outlives_a_failing_tick(config, caplog) -> None:
+    """A silent suppress here would make "expiry stopped working"
+    unfalsifiable, so the test asserts the log as well as the survival."""
+    calls = []
+
+    class Boom(Engine):
+        def expire_stops(self):
+            calls.append(len(calls))
+            if len(calls) == 1:
+                raise RuntimeError("one bad tick")
+            return []
+
+    engine = Boom(
+        config=config,
+        tmux=FakeTmux(sessions={}),
+        procs_fn=procs_from(""),
+        meminfo_fn=lambda: PLENTY,
+    )
+    with caplog.at_level(logging.ERROR, logger="hitchrail.server"):
+        async with client_for(engine, config):
+            # Long enough for at least two ticks at SWEEP_INTERVAL_S.
+            await asyncio.sleep(SWEEP_INTERVAL_S * 2.5)
+
+    assert len(calls) >= 2, "the sweep stopped after the failing tick"
+    assert "stop sweep failed" in caplog.text, "the failure was swallowed silently"
+```
+
+This needs `import asyncio`, `import logging` and
+`from hitchrail.server import SWEEP_INTERVAL_S` at the top of the test file.
 
 - [ ] **Step 4: Run to verify passing**
 
