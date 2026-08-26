@@ -850,7 +850,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
     # went red when discovery.py got SMALLER, reporting "past the guideline"
     # about a file that had just moved towards it. Failing on the improvement
     # you asked for is how a number gets bumped instead of fixed.
-    caps = {"discovery.py": 403}
+    # Empty, and that is the point: #33 landed, discovery.py came under the
+    # guideline, and this test failed until the entry was removed. The
+    # mechanism retires its own exceptions.
+    caps: dict[str, int] = {}
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"
     sizes = {p.name: len(p.read_text().splitlines()) for p in sorted(src.glob("*.py"))}

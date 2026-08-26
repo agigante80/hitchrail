@@ -6,6 +6,7 @@ paths:
   - "src/hitchrail/server.py"
   - "src/hitchrail/tmux.py"
   - "src/hitchrail/discovery.py"
+  - "src/hitchrail/projectnames.py"
   - "src/hitchrail/cli.py"
 ---
 

@@ -13,7 +13,6 @@ from pathlib import Path
 import pytest
 
 from hitchrail.discovery import (
-    _UNSAFE_TO_DISPLAY,
     MAX_NAME_LENGTH,
     MAX_REPORTED_UNSUPPORTED,
     AlreadyExists,
@@ -28,6 +27,7 @@ from hitchrail.discovery import (
     project_path,
     scan,
 )
+from hitchrail.projectnames import _UNSAFE_TO_DISPLAY
 
 
 def test_lists_only_directories_case_insensitively(tmp_path: Path) -> None:
@@ -801,3 +801,85 @@ def test_a_symlink_out_of_the_root_is_still_refused(tmp_path: Path) -> None:
     listing = scan(root)
     assert listing.projects == ()
     assert any("outside the root" in u.reason for u in listing.unsupported)
+
+
+# -- #31: a broken symlink must not vanish ---------------------------------
+
+
+def test_a_dangling_symlink_is_reported_not_hidden(tmp_path: Path) -> None:
+    """A link whose target is gone is a plausible everyday state.
+
+    A project moved, a checkout was deleted, an external drive unmounted. The
+    user can see the entry in their file manager, so Hitchrail showing nothing
+    is the failure the reporting channel was built to prevent.
+    """
+    (tmp_path / "gone").symlink_to(tmp_path / "nowhere", target_is_directory=True)
+    listing = scan(tmp_path)
+    assert listing.projects == ()
+    assert [u.name for u in listing.unsupported] == ["gone"]
+    assert "target" in listing.unsupported[0].reason
+
+
+def test_a_symlink_loop_is_reported_not_hidden(tmp_path: Path) -> None:
+    (tmp_path / "a").symlink_to(tmp_path / "b", target_is_directory=True)
+    (tmp_path / "b").symlink_to(tmp_path / "a", target_is_directory=True)
+    listing = scan(tmp_path)
+    assert listing.projects == ()
+    assert {u.name for u in listing.unsupported} == {"a", "b"}
+
+
+def test_a_regular_file_is_still_skipped_in_silence(tmp_path: Path) -> None:
+    """A file is not somebody's attempt at a project, so reporting it is noise.
+
+    This is the line the change must not cross: broken LINKS get reported,
+    ordinary non directories do not.
+    """
+    (tmp_path / "notes.txt").write_text("hello")
+    (tmp_path / "real").mkdir()
+    listing = scan(tmp_path)
+    assert listing.projects == ("real",)
+    assert listing.unsupported == ()
+
+
+def test_a_dot_directory_is_still_skipped_in_silence(tmp_path: Path) -> None:
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "real").mkdir()
+    listing = scan(tmp_path)
+    assert listing.projects == ("real",)
+    assert listing.unsupported == ()
+
+
+def test_a_dangling_dot_link_is_still_skipped_in_silence(tmp_path: Path) -> None:
+    """The dot rule wins over the broken link rule, as it does everywhere else."""
+    (tmp_path / ".cache").symlink_to(tmp_path / "nowhere", target_is_directory=True)
+    assert scan(tmp_path).unsupported == ()
+
+
+def test_a_link_target_in_a_reason_is_escaped(tmp_path: Path) -> None:
+    """The reason carries text from OUTSIDE the root, so it is attacker
+    influenceable on a shared machine.
+
+    `display_name` exists because a folder called `report\x1b[2J` clears the
+    terminal of anything printing the listing. A link target reaching a reason
+    raw would reintroduce exactly that, through a different door.
+    """
+    target = tmp_path / "evil\x1b[2Jtarget"
+    (tmp_path / "link").symlink_to(target, target_is_directory=True)
+    listing = scan(tmp_path)
+    reasons = " ".join(u.reason for u in listing.unsupported)
+    assert "\x1b" not in reasons
+    assert "\x1b" not in " ".join(u.name for u in listing.unsupported)
+
+
+def test_projectnames_does_not_import_discovery() -> None:
+    """The dependency runs one way, which is what makes #33 a seam.
+
+    If `projectnames` ever imports `discovery` back, the split stops being a
+    seam and becomes a cut through a cycle, and the next person to tidy up will
+    reasonably merge them again.
+    """
+    source = (
+        Path(__file__).parent.parent / "src" / "hitchrail" / "projectnames.py"
+    ).read_text()
+    assert "import discovery" not in source
+    assert "from hitchrail.discovery" not in source

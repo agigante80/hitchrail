@@ -1,36 +1,48 @@
-"""Listing and creating project folders, and the path safety around both."""
+"""The root as a hard boundary: what it contains, and what may be opened.
+
+The vocabulary these checks are built from lives in `projectnames.py`, split
+out at #33. This module owns the filesystem: scanning, resolving, creating.
+That one owns what a valid name IS.
+"""
 
 from __future__ import annotations
 
-import re
+import errno
 from dataclasses import dataclass
 from pathlib import Path
 
-# The filesystem's own limit on most Linux filesystems. The pattern is ASCII
-# only, so a character is a byte and this is the real ceiling rather than an
-# invented one. It was 64, which was arbitrary and hid perfectly ordinary
-# folders for no security reason: length carries no argument here, unlike the
-# alphabet and the first character, which both do.
-MAX_NAME_LENGTH = 255
+from hitchrail.projectnames import (
+    MAX_NAME_LENGTH,
+    NAME_PATTERN,
+    InvalidName,
+    display_name,
+    explain_name,
+    validate_name,
+)
 
-# Allowlist, not a denylist. A name that matches this cannot traverse, because
-# it cannot contain a separator; cannot hide, because it cannot begin with a
-# dot; and cannot become a flag in an argv slot, because it cannot begin with a
-# hyphen. Everything outside the pattern is refused without being enumerated,
-# which is what makes it robust against encodings nobody thought to list.
-#
-# \Z, not $. `$` matches before a trailing newline, so `evil\n` satisfied this
-# pattern and became a real directory, and a name at the cap plus a newline
-# walked straight past the cap the pattern is written to impose. \Z anchors at
-# the actual end of the string. This is the whole allowlist failing open over
-# one character, so it gets a named regression test.
-NAME_PATTERN = re.compile(rf"\A[A-Za-z0-9][A-Za-z0-9._-]{{0,{MAX_NAME_LENGTH - 1}}}\Z")
+__all__ = [
+    "MAX_NAME_LENGTH",
+    "MAX_REPORTED_UNSUPPORTED",
+    "NAME_PATTERN",
+    "AlreadyExists",
+    "InvalidName",
+    "Listing",
+    "NoSuchProject",
+    "OutsideRoot",
+    "RootUnavailable",
+    "Unsupported",
+    "create_project",
+    "display_name",
+    "explain_name",
+    "list_projects",
+    "project_path",
+    "resolve_child",
+    "scan",
+    "validate_name",
+]
 
-_ALLOWED_CHARS = re.compile(r"[A-Za-z0-9._-]")
-
-# How many rejected folders to name before giving up and reporting a count.
-# A root that shares a tree with a Downloads folder can hold thousands.
 MAX_REPORTED_UNSUPPORTED = 50
+
 
 # Characters that are dangerous to hand to whatever renders the listing, as
 # opposed to merely invalid in a name. Written as escapes rather than literals
@@ -46,33 +58,6 @@ MAX_REPORTED_UNSUPPORTED = 50
 #                         override. The override displays proj<RLO>gnp.exe as
 #                         projexe.gnp, even through textContent.
 #   \u2066-\u2069         bidi isolates, the same trick with newer codepoints
-_UNSAFE_TO_DISPLAY = re.compile("[\x00-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2066-\u2069]")
-
-
-def display_name(name: str) -> str:
-    """Make a filesystem name safe to show, without pretending it is valid.
-
-    Two separate hazards, both of which arrive only because rejected folders
-    are now reported rather than dropped:
-
-    - **Surrogates.** `os.listdir` surrogate escapes a name that is not valid
-      UTF-8, and `json.dumps(...).encode("utf-8")` then raises. One latin-1
-      named folder under the root would have turned the whole project list into
-      a 500, hiding every healthy project behind it.
-    - **Control and bidi characters.** These are exactly what the allowlist
-      refuses on the way in, and reporting the rejection handed them straight
-      back out.
-
-    Nothing passed to this function is a valid project name, so escaping loses
-    nothing: no caller can open these paths anyway.
-    """
-    # errors="replace" turns lone surrogates into U+FFFD rather than raising.
-    decoded = name.encode("utf-8", "replace").decode("utf-8", "replace")
-    return _UNSAFE_TO_DISPLAY.sub(lambda m: f"\\u{ord(m.group()):04x}", decoded)
-
-
-class InvalidName(ValueError):
-    """The name is not one we are willing to turn into a path."""
 
 
 class NoSuchProject(InvalidName):
@@ -156,74 +141,6 @@ class Listing:
     unsupported_total: int = 0
 
 
-def _describe_offenders(offenders: list[str]) -> str:
-    """Group by kind rather than listing each character.
-
-    Naming every distinct character produced "a non ASCII character ('P'), a
-    non ASCII character ('e') and 3 more" for a Cyrillic folder name, which
-    tells the reader nothing they could not see and buries the one useful
-    word in it.
-
-    The buckets are exclusive. A non breaking space, which copy and paste out
-    of a browser produces routinely, is both whitespace and non ASCII, and
-    landing in two buckets reported one character as two separate problems.
-    """
-    spaces = [c for c in offenders if c.isascii() and c.isspace()]
-    non_ascii = [c for c in offenders if not c.isascii()]
-    other = [c for c in offenders if c.isascii() and not c.isspace()]
-
-    parts: list[str] = []
-    if spaces:
-        parts.append("a space" if spaces == [" "] else "whitespace")
-    if non_ascii:
-        shown = ", ".join(repr(c) for c in non_ascii[:3])
-        parts.append(f"non ASCII characters ({shown}{', ...' if len(non_ascii) > 3 else ''})")
-    if other:
-        shown = ", ".join(repr(c) for c in other[:4])
-        parts.append(f"{shown}{', ...' if len(other) > 4 else ''}")
-    return " and ".join(parts)
-
-
-def explain_name(name: str) -> str | None:
-    """Why this name cannot be a project, or None if it can.
-
-    Separate from `validate_name` because refusing and explaining are different
-    jobs: the guard needs to be fast and total, the explanation needs to be
-    read by a person who is wondering where their folder went.
-    """
-    if NAME_PATTERN.match(name):
-        return None
-    if not name:
-        return "the name is empty"
-    if name.startswith("."):
-        return "begins with a dot, so it is a hidden directory rather than a project"
-    if name.startswith("-"):
-        return "begins with a hyphen, which an argv slot reads as a flag"
-    if len(name) > MAX_NAME_LENGTH:
-        return f"{len(name)} characters, over the {MAX_NAME_LENGTH} limit"
-    offenders = sorted({c for c in name if not _ALLOWED_CHARS.match(c)})
-    if offenders:
-        return (
-            f"contains {_describe_offenders(offenders)}; names may use letters, "
-            "digits, dot, underscore and hyphen"
-        )
-    if not name[0].isalnum():
-        # `_leading` reaches here: every character is in the allowed set, but
-        # the first one is not a letter or a digit. Without this it fell
-        # through to a message that named no rule at all.
-        return f"begins with {name[0]!r}; a name must start with a letter or a digit"
-    # Unreachable: a name whose characters are all allowed, whose first is
-    # alphanumeric, and whose length is within the cap matches NAME_PATTERN by
-    # construction, so it returned None at the top. Kept so the function is
-    # total, because a silent None here would read as "this name is fine".
-    return "not an acceptable project name"  # pragma: no cover
-
-
-def validate_name(name: str) -> None:
-    if not NAME_PATTERN.match(name):
-        raise InvalidName(f"not an acceptable project name: {name!r}")
-
-
 def resolve_child(root: Path, name: str) -> Path:
     """Validate the name, then prove the result is a direct child of the root.
 
@@ -251,6 +168,32 @@ def resolve_child(root: Path, name: str) -> Path:
             f"{name!r} resolves to {real}, which is not a direct child of {real_root}"
         )
     return real
+
+
+def _broken_link_reason(entry: Path) -> str:
+    """Why a symlink is not a directory, for the person looking at their folder.
+
+    `is_dir()` answers False for a dangling link, a loop and a link to a file
+    alike, and those want different explanations. `stat()` follows the link and
+    raises with an errno that tells them apart.
+
+    The target is text from OUTSIDE the root, so it is attacker influenceable
+    on a shared machine and goes through `display_name` like every other
+    reported name. A target called `report\x1b[2J` would otherwise clear the
+    terminal of anything printing the listing, which is the exact hazard
+    `display_name` was written for, arriving through a different door.
+    """
+    try:
+        entry.stat()
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            return "is a symlink loop, so it has no target to open"
+        try:
+            target = str(entry.readlink())
+        except OSError:
+            return "is a symlink whose target cannot be read"
+        return f"points at a target that does not exist: {display_name(target)}"
+    return "is a symlink to something that is not a directory"
 
 
 def _dedup_order(entry: Path) -> tuple[int, str]:
@@ -321,6 +264,19 @@ def scan(root: Path) -> Listing:
         name = entry.name
         try:
             if not entry.is_dir():
+                # A regular file is not somebody's attempt at a project, so it
+                # is skipped in silence as before. A broken LINK is different:
+                # the user put it there meaning to open something, and this
+                # module's whole argument is that a folder which simply
+                # vanishes reads as Hitchrail being unable to see it.
+                if not entry.is_symlink():
+                    continue
+                # A distinct name, not `reason`: assigning a str here narrows
+                # the variable and mypy then rejects the `str | None` that
+                # `explain_name` returns below.
+                link_reason = _broken_link_reason(entry)
+                if not name.startswith("."):
+                    unsupported.append(Unsupported(display_name(name), link_reason))
                 continue
             reason = explain_name(name)
             if reason is None:
