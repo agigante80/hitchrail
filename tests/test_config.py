@@ -840,21 +840,30 @@ def test_every_module_is_under_the_size_guideline() -> None:
     one thing. config.py reached 502 before its split.
 
     Every module, not the two that #18 touched. Naming those two let
-    discovery.py drift to 409 unnoticed while this test passed, which is the
+    discovery.py drift past 400 unnoticed while this test passed, which is the
     same shape of gap as testing three hand picked pairs for injectivity.
     """
-    # One known exception, tracked as #33, recorded here rather than excused by
-    # loosening the threshold. Written as an exact size so the debt cannot grow
-    # quietly either: this fails if discovery.py gets bigger OR if #33 lands and
-    # the entry is left behind.
-    known = {"discovery.py": 403}
+    # One known exception, tracked as #33, recorded rather than excused by
+    # loosening the threshold for everybody.
+    #
+    # A CAP, not an exact size. An earlier version pinned 403 exactly and so
+    # went red when discovery.py got SMALLER, reporting "past the guideline"
+    # about a file that had just moved towards it. Failing on the improvement
+    # you asked for is how a number gets bumped instead of fixed.
+    caps = {"discovery.py": 403}
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"
     sizes = {p.name: len(p.read_text().splitlines()) for p in sorted(src.glob("*.py"))}
-    oversize = {n: c for n, c in sizes.items() if c >= 400}
-    assert oversize == known, (
-        f"past the guideline: {oversize}, expected only the tracked exception {known}"
+
+    over = {n: c for n, c in sizes.items() if c >= 400 and c > caps.get(n, 399)}
+    assert not over, (
+        f"past the guideline: {over}. Split it, or track it in `caps` with a ticket."
     )
+
+    # And the exception cannot outlive its reason: once #33 brings discovery.py
+    # under the guideline, this fails and the entry must go.
+    settled = {n for n in caps if sizes.get(n, 0) < 400}
+    assert not settled, f"no longer oversize, remove from `caps`: {sorted(settled)}"
 
 
 @pytest.mark.parametrize(

@@ -746,6 +746,10 @@ def test_links_to_an_unlistable_target_fall_back_to_name_order(tmp_path: Path) -
     assert scan(root).projects == ("alpha",)
 
 
+@pytest.mark.skipif(
+    os.geteuid() == 0,
+    reason="root has CAP_DAC_OVERRIDE, so mode 0o600 does not stop the lstat this needs",
+)
 def test_an_unsearchable_entry_does_not_take_the_whole_root_down(tmp_path: Path) -> None:
     """`_dedup_order` runs inside the sorted() whose OSError is fatal.
 

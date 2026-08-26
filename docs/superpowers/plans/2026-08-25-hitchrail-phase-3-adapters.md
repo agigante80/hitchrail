@@ -1155,8 +1155,12 @@ def available_mb(meminfo_text: str) -> int:
 
 
 def guard(available: int, need_mb: int, hard_mb: int, soft_mb: int) -> Verdict:
-    """Decide against what would be LEFT after starting, not what is free now."""
-    remaining = available_mb - need_mb
+    """Decide against what would be LEFT after starting, not what is free now.
+
+    The parameter is `available`, not `available_mb`: the latter shadows the
+    module level parser of that name.
+    """
+    remaining = available - need_mb
     if remaining < hard_mb:
         return Verdict.HARD
     if remaining < soft_mb:
