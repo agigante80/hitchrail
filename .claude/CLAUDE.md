@@ -3,15 +3,18 @@
 A web UI for starting and stopping headless Claude Code sessions across a folder
 of projects. Phone first. Python, standalone, no bash dependency.
 
-## Status: phases 1 to 3 of 7 are built
+## Status
 
-What exists: the package skeleton with five blocking gates, the configuration
-and its refusals, the folder discovery, the three security controls, all four
-adapters, and 519 tests. What does not exist yet is everything you would
-actually run: the HTTP API, the browser interface, and the engine that starts
-and stops sessions. `engine.py`, `events.py`, `server.py` and `cli.py` are one
-line placeholders, so importing them succeeds and tells you nothing. Phase 4 is
-the next work; read `docs/roadmap.md` first.
+**Do not state the phase count here.** It was wrong for three phases: this
+section claimed "phases 1 to 3 of 7" and named `engine.py`, `server.py`,
+`events.py` and `cli.py` as one line placeholders long after all four were
+implemented, which told every reader the opposite of the truth about the part
+they were most likely to touch.
+
+`docs/roadmap.md` is the one place that says what is built. A closed milestone
+means a phase whose exit criteria were ticked with evidence. Read it first, and
+`tests/test_docs_are_true.py` asserts that this file has not gone back to
+claiming otherwise.
 
 ## Where things are
 
