@@ -250,3 +250,9 @@ dialog[data-dialog]::backdrop { background: rgba(46, 37, 28, 0.55); }
   max-height: 46vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;
   margin: 0 0 16px;
 }
+
+.sheet-field {
+  width: 100%; min-height: var(--touch); padding: 0 12px; margin-top: 6px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface-alt); color: var(--ink); font: inherit;
+}

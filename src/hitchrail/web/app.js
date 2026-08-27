@@ -220,10 +220,10 @@ function buildActions(project, actions) {
   };
 
   if (isRunning(project) || project.state === "stale") {
-    add("Open", "ghost");
+    add("Open", "ghost").addEventListener("click", () => openLogs(project));
   }
   if (project.state === "stopped") {
-    add("Start", "accent");
+    add("Start", "accent").addEventListener("click", () => startProject(project));
   }
   // No Stop control on the controller row, ever. The API answers 423, and an
   // interface that lets you reach a 423 has already failed the person holding
@@ -463,6 +463,160 @@ function showRefusal(result) {
   });
 }
 
+/* -- starting ----------------------------------------------------------
+   The two memory refusals are DIFFERENT SCREENS, not one with a variable.
+   The soft one asks and can be overridden; the hard one refuses and offers a
+   way out. Rendering both from one template with a boolean is how "Start
+   anyway" ends up on a screen that cannot start anything. */
+
+async function startProject(project, { acknowledged = false } = {}) {
+  const query = acknowledged ? "?acknowledged=1" : "";
+  const result = await api(
+    `/api/sessions/${encodeURIComponent(project.name)}${query}`,
+    { method: "POST" },
+  );
+  if (result.ok) {
+    closeDialog();
+    await refresh();
+    return;
+  }
+  if (result.body.code === "ram_soft") {
+    showSoftMemory(project, result.body);
+    return;
+  }
+  if (result.body.code === "ram_hard") {
+    showHardMemory(project, result.body);
+    return;
+  }
+  if (result.body.code === "start_died") {
+    showDeadStart(project, result.body);
+    return;
+  }
+  showRefusal(result);
+}
+
+function showSoftMemory(project, body) {
+  const left = body.available_mb - body.needed_mb;
+  showDialog({
+    title: "Tight on memory",
+    // What would be LEFT, not what is needed. That is the number the decision
+    // turns on, and it is what the canvas puts on this screen.
+    body:
+      `Starting ${project.name} would leave about ${formatMb(left)} free. `
+      + "Sessions have been killed by the kernel below that.",
+    actions: [
+      ["Cancel", "ghost", closeDialog],
+      ["Start anyway", "", () => startProject(project, { acknowledged: true })],
+    ],
+  });
+}
+
+function showHardMemory(project, body) {
+  // NO "Start anyway" anywhere on this screen. 507 is not overridable, and a
+  // control that cannot work is worse than no control.
+  const largest = [...state.projects]
+    .filter((candidate) => candidate.pid !== null && !candidate.protected)
+    .sort((a, b) => b.ram_mb - a.ram_mb)[0];
+
+  const actions = [["Cancel", "ghost", closeDialog]];
+  if (largest) {
+    actions.push([
+      `Stop ${largest.name}`,
+      "danger",
+      () => confirmStop(largest),
+    ]);
+  }
+  showDialog({
+    title: "Not enough memory",
+    body:
+      `Only ${formatMb(body.available_mb)} free. Hitchrail will not start a `
+      + "session into that."
+      + (largest ? ` The largest is ${largest.name}, ${formatMb(largest.ram_mb)}.` : ""),
+    actions,
+  });
+}
+
+function showDeadStart(project, body) {
+  const pane = document.createElement("pre");
+  pane.className = "log-pane";
+  pane.textContent = body.output || "It printed nothing.";
+  pane.hidden = true;
+
+  showDialog({
+    title: `${project.name} died`,
+    body: "Started, then exited almost immediately.",
+    extra: pane,
+    actions: [
+      ["Read what it printed", "ghost", () => { pane.hidden = false; }],
+      ["Close", "ghost", closeDialog],
+    ],
+  });
+}
+
+/* -- the log drawer ---------------------------------------------------- */
+
+async function openLogs(project) {
+  const result = await api(
+    `/api/sessions/${encodeURIComponent(project.name)}/logs?lines=40`,
+  );
+  if (!result.ok) {
+    showRefusal(result);
+    return;
+  }
+  const pane = document.createElement("pre");
+  pane.className = "log-pane";
+  pane.textContent = result.body.text || "The pane has printed nothing yet.";
+  showDialog({
+    title: project.name,
+    body: "last 40 lines of the pane",
+    extra: pane,
+    actions: [["Close", "ghost", closeDialog]],
+  });
+}
+
+/* -- the new folder sheet ---------------------------------------------- */
+
+function showNewFolder(message) {
+  const field = document.createElement("input");
+  field.type = "text";
+  field.setAttribute("aria-label", "Folder name");
+  field.className = "sheet-field";
+  field.value = "";
+
+  const wrapper = document.createElement("div");
+  const path = document.createElement("p");
+  path.className = "meta";
+  path.textContent = `${state.root}/`;
+  wrapper.append(path, field);
+
+  showDialog({
+    title: "New folder",
+    // No client side name rule. The API decides, and a second copy of that
+    // rule here would drift from it; the copy that drifts is the one a person
+    // sees.
+    body: message || "",
+    extra: wrapper,
+    actions: [
+      ["Cancel", "ghost", closeDialog],
+      ["Create", "accent", () => createProject(field.value)],
+    ],
+  });
+  field.focus();
+}
+
+async function createProject(name) {
+  const result = await api("/api/projects", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+  if (!result.ok) {
+    showNewFolder(result.body.message);
+    return;
+  }
+  closeDialog();
+  await refresh();
+}
+
 /* -- start ------------------------------------------------------------- */
 
 async function refresh() {
@@ -486,6 +640,7 @@ async function refresh() {
 function boot() {
   applyTheme(storedTheme());
   $("[data-theme-toggle]")?.addEventListener("click", toggleTheme);
+  $("[data-new]")?.addEventListener("click", () => showNewFolder());
   $("[data-search]")?.addEventListener("input", (event) => {
     state.query = event.target.value;
     renderList();

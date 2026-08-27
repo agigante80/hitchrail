@@ -207,11 +207,16 @@ class Harness:
                 self_project=protect,
             )
 
-        # Sessions are started through an engine with NO self_project, then the
-        # protection is applied. `start` refuses the protected project, which
-        # is the behaviour #55 tests, so a harness that set it first could
-        # never seed the one row those tests are about.
-        opener = Engine(config=build(None), meminfo_fn=lambda: meminfo)
+        # Seeding runs through an engine with NO self_project and PLENTY of
+        # memory, and the real settings are applied afterwards.
+        #
+        # Both are the same argument: `start` refuses the protected project and
+        # refuses a start under the hard floor, which are the behaviours #55
+        # and #56 test, so a harness that applied them first could never seed
+        # the rows those tests are about. Setting up the world is not the same
+        # act as exercising the guards on it.
+        plenty = "MemTotal: 33554432 kB\nMemAvailable: 25198592 kB\n"
+        opener = Engine(config=build(None), meminfo_fn=lambda: plenty)
         for name in running or []:
             opener.start(e2e_name(name))
 
