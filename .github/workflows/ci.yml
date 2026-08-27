@@ -44,12 +44,32 @@ jobs:
       # docs/tech-guidelines.md section 7.4 rules out a percentage threshold,
       # because it is satisfied by executing lines without asserting on them.
       # The five gates above are the blocking ones.
+      # The browser tier needs a browser, and the runner has none. Installed
+      # after `uv sync` because the CLI comes from the dev dependency group.
+      # `--with-deps` pulls the shared libraries headless chromium needs, which
+      # a bare runner also lacks; without it the launch fails with a missing
+      # .so rather than with anything about browsers.
+      - run: uv run playwright install --with-deps chromium
       - run: uv run coverage run -m pytest
       - run: uv run coverage report
       # Assert the live_tmux tier actually RAN. Without this the suite stays
       # green while that tier silently skips, which is the failure the tier was
       # written to prevent: it exists because the hermetic tmux tests encode
       # the same belief the code does and cannot falsify it.
+      # Same argument as the live_tmux guard below: a tier that silently
+      # skips everywhere looks like coverage while proving less than none.
+      # The browser tier is the only one that can see the stop escalation, the
+      # phone viewport or a row's height, so a skip here is a whole class of
+      # assertion quietly not running.
+      - name: the browser tier must not have skipped
+        run: |
+          uv run pytest -m e2e -q --no-header | tee /tmp/e2e.txt
+          grep -qE '[0-9]+ passed' /tmp/e2e.txt
+          if grep -qE '[0-9]+ skipped' /tmp/e2e.txt; then
+            echo "::error::the e2e tier skipped; chromium or tmux is missing"
+            exit 1
+          fi
+
       - name: the live tmux tier must not have skipped
         run: |
           uv run pytest -m live_tmux -q --no-header | tee /tmp/live_tmux.txt

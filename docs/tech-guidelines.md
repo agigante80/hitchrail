@@ -218,6 +218,7 @@ two are told apart by what they touch.
 | Integration | `integration` | the real Starlette app through `httpx.ASGITransport` | routing, middleware order, status codes, error bodies |
 | Live socket | `live` | 127.0.0.1 on an ephemeral port | the DEPLOYED server refuses something |
 | Live tmux | `live_tmux` | a real tmux on a private socket | our beliefs about an external tool are true |
+| Browser | `e2e` | a real browser, a real server, a real tmux, a fake agent | what only a person at a screen can see |
 
 The integration tier gained its marker in #37, at the start of Phase 5 and
 before the tier tripled in size. Until then it was told apart from unit only by
@@ -231,10 +232,20 @@ run while `-m live` pulls it into one, so which tier it is depends on how you
 ask. A test that drives a real app and declares nothing lands in the unit tier,
 and the tier people run in a tight loop quietly stops being fast.
 
-**A browser tier does not exist yet.** The design's repository layout names
-`tests/e2e/`, and Playwright arrives with the interface in Phase 6 as #38.
-Until then nothing in this project drives a browser, and no phrasing here
-should imply otherwise.
+**The browser tier arrived with the interface**, as #38, and it is the only
+tier that can see a sequence over time, a measured height or a viewport. It
+drives a real server and a real tmux on a private socket, against a FAKE agent:
+a test that starts a real Claude costs money, needs credentials, and cannot run
+in CI.
+
+It uses Playwright's ASYNC API. The sync one refuses to run inside an asyncio
+event loop, and this project sets `asyncio_mode = "auto"`, so a sync browser
+test poisons every async test in the same session: the symptom was 150 failures
+and 50 errors in unrelated files, each of which passed perfectly on its own.
+
+`httpx.ASGITransport` cannot stream, so the SSE route belongs in `live` rather
+than here or in `integration`: the transport awaits the app to completion, and
+an endless generator hangs it rather than failing.
 
 The distinction that matters most is the bottom two rows. A fake encodes the
 same belief the code does, so a test built on one proves the implementation
