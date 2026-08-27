@@ -45,6 +45,7 @@ dev = [
   "import-linter>=2.13",
   "coverage[toml]>=7.15",
   "hypothesis>=6.165.10",
+  "playwright>=1.50",
 ]
 
 [tool.ruff]
@@ -99,6 +100,7 @@ markers = [
   # test was whether its file reached for `httpx.ASGITransport`, so a test that
   # stopped using it silently changed tier. See #37.
   "integration: drives the real Starlette app through httpx.ASGITransport, no socket",
+  "e2e: drives a real browser against a real server; needs `playwright install chromium`",
   "live: binds a real loopback socket on an ephemeral port",
   "live_tmux: drives a real tmux server on a private socket",
 ]
@@ -139,3 +141,10 @@ forbidden_modules = [
   "uvicorn",
   "sse_starlette",
 ]
+
+# `web/` is package DATA, not code, and hatchling ships only what it is told to.
+# Without this `uvx hitchrail` installs a distribution whose page is missing,
+# and the failure is a 404 on the one route a person opens first.
+[tool.hatch.build.targets.wheel]
+packages = ["src/hitchrail"]
+artifacts = ["src/hitchrail/web/*"]

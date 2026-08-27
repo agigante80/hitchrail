@@ -155,6 +155,40 @@ class Engine:
     def available_mb(self) -> int:
         return ram.available_mb(self._meminfo_fn())
 
+    def machine_memory(self) -> tuple[int, int | None]:
+        """Available and total, in megabytes, from ONE read of the file.
+
+        One read on purpose. Reading twice lets the figure and the proportion
+        the interface draws from them come from different instants, which is a
+        small lie but a visible one while memory is moving.
+
+        **The two halves fail differently, and that asymmetry is the point.**
+        `available` is what the memory guard decides on, so an unreadable one
+        raises: guessing it would approve a start on an exhausted machine.
+        `total` is only ever a denominator for a bar, so an unreadable one is
+        `None` and the interface draws no bar.
+
+        A first version raised for both, which made a missing `MemTotal` return
+        503 for the whole listing. That is a cosmetic figure taking the entire
+        page down, and it is the wrong direction: the rows are what the person
+        came for.
+        """
+        text = self._meminfo_fn()
+        try:
+            available = ram.available_mb(text)
+        except ValueError as exc:
+            # `MachineUnreadable`, not a bare ValueError. A meminfo we cannot
+            # read IS a machine we cannot read, and the API already has a code
+            # and a 503 for that. Left raw it escaped as an unhandled
+            # exception, so the route answered 500 with a traceback rather
+            # than the envelope it documents.
+            raise MachineUnreadable(str(exc)) from exc
+        try:
+            return available, ram.total_mb(text)
+        except ValueError:
+            logger.warning("MemTotal is unreadable, so no memory proportion is reported")
+            return available, None
+
     def stopping_since(self, name: str) -> float | None:
         """When a graceful stop was requested, or None. Memory only."""
         with self._stopping_guard:

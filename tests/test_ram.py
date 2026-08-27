@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from hitchrail.ram import Verdict, available_mb, guard, read_meminfo
+from hitchrail.ram import Verdict, available_mb, guard, read_meminfo, total_mb
 
 # A real fragment, copied from this machine's /proc/meminfo, so the parser is
 # tested against the format it will actually meet rather than an idealised one.
@@ -160,3 +160,52 @@ def test_guard_does_not_shadow_the_parser() -> None:
     wants to. Asserted by calling both in one expression.
     """
     assert guard(available_mb(MEMINFO), NEED, HARD, SOFT) is Verdict.OK
+
+
+# -- #64: the total, for the interface rather than for the guard ------------
+
+REAL_MEMINFO = """\
+MemTotal:       32791244 kB
+MemFree:         1234567 kB
+MemAvailable:   24608000 kB
+Buffers:          123456 kB
+"""
+
+
+def test_total_mb_reads_memtotal() -> None:
+    assert total_mb(REAL_MEMINFO) == 32022
+
+
+def test_total_and_available_come_from_the_same_text() -> None:
+    """One read, so the figure and the proportion drawn from it describe the
+    same instant. `total >= available` on any real file."""
+    assert total_mb(REAL_MEMINFO) >= available_mb(REAL_MEMINFO)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "MemAvailable:   24608000 kB\n",  # the field is absent
+        "MemTotal:\n",  # present and empty
+        "MemTotal:       notanumber kB\n",  # present and not a number
+        "MemTotal:       32791244 MB\n",  # the wrong unit
+        "MemTotal:       32791244\n",  # no unit at all
+        "",  # an empty file
+    ],
+)
+def test_an_unreadable_total_refuses_rather_than_guessing(text: str) -> None:
+    """Same refusal as `available_mb`, and for a sharper reason: a total
+    guessed as zero renders a full bar on an empty machine, which is the exact
+    opposite of the truth at the moment somebody is deciding to start one."""
+    with pytest.raises(ValueError, match="MemTotal"):
+        total_mb(text)
+
+
+def test_the_two_readers_share_one_parser() -> None:
+    """Not style. The unit assertion was written for `MemAvailable` and is
+    worth exactly as much to `MemTotal`; a second hand rolled copy is where it
+    would be dropped. Asserted by behaviour: both reject the wrong unit."""
+    with pytest.raises(ValueError):
+        available_mb("MemAvailable: 100 MB\n")
+    with pytest.raises(ValueError):
+        total_mb("MemTotal: 100 MB\n")

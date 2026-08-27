@@ -40,23 +40,17 @@ def read_meminfo(path: Path = MEMINFO_PATH) -> str:
     return path.read_text()
 
 
-def available_mb(meminfo_text: str) -> int:
-    """Megabytes obtainable without swapping, from `MemAvailable`.
+def _field_mb(meminfo_text: str, field_name: str) -> int:
+    """One field from `/proc/meminfo`, in megabytes, or `ValueError`.
 
-    `MemAvailable`, never `MemFree`. They are different numbers and the gap is
-    large: `MemFree` excludes the page cache, which the kernel reclaims on
-    demand, so on a healthy machine it is small and a guard built on it refuses
-    to start a session that would have run fine. `MemAvailable` is the kernel's
-    own estimate of what is obtainable, which is the question being asked.
-
-    Raises `ValueError` when the field is absent or unparseable, rather than
-    returning 0. Zero is indistinguishable from a machine truly out of memory,
-    so guessing it would turn every start into a refusal citing memory pressure
-    on a machine with plenty. A guard that cannot read its input says so.
+    Shared by `available_mb` and `total_mb` so the two cannot drift in how
+    strictly they read the file. The unit assertion below is the reason that
+    matters: it was written for `MemAvailable` and is worth exactly as much to
+    `MemTotal`, and a second hand rolled copy is where it would be dropped.
     """
     for line in meminfo_text.splitlines():
         field, _, rest = line.partition(":")
-        if field.strip() != "MemAvailable":
+        if field.strip() != field_name:
             continue
         parts = rest.split()
         # The unit is asserted rather than assumed. The kernel has always
@@ -71,7 +65,39 @@ def available_mb(meminfo_text: str) -> int:
             return int(parts[0]) // _KB_PER_MB
         except ValueError:
             break
-    raise ValueError("MemAvailable is missing or unreadable in /proc/meminfo")
+    raise ValueError(f"{field_name} is missing or unreadable in /proc/meminfo")
+
+
+def total_mb(meminfo_text: str) -> int:
+    """Megabytes the machine has, from `MemTotal`.
+
+    Only ever used to turn `available_mb` into a proportion for the interface.
+    Nothing decides anything on it: the memory guard reads what is OBTAINABLE,
+    and a total tells you nothing about that on a machine whose cache is full.
+
+    Refuses the same way `available_mb` does, and for a sharper reason. A total
+    guessed as zero renders a full bar on an empty machine, which is the exact
+    opposite of the truth at the moment somebody is deciding whether to start
+    another session.
+    """
+    return _field_mb(meminfo_text, "MemTotal")
+
+
+def available_mb(meminfo_text: str) -> int:
+    """Megabytes obtainable without swapping, from `MemAvailable`.
+
+    `MemAvailable`, never `MemFree`. They are different numbers and the gap is
+    large: `MemFree` excludes the page cache, which the kernel reclaims on
+    demand, so on a healthy machine it is small and a guard built on it refuses
+    to start a session that would have run fine. `MemAvailable` is the kernel's
+    own estimate of what is obtainable, which is the question being asked.
+
+    Raises `ValueError` when the field is absent or unparseable, rather than
+    returning 0. Zero is indistinguishable from a machine truly out of memory,
+    so guessing it would turn every start into a refusal citing memory pressure
+    on a machine with plenty. A guard that cannot read its input says so.
+    """
+    return _field_mb(meminfo_text, "MemAvailable")
 
 
 def guard(available: int, need_mb: int, hard_mb: int, soft_mb: int) -> Verdict:

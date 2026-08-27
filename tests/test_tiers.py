@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 TESTS = Path(__file__).parent
-TIERS = {"integration", "live", "live_tmux"}
+TIERS = {"integration", "live", "live_tmux", "e2e"}
 # Unambiguous: a module that names one of these is talking to an ASGI app.
 TRANSPORTS = {"ASGITransport", "AsyncClient"}
 # Ambiguous on their own, and only consulted INSIDE a module that already names

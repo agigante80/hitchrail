@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en" data-stream="connecting">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>hitchrail</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;600;700&family=Karla:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="bar">
+  <div class="bar-titles">
+    <h1>hitchrail</h1>
+    <p class="root" data-root></p>
+  </div>
+  <div class="bar-actions">
+    <button type="button" class="ghost" data-theme-toggle aria-live="polite">Dark</button>
+    <button type="button" class="accent" data-new>New</button>
+  </div>
+</header>
+
+<nav class="tabs" role="tablist" aria-label="Filter projects" data-tabs></nav>
+
+<div class="search">
+  <input type="search" role="searchbox" placeholder="Search folders" aria-label="Search folders" data-search>
+</div>
+
+<main data-list aria-live="polite"></main>
+
+<template data-empty-template>
+  <p class="empty-title">Nothing matches</p>
+  <p class="empty-body">No folder here is called that.</p>
+</template>
+
+<section class="unsupported" data-unsupported hidden>
+  <h2 data-unsupported-title></h2>
+  <ul data-unsupported-list></ul>
+</section>
+
+<footer role="contentinfo" class="footer">
+  <div class="mem-figure" data-mem-label></div>
+  <div class="mem-track"><div class="mem-bar" data-mem-bar></div></div>
+  <div class="run-count" data-run-count></div>
+</footer>
+
+<div class="scrim" data-scrim hidden></div>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

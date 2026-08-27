@@ -12,14 +12,15 @@ import contextlib
 import functools
 import json
 import logging
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from pathlib import Path
 from typing import TypeVar
 
 from sse_starlette.sse import EventSourceResponse
 from starlette.applications import Starlette
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route
 
 from hitchrail import discovery
@@ -29,6 +30,19 @@ from hitchrail.events import EventBus
 from hitchrail.security import middleware_stack
 
 T = TypeVar("T")
+
+# The page and its two assets. INSIDE the package, because `uvx hitchrail`
+# installs a distribution and a directory beside it is not in one.
+WEB = Path(__file__).parent / "web"
+
+# Fixed names, fixed types, no path parameter anywhere. A route that built a
+# path out of the request would make `/../../etc/passwd` reachable, and this is
+# the only code in the project that reads a file chosen by a URL. It does not
+# choose: the mapping is this dict and nothing else can be asked for.
+ASSETS = {
+    "/app.css": ("app.css", "text/css; charset=utf-8"),
+    "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+}
 
 SWEEP_INTERVAL_S = 1.0
 
@@ -107,6 +121,25 @@ async def _routing_error(request: Request, exc: Exception) -> Response:
     )
 
 
+async def _page(request: Request) -> Response:
+    """The single page. Behind the token like every other route.
+
+    Serving it unauthenticated would be a change to the security boundary, and
+    it is #21's to argue, not this route's to assume.
+    """
+    return FileResponse(WEB / "index.html", media_type="text/html; charset=utf-8")
+
+
+def _asset_route(path: str) -> Callable[[Request], Awaitable[Response]]:
+    """One handler per asset, closed over a name this module chose."""
+    filename, media_type = ASSETS[path]
+
+    async def handler(request: Request) -> Response:
+        return FileResponse(WEB / filename, media_type=media_type)
+
+    return handler
+
+
 def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
     """The bus is REQUIRED, and the caller owns it.
 
@@ -134,12 +167,12 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
         # `unsupported` is the folders under the root that cannot be projects,
         # each with the rule it broke. Dropping them silently made a folder
         # called `my app` look like one Hitchrail could not see. See issue #7.
-        def read() -> tuple[discovery.Listing, list[eng.Session], int]:
+        def read() -> tuple[discovery.Listing, list[eng.Session], tuple[int, int | None]]:
             listing = discovery.scan(config.root)
-            return listing, engine.list(listing=listing), engine.available_mb()
+            return listing, engine.list(listing=listing), engine.machine_memory()
 
         try:
-            listing, sessions, available = await in_thread(read)
+            listing, sessions, memory = await in_thread(read)
         except discovery.RootUnavailable as exc:
             # The root going away, an unmounted drive or a deleted directory,
             # is not "no projects". Reporting an empty list would be a lie the
@@ -161,7 +194,11 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
                 # interface says "50 of 1240 shown"; hiding the excess
                 # silently would be the bug this whole field exists to fix.
                 "unsupported_total": listing.unsupported_total,
-                "memory": {"available_mb": available},
+                # The machine, not the projects. The footer draws a
+                # proportion and the header names the folder, and neither is
+                # derivable from the rows. See #64.
+                "memory": {"available_mb": memory[0], "total_mb": memory[1]},
+                "root": str(config.root),
             }
         )
 
@@ -422,6 +459,8 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
             Route("/api/sessions/{name}/logs", logs, methods=["GET"]),
             Route("/api/sessions/{name}/url", session_url, methods=["GET"]),
             Route("/api/events", event_stream, methods=["GET"]),
+            Route("/", _page, methods=["GET"]),
+            *[Route(p, _asset_route(p), methods=["GET"]) for p in ASSETS],
         ],
         middleware=middleware_stack(config),
         exception_handlers={HTTPException: _routing_error},

@@ -53,7 +53,8 @@ STARTED_PS = """\
  1002  1001 300000      5 claude --dangerously-skip-permissions --remote-control network
 """
 
-PLENTY = "MemAvailable: 25198592 kB\n"
+# Both fields, because the listing reports a proportion as well as a figure.
+PLENTY = "MemTotal: 33554432 kB\nMemAvailable: 25198592 kB\n"
 HEADERS = {"host": "localhost", "origin": "http://localhost:8787"}
 
 
@@ -639,7 +640,8 @@ async def test_the_stream_is_a_get_because_eventsource_cannot_be_anything_else(
     ("method", "path", "status", "code"),
     [
         ("GET", "/nope", 404, "not_found"),
-        ("GET", "/", 404, "not_found"),
+        # `/` is no longer here: #53 gave it the page. `/nope` still covers
+        # the routing 404, which is what this test is about.
         ("POST", "/api/events", 405, "method_not_allowed"),
         ("PUT", "/api/projects", 405, "method_not_allowed"),
         ("PATCH", "/api/sessions/vessel", 405, "method_not_allowed"),
@@ -735,3 +737,66 @@ async def test_a_folder_whose_name_is_not_utf8_does_not_500_the_listing(
     body = response.json()
     assert isinstance(body["projects"], list)
     assert "\udce9" not in response.text, "a lone surrogate reached the response"
+
+
+# -- #64: the listing describes the machine, not only the projects ----------
+
+
+async def test_the_listing_carries_the_root_it_is_listing(
+    client: httpx.AsyncClient, config: Config
+) -> None:
+    """The header names the folder. Two Hitchrails open on one phone are
+    otherwise indistinguishable, which is the entire point of that line."""
+    body = (await client.get("/api/projects", headers=HEADERS)).json()
+    assert body["root"] == str(config.root)
+
+
+async def test_the_listing_carries_a_memory_total_for_the_proportion(
+    client: httpx.AsyncClient,
+) -> None:
+    body = (await client.get("/api/projects", headers=HEADERS)).json()
+    memory = body["memory"]
+    assert memory["total_mb"] >= memory["available_mb"] > 0
+
+
+async def test_an_unreadable_total_leaves_the_rows_intact(
+    config: Config, tmux: FakeTmux
+) -> None:
+    """The failure direction. `total_mb` is a denominator for a bar; a missing
+    one must not take the whole listing down with it, because the rows are
+    what the person came for.
+
+    A first version raised for both figures and returned 503 for the listing.
+    """
+    engine = make_engine(
+        config, tmux, procs_from(RUNNING_PS), mem="MemAvailable: 25198592 kB\n"
+    )
+    async with client_for(engine, config) as c:
+        response = await c.get("/api/projects", headers=HEADERS)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["memory"]["total_mb"] is None
+    assert body["memory"]["available_mb"] == 24608
+    assert [p["name"] for p in body["projects"]], "the rows went with the bar"
+
+
+async def test_an_unreadable_available_figure_still_refuses(
+    config: Config, tmux: FakeTmux
+) -> None:
+    """The other half of the asymmetry. Available is what the memory guard
+    decides on, so guessing it would approve a start on an exhausted machine."""
+    engine = make_engine(config, tmux, procs_from(RUNNING_PS), mem="MemTotal: 100 kB\n")
+    async with client_for(engine, config) as c:
+        response = await c.get("/api/projects", headers=HEADERS)
+    assert response.status_code == 503
+    assert response.json()["code"] == "machine_unreadable"
+
+
+async def test_the_page_route_exists_and_is_html(client: httpx.AsyncClient) -> None:
+    """`/` used to be a routing 404 and is now the interface. Asserted so the
+    envelope test above cannot quietly start covering a route that moved."""
+    response = await client.get("/", headers=HEADERS)
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "hitchrail" in response.text
