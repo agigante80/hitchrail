@@ -98,7 +98,17 @@ while True:
 
 # Ignores the graceful request. For the stop escalation tests, where the point
 # is what the interface does while nothing is happening.
+#
+# It has to ignore SIGINT, not just `/exit`. The graceful stop is `C-c C-c`
+# and then `/exit`, sent through `send-keys`, and `C-c` in a pane raises
+# SIGINT in the foreground process: a "stubborn" fake that only declines to
+# read `/exit` still dies on the first keystroke. The symptom was a stop
+# escalation test whose session had already stopped, so the dialog closed
+# before the assertion ran and the kill control looked absent when it was
+# there.
 STUBBORN_BODY = """
+import signal
+signal.signal(signal.SIGINT, signal.SIG_IGN)
 while True:
     time.sleep(0.2)
 """

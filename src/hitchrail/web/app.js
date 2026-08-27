@@ -229,7 +229,7 @@ function buildActions(project, actions) {
   // interface that lets you reach a 423 has already failed the person holding
   // the phone: refusing after the tap is worse than not offering the tap.
   if (!project.protected && (isRunning(project) || project.state === "stale")) {
-    add("Stop", "");
+    add("Stop", "").addEventListener("click", () => confirmStop(project));
   }
   if (project.state === "detached" && !project.protected) {
     add(`Kill pid ${project.pid}`, "danger");
@@ -299,6 +299,170 @@ export function render() {
   renderFooter();
 }
 
+/* -- dialogs -----------------------------------------------------------
+   One dialog element, reused, because the stop sequence ESCALATES rather than
+   branching: the same surface changes what it offers as the situation
+   changes. A second dialog for the kill would put the destructive path on
+   screen beside the safe one. */
+
+function closeDialog() {
+  const dialog = $("[data-dialog]");
+  if (dialog?.open) dialog.close();
+}
+
+/* `actions` are given SAFEST FIRST. The column layout means first is topmost
+   and furthest from the thumb, which is the placement section 7 asks for. */
+function showDialog({ title, body, actions, extra }) {
+  const dialog = $("[data-dialog]");
+  if (!dialog) return;
+  dialog.replaceChildren();
+
+  const heading = document.createElement("h2");
+  heading.className = "dialog-title";
+  heading.textContent = title;
+  dialog.append(heading);
+
+  if (body) {
+    const paragraph = document.createElement("p");
+    paragraph.className = "dialog-body";
+    paragraph.textContent = body;
+    dialog.append(paragraph);
+  }
+  if (extra) dialog.append(extra);
+
+  const row = document.createElement("div");
+  row.className = "dialog-actions";
+  for (const [label, className, onClick] of actions) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = className;
+    button.textContent = label;
+    button.addEventListener("click", onClick);
+    row.append(button);
+  }
+  dialog.append(row);
+  if (!dialog.open) dialog.showModal();
+}
+
+/* -- stopping ----------------------------------------------------------
+   Confirm, then a wait during which the kill is reachable, then a timeout
+   that reports and does NOT escalate on its own. The engine refuses to
+   escalate by itself; the interface must not do it on the engine's behalf. */
+
+function confirmStop(project) {
+  showDialog({
+    title: `Stop ${project.name}?`,
+    body: "It will be asked to finish what it is doing.",
+    // Cancel and Stop, and nothing else. A kill control at this step puts the
+    // destructive path under the thumb at the same weight as the safe one.
+    actions: [
+      ["Cancel", "ghost", closeDialog],
+      ["Stop", "", () => beginStop(project)],
+    ],
+  });
+}
+
+async function beginStop(project) {
+  showWaiting(project);
+  const result = await api(`/api/sessions/${encodeURIComponent(project.name)}`, {
+    method: "DELETE",
+  });
+  if (!result.ok) {
+    showRefusal(result);
+    return;
+  }
+  await refresh();
+  awaitStopped(project);
+}
+
+function showWaiting(project) {
+  showDialog({
+    title: `Stopping ${project.name}`,
+    body: "Waiting for it to finish.",
+    actions: [
+      // "Hide, keep stopping" first: a modal that owns a phone screen for
+      // thirty seconds is one people kill the app to escape.
+      ["Hide, keep stopping", "ghost", closeDialog],
+      // Phrased as impatience rather than as an alternative, and available
+      // for the WHOLE wait rather than only at the end.
+      ["Do not wait, kill it now", "danger", () => killNow(project)],
+    ],
+  });
+}
+
+function awaitStopped(project) {
+  const deadline = Date.now() + stopTimeoutMs();
+  const tick = async () => {
+    const current = state.projects.find((p) => p.name === project.name);
+    if (!current || !current.stopping) {
+      closeDialog();
+      return;
+    }
+    if (Date.now() >= deadline) {
+      showTimedOut(project);
+      return;
+    }
+    await refresh();
+    window.setTimeout(tick, 700);
+  };
+  window.setTimeout(tick, 700);
+}
+
+function showTimedOut(project) {
+  showDialog({
+    title: `No answer from ${project.name}`,
+    // The risk BEFORE the kill is offered. This is the moment a person is
+    // most likely to reach for it and least likely to have thought about
+    // work that is not saved.
+    body:
+      "It has not finished. Killing it now ends the process immediately, "
+      + "and anything it has not written to disk is lost.",
+    actions: [
+      ["Leave it", "ghost", closeDialog],
+      ["Kill it", "danger", () => killNow(project)],
+    ],
+  });
+}
+
+async function killNow(project) {
+  const result = await api(`/api/sessions/${encodeURIComponent(project.name)}/kill`, {
+    method: "POST",
+  });
+  closeDialog();
+  if (!result.ok) {
+    showRefusal(result);
+    return;
+  }
+  await refresh();
+}
+
+/* The server owns the real timeout and does not report it, so this is a
+   ceiling for the interface's own patience rather than a second copy of the
+   rule. Erring long is right: showing "no answer" while the engine is still
+   waiting would offer a kill the situation does not call for.
+
+   Overridable only so the browser tier can reach the timeout screen without
+   waiting thirty seconds per test. It is not read from the server, and a
+   client that shortened it would only make itself impatient. */
+let stopPatienceMs = 30_000;
+
+function stopTimeoutMs() {
+  return stopPatienceMs;
+}
+
+export function setStopPatience(ms) {
+  stopPatienceMs = ms;
+}
+
+function showRefusal(result) {
+  const { code, message } = result.body;
+  showDialog({
+    title: code === "self_protected" ? "That one is protected" : "That did not work",
+    body: message,
+    actions: [["Close", "ghost", closeDialog]],
+  });
+}
+
 /* -- start ------------------------------------------------------------- */
 
 async function refresh() {
@@ -338,4 +502,4 @@ if (document.readyState === "loading") {
 /* The ONLY test seam. The browser tier needs to reach the stream to simulate
    a suspended tab (#57); exposing application state as well would let tests
    assert on internals and then pass through a rewrite that broke the page. */
-window.__hitchrail = { applyTheme, toggleTheme, refresh, render, state };
+window.__hitchrail = { applyTheme, toggleTheme, refresh, render, state, api, setStopPatience };

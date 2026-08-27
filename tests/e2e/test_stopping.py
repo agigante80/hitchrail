@@ -1,0 +1,187 @@
+"""#55: stopping escalates, it does not branch.
+
+The flow the design argues hardest about, and the one no other tier can see:
+it is a sequence over time, not a status code.
+"""
+
+from __future__ import annotations
+
+import pytest
+from playwright.async_api import Page, expect
+
+from .conftest import Harness
+
+pytestmark = pytest.mark.e2e
+
+
+async def _open_stop(page: Page, server: Harness, name: str = "vessel") -> None:
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project(name)}"]')
+    await expect(row).to_be_visible()
+    await row.get_by_role("button", name="Stop").click()
+
+
+async def test_the_confirm_step_offers_only_cancel_and_stop(
+    page: Page, server: Harness
+) -> None:
+    """It escalates, it does not branch. A kill control here puts the
+    destructive path under the thumb at the same weight as the safe one,
+    which section 7 forbids in those words."""
+    server.seed(running=["vessel"])
+    await _open_stop(page, server)
+
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text(f"Stop {server.project('vessel')}?")
+    await expect(dialog.get_by_role("button", name="Cancel")).to_be_visible()
+    await expect(dialog.get_by_role("button", name="Stop", exact=True)).to_be_visible()
+    assert await dialog.get_by_role("button", name="kill").count() == 0
+
+
+async def test_cancel_stops_nothing(page: Page, server: Harness) -> None:
+    """The safe exit has to actually be safe."""
+    server.seed(running=["vessel"])
+    await _open_stop(page, server)
+    await page.locator("[data-dialog]").get_by_role("button", name="Cancel").click()
+    assert server.is_running("vessel"), "Cancel stopped the session"
+
+
+async def test_kill_appears_once_the_wait_is_under_way_and_stays(
+    page: Page, server: Harness
+) -> None:
+    """Available for the WHOLE wait, phrased as impatience rather than as an
+    alternative. Asserted twice with time in between, because a control that
+    appears and then vanishes passes a single check."""
+    server.seed(running=["vessel"], ignores_graceful_stop=True)
+    await _open_stop(page, server)
+    await page.locator("[data-dialog]").get_by_role("button", name="Stop", exact=True).click()
+
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text(f"Stopping {server.project('vessel')}")
+    kill = dialog.get_by_role("button", name="Do not wait, kill it now")
+    await expect(kill).to_be_visible()
+    await page.wait_for_timeout(2500)
+    await expect(kill).to_be_visible()
+
+
+async def test_the_wait_can_be_dismissed_without_cancelling_the_stop(
+    page: Page, server: Harness
+) -> None:
+    """`Hide, keep stopping`. A phone user has other rows to look at, and a
+    modal that owns the screen for thirty seconds is one they kill the app to
+    escape. The stop must survive the dismissal."""
+    server.seed(running=["vessel"], ignores_graceful_stop=True)
+    await _open_stop(page, server)
+    await page.locator("[data-dialog]").get_by_role("button", name="Stop", exact=True).click()
+    await (
+        page.locator("[data-dialog]").get_by_role("button", name="Hide, keep stopping").click()
+    )
+
+    await expect(page.locator("[data-dialog]")).to_be_hidden()
+    await expect(
+        page.locator(f'[data-project="{server.project("vessel")}"]')
+    ).to_have_attribute("data-stopping", "true")
+
+
+async def test_the_kill_control_ends_a_session_that_will_not_stop(
+    page: Page, server: Harness
+) -> None:
+    server.seed(running=["vessel"], ignores_graceful_stop=True)
+    await _open_stop(page, server)
+    await page.locator("[data-dialog]").get_by_role("button", name="Stop", exact=True).click()
+    await (
+        page.locator("[data-dialog]")
+        .get_by_role("button", name="Do not wait, kill it now")
+        .click()
+    )
+
+    await expect(
+        page.locator(f'[data-project="{server.project("vessel")}"]')
+    ).to_have_attribute("data-state", "stopped", timeout=15_000)
+    assert not server.is_running("vessel")
+
+
+async def test_a_graceful_stop_that_works_needs_no_kill(page: Page, server: Harness) -> None:
+    """The happy path, which the escalation exists to avoid. The shim obeys
+    `/exit`, so the dialog closes on its own."""
+    server.seed(running=["vessel"])
+    await _open_stop(page, server)
+    await page.locator("[data-dialog]").get_by_role("button", name="Stop", exact=True).click()
+
+    await expect(
+        page.locator(f'[data-project="{server.project("vessel")}"]')
+    ).to_have_attribute("data-state", "stopped", timeout=20_000)
+    await expect(page.locator("[data-dialog]")).to_be_hidden()
+
+
+async def test_the_protected_row_offers_no_stop_at_all(page: Page, server: Harness) -> None:
+    """There is no path from this interface to a 423. Refusing after the tap
+    is worse than not offering the tap."""
+    server.seed(running=["hitchrail"], self_project="hitchrail")
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("hitchrail")}"]')
+    await expect(row).to_be_visible()
+    assert await row.get_by_role("button", name="Stop").count() == 0
+    assert await row.get_by_role("button", name="Kill").count() == 0
+
+
+async def test_the_timeout_states_the_risk_before_offering_the_kill(
+    page: Page, server: Harness
+) -> None:
+    """Section 7: this is the moment the user is most likely to reach for the
+    kill and least likely to have thought about work that is not saved."""
+    server.seed(running=["vessel"], ignores_graceful_stop=True)
+    await page.goto(server.base)
+    await page.evaluate("() => window.__hitchrail.setStopPatience(1500)")
+
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row).to_be_visible()
+    await row.get_by_role("button", name="Stop").click()
+    await page.locator("[data-dialog]").get_by_role("button", name="Stop", exact=True).click()
+
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text(
+        f"No answer from {server.project('vessel')}", timeout=15_000
+    )
+    risk = (await dialog.inner_text()).lower()
+    assert "lost" in risk or "unsaved" in risk or "not written" in risk, risk
+    await expect(dialog.get_by_role("button", name="Leave it")).to_be_visible()
+    await expect(dialog.get_by_role("button", name="Kill it")).to_be_visible()
+
+
+async def test_the_timeout_does_not_kill_by_itself(page: Page, server: Harness) -> None:
+    """The engine reports and does not escalate; the interface must not do the
+    escalating on its behalf. An automatic kill is a destructive action taken
+    while the person was not looking, and this is the assertion that pins it."""
+    server.seed(running=["vessel"], ignores_graceful_stop=True)
+    await page.goto(server.base)
+    await page.evaluate("() => window.__hitchrail.setStopPatience(1200)")
+
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row).to_be_visible()
+    await row.get_by_role("button", name="Stop").click()
+    await page.locator("[data-dialog]").get_by_role("button", name="Stop", exact=True).click()
+    await expect(page.locator("[data-dialog]")).to_contain_text(
+        "No answer from", timeout=15_000
+    )
+
+    await page.wait_for_timeout(3000)
+
+    assert server.is_running("vessel"), "the interface killed a session nobody told it to"
+
+
+async def test_leave_it_leaves_it(page: Page, server: Harness) -> None:
+    """The safe exit from the timeout screen has to actually be safe."""
+    server.seed(running=["vessel"], ignores_graceful_stop=True)
+    await page.goto(server.base)
+    await page.evaluate("() => window.__hitchrail.setStopPatience(1200)")
+
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row).to_be_visible()
+    await row.get_by_role("button", name="Stop").click()
+    await page.locator("[data-dialog]").get_by_role("button", name="Stop", exact=True).click()
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text("No answer from", timeout=15_000)
+    await dialog.get_by_role("button", name="Leave it").click()
+
+    await expect(dialog).to_be_hidden()
+    assert server.is_running("vessel")
