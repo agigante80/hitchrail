@@ -20,6 +20,15 @@ same session: the symptom was 150 unrelated failures and 50 errors in
 the async API keeps this tier consistent with the rest of the suite instead of
 carving out an exception for it, and it drops the `pytest-playwright` plugin.
 
+**Project names are prefixed and must stay that way.** This tier reads the
+REAL process table, which is the point: it is the only tier that can see what
+the machine actually does. That means a test project called `hitchrail` or
+`forge-kit` collides with whatever the developer is genuinely running, and
+`_find_detached` matches on the argv tail, so a real `claude ... --remote-control
+forge-kit` is indistinguishable from a seeded one. Verified on this machine:
+eight real sessions were running, three of them sharing a name with a name
+these tests used. `e2e_names` below is the guard.
+
 **A private tmux server**, on a short socket path, invoked through
 `env -u TMUX`. A bare `tmux` honours `$TMUX` over `$TMUX_TMPDIR`, so a suite
 run from inside tmux would otherwise drive the developer's real server. Same
@@ -33,6 +42,7 @@ import os
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -43,6 +53,7 @@ import pytest
 import uvicorn
 from playwright.async_api import Page, async_playwright
 
+from hitchrail import claude_ipc
 from hitchrail.config import Config
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
@@ -55,29 +66,58 @@ STARTUP_TIMEOUT = 15.0
 # Prints a line so the log drawer has something to show, then waits for the
 # graceful stop the engine sends. `read` returns non zero when the pane closes,
 # which ends the loop rather than leaving an orphan.
-SHIM = """#!/bin/sh
-echo "hitchrail-shim: started as $*"
-while read -r line; do
-  case "$line" in
-    /exit) echo "hitchrail-shim: exiting"; exit 0 ;;
-  esac
-done
-exit 0
+# A PYTHON shim, not a shell one, and that is not a preference.
+#
+# A detached tmux pane has no client attached, so a `read` in `/bin/sh` returns
+# EOF immediately rather than blocking, and a plain `while read` loop exits at
+# once. The symptom is the worst kind: the pane still shows the line it
+# printed and the session still exists, so a start looks like it worked while
+# the process table has no agent in it. That reads as a broken derivation
+# rather than a broken fake, and it cost an hour.
+#
+# Python is already a dependency here, `sys.stdin.readline()` returning "" on
+# EOF is documented rather than shell dependent, and the loop is explicit
+# about what it does on each outcome.
+_SHIM_HEAD = """#!{python}
+import sys, time
+print("hitchrail-shim: started as " + " ".join(sys.argv[1:]), flush=True)
 """
 
-# Same, but it ignores the graceful request. Used by the stop escalation tests,
-# where the point is what the interface does while nothing is happening.
-STUBBORN_SHIM = """#!/bin/sh
-echo "hitchrail-shim: started as $*"
-while true; do sleep 1; done
+# Waits, and exits on the graceful request the engine sends through send-keys.
+SHIM_BODY = """
+while True:
+    line = sys.stdin.readline()
+    if line == "":
+        # EOF, which a detached pane gives immediately. Not a reason to stop.
+        time.sleep(0.2)
+        continue
+    if line.strip() == "/exit":
+        print("hitchrail-shim: exiting", flush=True)
+        sys.exit(0)
 """
 
-# Exits immediately, for the dead start flow.
-DYING_SHIM = """#!/bin/sh
-echo "hitchrail-shim: started as $*"
-echo "hitchrail-shim: nothing to do, exiting"
-exit 3
+# Ignores the graceful request. For the stop escalation tests, where the point
+# is what the interface does while nothing is happening.
+STUBBORN_BODY = """
+while True:
+    time.sleep(0.2)
 """
+
+# Exits at once, for the dead start flow.
+DYING_BODY = """
+print("hitchrail-shim: nothing to do, exiting", flush=True)
+sys.exit(3)
+"""
+
+
+# Prefixed so a seeded project can never be a real one. `hr` is short because
+# the name reaches a tmux session name and a filesystem path.
+E2E_PREFIX = "hrx-"
+
+
+def e2e_name(name: str) -> str:
+    """The name a test asks for, made impossible to confuse with a real one."""
+    return name if name.startswith(E2E_PREFIX) else f"{E2E_PREFIX}{name}"
 
 
 def free_port() -> int:
@@ -99,7 +139,12 @@ class Harness:
         self.bus = EventBus()
         self.engine: Engine | None = None
         self._config: Config | None = None
-        self._agent = root / "bin" / "agent"
+        self._orphans: list[subprocess.Popen[bytes]] = []
+        # OUTSIDE the project root. `discovery.scan` lists every direct
+        # subfolder, so a `bin/` beside the projects becomes a project: the
+        # tab counts read one too high and every count assertion is off by the
+        # harness rather than by the code.
+        self._agent = root.parent / f"{root.name}-bin" / "agent"
 
     # -- setup ----------------------------------------------------------
 
@@ -112,6 +157,7 @@ class Harness:
         self,
         running: list[str] | None = None,
         stopped: list[str] | None = None,
+        detached: list[str] | None = None,
         unsupported: list[str] | None = None,
         self_project: str | None = None,
         available_mb: int | None = None,
@@ -121,34 +167,64 @@ class Harness:
         token: str | None = None,
     ) -> None:
         """Set the world up BEFORE the page loads."""
-        body = SHIM
+        body = SHIM_BODY
         if ignores_graceful_stop:
-            body = STUBBORN_SHIM
+            body = STUBBORN_BODY
         if agent_exits_immediately:
-            body = DYING_SHIM
-        self._write_shim(body)
+            body = DYING_BODY
+        self._write_shim(_SHIM_HEAD.format(python=sys.executable) + body)
 
-        for name in (running or []) + (stopped or []):
-            (self.root / name).mkdir(exist_ok=True)
+        for name in (running or []) + (stopped or []) + (detached or []):
+            (self.root / e2e_name(name)).mkdir(exist_ok=True)
+        # NOT prefixed: an unsupported folder is one Hitchrail cannot use, so
+        # its name is the point and it never becomes a session.
         for name in unsupported or []:
             (self.root / name).mkdir(exist_ok=True)
 
         meminfo = f"MemTotal: 33554432 kB\nMemAvailable: {(available_mb or 24608) * 1024} kB\n"
         sessions = self.root / ".sessions"
         sessions.mkdir(exist_ok=True)
-        self._config = Config(
-            root=self.root,
-            sessions_dir=sessions,
-            port=self.port,
-            tmux_socket=self._sock,
-            self_project=self_project,
-            agent_binary=str(self._agent),
-            stop_timeout=stop_timeout,
-            token=token,
-        )
-        self.engine = Engine(config=self._config, meminfo_fn=lambda: meminfo)
+
+        def build(protect: str | None) -> Config:
+            return Config(
+                root=self.root,
+                sessions_dir=sessions,
+                port=self.port,
+                tmux_socket=self._sock,
+                agent_binary=str(self._agent),
+                stop_timeout=stop_timeout,
+                token=token,
+                self_project=protect,
+            )
+
+        # Sessions are started through an engine with NO self_project, then the
+        # protection is applied. `start` refuses the protected project, which
+        # is the behaviour #55 tests, so a harness that set it first could
+        # never seed the one row those tests are about.
+        opener = Engine(config=build(None), meminfo_fn=lambda: meminfo)
         for name in running or []:
-            self.engine.start(name)
+            opener.start(e2e_name(name))
+
+        # `detached` is an agent that outlived its terminal, so it is spawned
+        # OUTSIDE tmux rather than by killing a session. Killing a session
+        # kills the pane's process group with it, which leaves `stopped` and
+        # not `detached`: the state a naive tool gets wrong cannot be faked by
+        # breaking the tmux half.
+        for name in detached or []:
+            self._orphans.append(
+                subprocess.Popen(
+                    claude_ipc.launch_argv(str(self._agent), e2e_name(name)),
+                    cwd=self.root / e2e_name(name),
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            )
+        if detached:
+            time.sleep(0.4)
+
+        self._config = build(e2e_name(self_project) if self_project else None)
+        self.engine = Engine(config=self._config, meminfo_fn=lambda: meminfo)
         self.start()
 
     # -- lifecycle ------------------------------------------------------
@@ -168,6 +244,21 @@ class Harness:
             time.sleep(0.05)
         raise RuntimeError("uvicorn did not start")
 
+    def reap_orphans(self) -> None:
+        """Anything spawned outside tmux is ours to clean up.
+
+        Nothing else will: it has no pane, so no `kill-server` reaches it, and
+        a leaked one keeps matching the argv tail for every later test on this
+        machine.
+        """
+        for orphan in self._orphans:
+            orphan.terminate()
+            try:
+                orphan.wait(timeout=5)
+            except subprocess.TimeoutExpired:  # pragma: no cover - a stuck fake
+                orphan.kill()
+        self._orphans.clear()
+
     def stop_serving(self) -> None:
         if self._server is not None:
             self._server.should_exit = True
@@ -178,11 +269,15 @@ class Harness:
 
     def is_running(self, name: str) -> bool:
         assert self.engine is not None
-        return self.engine.get(name).state.value == "running"
+        return self.engine.get(e2e_name(name)).state.value == "running"
 
     def kill(self, name: str) -> None:
         assert self.engine is not None
-        self.engine.kill(name)
+        self.engine.kill(e2e_name(name))
+
+    def project(self, name: str) -> str:
+        """The prefixed name, for a test that needs to select on it."""
+        return e2e_name(name)
 
 
 @pytest.fixture
@@ -201,6 +296,7 @@ def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Harness]:
         yield harness
     finally:
         harness.stop_serving()
+        harness.reap_orphans()
         # Scoped kill, never a bare `tmux kill-server`: this socket only.
         subprocess.run(
             ["tmux", "-S", sock, "kill-server"],

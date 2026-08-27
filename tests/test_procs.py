@@ -11,7 +11,7 @@ import subprocess
 
 import pytest
 
-from hitchrail.procs import Proc, ProcTable, parse_ps, snapshot
+from hitchrail.procs import PS_ARGV, Proc, ProcTable, parse_ps, snapshot
 
 # Real shape, five columns, `args` last and unbounded.
 TABLE = """\
@@ -80,7 +80,7 @@ def test_an_empty_table_parses_to_nothing() -> None:
 def test_snapshot_issues_one_call_with_the_verified_columns() -> None:
     runner = FakeRunner(TABLE)
     snapshot(runner)
-    assert runner.calls == [["ps", "-eo", "pid,ppid,rss,etimes,args", "--no-headers"]]
+    assert runner.calls == [["ps", "-eww", "-o", "pid,ppid,rss,etimes,args", "--no-headers"]]
 
 
 def test_a_failed_ps_is_an_empty_table_rather_than_an_exception() -> None:
@@ -191,3 +191,57 @@ def test_a_ps_refused_by_permissions_is_also_a_failed_table() -> None:
         raise PermissionError(13, "Permission denied", argv[0])
 
     assert snapshot(refused).ok is False
+
+
+# -- #65: ps truncates to the terminal width --------------------------------
+
+
+def test_the_process_table_is_read_at_unlimited_width() -> None:
+    """The bug this project could not see, because every fixture writes short
+    rows by hand.
+
+    `ps` cuts the command line at `$COLUMNS`, and the end of the argv is where
+    `--remote-control <project>` lives. Measured at 80 columns on a real
+    machine: eight agents visible, twelve with `-ww`. The four that vanished
+    would have derived as `stopped` and offered a Start, putting a second agent
+    in a folder that already had one.
+
+    Doubled on purpose: a single `-w` widens to 132 columns, which moves the
+    cliff rather than removing it.
+    """
+    # Checked as "a flag requesting doubled w", not as the literal "-ww",
+    # because it is combined with -e as "-eww" and an exact match would fail
+    # against correct code the day somebody splits the flags apart.
+    doubled = [flag for flag in PS_ARGV if flag.startswith("-") and "ww" in flag]
+    assert doubled, (
+        "ps truncates to the terminal width without -ww, and the marker is at "
+        "the END of the argv, so a live agent under a long path becomes "
+        f"invisible. PS_ARGV is {PS_ARGV}"
+    )
+
+
+def test_a_command_line_longer_than_any_terminal_keeps_its_tail() -> None:
+    """The parser half. The flag decides what `ps` writes; this decides that a
+    long row survives being read, which is the property the engine depends on
+    when it matches on the argv tail."""
+    long_path = "/" + "/".join(f"segment-{i}" for i in range(40))
+    args = f"{long_path}/python {long_path}/agent --remote-control deep-project"
+    assert len(args) > 500
+
+    procs = parse_ps(f" 4242  1  512  60 {args}\n")
+
+    assert len(procs) == 1
+    assert procs[0].args.endswith("--remote-control deep-project")
+    assert procs[0].pid == 4242
+
+
+def test_the_documented_invocation_matches_the_one_used() -> None:
+    """The module docstring names the exact `ps` it was verified against. A
+    docstring describing a different command is how somebody reasons about the
+    wrong output format."""
+    import hitchrail.procs as module
+
+    documented = " ".join(PS_ARGV)
+    assert documented in (module.__doc__ or ""), (
+        f"the module docstring does not name {documented!r}"
+    )

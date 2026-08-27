@@ -6,7 +6,7 @@ can disagree inside a single refresh: a process alive for one question and dead
 for the next, so a session reads as both running and stopped.
 
 Verified against procps-ng 4.0.4 on this machine before the parser was written:
-`ps -eo pid,ppid,rss,etimes,args --no-headers` yields those five columns in
+`ps -eww -o pid,ppid,rss,etimes,args --no-headers` yields those five columns in
 that order. `etimes` is seconds; `etime` is `[[dd-]hh:]mm:ss` and parsing a
 duration format is a bug farm, so the numeric column is the one to ask for.
 
@@ -21,7 +21,21 @@ from dataclasses import dataclass, field
 
 from hitchrail.tmux import Runner
 
-PS_ARGV = ["ps", "-eo", "pid,ppid,rss,etimes,args", "--no-headers"]
+# `-ww` is unlimited width, and it is load bearing rather than tidy.
+#
+# `ps` truncates the command line to the TERMINAL WIDTH, and the part it cuts
+# is the end of the argv, which is exactly where the agent's own marker and
+# the project name live. Without this, a live agent under a long path derives as `stale` and a
+# detached one is never found at all, so its row reads `stopped` and offers to
+# Start: a second agent in a folder that already has one, which is the failure
+# section 4.1 exists to prevent.
+#
+# Measured on a real machine at 80 columns: eight agents visible without it,
+# twelve with. Four running sessions were absent, not mislabelled.
+#
+# Doubled deliberately. A single `-w` widens to 132 columns, which moves the
+# cliff rather than removing it. See #65.
+PS_ARGV = ["ps", "-eww", "-o", "pid,ppid,rss,etimes,args", "--no-headers"]
 
 # ps reports rss in kilobytes. Everything above this module works in MB.
 _KB_PER_MB = 1024

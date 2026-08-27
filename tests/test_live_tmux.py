@@ -25,11 +25,13 @@ from __future__ import annotations
 import shutil
 import subprocess
 import tempfile
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
+from hitchrail.procs import snapshot
 from hitchrail.tmux import Tmux, sanitize
 
 pytestmark = [
@@ -232,3 +234,44 @@ def test_teardown_survives_a_name_tmux_rewrote() -> None:
     private.new_session(f"{PREFIX}dotted.site")
     assert private.sessions() == [f"{PREFIX}dotted_site"]
     assert private.close() == [], "the rewritten session outlived close()"
+
+
+# -- #65: the real `ps`, which is the only thing that could catch this -------
+
+
+def test_a_long_command_line_survives_the_real_process_table(
+    server: PrivateTmux,
+) -> None:
+    """The test that would have found #65, and the reason it is in THIS tier.
+
+    Every hermetic test feeds `parse_ps` a string that was never truncated,
+    because the fixtures write short rows by hand. Only a tier that runs the
+    real `ps` against a real process can see that the command line was cut at
+    the terminal width, and the part cut is the end of the argv, where
+    `--remote-control <project>` lives.
+
+    Measured at 80 columns before the fix: eight agents visible, twelve with
+    `-ww`. The four that vanished derived as `stopped` and would have offered
+    a Start into a folder that already had an agent.
+    """
+    # Long enough to exceed any terminal, and long in the way a real
+    # deployment is: a deep path rather than an absurd project name.
+    deep = Path(server._dir) / "/".join(f"segment-{i}" for i in range(12))
+    deep.mkdir(parents=True, exist_ok=True)
+    marker = "--remote-control a-project-under-a-deep-path"
+    script = deep / "agent"
+    script.write_text("#!/bin/sh\nwhile true; do sleep 0.2; done\n")
+    script.chmod(0o755)
+
+    server.run("new-session", "-d", "-s", "hr-deep", str(script), *marker.split())
+    time.sleep(0.6)
+
+    table = snapshot()
+
+    assert table.ok, "the process table could not be read at all"
+    matching = [p for p in table.procs if marker in p.args]
+    assert matching, (
+        f"a command line of {len(str(script)) + len(marker)} characters lost its "
+        "tail. `ps` truncates to the terminal width without -ww."
+    )
+    assert matching[0].args.rstrip().endswith("a-project-under-a-deep-path")
