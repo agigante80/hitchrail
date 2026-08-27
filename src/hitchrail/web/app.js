@@ -305,17 +305,34 @@ export function render() {
    changes. A second dialog for the kill would put the destructive path on
    screen beside the safe one. */
 
-function closeDialog() {
+/* `onlyIfFor` is passed DELIBERATELY, never by a listener.
+ *
+ * This function is handed to `addEventListener` in several places, and a
+ * listener receives the click event as its first argument. When this gained a
+ * parameter, that event silently became `onlyIfFor`, never matched, and every
+ * Cancel and Close stopped working. The call sites wrap it for that reason. */
+function closeDialog(onlyIfFor) {
   const dialog = $("[data-dialog]");
-  if (dialog?.open) dialog.close();
+  if (!dialog?.open) return;
+  // A background stop finishing must not close a dialog somebody opened
+  // afterwards. Hide, keep stopping leaves the stop running, so by the time
+  // it completes the person may be reading a log drawer or naming a new
+  // folder, and closing that out from under them looks like a crash.
+  if (onlyIfFor !== undefined && dialog.dataset.for !== onlyIfFor) return;
+  dialog.close();
 }
 
 /* `actions` are given SAFEST FIRST. The column layout means first is topmost
    and furthest from the thumb, which is the placement section 7 asks for. */
-function showDialog({ title, body, actions, extra }) {
+function showDialog({ title, body, actions, extra, forProject }) {
   const dialog = $("[data-dialog]");
   if (!dialog) return;
   dialog.replaceChildren();
+  if (forProject === undefined) {
+    delete dialog.dataset.for;
+  } else {
+    dialog.dataset.for = forProject;
+  }
 
   const heading = document.createElement("h2");
   heading.className = "dialog-title";
@@ -356,7 +373,7 @@ function confirmStop(project) {
     // Cancel and Stop, and nothing else. A kill control at this step puts the
     // destructive path under the thumb at the same weight as the safe one.
     actions: [
-      ["Cancel", "ghost", closeDialog],
+      ["Cancel", "ghost", () => closeDialog()],
       ["Stop", "", () => beginStop(project)],
     ],
   });
@@ -379,10 +396,11 @@ function showWaiting(project) {
   showDialog({
     title: `Stopping ${project.name}`,
     body: "Waiting for it to finish.",
+    forProject: project.name,
     actions: [
       // "Hide, keep stopping" first: a modal that owns a phone screen for
       // thirty seconds is one people kill the app to escape.
-      ["Hide, keep stopping", "ghost", closeDialog],
+      ["Hide, keep stopping", "ghost", () => closeDialog()],
       // Phrased as impatience rather than as an alternative, and available
       // for the WHOLE wait rather than only at the end.
       ["Do not wait, kill it now", "danger", () => killNow(project)],
@@ -395,7 +413,7 @@ function awaitStopped(project) {
   const tick = async () => {
     const current = state.projects.find((p) => p.name === project.name);
     if (!current || !current.stopping) {
-      closeDialog();
+      closeDialog(project.name);
       return;
     }
     if (Date.now() >= deadline) {
@@ -418,7 +436,7 @@ function showTimedOut(project) {
       "It has not finished. Killing it now ends the process immediately, "
       + "and anything it has not written to disk is lost.",
     actions: [
-      ["Leave it", "ghost", closeDialog],
+      ["Leave it", "ghost", () => closeDialog()],
       ["Kill it", "danger", () => killNow(project)],
     ],
   });
@@ -456,10 +474,21 @@ export function setStopPatience(ms) {
 
 function showRefusal(result) {
   const { code, message } = result.body;
+  if (result.status === 401) {
+    // The token is the whole auth model, so an expired or revoked one is a
+    // situation a person can actually be in, and "That did not work" leaves
+    // them with nothing to do. Reloading reaches the token screen.
+    showDialog({
+      title: "Not signed in any more",
+      body: "This browser is no longer accepted. Open the link with the token again.",
+      actions: [["Reload", "accent", () => window.location.reload()]],
+    });
+    return;
+  }
   showDialog({
     title: code === "self_protected" ? "That one is protected" : "That did not work",
     body: message,
-    actions: [["Close", "ghost", closeDialog]],
+    actions: [["Close", "ghost", () => closeDialog()]],
   });
 }
 
@@ -505,7 +534,7 @@ function showSoftMemory(project, body) {
       `Starting ${project.name} would leave about ${formatMb(left)} free. `
       + "Sessions have been killed by the kernel below that.",
     actions: [
-      ["Cancel", "ghost", closeDialog],
+      ["Cancel", "ghost", () => closeDialog()],
       ["Start anyway", "", () => startProject(project, { acknowledged: true })],
     ],
   });
@@ -518,7 +547,7 @@ function showHardMemory(project, body) {
     .filter((candidate) => candidate.pid !== null && !candidate.protected)
     .sort((a, b) => b.ram_mb - a.ram_mb)[0];
 
-  const actions = [["Cancel", "ghost", closeDialog]];
+  const actions = [["Cancel", "ghost", () => closeDialog()]];
   if (largest) {
     actions.push([
       `Stop ${largest.name}`,
@@ -548,7 +577,7 @@ function showDeadStart(project, body) {
     extra: pane,
     actions: [
       ["Read what it printed", "ghost", () => { pane.hidden = false; }],
-      ["Close", "ghost", closeDialog],
+      ["Close", "ghost", () => closeDialog()],
     ],
   });
 }
@@ -570,7 +599,7 @@ async function openLogs(project) {
     title: project.name,
     body: "last 40 lines of the pane",
     extra: pane,
-    actions: [["Close", "ghost", closeDialog]],
+    actions: [["Close", "ghost", () => closeDialog()]],
   });
 }
 
@@ -597,7 +626,7 @@ function showNewFolder(message) {
     body: message || "",
     extra: wrapper,
     actions: [
-      ["Cancel", "ghost", closeDialog],
+      ["Cancel", "ghost", () => closeDialog()],
       ["Create", "accent", () => createProject(field.value)],
     ],
   });

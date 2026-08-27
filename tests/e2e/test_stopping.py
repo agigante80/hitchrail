@@ -42,6 +42,13 @@ async def test_cancel_stops_nothing(page: Page, server: Harness) -> None:
     server.seed(running=["vessel"])
     await _open_stop(page, server)
     await page.locator("[data-dialog]").get_by_role("button", name="Cancel").click()
+
+    # Both halves. Asserting only that nothing stopped passes against a Cancel
+    # that does nothing at all, which is exactly what happened when
+    # `closeDialog` gained a parameter and was still used as a listener: the
+    # click event arrived as that parameter, never matched, and every Cancel
+    # and Close silently stopped closing anything.
+    await expect(page.locator("[data-dialog]")).to_be_hidden()
     assert server.is_running("vessel"), "Cancel stopped the session"
 
 
@@ -185,3 +192,43 @@ async def test_leave_it_leaves_it(page: Page, server: Harness) -> None:
 
     await expect(dialog).to_be_hidden()
     assert server.is_running("vessel")
+
+
+async def test_a_finishing_stop_does_not_close_a_dialog_opened_since(
+    page: Page, server: Harness
+) -> None:
+    """`Hide, keep stopping` leaves the stop running, so by the time it
+    completes the person may be part way through something else. Closing that
+    out from under them looks like a crash.
+
+    The New folder sheet rather than a log drawer, because it needs no second
+    session: the property is about which dialog is on screen, not about what
+    opened it.
+    """
+    server.seed(running=["vessel"])
+    await page.goto(server.base)
+    vessel = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(vessel).to_be_visible()
+
+    await vessel.get_by_role("button", name="Stop").click()
+    await page.locator("[data-dialog]").get_by_role("button", name="Stop", exact=True).click()
+    await (
+        page.locator("[data-dialog]").get_by_role("button", name="Hide, keep stopping").click()
+    )
+    # A modal dialog makes the rest of the page inert, so the next click is
+    # intercepted by the backdrop until it has actually closed.
+    await expect(page.locator("[data-dialog]")).to_be_hidden()
+
+    await page.get_by_role("button", name="New").click()
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text("New folder")
+    await page.get_by_label("Folder name").fill("half-typed")
+
+    # Let the background stop run to completion underneath it.
+    await page.wait_for_timeout(6000)
+
+    await expect(dialog).to_be_visible()
+    await expect(dialog).to_contain_text("New folder")
+    assert await page.get_by_label("Folder name").input_value() == "half-typed", (
+        "the sheet was rebuilt, losing what had been typed into it"
+    )
