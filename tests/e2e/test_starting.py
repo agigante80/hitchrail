@@ -83,8 +83,17 @@ async def test_a_start_that_dies_says_so_and_offers_the_output(
     await expect(row).to_be_visible()
     await row.get_by_role("button", name="Start").click()
 
+    # Wait for the dialog to OPEN before asserting on its text. A closed
+    # `<dialog>` is display:none, so `to_contain_text` on it reports an empty
+    # string and says nothing about why: on CI this failed with "Actual value:
+    # (blank)" and no indication that the request was simply still in flight.
+    #
+    # The generous timeout is the engine's, not this test's. `start` polls for
+    # `start_grace` seconds before it can report a dead start, and every poll
+    # spawns `ps` and `tmux`, which on a shared runner is far slower than here.
     dialog = page.locator("[data-dialog]")
-    await expect(dialog).to_contain_text("died", timeout=25_000)
+    await expect(dialog).to_be_visible(timeout=45_000)
+    await expect(dialog).to_contain_text("died")
     await expect(dialog).to_contain_text("exited almost immediately")
     await dialog.get_by_role("button", name="Read what it printed").click()
 
