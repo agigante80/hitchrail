@@ -372,12 +372,53 @@ user or a script has a legitimate need to kill outright, and enforcing etiquette
 in the transport would only invite working around it.
 
 Errors return a JSON body with a stable machine readable `code` and a human
-readable `message`. The codes carry the meanings the UI branches on, including
-`ram_soft`, `ram_hard`, `self_protected`, `start_died`, `url_pending` and
-`locked`.
+readable `message`. The complete set, because a short list reads as a complete
+one and a client cannot tell the difference:
+
+| Code | Status | Meaning |
+|---|---|---|
+| `invalid_name` | 400 | not a name we will turn into a path |
+| `not_found` | 404 | no such ROUTE on this server |
+| `unknown_project` | 404 | no such folder under the root |
+| `method_not_allowed` | 405 | the route exists and does not accept this method |
+| `already_running` | 409 | a session is already live there |
+| `already_exists` | 409 | a folder of that name is already there |
+| `not_running` | 409 | there is no session to act on |
+| `locked` | 409 | a start is already in flight for this folder |
+| `ram_soft` | 409 | starting would leave the machine short; resubmit acknowledged |
+| `url_pending` | 409 | the session has no link yet; ask again shortly |
+| `self_protected` | 423 | this is the folder Hitchrail is running in |
+| `start_died` | 502 | the session did not come up within the grace window |
+| `root_unavailable` | 503 | the configured root cannot be read right now |
+| `machine_unreadable` | 503 | tmux or the process table could not be read |
+| `ram_hard` | 507 | not enough memory, and not overridable |
+
+Four of these exist because of a decision rather than a condition, and the
+decision is the part a client author needs.
 
 `ram_soft` is a confirmation gate: the client resubmits with an explicit
 acknowledgement. The server never proceeds on a soft refusal by itself.
+`ram_hard` is not overridable, which is why they are different codes rather
+than one with a severity.
+
+`unknown_project` and `not_running` are deliberately distinguishable. The root
+has never heard of the first; the second is a real project that simply is not
+running. Collapsing them tells a person to start something that was never
+there, or to check a name that is perfectly correct.
+
+`root_unavailable` and `machine_unreadable` are both 503 meaning ask again, and
+neither is the caller's fault. The second is the one worth handling carefully:
+section 4.1 makes an unreadable machine an error rather than a fifth state
+precisely so it is never derived as `stopped`, and a client that renders its
+503 as a failed request shows an empty list where the truth is that the machine
+cannot be read.
+
+**One refusal is not in this envelope.** A request body over the limit is
+answered `413` with a `text/plain` body, because Starlette installs its body
+limit outside the exception handlers and it therefore answers before the
+application exists. Documented rather than worked around: a check inside the
+route that would have answered in the envelope first could never execute, since
+the middleware wins even against a client that lies about `content-length`.
 
 SSE uses `sse-starlette`, not a hand rolled `StreamingResponse`. Ping keepalive,
 client disconnect detection and generator shutdown are the parts that are

@@ -100,3 +100,53 @@ def test_the_roadmap_marks_a_phase_done_only_when_its_plan_is_finished() -> None
         assert unticked == 0, (
             f"{match.group(1)} is marked done but its plan has {unticked} unticked items"
         )
+
+
+# -- #63: the design's error table against the server -----------------------
+
+SPEC = ROOT / "docs" / "superpowers" / "specs" / "2026-08-25-hitchrail-design.md"
+SERVER = SRC / "server.py"
+
+
+def _codes_the_server_returns() -> set[str]:
+    """Parsed from the SOURCE, not imported from a list.
+
+    A list exported from `server.py` and compared against the document would
+    pass while a handler returned something not on it, which is the exact shape
+    of the gap #63 is about. Reading the calls catches a code added inline the
+    same as one added to the constant.
+    """
+    src = SERVER.read_text()
+    codes = set(re.findall(r'_error\(\s*\d+,\s*"([a-z_]+)"', src))
+    for block in re.findall(r"_ROUTING_CODES\s*=\s*\{(.*?)\}", src, re.S):
+        codes |= set(re.findall(r'"([a-z_]+)"', block))
+    return codes
+
+
+def _codes_the_spec_documents() -> set[str]:
+    text = SPEC.read_text()
+    section = text[text.index("## 6. HTTP interface") : text.index("## 7. Interface design")]
+    return set(re.findall(r"^\| `([a-z_]+)` \| \d+ \|", section, re.M))
+
+
+def test_the_spec_documents_every_code_the_server_can_return() -> None:
+    """The table listed six of fifteen, and a reader cannot tell a short list
+    from a complete one. `machine_unreadable` was the costly omission: a client
+    that renders its 503 as a failed request shows an empty list where the
+    truth is that the machine cannot be read."""
+    missing = _codes_the_server_returns() - _codes_the_spec_documents()
+    assert not missing, (
+        f"the server returns codes the design does not document: {sorted(missing)}. "
+        "Add them to section 6's table."
+    )
+
+
+def test_the_spec_documents_no_code_the_server_cannot_return() -> None:
+    """The other direction, and it is not symmetry for its own sake. A spec
+    describing a refusal that cannot happen sends a client author writing a
+    dead branch, which is the same class of harm as omitting a live one."""
+    stale = _codes_the_spec_documents() - _codes_the_server_returns()
+    assert not stale, (
+        f"the design documents codes the server cannot return: {sorted(stale)}. "
+        "Remove them, or the client writes branches that never run."
+    )
