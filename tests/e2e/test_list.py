@@ -123,6 +123,10 @@ async def test_a_project_name_is_rendered_as_text_and_never_as_markup(
     hand what is left to an HTML parser."""
     server.seed(stopped=["vessel"])
     await page.goto(server.base)
+    # Wait for the initial fetch to have rendered before injecting. `boot`
+    # kicks off `refresh` without awaiting it, so a state written before that
+    # resolves is overwritten by the real listing and the test flakes.
+    await expect(page.locator('[data-project="hrx-vessel"]')).to_be_visible()
     hostile = "<img src=x onerror=alert(1)>"
     await page.evaluate(
         """(name) => {
