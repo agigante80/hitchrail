@@ -83,10 +83,12 @@ survive.
 Hitchrail starts `claude --dangerously-skip-permissions`. **Anyone who can reach
 its API can run arbitrary code on that machine as you.**
 
-This section describes the finished tool. Every control below is now built and
-tested, including on a real socket rather than only in theory, but there is no
-API behind them yet. None of it is optional, and none of it is a reason to run
-this on a network you do not trust.
+Every control below is built and tested, including on a real socket rather than
+only in theory, and the API is now behind them. None of it is optional, and
+none of it is a reason to run this on a network you do not trust.
+
+The browser interface is not built yet. Until it is, this is an API you drive
+with `curl`, and the warning above applies to it exactly as written.
 
 It binds to loopback with no authentication by default. Binding it to any other
 interface requires a token, and the server refuses to start without one. It
