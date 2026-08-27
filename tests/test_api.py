@@ -800,3 +800,54 @@ async def test_the_page_route_exists_and_is_html(client: httpx.AsyncClient) -> N
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert "hitchrail" in response.text
+
+
+# -- #53: the page and its assets, at the tier that does not need a browser --
+
+
+@pytest.mark.parametrize(
+    ("path", "content_type"),
+    [("/", "text/html"), ("/app.css", "text/css"), ("/app.js", "javascript")],
+)
+async def test_the_page_and_its_assets_are_served(
+    client: httpx.AsyncClient, path: str, content_type: str
+) -> None:
+    """Asserted here as well as in the browser tier, because this is the tier
+    that runs everywhere: a wheel missing `web/` fails here without needing a
+    browser to notice."""
+    response = await client.get(path, headers=HEADERS)
+    assert response.status_code == 200, path
+    assert content_type in response.headers["content-type"], path
+    assert response.content, f"{path} was served empty"
+
+
+@pytest.mark.parametrize(
+    "attempt",
+    [
+        "/../pyproject.toml",
+        "/app.css/../../pyproject.toml",
+        "/%2e%2e/pyproject.toml",
+        "/app.js%00.css",
+        "/APP.CSS",
+    ],
+)
+async def test_no_request_reaches_a_file_the_module_did_not_name(
+    client: httpx.AsyncClient, attempt: str
+) -> None:
+    """The security content of the asset routes. They take NO path parameter,
+    so traversal is not refused: it is unreachable. `/APP.CSS` is in the list
+    because a case insensitive match would be a second way in."""
+    response = await client.get(attempt, headers=HEADERS)
+    assert response.status_code in (301, 307, 404), f"{attempt} -> {response.status_code}"
+    assert "[project]" not in response.text, f"{attempt} served pyproject.toml"
+
+
+async def test_the_page_is_behind_the_token(tmp_path: pathlib.Path) -> None:
+    """Serving the shell unauthenticated is a change to the security boundary,
+    and it is #21's to argue rather than this route's to assume."""
+    (tmp_path / "vessel").mkdir()
+    config = Config(root=tmp_path, sessions_dir=tmp_path / ".s", token="s3cret")
+    engine = make_engine(config, FakeTmux(), procs_from(""))
+    async with client_for(engine, config) as c:
+        for path in ("/", "/app.css", "/app.js"):
+            assert (await c.get(path, headers={"host": "localhost"})).status_code == 401, path
