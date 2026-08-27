@@ -116,6 +116,25 @@ From `States.dc.html`, in its own words, because these are the requirements:
 
 ### The phone flows, from `Main.dc.html`
 
+**The filter is a tab strip with counts**, in both artboards, and it was nearly
+missed because it appears as `{{ tab.label }}` rather than as literal text:
+
+```js
+mkTab('all', 'All', all.length)
+mkTab('running', 'Running', runNames.length)
+mkTab('stopped', 'Stopped', all.length - runNames.length)
+```
+
+Three tabs, each carrying its own count, and `Stopped` is defined as everything
+that is not running rather than as the `stopped` STATE. That matters: a `stale`
+or `detached` row is not running, so it belongs under `Stopped` even though its
+`data-state` says otherwise. Filtering on the state string would hide exactly
+the two rows a person most needs to find.
+
+**The controller row's badge reads `controller`**, from
+`badge: live && live.controller ? 'controller' : 'running'`. An earlier draft
+of this plan said "a lock", which is the affordance, not the label.
+
 Header (`hitchrail`, the root path, `New`), search with an empty state
 ("Nothing matches" / "No folder here is called that."), rows with `Open` and
 `Start`, the stop sequence (`Stop {name}?` with `Cancel` and `Stop`, then
@@ -182,6 +201,7 @@ discovered by grepping:
 | `data-protected` | the row | `true` for the controller session |
 | `data-stream` | the shell | `open`, `down` |
 | `data-theme` | `:root` | `light`, `dark`, absent when following the system |
+| `data-mem-pct` | the footer | the percentage of memory in use, as an integer |
 
 **Why the harness lands with the skeleton.** #37 marked the integration tier
 before it tripled, and the same argument applies harder here: a browser tier
@@ -387,6 +407,30 @@ def test_search_filters_and_says_so_when_nothing_matches(page: Page, server) -> 
     page.get_by_role("searchbox").fill("zzz")
     expect(page.get_by_text("Nothing matches")).to_be_visible()
     expect(page.get_by_text("No folder here is called that.")).to_be_visible()
+
+
+def test_the_tabs_filter_and_carry_their_own_counts(page: Page, server) -> None:
+    """Three tabs from the canvas: All, Running, Stopped, each with a count."""
+    server.seed(running=["vessel"], stopped=["koala", "media-sync"])
+    page.goto(server.base)
+    expect(page.get_by_role("tab", name="All")).to_contain_text("3")
+    expect(page.get_by_role("tab", name="Running")).to_contain_text("1")
+    expect(page.get_by_role("tab", name="Stopped")).to_contain_text("2")
+    page.get_by_role("tab", name="Running").click()
+    expect(page.locator("[data-project]")).to_have_count(1)
+
+
+def test_stopped_means_not_running_rather_than_the_stopped_state(page: Page, server) -> None:
+    """`Stopped` is `all.length - runNames.length` in the canvas, not a state
+    match. A stale or detached row is not running, so it belongs here: those
+    are the two rows a person most needs to find, and a state string filter
+    would hide both."""
+    server.seed(running=["vessel"], stale=["koala"], detached=["forge-kit"])
+    page.goto(server.base)
+    page.get_by_role("tab", name="Stopped").click()
+    expect(page.locator('[data-project="koala"]')).to_be_visible()
+    expect(page.locator('[data-project="forge-kit"]')).to_be_visible()
+    expect(page.locator('[data-project="vessel"]')).to_have_count(0)
 
 
 def test_a_folder_that_cannot_be_a_project_is_accounted_for(page: Page, server) -> None:
@@ -625,6 +669,9 @@ def test_the_memory_footer_reports_what_is_free(page: Page, server) -> None:
     server.seed(stopped=["vessel"], available_mb=8192)
     page.goto(server.base)
     expect(page.get_by_role("contentinfo")).to_contain_text("8.0 GB")
+    # `memPct` in the canvas alongside `memLabel`: the figure and the
+    # proportion, because "12.8 GB free" means nothing without the total.
+    expect(page.locator("[data-mem-pct]")).to_have_attribute("data-mem-pct", "50")
 ```
 
 - [ ] **Step 2: Run to verify failure**
@@ -748,17 +795,27 @@ any outbound request, and browser history sync carries it to every signed in
 device. A fragment is never sent to any server, which removes all three at
 once.
 
-**The decision this task has to make**, and it is the reason the ticket is
-here rather than in Phase 2: no token reaches the server, so the navigation is
-answered `401` by `TokenMiddleware`. For a BROWSER navigation that must serve
-the app shell rather than a JSON refusal, or there is no JavaScript to read the
-fragment and the flow cannot start.
+**The decision, which #21 already made and this plan initially got wrong.** No
+token reaches the server, so something has to be reachable unauthenticated or
+there is no JavaScript to read the fragment and the flow cannot start. Two
+candidates, both in the ticket:
 
-The narrowest rule that works: an unauthenticated `GET` whose `Accept` includes
-`text/html`, and only for the page route, is answered with the shell and a
-`401` status. Everything else keeps the JSON refusal it has. The status stays
-401 so nothing downstream treats it as a success, and the shell it serves
-contains the token screen and no data.
+- A dedicated `GET /grant`, a single purpose page whose only job is to read the
+  fragment and post it. The rest of the app stays fully behind the token.
+- The app shell served on `401` for `Accept: text/html`. One URL, nicer to
+  paste.
+
+**Build the dedicated route.** A first draft of this plan chose the shell,
+reasoning about how to make one URL work, which quietly accepted the one URL
+goal as the premise. The ticket had already answered it and answered it better:
+the link is GENERATED, by `banner()` in `cli.py`, so its length costs nobody
+anything, and a single purpose page cannot accrete. The shell exemption is the
+one that gets worse over time, because every future addition to the shell
+inherits it, and this project has spent two phases removing guards that eroded
+exactly that way.
+
+So: `GET /grant` is the only unauthenticated route, it serves a page with no
+data on it, and `/` stays behind the token like everything else.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -774,31 +831,51 @@ def test_the_fragment_never_reaches_the_server(page: Page, server) -> None:
     """The whole point. Asserted against what the server SAW, not against the
     address bar, because the address bar is what #20 already fixed."""
     server.start_with_token("s3cret")
-    page.goto(f"{server.base}/#token=s3cret")
+    page.goto(f"{server.base}/grant#token=s3cret")
     expect(page.get_by_role("heading", name="hitchrail")).to_be_visible(timeout=10_000)
     assert all("s3cret" not in line for line in server.access_log), server.access_log
 
 
 def test_the_grant_leaves_the_address_bar(page: Page, server) -> None:
     server.start_with_token("s3cret")
-    page.goto(f"{server.base}/#token=s3cret")
+    page.goto(f"{server.base}/grant#token=s3cret")
     expect(page.get_by_role("heading", name="hitchrail")).to_be_visible(timeout=10_000)
     assert "s3cret" not in page.url, page.url
 
 
 def test_the_cookie_survives_a_reload_so_the_link_is_used_once(page: Page, server) -> None:
     server.start_with_token("s3cret")
-    page.goto(f"{server.base}/#token=s3cret")
+    page.goto(f"{server.base}/grant#token=s3cret")
     expect(page.get_by_role("heading", name="hitchrail")).to_be_visible(timeout=10_000)
     page.goto(server.base)
     expect(page.get_by_role("heading", name="hitchrail")).to_be_visible()
 
 
-def test_an_unauthenticated_browser_gets_the_token_screen_not_json(page: Page, server) -> None:
-    """A person who opens the address with no token must see something they can
-    act on. A raw JSON 401 in a browser window is a dead end."""
+def test_the_grant_page_is_the_only_unauthenticated_route(page: Page, server) -> None:
+    """`/grant` serves a page with no data. `/` does not, and neither does
+    anything else: that is the whole reason for a separate route."""
     server.start_with_token("s3cret")
-    page.goto(server.base)
+    expect_page = page.request.get(f"{server.base}/grant")
+    assert expect_page.status == 200
+    assert "text/html" in expect_page.headers["content-type"]
+    for path in ("/", "/app.js", "/api/projects"):
+        assert page.request.get(f"{server.base}{path}").status == 401, path
+
+
+def test_the_grant_page_carries_no_project_data(page: Page, server) -> None:
+    """A page reachable without a token must not name what is on the machine.
+    Folder names are the thing the token protects."""
+    server.start_with_token("s3cret")
+    server.seed(running=["vessel"])
+    body = page.request.get(f"{server.base}/grant").text()
+    assert "vessel" not in body
+
+
+def test_an_unauthenticated_browser_gets_the_token_screen_not_json(page: Page, server) -> None:
+    """A person who opens the grant address with no fragment must see something
+    they can act on. A raw JSON 401 in a browser window is a dead end."""
+    server.start_with_token("s3cret")
+    page.goto(f"{server.base}/grant")
     expect(page.get_by_role("dialog")).to_contain_text(
         "Anyone with this key can run code on that machine as you."
     )
@@ -824,8 +901,9 @@ def test_a_wrong_token_says_so_without_confirming_anything(page: Page, server) -
 
 
 def test_an_api_request_still_gets_json(page: Page, server) -> None:
-    """The shell exception is for a browser NAVIGATION only. If it widened to
-    every 401 the API would start answering scripts with HTML."""
+    """The exemption is one ROUTE, not a content type rule. If it were
+    `Accept: text/html` on any 401, the API would start answering a script
+    with HTML the moment somebody sent a browser-shaped header."""
     server.start_with_token("s3cret")
     response = page.request.get(f"{server.base}/api/projects")
     assert response.status == 401
@@ -833,17 +911,23 @@ def test_an_api_request_still_gets_json(page: Page, server) -> None:
 ```
 
 - [ ] **Step 2: Run to verify failure**
-- [ ] **Step 3: Implement the shell exception, the screen, and the fragment read**
+- [ ] **Step 3: Implement `/grant`, the screen, and the fragment read**
 
-The page reads `location.hash`, posts the token to a small grant endpoint or
-sets the cookie via the existing carrier, then calls
-`history.replaceState` to drop the fragment before anything else runs.
+`/grant` is registered BEFORE the token middleware would refuse it, and it is
+the only route with that property. It serves a page carrying the token screen
+and nothing else: no project names, no memory figures, no root path. A page
+reachable without a token must not name what is on the machine, and there is a
+test that asserts a seeded project name does not appear in its body.
+
+That page reads `location.hash`, posts the token to the grant endpoint, which
+sets the same cookie `TokenMiddleware` already accepts, then calls
+`history.replaceState` to drop the fragment and redirects to `/`.
 `replaceState` rather than `pushState`, or the back button walks into a URL
 that still carries the token.
 
 - [ ] **Step 4: Update the banner and the README**
 
-`banner()` prints `http://{host}:{port}/#token={token}`. The README's phone
+`banner()` prints `http://{host}:{port}/grant#token={token}`. The README's phone
 flow, its security section and any `curl` example that shows `?token=` change
 with it. `GRANT_PARAM` stays supported on the query for one release so an
 operator's saved link does not break, and `docs/versioning.md` decides whether
