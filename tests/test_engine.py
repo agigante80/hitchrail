@@ -1515,3 +1515,81 @@ def test_session_url_is_none_for_a_stale_session(root: Path) -> None:
     engine, _ = engine_for(root, sessions={"vessel": PANE}, table=ps_row(PANE, 1))
     assert engine.get("vessel").state is State.STALE
     assert engine.session_url("vessel") is None
+
+
+# -- #66: a start that dies keeps what it printed ---------------------------
+
+
+def test_a_dead_start_carries_the_output_and_leaves_no_session(root: Path) -> None:
+    """The pane is kept alive past its process precisely so this read finds
+    something. Without it the pane, the window, the session and the tmux
+    server are gone inside fifty milliseconds, and `start_died` arrives empty:
+    the interface then says a session died and cannot say why, which is the
+    failure "Started, then exited after 3 seconds" was written to avoid.
+    """
+    engine, tmux, _ = start_engine(root, table=procs_from(""))
+    tmux.pane_text["vessel"] = "agent: missing credential\nPane is dead (status 3)"
+
+    with pytest.raises(StartFailed) as raised:
+        engine.start("vessel")
+
+    assert "missing credential" in raised.value.output
+    assert "status 3" in raised.value.output, "the exit status is the diagnostic"
+    assert tmux.killed == ["vessel"], "the kept pane was not cleaned up"
+
+
+def test_a_dead_start_reads_the_whole_scrollback(root: Path) -> None:
+    """tmux writes its own "Pane is dead" line into the VISIBLE pane, so a
+    bounded read can return that and nothing else while what the agent printed
+    has scrolled above it."""
+    engine, tmux, _ = start_engine(root, table=procs_from(""))
+    tmux.pane_text["vessel"] = "anything"
+
+    with pytest.raises(StartFailed):
+        engine.start("vessel")
+
+    assert tmux.capture_lines == [0], (
+        f"the dead start read {tmux.capture_lines}, not the whole scrollback"
+    )
+
+
+def test_a_successful_start_stops_keeping_the_pane(root: Path) -> None:
+    """Left on, a later graceful exit leaves a dead pane, the session lingers,
+    and the engine derives `stale` where the truth is `stopped`. That would
+    silently change the outcome of the stop flow."""
+    engine, tmux, _ = start_engine(root, table=running_after())
+
+    engine.start("vessel")
+
+    assert ("vessel", False) in tmux.pane_kept, "remain-on-exit was left on"
+
+
+def test_a_start_is_not_failed_by_a_tmux_that_dies_while_tidying_up(
+    root: Path,
+) -> None:
+    """The start WORKED. Reporting it as a failure because the tidy up
+    afterwards did not is the wrong answer to a cosmetic problem."""
+    engine, tmux, _ = start_engine(root, table=running_after())
+
+    def gone(project: str, keep: bool) -> None:
+        raise TmuxUnavailable("tmux went away")
+
+    tmux.keep_pane_on_exit = gone  # type: ignore[method-assign]
+
+    assert engine.start("vessel").state is State.RUNNING
+
+
+def test_a_dead_start_still_reports_when_the_cleanup_fails(root: Path) -> None:
+    """The message matters more than the tidying. A machine that has lost tmux
+    will not be told about it by this path."""
+    engine, tmux, _ = start_engine(root, table=procs_from(""))
+    tmux.pane_text["vessel"] = "agent: exploded"
+
+    def gone(project: str) -> None:
+        raise TmuxUnavailable("tmux went away")
+
+    tmux.kill_session = gone  # type: ignore[method-assign]
+
+    with pytest.raises(StartFailed) as raised:
+        engine.start("vessel")
+    assert "exploded" in raised.value.output

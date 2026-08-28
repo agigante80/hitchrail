@@ -170,8 +170,14 @@ These are the ones that cost real debugging to find, or that protect somebody.
   read its argument as a session, or a stopped project reports a sibling's
   process as its own. `.` and `:` are window and pane separators, so a session
   named `dotted.site` can be created and never addressed: sanitize on the way in
-  and keep the display name apart from the tmux name. Each of these gets a named
-  regression test that fails if the workaround is removed.
+  and keep the display name apart from the tmux name. **A pane vanishes before
+  it can be read**: an agent that dies takes the pane, the window, the session
+  and then the server with it in under 50ms, so `remain-on-exit` is chained
+  into the same `new-session` invocation and cleared once the start succeeds,
+  or a dead start reports nothing and a live one lingers as `stale`. That
+  `set-option` needs `=name:` and not `=name`, the same colon `list-panes`
+  needs, because it is a WINDOW option. Each of these gets a named regression
+  test that fails if the workaround is removed.
 - **Starlette is 1.x here.** `on_startup`, `on_shutdown`, `add_event_handler()`
   and the `@app.route()` decorators were removed at 1.0. Use the `lifespan`
   context manager and an explicit `routes=` list. Most examples online are

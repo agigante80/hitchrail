@@ -186,6 +186,17 @@ not know about them.
 5. Never issue a bare `tmux kill-server`. Never kill a session Hitchrail did not
    create. Every tmux invocation is scoped explicitly.
 
+
+**A pane does not outlive its process.** When an agent exits, tmux destroys the
+pane, the window, the session, and then the server itself, in under fifty
+milliseconds. Anything the agent printed on its way out is gone before a poll
+can see it, which matters most for a start that died: that output is almost
+always the explanation. `remain-on-exit` is set on the session, chained into
+the same `new-session` invocation so it wins the race, and cleared as soon as
+the start is confirmed. Left on, a normal exit leaves a dead pane and the
+session reads as `stale` rather than `stopped`. Set with `-g` it would change
+the user's own tmux server, which this project drives by default.
+
 ### 4.3 Stopping, and the one piece of state that is not derived
 
 Stopping is a sequence, not a button:

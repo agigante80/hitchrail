@@ -872,7 +872,15 @@ def test_every_module_is_under_the_size_guideline() -> None:
     # Raise this only for a change that adds behaviour, and say what in the
     # commit. If it passes roughly 550, look for a seam again with fresh eyes.
     caps = {
-        "engine.py": 597,  # +_await_gone, +list(listing=...), +#47 split, +#64 memory
+        "engine.py": 642,  # +_await_gone, +list(...), +#47 split, +#64, +#66
+        # 406. tmux.py is the module that encodes what tmux actually does
+        # rather than what its manual implies, and every entry is a footgun
+        # that cost real debugging: prefix matching targets, the colon
+        # `list-panes` and `set-option` both need, a rewritten dot, and now a
+        # pane that vanishes before it can be read. The length is those
+        # explanations. Deleting them to reclaim lines would delete the reason
+        # the workarounds look wrong, which is the one thing a reader needs.
+        "tmux.py": 406,
         # 413, and thirteen lines over the guideline is not a second job. #18
         # already took the host vocabulary out of this file, and what is left
         # is one dataclass and its startup refusals, which is one thing. The

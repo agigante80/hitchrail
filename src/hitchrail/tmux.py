@@ -273,6 +273,12 @@ class Tmux:
         `-J` joins wrapped lines, so a long line reads as one line rather than
         as the terminal's arbitrary column count. `-S -<lines>` bounds the
         history: without it this returns the whole scrollback.
+
+        `lines=0` means the WHOLE scrollback, for the one caller that needs it:
+        a start that died. tmux writes its own "Pane is dead (status N)" line
+        into the visible pane, so a bounded read of a dead pane can return that
+        and nothing else, while what the agent actually printed has scrolled
+        above it.
         """
         result = self._try(
             self._argv(
@@ -280,7 +286,7 @@ class Tmux:
                 "-p",
                 "-J",
                 "-S",
-                f"-{lines}",
+                "-" if lines == 0 else f"-{lines}",
                 "-t",
                 self.pane_target(project),
             )
@@ -295,9 +301,69 @@ class Tmux:
         Created with the plain session NAME. Only targets carry the `=` anchor;
         passing an anchored string to `-s` would create a session whose name
         begins with an equals sign.
+
+        **`remain-on-exit` is chained into the SAME invocation**, and all three
+        parts of that sentence are load bearing (#66).
+
+        Chained, because an agent that dies on a bad flag takes the pane, the
+        window, the session and then the whole server with it in under fifty
+        milliseconds. A second `tmux` call arrives to find nothing, and the
+        engine's first poll is at 250ms. In one command list tmux executes both
+        before it handles the child's exit: measured 6 of 6 against a process
+        that exits immediately.
+
+        Set on the SESSION, never with `-g`. `Config.tmux_socket` defaults to
+        `None`, so this adapter drives the user's own default tmux server, and
+        a global option there would stop panes closing for every session they
+        own. That is a persistent change to something we do not own.
+
+        Cleared again by `keep_pane_on_exit(project, False)` as soon as a start
+        succeeds, because left on it changes the normal path too: a graceful
+        exit would leave a dead pane, the session would linger, and the engine
+        would derive `stale` where the truth is `stopped`.
         """
         self._try(
-            self._argv("new-session", "-d", "-s", self.session_name(project), "-c", cwd, *argv)
+            self._argv(
+                "new-session",
+                "-d",
+                "-s",
+                self.session_name(project),
+                "-c",
+                cwd,
+                *argv,
+                ";",
+                "set-option",
+                "-t",
+                # `pane_target`, not `session_target`. `remain-on-exit` is a
+                # WINDOW option, and `set-option -t =hr-vessel` is refused with
+                # "no such window" while `=hr-vessel:` resolves. Same rule as
+                # `list-panes`, verified the same way: the trailing colon
+                # qualifies the string as a session, after which tmux finds its
+                # window. Third command in this module with that requirement.
+                self.pane_target(project),
+                "remain-on-exit",
+                "on",
+            )
+        )
+
+    def keep_pane_on_exit(self, project: str, keep: bool) -> None:
+        """Turn `remain-on-exit` on or off for one session.
+
+        Only ever called with `False`, by the engine, once a start has been
+        confirmed. It exists as a method rather than as an inline argv so the
+        session target goes through `session_target`, which is what stops
+        `hr-vessel` addressing `hr-vessel-social`.
+        """
+        self._try(
+            self._argv(
+                "set-option",
+                "-t",
+                # `pane_target` for the same reason as `new_session`: this is a
+                # window option and the bare anchor is refused.
+                self.pane_target(project),
+                "remain-on-exit",
+                "on" if keep else "off",
+            )
         )
 
     def kill_session(self, project: str) -> None:

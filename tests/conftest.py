@@ -69,6 +69,8 @@ class FakeTmux(Tmux):
         self.pane_text: dict[str, str] = {}
         self.killed: list[str] = []
         self.started: list[tuple[str, str, list[str]]] = []
+        self.pane_kept: list[tuple[str, bool]] = []
+        self.capture_lines: list[int] = []
         self.sent: list[tuple[str, tuple[str, ...]]] = []
         self.pane_pids_calls = 0
         self.capture_calls = 0
@@ -101,9 +103,27 @@ class FakeTmux(Tmux):
     def kill_session(self, project: str) -> None:
         self.killed.append(project)
         self.sessions.pop(project, None)
+        # A killed session takes its pane text with it, the way a real one
+        # does. Without this a test could capture output from a session that
+        # no longer exists and never notice, which is exactly the mistake #66
+        # is about.
+        self.pane_text.pop(project, None)
+
+    def keep_pane_on_exit(self, project: str, keep: bool) -> None:
+        """#66's `remain-on-exit`, recorded rather than performed.
+
+        Recorded as a LIST rather than a flag, because the property that
+        matters is that it is cleared once per successful start: a fake that
+        stored only the latest value cannot tell "set then cleared" from
+        "never set".
+        """
+        self.pane_kept.append((project, keep))
 
     def capture_pane(self, project: str, lines: int = 40) -> str:
         self.capture_calls += 1
+        # Recorded, because #66 turns on WHICH read was asked for: a dead
+        # start needs the whole scrollback and a log tail does not.
+        self.capture_lines.append(lines)
         return self.pane_text.get(project, "")
 
     def send_keys(self, project: str, *keys: str) -> None:

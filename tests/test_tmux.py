@@ -330,10 +330,25 @@ def test_new_session_is_detached_and_carries_the_working_directory() -> None:
     argv = runner.calls[-1]
     assert argv[:4] == ["tmux", "new-session", "-d", "-s"]
     assert "-c" in argv and "/srv/vessel" in argv
-    assert argv[-2:] == ["claude", "--x"]
-    # Created with the plain name; only TARGETS carry the anchor.
-    assert "hr-vessel" in argv
-    assert "=hr-vessel" not in argv
+
+    # The agent argv is no longer last: #66 chains a `set-option` after it.
+    # Asserted as a contiguous run rather than by position, so the test says
+    # "these arguments arrive together and in this order" and stays true
+    # whatever is appended next.
+    split = argv.index(";")
+    assert argv[split - 2 : split] == ["claude", "--x"]
+
+    # Created with the plain name. Only TARGETS carry the anchor, and the
+    # chained option is a target, so both spellings appear and each is in the
+    # right place.
+    assert argv[argv.index("-s") + 1] == "hr-vessel"
+    assert argv[split + 1 :] == [
+        "set-option",
+        "-t",
+        "=hr-vessel:",
+        "remain-on-exit",
+        "on",
+    ]
 
 
 def test_send_keys_passes_each_key_as_its_own_argument() -> None:

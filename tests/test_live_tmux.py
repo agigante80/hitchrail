@@ -275,3 +275,77 @@ def test_a_long_command_line_survives_the_real_process_table(
         "tail. `ps` truncates to the terminal width without -ww."
     )
     assert matching[0].args.rstrip().endswith("a-project-under-a-deep-path")
+
+
+# -- #66: a pane that outlives its process, against a real tmux -------------
+
+
+def test_a_dead_pane_keeps_what_it_printed(server: PrivateTmux) -> None:
+    """The measurement this whole ticket rests on, asserted rather than
+    remembered.
+
+    Without `remain-on-exit` a pane that exits takes the window, the session
+    and then the tmux server with it in under fifty milliseconds, so there is
+    nothing to capture and `start_died` arrives empty. Only this tier can see
+    that: every hermetic fake returns whatever text the test put in it,
+    whether or not a real tmux would still have the pane.
+    """
+    script = Path(server._dir) / "dying-agent"
+    script.write_text(
+        "#!/bin/sh\necho 'agent: missing credential'\necho 'agent: goodbye'\nexit 3\n"
+    )
+    script.chmod(0o755)
+
+    # Through the ADAPTER, not a hand rolled argv. The chained `set-option`
+    # and its target form are the things under test, and writing them out here
+    # again would test this file's copy of them rather than the module's.
+    adapter = Tmux(prefix="hr-", socket=server.socket)
+    adapter.new_session("dying", str(server._dir), [str(script)])
+    server.created.append("hr-dying")
+    time.sleep(0.6)
+
+    whole = adapter.capture_pane("dying", lines=0)
+
+    assert "missing credential" in whole, f"the output was lost: {whole!r}"
+    assert "goodbye" in whole
+    # tmux's own line, and the exit code with it. Nothing else in this system
+    # reports what an agent exited with.
+    assert "status 3" in whole, f"the exit status was lost: {whole!r}"
+
+
+def test_without_the_option_the_pane_is_gone_before_anything_can_read_it(
+    server: PrivateTmux,
+) -> None:
+    """The negative half, and the reason capturing during the grace window
+    cannot work: the engine's first poll is at 250ms."""
+    script = Path(server._dir) / "instant-agent"
+    script.write_text("#!/bin/sh\necho 'agent: gone'\nexit 3\n")
+    script.chmod(0o755)
+
+    server.run("new-session", "-d", "-s", "hr-instant", str(script))
+    time.sleep(0.6)
+
+    adapter = Tmux(prefix="hr-", socket=server.socket)
+    assert adapter.capture_pane("instant", lines=0) == "", (
+        "the pane survived without remain-on-exit, so this project's premise "
+        "about tmux has changed and #66 should be re-measured"
+    )
+
+
+def test_clearing_the_option_lets_a_session_end_normally(server: PrivateTmux) -> None:
+    """The cost of leaving it on. A graceful exit would leave a dead pane, the
+    session would linger, and the engine would derive `stale` where the truth
+    is `stopped`, silently changing the outcome of the stop flow."""
+    adapter = Tmux(prefix="hr-", socket=server.socket)
+    script = Path(server._dir) / "obedient-agent"
+    script.write_text("#!/bin/sh\nsleep 0.4\nexit 0\n")
+    script.chmod(0o755)
+
+    adapter.new_session("obedient", str(server._dir), [str(script)])
+    server.created.append("hr-obedient")
+    adapter.keep_pane_on_exit("obedient", False)
+    time.sleep(1.2)
+
+    assert "hr-obedient" not in server.sessions(), (
+        "the session lingered after a normal exit, so the engine would call it stale"
+    )

@@ -382,13 +382,58 @@ class Engine:
         while True:
             started = self.get(name)
             if started.state is State.RUNNING:
+                # The start worked, so stop keeping the pane alive past its
+                # process. Left on, a later graceful exit would leave a dead
+                # pane and the session would linger, so the engine would derive
+                # `stale` where the truth is `stopped`. See #66.
+                self._release_pane(name)
                 self._announce(started)
                 return started
             if self._clock() >= deadline:
-                raise StartFailed(self._safe_capture(name))
+                raise StartFailed(self._dead_start_output(name))
             self._sleep(self.poll_interval)
 
-    def _safe_capture(self, name: str) -> str:
+    def _release_pane(self, name: str) -> None:
+        """Undo `new_session`'s `remain-on-exit`, never fatally.
+
+        A start that worked must not be reported as a failure because tidying
+        up afterwards did not. The cost of failing to clear it is a session
+        that lingers after its agent exits, which reads as `stale`: wrong, but
+        honest, and visible.
+        """
+        try:
+            self.tmux.keep_pane_on_exit(name, False)
+        except TmuxUnavailable:
+            logger.warning("could not clear remain-on-exit for %s", name)
+
+    def _dead_start_output(self, name: str) -> str:
+        """What the agent printed on its way out, and then no session.
+
+        The whole point of #66. `new_session` keeps the pane alive past its
+        process precisely so this read has something to find: without it the
+        pane, the window, the session and the server are gone inside fifty
+        milliseconds and this returns nothing at all.
+
+        The WHOLE scrollback, because tmux writes its own "Pane is dead
+        (status N)" line into the visible pane. A bounded read of a dead pane
+        can return that and nothing else, while what the agent printed has
+        scrolled above it. That status line is worth keeping: it is the exit
+        code, which nothing else in this system reports.
+
+        Then the session is killed, because the pane is only being kept for
+        this read. `kill_session` is prefix scoped in the adapter and that is
+        not relaxed here.
+        """
+        output = self._safe_capture(name, lines=0)
+        try:
+            self.tmux.kill_session(name)
+        except TmuxUnavailable:
+            # The message matters more than the tidying. A machine that has
+            # lost tmux will not be told about it by this path.
+            logger.warning("could not clean up the dead session for %s", name)
+        return output
+
+    def _safe_capture(self, name: str, lines: int = 40) -> str:
         """Pane output for an error message, never an error of its own.
 
         This runs while raising `StartFailed`, and a tmux that has gone away
@@ -396,7 +441,7 @@ class Engine:
         different exception entirely.
         """
         try:
-            return self.tmux.capture_pane(name, lines=40)
+            return self.tmux.capture_pane(name, lines=lines)
         except TmuxUnavailable:
             return ""
 

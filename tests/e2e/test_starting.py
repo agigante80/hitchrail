@@ -97,14 +97,16 @@ async def test_a_start_that_dies_says_so_and_offers_the_output(
     await expect(dialog).to_contain_text("exited almost immediately")
     await dialog.get_by_role("button", name="Read what it printed").click()
 
-    # Deliberately weak, and #66 is why. When the agent exits tmux destroys the
-    # pane, so `_safe_capture` runs after the grace window with nothing left to
-    # read and `output` arrives empty. The interface says so honestly, which is
-    # the correct behaviour for an empty capture and a useless answer for the
-    # person who wanted to know why it died. Strengthen this to assert the
-    # shim's own line once #66 captures during the window.
+    # #66 landed, so this asserts what the agent actually printed rather than
+    # only that something is there. `new_session` keeps the pane alive past
+    # its process, so the capture has something to find: without it the pane,
+    # the window, the session and the tmux server are gone inside fifty
+    # milliseconds and this control has nothing behind it.
     printed = await dialog.locator("pre").inner_text()
-    assert printed.strip(), "the control was offered with nothing behind it at all"
+    assert "hitchrail-shim" in printed, printed
+    assert "status 3" in printed, (
+        f"the exit status is the diagnostic and it was lost: {printed!r}"
+    )
 
 
 async def test_the_log_drawer_shows_the_pane_tail(page: Page, server: Harness) -> None:
