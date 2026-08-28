@@ -646,12 +646,110 @@ async function createProject(name) {
   await refresh();
 }
 
+/* -- the stream --------------------------------------------------------
+   The stream is an INVALIDATION SIGNAL, not the source of truth.
+
+   `EventSource` reconnects on its own; what it cannot do is tell you what
+   changed while it was away. A page that only applies events shows a row that
+   has been wrong since the tab was suspended, and that looks exactly like a
+   row where nothing is happening, which is this tool's normal state.
+
+   So a reconnect re-fetches the listing. The source of truth stays the same
+   derivation every other caller gets, which is the design's whole position on
+   state. */
+
+let stream = null;
+
+function setStreamState(value) {
+  document.documentElement.setAttribute("data-stream", value);
+}
+
+/* Three states, not two.
+   `open`  we are connected.
+   `down`  we are not connected.
+   `blind` we are connected and the machine cannot be read.
+   The third is `503 machine_unreadable` on the re-fetch, and collapsing it
+   into `down` would hide a broken tmux behind a network message. */
+function openStream() {
+  if (stream) stream.close();
+  stream = new EventSource("/api/events");
+  // Scoped to this EventSource, so it distinguishes the object's FIRST open
+  // from one of its own reconnects. A reopen through `openStream` starts a
+  // new object and so starts false again, which is right: whoever called it
+  // is responsible for the fetch, and `onVisible` does exactly that.
+  let connected = false;
+
+  stream.addEventListener("open", () => {
+    setStreamState("open");
+    if (connected) {
+      // A RECONNECT. The stream was away and cannot say what it missed, so
+      // the listing is re-read. The first open needs nothing: `boot` fetches.
+      refresh();
+    }
+    connected = true;
+  });
+
+  stream.addEventListener("message", (event) => {
+    let session;
+    try {
+      session = JSON.parse(event.data);
+    } catch {
+      // A malformed frame is not a reason to tear down a working stream.
+      return;
+    }
+    applySession(session);
+  });
+
+  stream.addEventListener("error", () => {
+    // `EventSource` retries on its own, so this fires for a transient drop as
+    // well as a final one. Both are `down`: what a person needs to know is
+    // that the list is not live, and distinguishing "retrying" from "gave up"
+    // would be a distinction they cannot act on differently. A list that has
+    // quietly stopped updating is indistinguishable from a quiet one, and
+    // quiet is this tool's normal state.
+    setStreamState("down");
+  });
+
+  return stream;
+}
+
+/* Patch one row in place. The whole listing is not re-fetched per event: the
+   stream carries the entire session shape precisely so a change costs no
+   subprocesses on the server. */
+function applySession(session) {
+  const index = state.projects.findIndex((p) => p.name === session.name);
+  if (index === -1) {
+    // A project we do not know about. The listing decides what exists, so ask
+    // it rather than inventing a row from an event.
+    refresh();
+    return;
+  }
+  state.projects[index] = session;
+  render();
+}
+
+/* The tab came back. `EventSource` may already have reconnected, but it
+   cannot replay what it missed, so the listing is re-read. */
+function onVisible() {
+  if (document.visibilityState !== "visible") return;
+  if (!stream || stream.readyState === EventSource.CLOSED) openStream();
+  refresh();
+}
+
 /* -- start ------------------------------------------------------------- */
 
 async function refresh() {
   const result = await api("/api/projects");
   if (!result.ok) {
+    // Connected, and the machine cannot be read. Distinct from `down`, which
+    // means we are not connected at all.
+    if (result.body.code === "machine_unreadable" || result.body.code === "root_unavailable") {
+      setStreamState("blind");
+    }
     return result;
+  }
+  if (document.documentElement.getAttribute("data-stream") === "blind") {
+    setStreamState(stream && stream.readyState === EventSource.OPEN ? "open" : "down");
   }
   const root = $("[data-root]");
   if (root) {
@@ -670,6 +768,8 @@ function boot() {
   applyTheme(storedTheme());
   $("[data-theme-toggle]")?.addEventListener("click", toggleTheme);
   $("[data-new]")?.addEventListener("click", () => showNewFolder());
+  document.addEventListener("visibilitychange", onVisible);
+  openStream();
   $("[data-search]")?.addEventListener("input", (event) => {
     state.query = event.target.value;
     renderList();
@@ -686,4 +786,16 @@ if (document.readyState === "loading") {
 /* The ONLY test seam. The browser tier needs to reach the stream to simulate
    a suspended tab (#57); exposing application state as well would let tests
    assert on internals and then pass through a rewrite that broke the page. */
-window.__hitchrail = { applyTheme, toggleTheme, refresh, render, state, api, setStopPatience };
+window.__hitchrail = {
+  applyTheme,
+  toggleTheme,
+  refresh,
+  render,
+  state,
+  api,
+  setStopPatience,
+  openStream,
+  get stream() {
+    return stream;
+  },
+};

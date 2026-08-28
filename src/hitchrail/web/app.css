@@ -127,6 +127,32 @@ button[disabled] { color: var(--muted-3); cursor: not-allowed; }
 .bar-actions { display: flex; gap: 8px; flex-shrink: 0; }
 
 /* -- tabs --------------------------------------------------------------- */
+/* The stream notice.
+   Driven entirely by `data-stream` on the root, so the page says whether it
+   is live without any JavaScript that writes copy. Both messages sit in the
+   markup and CSS picks one, which is also what makes the `role="status"`
+   announcement happen: the state change toggles `display`, and a live region
+   announces what appears.
+
+   `connecting` and `open` show NOTHING. A permanent "live" badge would be
+   noise on a phone, and the only state worth a person's attention is the one
+   where the list has quietly stopped being true. */
+.stream-note {
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+  color: var(--warn);
+  background: var(--warn-tint);
+  border-bottom: 1px solid var(--line);
+  display: none;
+}
+.stream-note span { display: none; }
+:root[data-stream="down"] .stream-note,
+:root[data-stream="blind"] .stream-note { display: block; padding: 8px 16px; }
+:root[data-stream="down"] .stream-note span[data-when="down"],
+:root[data-stream="blind"] .stream-note span[data-when="blind"] { display: inline; }
+:root[data-stream="blind"] .stream-note { color: var(--danger); background: var(--danger-tint); }
+
 .tabs { display: flex; gap: 8px; padding: 12px 16px 0; overflow-x: auto; }
 .tabs button {
   padding: 0 14px; border-radius: 999px; white-space: nowrap;

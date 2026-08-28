@@ -38,6 +38,7 @@ socket path is capped near 108 bytes and a pytest tmp_path can exceed it.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import socket
@@ -144,6 +145,7 @@ class Harness:
         self._sock = sock
         self._server: uvicorn.Server | None = None
         self._thread: threading.Thread | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         self.port = free_port()
         self.base = f"http://127.0.0.1:{self.port}"
         self.bus = EventBus()
@@ -250,7 +252,10 @@ class Harness:
         self._server = uvicorn.Server(
             uvicorn.Config(app, host="127.0.0.1", port=self.port, log_level="warning")
         )
-        self._thread = threading.Thread(target=self._server.run, daemon=True)
+        # Our own loop rather than `Server.run`'s, because `drop_connections`
+        # needs a handle to schedule onto from this thread.
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(target=self._serve, daemon=True)
         self._thread.start()
         deadline = time.monotonic() + STARTUP_TIMEOUT
         while time.monotonic() < deadline:
@@ -258,6 +263,11 @@ class Harness:
                 return
             time.sleep(0.05)
         raise RuntimeError("uvicorn did not start")
+
+    def _serve(self) -> None:
+        assert self._loop is not None and self._server is not None
+        asyncio.set_event_loop(self._loop)
+        self._loop.run_until_complete(self._server.serve())
 
     def reap_orphans(self) -> None:
         """Anything spawned outside tmux is ours to clean up.
@@ -274,9 +284,42 @@ class Harness:
                 orphan.kill()
         self._orphans.clear()
 
+    def drop_connections(self) -> None:
+        """Cut every live connection at the socket, leaving the server up.
+
+        What a phone losing its network looks like from the page: the stream
+        dies and the server is still there to reconnect to.
+
+        Nothing gentler works. `should_exit` waits for open connections and an
+        SSE stream never closes on its own; `force_exit` skips the wait but
+        this server is a THREAD in a live process, so the accepted sockets stay
+        open and the browser sees no FIN at all. uvicorn's own
+        `connection.shutdown()` is no better: for a response still in flight it
+        only clears `keep_alive`. Aborting the transport is the one thing the
+        peer actually notices.
+        """
+        server, loop = self._server, self._loop
+        if server is None or loop is None:
+            return
+
+        def cut() -> None:
+            for connection in list(server.server_state.connections):
+                transport = getattr(connection, "transport", None)
+                if transport is not None:
+                    transport.abort()
+
+        loop.call_soon_threadsafe(cut)
+
     def stop_serving(self) -> None:
+        """Teardown. `force_exit` so an open SSE stream cannot hold the join.
+
+        A graceful uvicorn shutdown waits for open connections, and every test
+        that loaded the page leaves one, so without this each teardown stalls
+        for the full join timeout.
+        """
         if self._server is not None:
             self._server.should_exit = True
+            self._server.force_exit = True
         if self._thread is not None:
             self._thread.join(timeout=10)
 
