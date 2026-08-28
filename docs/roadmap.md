@@ -231,9 +231,39 @@ and refuses a forged `Host` on a live socket.
 **Not done if:** the suite passes but nobody has watched it start and stop a real
 Claude session.
 
-## Phase 6: Interface
+## Phase 6: Interface (built, not closed)
 
 **Plan: [`superpowers/plans/2026-08-27-hitchrail-phase-6-interface.md`](superpowers/plans/2026-08-27-hitchrail-phase-6-interface.md)**
+
+**Status as of 2026-08-28.** All six tasks are implemented and eleven of the
+twelve exit criteria are ticked with evidence. The phase is NOT closed, and the
+reason is worth reading before picking it up: the twelfth criterion is running
+it against a real machine, and the first hour of doing that found five defects
+no tier of the suite could reach.
+
+Open and blocking, all P1:
+
+| Issue | What |
+|---|---|
+| #89 | The graceful stop interrupts twice and quits while the screen says it is asking the agent to finish. Measured: `C-c C-c` alone exits in 1s so `/exit` is dead code, and a session stopped mid task lost 13 of 40 seconds of work. |
+| #88 | A session in a folder Claude Code has not seen hangs on a startup modal and is reported `running` with a null link. Broader than the trust prompt: any modal. |
+| #84 | The tmux server's own argv still carries the command line that started the first session, so it matches the agent pattern and a row can show the server's pid and RSS. |
+| #83 | The `Kill pid N` button on a detached row has no handler, and no API behind it. |
+| #81 | The stop timeout states "it has not finished" from a listing it may have failed to read, and offers Kill on that basis. |
+
+Plus #75, walking the flows on a phone, and #67, a CI only failure. Both need a
+person rather than an agent.
+
+**What that hour taught, beyond the list.** Every fixture in the suite starts
+from an empty private tmux server and a fresh temp directory, so the tests
+describe a machine where Hitchrail is the only thing that has ever run. The real
+one had another tool's sessions, a tmux server old enough to carry a stale
+command line, and agents Hitchrail did not start. None of the five is reachable
+from a world Hitchrail alone created.
+
+Much of the diagnosis came from the `workstation` session, which has run the same
+job in production for six weeks. The exchange is quoted in #83, #84, #85, #88,
+#89, #90 and #91, and it reversed the stop design twice.
 
 The browser interface from the design canvas, and the end to end tier that
 proves it. Six tasks, 18 to 23.
