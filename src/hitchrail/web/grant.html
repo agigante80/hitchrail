@@ -136,7 +136,17 @@ function fail(message) {
 async function grant(token) {
   let response;
   try {
-    response = await fetch("/api/grant", {
+    /* RELATIVE, and so are the two navigations below. This page is served
+       from `/grant`, and the guard now compares the path the router matches
+       on, so it is also reachable at `/<mount>/grant` behind a sub path proxy.
+       An absolute `/api/grant` from there would POST the operator's key to the
+       origin root, which is not Hitchrail: reachable with absolute URLs would
+       have been worse than unreachable.
+
+       From `/grant`, `api/grant` resolves to `/api/grant`. From
+       `/hitchrail/grant` it resolves to `/hitchrail/api/grant`. Same file, no
+       configuration, nothing to keep in step with the proxy. */
+    response = await fetch("api/grant", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ token }),
@@ -157,7 +167,7 @@ async function grant(token) {
      `replace` rather than an assignment, so this page is not a back target.
      That is a courtesy and not a control: the entry it would leave carries no
      key either. */
-  window.location.replace("/");
+  window.location.replace("./");
   return true;
 }
 
@@ -179,7 +189,7 @@ if (offered) {
   /* Cleared BEFORE the request, not after it. A rejected key would otherwise
      sit in the address bar, and in the history entry, for as long as the
      person stares at the failure. */
-  history.replaceState(null, "", "/grant");
+  history.replaceState(null, "", location.pathname);
   grant(offered).then((ok) => {
     if (!ok) fail("That key was not accepted. Check it and try again.");
   });

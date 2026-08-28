@@ -1041,9 +1041,14 @@ async def test_a_grant_on_a_server_with_no_token_is_not_a_way_in(
     r = await client.post("/api/grant", json={"token": "anything"}, headers=HEADERS)
     assert r.status_code == 404
     assert "hitchrail_token" not in r.cookies
-    # And the MESSAGE must not say it either. An earlier draft argued exactly
-    # this in a comment and then answered "no token is configured" in words.
-    assert "token" not in r.json()["message"].lower(), r.json()
+    # IDENTICAL to what a genuinely unrouted path answers, not merely free of
+    # the word "token". A first draft argued this in a comment and then said
+    # "no token is configured" in words; a second said "no such route on this
+    # server", which no other path answers, so the two were still tellable
+    # apart by anyone who compared them.
+    unrouted = await client.post("/api/nope", json={}, headers=HEADERS)
+    assert unrouted.status_code == 404
+    assert r.json() == unrouted.json(), (r.json(), unrouted.json())
 
 
 @pytest.mark.parametrize("raw", [b'{"token": "\\ud800"}', b'{"token": "a\\udfffb"}'])

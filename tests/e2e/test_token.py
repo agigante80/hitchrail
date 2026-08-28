@@ -10,6 +10,8 @@ from __future__ import annotations
 import pytest
 from playwright.async_api import Page, expect
 
+from hitchrail import pages
+
 from .conftest import Harness
 
 pytestmark = pytest.mark.e2e
@@ -154,3 +156,35 @@ async def test_an_api_caller_still_gets_json(page: Page, server: Harness) -> Non
     )
     assert response.status == 401
     assert "application/json" in response.headers["content-type"]
+
+
+async def test_the_page_asks_for_the_grant_next_to_itself(page: Page, server: Harness) -> None:
+    """Every URL the page uses is relative to the page.
+
+    The guard compares the path the router matches on, so `/grant` is reachable
+    under a mount prefix too. An absolute `/api/grant` from there would POST the
+    operator's key to the origin root, which is not Hitchrail: reachable with
+    absolute URLs is worse than unreachable.
+
+    Served at the root, an absolute URL and a sibling one resolve to the same
+    string, so what the browser requested cannot tell them apart on its own.
+    Both halves are here: the browser confirms the request goes where it must,
+    and the source confirms the one character that decides where it would go
+    under a prefix.
+    """
+    server.seed(stopped=["vessel"], token=TOKEN)
+    seen: list[str] = []
+    page.on("request", lambda request: seen.append(request.url))
+
+    await page.goto(f"{server.base}/grant#token={TOKEN}")
+    await expect(page.locator(f'[data-project="{server.project("vessel")}"]')).to_be_visible(
+        timeout=15_000
+    )
+
+    paths = [url.removeprefix(server.base) for url in seen]
+    assert paths[paths.index("/grant") + 1] == "/api/grant", paths
+
+    source = (pages.WEB / "grant.html").read_text()
+    assert 'fetch("api/grant"' in source, "the grant is not a sibling of the page"
+    assert 'window.location.replace("./")' in source, "the app root is not relative"
+    assert '"/api/grant"' not in source and '"/grant"' not in source, source

@@ -910,7 +910,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # so moving it to its own file makes the removal a deletion rather than
         # surgery in the middle of a security module. Until then this entry is
         # the record that the size is known and argued.
-        "security.py": 530,
+        # 537 after round 2 of that review: HEAD, which Starlette adds to every
+        # route that has GET, so the router was serving a request the guard
+        # refused.
+        "security.py": 537,
         # 474. The HTTP layer: routes, the error envelope, the SSE stream and
         # the lifespan sweeper, which is one job described four ways. Most of
         # the length above the guideline is the comments recording what the
@@ -926,7 +929,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # `create_project`'s publish, which records that this route once put a
         # different shape on the bus from the engine's and that the client's
         # refetch hid it. Four lines to stop it being written back.
-        "server.py": 478,
+        # 481 after #21's security review: `ROUTING_404_MESSAGE`, read from
+        # Starlette so the grant's refusal cannot drift away from the one an
+        # unrouted path gives.
+        "server.py": 481,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

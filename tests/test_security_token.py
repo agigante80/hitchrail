@@ -750,7 +750,21 @@ async def test_the_grant_api_still_answers_to_the_origin_check(tmp_path: Path) -
 # -- #21 round 1: what the review found -------------------------------------
 
 
-def test_the_exemption_is_exactly_two_entries() -> None:
+@pytest.mark.integration
+async def test_head_on_the_grant_page_is_exempt_like_get(tmp_path: Path) -> None:
+    """Starlette adds HEAD to every route that has GET, so the router DOES
+    serve `HEAD /grant`. A guard that refused it named a different route from
+    the one that runs, which is the reason the comparison uses `route_path` in
+    the first place. It failed closed, so this is correctness and not a hole.
+    """
+    app = Starlette(
+        routes=[Route("/grant", _ok, methods=["GET"])],
+        middleware=middleware_stack(Config(root=tmp_path, host="0.0.0.0", token=TOKEN)),
+    )
+    assert (await call(app, "HEAD", path="/grant", headers=HOST)).status_code == 200
+
+
+def test_the_exemption_is_exactly_three_entries() -> None:
     """The cheapest guard there is, and it was the missing one.
 
     Every other test here probes paths a test file chose, so adding
@@ -759,7 +773,13 @@ def test_the_exemption_is_exactly_two_entries() -> None:
     notices there is one.
     """
     assert (
-        frozenset({("http", "GET", "/grant"), ("http", "POST", "/api/grant")})
+        frozenset(
+            {
+                ("http", "GET", "/grant"),
+                ("http", "HEAD", "/grant"),
+                ("http", "POST", "/api/grant"),
+            }
+        )
         == UNAUTHENTICATED
     )
 
@@ -767,7 +787,12 @@ def test_the_exemption_is_exactly_two_entries() -> None:
 @pytest.mark.integration
 @pytest.mark.parametrize(
     ("method", "path"),
-    [("POST", "/grant"), ("DELETE", "/grant"), ("GET", "/api/grant")],
+    [
+        ("POST", "/grant"),
+        ("DELETE", "/grant"),
+        ("GET", "/api/grant"),
+        ("HEAD", "/api/grant"),
+    ],
 )
 async def test_the_exemption_is_scoped_to_one_method_each(
     tmp_path: Path, method: str, path: str
@@ -878,6 +903,10 @@ def test_a_token_that_utf8_cannot_encode_is_false_and_not_a_crash() -> None:
     accepts a lone surrogate: an unauthenticated 500 on the one route reachable
     without a token, where every other input gets 401.
     """
-    assert token_matches("\\ud800", TOKEN) is False
-    assert token_matches("a\\udfffb", TOKEN) is False
+    # REAL surrogates. An earlier draft wrote `"\\ud800"`, which is six ASCII
+    # characters, so it passed against the UNFIXED comparison: the commit that
+    # claimed to re-arm six tests shipped this one disarmed.
+    assert len("\ud800") == 1, "not a lone surrogate"
+    assert token_matches("\ud800", TOKEN) is False
+    assert token_matches("a\udfffb", TOKEN) is False
     assert token_matches(TOKEN, TOKEN) is True

@@ -31,6 +31,11 @@ from hitchrail.security import middleware_stack
 
 T = TypeVar("T")
 
+# The message an unrouted path answers with, READ from Starlette rather than
+# copied, so a route that wants to be indistinguishable from a missing one
+# cannot drift apart from the real thing when Starlette rewords it.
+ROUTING_404_MESSAGE = str(HTTPException(status_code=404).detail)
+
 SWEEP_INTERVAL_S = 1.0
 
 # The only route that reads a body takes {"name": <a project name>}, and a
@@ -210,14 +215,12 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
         exists to stop. A GET here would be exactly that link.
         """
         if config.token is None:
-            # No token configured, so there is nothing to grant and no cookie
-            # that would mean anything. Refusing is not pedantry: answering 200
-            # would tell a caller the deployment is open. Neither does the
-            # message: an earlier draft argued exactly that and then said "no
-            # token is configured" in words, which is the disclosure the
-            # argument was about. This is the same answer any unrouted path
-            # gets.
-            return _error(404, "not_found", "no such route on this server")
+            # Nothing to grant, and answering 200 would tell a caller the
+            # deployment is open. Neither does the message: a first draft
+            # argued exactly that and then said "no token is configured" in
+            # words, a second said "no such route on this server", which no
+            # other path answers. Identical to an unrouted one, asserted.
+            return _error(404, "not_found", ROUTING_404_MESSAGE)
         try:
             body = await request.json()
             offered = body["token"]

@@ -58,6 +58,11 @@ GRANT_API_PATH = "/api/grant"
 UNAUTHENTICATED: frozenset[tuple[str, str, str]] = frozenset(
     {
         ("http", "GET", GRANT_PAGE_PATH),
+        # HEAD comes with GET: Starlette adds it to every route that has one, so
+        # the router serves `HEAD /grant` and a guard refusing it would name a
+        # different route from the one that runs. `/api/grant` is POST only, so
+        # it gets no HEAD for the same reason.
+        ("http", "HEAD", GRANT_PAGE_PATH),
         ("http", "POST", GRANT_API_PATH),
     }
 )
@@ -405,9 +410,11 @@ class TokenMiddleware:
         # into the access log. The Origin check still runs on `POST /api/grant`,
         # because it sits inside this middleware and a grant is mutating.
         # `route_path`, not `scope["path"]`: the guard has to name the same
-        # route the router will serve. Behind a sub path proxy the unstripped
-        # path names a different one, and `GET /hitchrail/grant` was not exempt,
-        # so the grant flow was unreachable there.
+        # route the router will serve, and behind a sub path proxy the
+        # unstripped path names a different one. That is the whole argument.
+        # Sub path mounting is not a documented deployment and this does not
+        # make it one; what it stops is a guard and a router disagreeing about
+        # which route a request is for, which is a bug whatever the deployment.
         if (scope["type"], scope.get("method", ""), route_path(scope)) in UNAUTHENTICATED:
             await self.app(scope, receive, send)
             return
