@@ -79,8 +79,34 @@ def test_the_banner_carries_a_link_a_phone_can_open(tmp_path: Path) -> None:
         )
     )
     text = banner(cfg)
-    assert "http://box.lan:8787/?token=abc123" in text
+    assert "http://box.lan:8787/grant#token=abc123" in text
     assert "run code on this machine as you" in text.lower()
+
+
+def test_the_banner_never_offers_the_token_as_a_query_string(tmp_path: Path) -> None:
+    """#21. A query string is written down by everything it passes through: the
+    reverse proxy the README recommends for TLS logs `$request`, the `Referer`
+    header carries it outbound, and history sync carries it to every signed in
+    device. A fragment is sent to no server at all.
+
+    The query grant still WORKS, so an already pasted link keeps working, but
+    nothing this program prints may create another one.
+    """
+    cfg = build_config(
+        parse_args(
+            [
+                "--root",
+                str(tmp_path),
+                "--host",
+                "0.0.0.0",
+                "--token",
+                "abc123",
+                "--allow-host",
+                "box.lan",
+            ]
+        )
+    )
+    assert "?token=" not in banner(cfg)
 
 
 def test_the_banner_is_silent_on_loopback(tmp_path: Path) -> None:

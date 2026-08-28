@@ -127,17 +127,20 @@ non negotiable and each has a test that asserts the refusal.
    secret in a request target has to be followed all the way to where the
    server writes that target down.
 
-   That clearing is still incomplete, and #20 tracks it: it sits on the grant
-   path, so a request that already holds a valid cookie or header returns
-   before reaching it and logs the token anyway. A partial fix to this kind of
-   leak is worth recording as partial rather than as done.
-
-   And note how far the rule reaches. Scrubbing our own log cannot be
-   sufficient while the secret is in the URL at all, because a reverse proxy,
+   And note how far the rule reaches. Scrubbing our own log could never be
+   sufficient while the secret was in the URL at all, because a reverse proxy,
    the `Referer` header and browser history sync each write that URL down
-   somewhere we do not control. #21 moves it into a fragment, which no server
-   ever receives. When a mitigation only narrows an exposure, say which one
-   ends it.
+   somewhere we do not control. #21 ended it by moving the grant into a URL
+   fragment, which no server ever receives: `hitchrail` now prints
+   `/grant#token=`, and `GET /grant` serves a page whose only job is to read
+   the fragment in the browser and POST it. The `?token=` form still works so
+   an already saved link does not break, and is removed before 1.0.
+
+   Read the whole arc rather than the ending. #20 cleared the token from our
+   own access line, which was real and was not the fix; the guidelines said so
+   at the time, naming the successor rather than calling the mitigation done.
+   When a mitigation only narrows an exposure, say which one ends it, and
+   write the ending down when it lands.
 
    The suite could not see this on its own: the live socket fixture ran at
    `log_level="warning"`, so the component under test was silenced by the test

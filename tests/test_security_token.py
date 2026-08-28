@@ -25,8 +25,8 @@ from hitchrail.config import Config
 from hitchrail.security import (
     GRANT_PARAM,
     TOKEN_COOKIE,
-    _token_matches,
     middleware_stack,
+    token_matches,
 )
 
 TOKEN = "s3cret-token-value"
@@ -34,9 +34,12 @@ HOST = {"host": "localhost"}
 ORIGIN = {**HOST, "origin": "http://localhost:8787"}
 
 
+async def _ok(request: httpx.Request) -> JSONResponse:
+    return JSONResponse({"ok": True})
+
+
 def build(config: Config) -> Starlette:
-    async def ok(request: httpx.Request) -> JSONResponse:
-        return JSONResponse({"ok": True})
+    ok = _ok
 
     return Starlette(
         routes=[
@@ -360,8 +363,8 @@ def test_the_comparison_is_constant_time(monkeypatch: pytest.MonkeyPatch) -> Non
         return real(a, b)
 
     monkeypatch.setattr("hitchrail.security.secrets.compare_digest", spy)
-    assert _token_matches(TOKEN, TOKEN)
-    assert not _token_matches("wrong", TOKEN)
+    assert token_matches(TOKEN, TOKEN)
+    assert not token_matches("wrong", TOKEN)
     assert len(seen) == 2
 
 
@@ -653,3 +656,90 @@ async def test_a_parameter_that_merely_contains_the_word_is_left_alone(
         headers={"host": "localhost", "cookie": f"{TOKEN_COOKIE}={TOKEN}"},
     )
     assert _scope_seen_by(seen)["query_string"].decode("latin-1") == query
+
+
+# -- #21: the two paths reachable without a token ---------------------------
+
+
+@pytest.mark.integration
+async def test_the_grant_paths_are_the_only_ones_exempt(tmp_path: Path) -> None:
+    """The exemption is a list of two, and nothing else may join it by accident.
+
+    A fragment is readable only by JavaScript in the browser, so the flow needs
+    one unauthenticated door. That door was argued: a dedicated route rather
+    than the app shell on a 401, because every future addition to the shell
+    would inherit the exemption.
+    """
+    app = build(
+        Config(root=tmp_path, host="0.0.0.0", token=TOKEN),
+    )
+    for path in ("/x", "/deep/path", "/api/events"):
+        assert (await call(app, path=path, headers=HOST)).status_code == 401, path
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("path", ["/grant", "/api/grant"])
+async def test_an_exempt_path_reaches_the_application(tmp_path: Path, path: str) -> None:
+    """Asserted through the middleware stack rather than by reading the set.
+
+    A test that only checked `UNAUTHENTICATED_PATHS` would pass against a
+    middleware that never consulted it.
+    """
+    app = Starlette(
+        routes=[
+            Route("/grant", _ok, methods=["GET"]),
+            Route("/api/grant", _ok, methods=["POST"]),
+        ],
+        middleware=middleware_stack(Config(root=tmp_path, host="0.0.0.0", token=TOKEN)),
+    )
+    method = "POST" if path.startswith("/api/") else "GET"
+    response = await call(app, method, path=path, headers=ORIGIN)
+    assert response.status_code == 200
+
+
+@pytest.mark.integration
+async def test_an_exempt_path_is_matched_exactly(tmp_path: Path) -> None:
+    """`/grant` and not `/grantstuff`, `/grant/x` or `/x/grant`.
+
+    A prefix or substring test here would exempt anything a route was later
+    mounted under, which is the whole boundary given away by a comparison
+    operator.
+    """
+    app = Starlette(
+        routes=[
+            Route("/grantstuff", _ok, methods=["GET"]),
+            Route("/grant/x", _ok, methods=["GET"]),
+            Route("/x/grant", _ok, methods=["GET"]),
+        ],
+        middleware=middleware_stack(Config(root=tmp_path, host="0.0.0.0", token=TOKEN)),
+    )
+    for path in ("/grantstuff", "/grant/x", "/x/grant"):
+        assert (await call(app, path=path, headers=HOST)).status_code == 401, path
+
+
+@pytest.mark.integration
+async def test_an_exempt_path_still_answers_to_the_host_allowlist(tmp_path: Path) -> None:
+    """Host is outermost, and the exemption is inside it. A rebound request
+    must not reach the one page that is served without a token either."""
+    app = Starlette(
+        routes=[Route("/grant", _ok, methods=["GET"])],
+        middleware=middleware_stack(Config(root=tmp_path, host="0.0.0.0", token=TOKEN)),
+    )
+    response = await call(app, path="/grant", headers={"host": "evil.example"})
+    assert response.status_code == 400
+    assert response.json()["code"] == "host_rejected"
+
+
+@pytest.mark.integration
+async def test_the_grant_api_still_answers_to_the_origin_check(tmp_path: Path) -> None:
+    """A grant is MUTATING, so a link must not be able to perform one. That is
+    the whole reason it is a POST rather than a GET."""
+    app = Starlette(
+        routes=[Route("/api/grant", _ok, methods=["POST"])],
+        middleware=middleware_stack(Config(root=tmp_path, host="0.0.0.0", token=TOKEN)),
+    )
+    response = await call(
+        app, "POST", path="/api/grant", headers={**HOST, "origin": "http://evil.example"}
+    )
+    assert response.status_code == 403
+    assert response.json()["code"] == "origin_rejected"

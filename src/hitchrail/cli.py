@@ -116,16 +116,23 @@ def banner(config: Config) -> str:
         "",
         "  Open one of these on your phone:",
     ]
+    # A FRAGMENT, not a query string. Everything after `#` stays in the browser
+    # and is never sent to any server, so the token reaches no access log, no
+    # reverse proxy log, and no `Referer` header. That is why the link is
+    # generated here rather than typed: `/grant#token=` is longer to paste and
+    # costs nobody anything, which is the argument #21 settled the design on.
     lines += [
-        f"    http://{h}:{config.port}/?token={config.token}"
+        f"    http://{h}:{config.port}/grant#token={config.token}"
         for h in reachable
         if h not in {"::1", "[::1]"}
     ]
     lines += [
         "",
-        "  The link sets a cookie and drops the token from the address bar.",
-        "  Over plain HTTP the token crosses the network in cleartext; put a",
-        "  TLS terminating proxy in front of this if that matters to you.",
+        "  The token stays in the browser: everything after the # is never sent",
+        "  to a server. The page trades it for a cookie and clears the address",
+        "  bar. Over plain HTTP the cookie still crosses the network in",
+        "  cleartext; put a TLS terminating proxy in front of this if that",
+        "  matters to you.",
         "",
     ]
     return "\n".join(lines)

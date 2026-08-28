@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer">
+<title>hitchrail</title>
+<!--
+  SELF CONTAINED, on purpose. This is the only page served without a token, and
+  every asset route stays behind one, so a linked stylesheet or an external
+  script here would be answered 401 and the page would arrive unstyled and
+  inert. Exempting the assets as well would grow the unauthenticated surface,
+  which is exactly what choosing a dedicated route over the app shell avoided.
+
+  The palette below is the subset of the main stylesheet this page uses. It is
+  duplicated, and that is the cost of the boundary; a test asserts the two
+  agree so it cannot drift silently. The names of the asset routes are kept out
+  of this file entirely, comments included, so the test that asserts this page
+  asks for none of them has something exact to check.
+-->
+<style>
+:root {
+  --ground: #F3ECE1;
+  --surface: #FFFDFA;
+  --line: #E8DFD1;
+  --ink: #2E251C;
+  --muted: #6B5A48;
+  --accent: #A8642E;
+  --danger: #9A3B2B;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #362D24;
+    --surface: #4A3E31;
+    --line: #6B5A48;
+    --ink: #F3ECE1;
+    --muted: #A2917D;
+    --accent: #D08A4A;
+    --danger: #9A3B2B;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: Karla, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+}
+main {
+  width: 100%;
+  max-width: 420px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 20px;
+}
+h1 { font-family: "Zilla Slab", Georgia, serif; font-size: 22px; margin: 0 0 8px; }
+p { margin: 0 0 16px; color: var(--muted); }
+label { display: block; font-size: 13px; margin-bottom: 6px; }
+input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  font: inherit;
+  color: var(--ink);
+  background: var(--ground);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+button {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 12px;
+  font: inherit;
+  font-weight: 600;
+  color: #FFFDFA;
+  background: var(--accent);
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.warn { color: var(--ink); font-weight: 600; }
+.bad { color: var(--danger); font-weight: 600; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main role="dialog" aria-modal="true" aria-labelledby="title">
+  <h1 id="title">hitchrail</h1>
+  <p class="warn">Anyone with this key can run code on that machine as you.</p>
+  <p data-working hidden>Checking.</p>
+  <form data-form hidden>
+    <label for="key">Access key</label>
+    <input id="key" type="password" name="token" autocomplete="off" autocapitalize="off"
+           autocorrect="off" spellcheck="false" data-key>
+    <p class="bad" role="alert" data-error hidden></p>
+    <button type="submit">Unlock</button>
+  </form>
+</main>
+<script>
+/* The whole point: a fragment is never sent to any server.
+
+   Not the query string. A query string is written down by everything it passes
+   through: the reverse proxy the README recommends for TLS logs `$request`,
+   the `Referer` header carries it on any outbound request, and browser history
+   sync carries it to every signed in device. #20 stopped Hitchrail's own log
+   printing it, which was as far as Hitchrail's reach went. This is the fix. */
+const form = document.querySelector("[data-form]");
+const working = document.querySelector("[data-working]");
+const error = document.querySelector("[data-error]");
+const key = document.querySelector("[data-key]");
+
+function fail(message) {
+  working.hidden = true;
+  form.hidden = false;
+  error.textContent = message;
+  error.hidden = false;
+  key.focus();
+}
+
+async function grant(token) {
+  const response = await fetch("/api/grant", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+  if (!response.ok) return false;
+  /* No `replaceState` here. The key is already out of the address bar by this
+     point, cleared before the request rather than after it, and clearing it a
+     second time only looks like the thing protecting history.
+
+     `replace` rather than an assignment, so this page is not a back target.
+     That is a courtesy and not a control: the entry it would leave carries no
+     key either. */
+  window.location.replace("/");
+  return true;
+}
+
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  error.hidden = true;
+  const typed = key.value.trim();
+  if (!typed) return;
+  form.hidden = true;
+  working.hidden = false;
+  /* One message for a wrong key and for a missing one. The API refuses to be
+     an oracle about which; the screen must not become the oracle instead. */
+  if (!(await grant(typed))) fail("That key was not accepted.");
+});
+
+const offered = new URLSearchParams(location.hash.slice(1)).get("token");
+if (offered) {
+  working.hidden = false;
+  /* Cleared BEFORE the request, not after it. A rejected key would otherwise
+     sit in the address bar, and in the history entry, for as long as the
+     person stares at the failure. */
+  history.replaceState(null, "", "/grant");
+  grant(offered).then((ok) => {
+    if (!ok) fail("That key was not accepted.");
+  });
+} else {
+  form.hidden = false;
+  key.focus();
+}
+</script>
+</body>
+</html>

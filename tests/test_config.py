@@ -889,22 +889,36 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # wrong, and the reason it is not belongs next to it. Split only if a
         # NEW responsibility arrives, never to reclaim these lines.
         "config.py": 413,
-        # 421. #20 moved the grant token scrub out of the grant path, where it
+        # 487. #20 moved the grant token scrub out of the grant path, where it
         # only ran when no carrier matched, into a helper every request goes
-        # through. The growth is that helper and the comment recording which
-        # three paths used to leak, which is the part a reader cannot recover
-        # from the code.
-        "security.py": 443,
-        # 413. The HTTP layer: routes, the error envelope, the SSE stream and
+        # through. #21 then added the unauthenticated path set, the exemption
+        # that consults it, and `set_token_cookie`, which is shared because two
+        # carriers now set that cookie and a security control with two
+        # definitions is not one control.
+        #
+        # No split, and the reason is the file's subject. This module answers
+        # one question, "may this request proceed", and the growth is the
+        # argument for each answer: which three paths used to leak the token,
+        # why exactly two paths are reachable without one, and why the cookie is
+        # not `Secure`. Splitting it would put half of a security boundary in
+        # another file, and the next reader would find one half.
+        "security.py": 487,
+        # 474. The HTTP layer: routes, the error envelope, the SSE stream and
         # the lifespan sweeper, which is one job described four ways. Most of
         # the length above the guideline is the comments recording what the
         # transport does rather than what this code does, and those are the
         # part a reader cannot recover from the source.
+        #
+        # #21 pushed it to 519 and the split was taken rather than the cap
+        # raised: `pages.py` now serves the two HTML pages and the two assets,
+        # which is a real seam and not an arithmetic one. Reading a file off
+        # disk is a different job from translating engine calls into JSON, and
+        # it is the only code here that reads a file chosen by a URL.
         # 473. +#53 page and asset routes, +#64 fields, +#57 the comment on
         # `create_project`'s publish, which records that this route once put a
         # different shape on the bus from the engine's and that the client's
         # refetch hid it. Four lines to stop it being written back.
-        "server.py": 473,
+        "server.py": 474,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"
@@ -978,7 +992,7 @@ def test_the_import_contract_covers_every_engine_layer_module() -> None:
     The web layer is the exception list below, and it is spelled out rather
     than inferred, so adding a module to it is a deliberate act.
     """
-    web = {"server.py", "cli.py", "security.py", "__init__.py"}
+    web = {"server.py", "pages.py", "cli.py", "security.py", "__init__.py"}
     src = Path(__file__).resolve().parents[1] / "src" / "hitchrail"
     engine_layer = {f"hitchrail.{p.stem}" for p in src.glob("*.py") if p.name not in web}
     contract = tomllib.loads(

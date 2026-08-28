@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import logging
 import pathlib
+import re
 import shutil
 from collections.abc import AsyncIterator, Callable
 
@@ -12,7 +13,7 @@ import pytest
 from starlette.responses import Response
 
 from conftest import FakeClock, FakeTmux, ScriptedProcs, failing_procs, procs_from
-from hitchrail import server
+from hitchrail import pages, server
 from hitchrail.config import Config
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
@@ -877,11 +878,195 @@ async def test_no_request_reaches_a_file_the_module_did_not_name(
 
 
 async def test_the_page_is_behind_the_token(tmp_path: pathlib.Path) -> None:
-    """Serving the shell unauthenticated is a change to the security boundary,
-    and it is #21's to argue rather than this route's to assume."""
+    """#21 argued it and kept it behind the token: `/grant` is the door, and
+    the shell stays shut so no future addition to it inherits an exemption."""
     (tmp_path / "vessel").mkdir()
     config = Config(root=tmp_path, sessions_dir=tmp_path / ".s", token="s3cret")
     engine = make_engine(config, FakeTmux(), procs_from(""))
     async with client_for(engine, config) as c:
         for path in ("/", "/app.css", "/app.js"):
             assert (await c.get(path, headers={"host": "localhost"})).status_code == 401, path
+
+
+# -- #21: the grant route ---------------------------------------------------
+
+
+def _token_app(tmp_path: pathlib.Path) -> tuple[Engine, Config]:
+    (tmp_path / "vessel").mkdir()
+    config = Config(root=tmp_path, sessions_dir=tmp_path / ".s", token="s3cret")
+    return make_engine(config, FakeTmux(), procs_from("")), config
+
+
+GRANT_HEADERS = {"host": "localhost", "origin": "http://localhost:8787"}
+
+
+async def test_the_grant_page_is_served_without_a_token(tmp_path: pathlib.Path) -> None:
+    engine, config = _token_app(tmp_path)
+    async with client_for(engine, config) as c:
+        r = await c.get("/grant", headers={"host": "localhost"})
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+
+
+async def test_the_grant_page_names_nothing_on_the_machine(tmp_path: pathlib.Path) -> None:
+    """A page reachable without a token must not say what is on the machine.
+    Folder names are among the things the token protects."""
+    engine, config = _token_app(tmp_path)
+    async with client_for(engine, config) as c:
+        body = (await c.get("/grant", headers={"host": "localhost"})).text
+    assert "vessel" not in body
+    assert str(tmp_path) not in body
+
+
+async def test_the_grant_page_asks_for_no_protected_asset(tmp_path: pathlib.Path) -> None:
+    """Self contained, and that is not a style preference.
+
+    Every asset route stays behind the token, so a `<link>` or `<script src>`
+    here would be answered 401 and the page would arrive unstyled and inert.
+    """
+    engine, config = _token_app(tmp_path)
+    async with client_for(engine, config) as c:
+        body = (await c.get("/grant", headers={"host": "localhost"})).text
+    assert "app.css" not in body
+    assert "app.js" not in body
+    assert "<script src" not in body
+
+
+async def test_the_grant_trades_a_token_for_a_cookie(tmp_path: pathlib.Path) -> None:
+    engine, config = _token_app(tmp_path)
+    async with client_for(engine, config) as c:
+        r = await c.post("/api/grant", json={"token": "s3cret"}, headers=GRANT_HEADERS)
+        assert r.status_code == 200
+        # And the cookie it set is the one the middleware accepts.
+        listing = await c.get("/api/projects", headers=GRANT_HEADERS)
+    assert "hitchrail_token" in r.cookies
+    assert listing.status_code == 200
+
+
+async def test_the_grant_cookie_is_httponly_and_lax(tmp_path: pathlib.Path) -> None:
+    """`HttpOnly` so script cannot read it back out, and `SameSite=Lax` rather
+    than `Strict` for the reason `TokenMiddleware` documents. Not `Secure`,
+    because over plain HTTP on a LAN a `Secure` cookie is never sent and the
+    tool silently stops working."""
+    engine, config = _token_app(tmp_path)
+    async with client_for(engine, config) as c:
+        r = await c.post("/api/grant", json={"token": "s3cret"}, headers=GRANT_HEADERS)
+    header = r.headers["set-cookie"].lower()
+    assert "httponly" in header
+    assert "samesite=lax" in header
+    assert "secure" not in header
+
+
+async def test_a_wrong_token_gets_the_same_answer_as_no_token(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The route must not become the oracle the middleware refuses to be."""
+    engine, config = _token_app(tmp_path)
+    async with client_for(engine, config) as c:
+        wrong = await c.post("/api/grant", json={"token": "nope"}, headers=GRANT_HEADERS)
+        missing = await c.get("/api/projects", headers=GRANT_HEADERS)
+    assert wrong.status_code == missing.status_code == 401
+    assert wrong.json() == missing.json()
+    assert "hitchrail_token" not in wrong.cookies
+
+
+async def test_a_wrong_token_is_not_echoed_back(tmp_path: pathlib.Path) -> None:
+    engine, config = _token_app(tmp_path)
+    async with client_for(engine, config) as c:
+        r = await c.post("/api/grant", json={"token": "hunter2-typo"}, headers=GRANT_HEADERS)
+    assert "hunter2-typo" not in r.text
+
+
+@pytest.mark.parametrize(
+    "body", [{}, {"token": None}, {"token": 7}, {"token": ["s3cret"]}, {"other": "x"}]
+)
+async def test_a_body_without_a_string_token_is_refused(
+    tmp_path: pathlib.Path, body: dict[str, object]
+) -> None:
+    """A JSON body is attacker shaped input. `token` being a list once meant
+    `compare_digest` raised `TypeError` rather than answering False, which is a
+    500 where a 400 belongs."""
+    engine, config = _token_app(tmp_path)
+    async with client_for(engine, config) as c:
+        r = await c.post("/api/grant", json=body, headers=GRANT_HEADERS)
+    assert r.status_code in (400, 401), body
+    assert r.json()["code"] in ("invalid_body", "unauthorized")
+
+
+async def test_a_grant_on_a_server_with_no_token_is_not_a_way_in(
+    client: httpx.AsyncClient,
+) -> None:
+    """Answering 200 would tell an unauthenticated caller the deployment is
+    open, which is a thing worth knowing before attacking it."""
+    r = await client.post("/api/grant", json={"token": "anything"}, headers=HEADERS)
+    assert r.status_code == 404
+    assert "hitchrail_token" not in r.cookies
+
+
+async def test_the_grant_is_a_post_and_not_a_link(tmp_path: pathlib.Path) -> None:
+    """A GET here would be a link that performs a mutation, which is the shape
+    the origin check exists to stop, and links are what this flow is made of."""
+    engine, config = _token_app(tmp_path)
+    async with client_for(engine, config) as c:
+        r = await c.get("/api/grant?token=s3cret", headers=GRANT_HEADERS)
+    assert r.status_code == 405
+
+
+def test_the_grant_page_palette_agrees_with_the_stylesheet() -> None:
+    """The grant page duplicates the palette because it cannot link to it.
+
+    That duplication is the price of the security boundary, and a price paid
+    once and then forgotten is how a page ends up rendering last year's colours
+    next to this year's. Every token the grant page defines must have the same
+    value in the real stylesheet, in the light palette and in the dark one.
+    """
+    web = pages.WEB
+    grant = web.joinpath("grant.html").read_text()
+    sheet = web.joinpath("app.css").read_text()
+
+    def palette(text: str, marker: str) -> dict[str, str]:
+        """The first `:root` declaration block at or after `marker`.
+
+        Matched on the marker and not on the whole selector, because the two
+        files spell the dark selector differently: the stylesheet guards it as
+        `:root:not([data-theme="light"])` so an explicit light choice wins,
+        which the grant page has no toggle to need.
+        """
+        after = text.index(marker)
+        opened = text.index("{", text.index(":root", after))
+        body = text[opened + 1 : text.index("}", opened)]
+        return {
+            name.strip(): value.strip()
+            for name, _, value in (
+                line.partition(":") for line in body.split(";") if "--" in line
+            )
+        }
+
+    for marker in (":root", "@media (prefers-color-scheme: dark)"):
+        here = palette(grant, marker)
+        there = palette(sheet, marker)
+        assert here, f"no tokens parsed out of the grant page for {marker!r}"
+        assert there, f"no tokens parsed out of the stylesheet for {marker!r}"
+        for name, value in here.items():
+            assert there.get(name) == value, (
+                f"{name} is {value} on the grant page and {there.get(name)} in "
+                f"the stylesheet, under {marker!r}"
+            )
+
+
+def test_every_file_the_server_serves_exists() -> None:
+    """A `FileResponse` on a missing path is a 500 at request time.
+
+    Verified by reading the SOURCE for the names, not by listing the directory,
+    so a file that stops being referenced is not mistaken for one that is
+    served. `pyproject.toml` ships `src/hitchrail/web/*` as a glob, so the
+    packaging follows whatever is here; what it cannot follow is a rename that
+    only half happened.
+    """
+    source = pathlib.Path(pages.__file__).read_text()
+    web = pages.WEB
+    served = set(re.findall(r'WEB / "([^"]+)"', source))
+    served |= {filename for filename, _ in pages.ASSETS.values()}
+    assert served, "no served filenames were found in server.py"
+    missing = sorted(name for name in served if not (web / name).is_file())
+    assert not missing, missing

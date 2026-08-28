@@ -115,16 +115,22 @@ send the dotted form, because typing `http://box.lan./` is a way to force
 absolute resolution on a split horizon network.
 
 Getting the token onto a phone is a link rather than 32 characters of typing.
-Open `http://<address>:8787/?token=<token>` once: it sets a cookie and
-redirects the token out of the address bar and the browser history.
+Open `http://<address>:8787/grant#token=<token>` once. The token is everything
+after the `#`, and a fragment is never sent to a server: not to Hitchrail, not
+to a reverse proxy, and not in a `Referer` header. The page reads it in the
+browser, trades it for a cookie, and clears the address bar.
 
-That link is still a URL with a secret in it, so treat it as one. The first
-open is kept out of Hitchrail's own access log, and re opening it later is not
-yet: that is #20. A reverse proxy in front, which is what the paragraph above
-recommends for TLS, keeps its own access log and will record the token there
-whatever Hitchrail does. #21 moves the token into a URL fragment, which is
-never sent to any server, and is the end of this problem rather than a
-narrowing of it.
+`hitchrail` prints that link for every address it can be reached on, so it is
+copied rather than typed.
+
+Treat the link as a secret anyway, because it is one, and the phone it lands on
+is where it now lives. What changed is the set of machines that write it down:
+that used to include this server's access log, any proxy in front, and every
+device signed into the same browser profile, and it is now none of them.
+
+The older `?token=<token>` form still works so a link already saved keeps
+working. It will be removed before 1.0, and nothing Hitchrail prints creates
+one any more.
 
 Hitchrail does not sandbox the sessions it starts. It is a launcher. The agent it
 launches has whatever access you have.

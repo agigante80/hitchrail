@@ -43,11 +43,19 @@ below as a refusal with a test that asserts it, not as advice.
    response redirects it out of the address bar. `TokenMiddleware` clears
    `scope["query_string"]` once the grant token is spent, and
    `test_the_grant_keeps_the_token_out_of_the_access_log` fails if that stops.
-   It covers the grant path only, so re opening the link with a valid cookie
-   still logs the token: that is #20, and a reverse proxy logs it regardless,
-   which is why #21 moves the token into a fragment instead. Follow any secret
-   that rides in a URL all the way to every place that URL is written down, not
-   only the places this process controls.
+   It covers the query grant, which is the carrier #21 replaced: the token now
+   rides in a URL fragment, and a fragment is sent to no server, so there is
+   nothing in the request target to log. The scrub stays because the `?token=`
+   form still works until it is removed before 1.0.
+
+   Follow any secret that rides in a URL all the way to every place that URL is
+   written down, not only the places this process controls. Scrubbing our own
+   log was never going to be enough on its own, and knowing that is what made
+   the fragment the fix rather than a fourth mitigation.
+
+   The exemption that flow needs is `security.UNAUTHENTICATED_PATHS`, two paths
+   long. Adding a third is a change to the security boundary and needs the
+   argument #21 made, not a line in a list.
 
 ## Order matters
 

@@ -12,37 +12,24 @@ import contextlib
 import functools
 import json
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
-from pathlib import Path
+from collections.abc import AsyncIterator, Callable
 from typing import TypeVar
 
 from sse_starlette.sse import EventSourceResponse
 from starlette.applications import Starlette
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse, Response
+from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
-from hitchrail import discovery
+from hitchrail import discovery, pages
 from hitchrail import engine as eng
+from hitchrail import security as sec
 from hitchrail.config import Config
 from hitchrail.events import EventBus
 from hitchrail.security import middleware_stack
 
 T = TypeVar("T")
-
-# The page and its two assets. INSIDE the package, because `uvx hitchrail`
-# installs a distribution and a directory beside it is not in one.
-WEB = Path(__file__).parent / "web"
-
-# Fixed names, fixed types, no path parameter anywhere. A route that built a
-# path out of the request would make `/../../etc/passwd` reachable, and this is
-# the only code in the project that reads a file chosen by a URL. It does not
-# choose: the mapping is this dict and nothing else can be asked for.
-ASSETS = {
-    "/app.css": ("app.css", "text/css; charset=utf-8"),
-    "/app.js": ("app.js", "text/javascript; charset=utf-8"),
-}
 
 SWEEP_INTERVAL_S = 1.0
 
@@ -119,25 +106,6 @@ async def _routing_error(request: Request, exc: Exception) -> Response:
     return _error(
         exc.status_code, _ROUTING_CODES.get(exc.status_code, "error"), str(exc.detail)
     )
-
-
-async def _page(request: Request) -> Response:
-    """The single page. Behind the token like every other route.
-
-    Serving it unauthenticated would be a change to the security boundary, and
-    it is #21's to argue, not this route's to assume.
-    """
-    return FileResponse(WEB / "index.html", media_type="text/html; charset=utf-8")
-
-
-def _asset_route(path: str) -> Callable[[Request], Awaitable[Response]]:
-    """One handler per asset, closed over a name this module chose."""
-    filename, media_type = ASSETS[path]
-
-    async def handler(request: Request) -> Response:
-        return FileResponse(WEB / filename, media_type=media_type)
-
-    return handler
 
 
 def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
@@ -229,6 +197,37 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
         # right because a refetch IS correct for a new project.
         events.publish(session.as_dict())
         return JSONResponse(session.as_dict(), status_code=201)
+
+    async def grant(request: Request) -> Response:
+        """Trade a token the page read from a fragment for the cookie.
+
+        Reached without authentication, by design: nothing but JavaScript in
+        the browser can read a fragment, so the flow needs one door. This is
+        that door and it checks the token itself.
+
+        A POST, so `OriginCheckMiddleware` runs on it: a grant is mutating, and
+        a mutating request a link can perform is the shape the origin check
+        exists to stop. A GET here would be exactly that link.
+        """
+        if config.token is None:
+            # No token configured, so there is nothing to grant and no cookie
+            # that would mean anything. Refusing is not pedantry: answering 200
+            # would tell a caller the deployment is open.
+            return _error(404, "not_found", "no token is configured")
+        try:
+            body = await request.json()
+            offered = body["token"]
+        except (ValueError, KeyError, TypeError):
+            return _error(400, "invalid_body", "a JSON body with a 'token' is required")
+        if not isinstance(offered, str) or not sec.token_matches(offered, config.token):
+            # The SAME answer a missing token gets from the middleware. A wrong
+            # token and no token are already indistinguishable at the API, and
+            # this route must not become the oracle the middleware refuses to
+            # be.
+            return _error(401, "unauthorized", "a valid token is required")
+        response = JSONResponse({"ok": True})
+        sec.set_token_cookie(response, config.token)
+        return response
 
     async def start(request: Request) -> Response:
         name = request.path_params["name"]
@@ -463,8 +462,10 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
             Route("/api/sessions/{name}/logs", logs, methods=["GET"]),
             Route("/api/sessions/{name}/url", session_url, methods=["GET"]),
             Route("/api/events", event_stream, methods=["GET"]),
-            Route("/", _page, methods=["GET"]),
-            *[Route(p, _asset_route(p), methods=["GET"]) for p in ASSETS],
+            Route(sec.GRANT_API_PATH, grant, methods=["POST"]),
+            Route(sec.GRANT_PAGE_PATH, pages.grant_page, methods=["GET"]),
+            Route("/", pages.page, methods=["GET"]),
+            *[Route(p, pages.asset_route(p), methods=["GET"]) for p in pages.ASSETS],
         ],
         middleware=middleware_stack(config),
         exception_handlers={HTTPException: _routing_error},
