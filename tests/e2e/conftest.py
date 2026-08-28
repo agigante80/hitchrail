@@ -39,6 +39,7 @@ socket path is capped near 108 bytes and a pytest tmp_path can exceed it.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shutil
 import signal
@@ -478,6 +479,27 @@ class Harness:
                 return
             time.sleep(0.02)
         raise RuntimeError(f"the agent for {name} survived SIGKILL")
+
+    def publish_link(self, name: str, bridge_id: str = "session_01TestBridgeId") -> str:
+        """Write the session file Claude Code writes, for a session we started.
+
+        Hitchrail does not generate the link. `claude_ipc.bridge_url` reads
+        `<sessions_dir>/<pid>.json` and takes `bridgeSessionId` verbatim,
+        including its `session_` prefix, so writing that file is how a test
+        gets a session with a link without a real agent behind it.
+
+        The real file carries about twenty keys, confirmed against a live
+        session: `cwd`, `tmux`, `status`, `messagingSocketPath` and the rest.
+        Only `bridgeSessionId` is read here, and pretending otherwise would
+        make this fixture claim to know more of an undocumented format than
+        the code it feeds.
+        """
+        assert self.engine is not None and self._config is not None
+        pid = self.engine.get(e2e_name(name)).pid
+        assert pid is not None, f"{name} is not running, so it has no session file"
+        path = self._config.sessions_dir / f"{pid}.json"
+        path.write_text(json.dumps({"bridgeSessionId": bridge_id, "pid": pid}))
+        return f"https://claude.ai/code/{bridge_id}"
 
     def break_machine(self) -> None:
         """Make the machine unreadable, through the seam the engine injects.

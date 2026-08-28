@@ -184,3 +184,105 @@ async def test_an_empty_list_announces_itself_once(page: Page, server: Harness) 
 
     await page.get_by_role("searchbox").fill("")
     await expect(region).to_have_text("")
+
+
+async def test_a_running_session_offers_the_link_you_talk_to_it_through(
+    page: Page, server: Harness
+) -> None:
+    """Hitchrail is a launcher, not a terminal.
+
+    It has no input control and the log drawer is read only, so this link is
+    the whole of how a person reaches the agent it started. Claude Code prints
+    it on startup as "Continue here, on your phone, or at ...", which is where
+    the label comes from.
+    """
+    server.seed(running=["vessel"])
+    expected = server.publish_link("vessel")
+    await page.goto(server.base)
+
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    link = row.get_by_role("link", name="Continue")
+    await expect(link).to_be_visible()
+    await expect(link).to_have_attribute("href", expected)
+    await expect(link).to_have_attribute("target", "_blank")
+    # `noreferrer` as much as `noopener`: without it the outbound request tells
+    # claude.ai the hostname and port of a machine on somebody's LAN.
+    await expect(link).to_have_attribute("rel", "noopener noreferrer")
+
+    # A real link, not a button that opens a window. On a phone this is what
+    # long press, copy, share and open in app all reach for.
+    box = await link.bounding_box()
+    assert box is not None and box["height"] >= 44, box
+
+
+async def test_a_stopped_row_offers_no_link(page: Page, server: Harness) -> None:
+    server.seed(stopped=["koala"])
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("koala")}"]')
+    await expect(row).to_have_attribute("data-state", "stopped")
+    assert await row.get_by_role("link").count() == 0
+
+
+async def test_a_session_with_no_link_yet_says_so_rather_than_pretending(
+    page: Page, server: Harness
+) -> None:
+    """The bridge file is written a second or two after the agent starts, and
+    a link arriving is not a state change, so the stream never announces it.
+    The row asks instead of waiting."""
+    server.seed(running=["vessel"])
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    assert await row.get_by_role("link", name="Continue").count() == 0
+
+    await row.get_by_role("button", name="Get link").click()
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text("No link yet")
+    await expect(dialog).to_contain_text("waiting for an answer in the terminal")
+
+
+async def test_asking_again_picks_up_a_link_that_has_since_appeared(
+    page: Page, server: Harness
+) -> None:
+    server.seed(running=["vessel"])
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row.get_by_role("button", name="Get link")).to_be_visible()
+
+    expected = server.publish_link("vessel")
+    await row.get_by_role("button", name="Get link").click()
+
+    link = row.get_by_role("link", name="Continue")
+    await expect(link).to_be_visible()
+    await expect(link).to_have_attribute("href", expected)
+
+
+async def test_a_link_that_does_not_point_at_claude_is_not_rendered(
+    page: Page, server: Harness
+) -> None:
+    """The refusal, and it is the reason the client checks at all.
+
+    The server allowlists the bridge id's SHAPE, so it cannot emit this today.
+    This is the second lock, on the whole value, because the string ends up in
+    an `href` and a `javascript:` one would be script execution rather than a
+    bad link. Injected into the page's own state, since the point is that the
+    client does not trust what it was handed.
+    """
+    server.seed(running=["vessel"])
+    server.publish_link("vessel")
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row.get_by_role("link", name="Continue")).to_be_visible()
+
+    for hostile in ("javascript:alert(1)", "https://evil.example/code/session_1", "/code/x"):
+        rendered = await page.evaluate(
+            """(url) => {
+                const hr = window.__hitchrail;
+                hr.state.projects = hr.state.projects.map(
+                    (p) => (p.state === "running" ? { ...p, url } : p)
+                );
+                hr.render();
+                return document.querySelectorAll('.row a.btn').length;
+            }""",
+            hostile,
+        )
+        assert rendered == 0, f"{hostile} was rendered as a link"
