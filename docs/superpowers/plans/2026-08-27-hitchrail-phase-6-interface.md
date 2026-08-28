@@ -842,6 +842,44 @@ instead of their mount.
 ```bash
 git commit -m "feat(web): live updates, and a list that is right after a reconnect (#57)"
 ```
+
+**The review loop ran three rounds and stopped on the trip wire.** Recorded
+because the stopping reason is a decision somebody may want to reverse, and
+because two of the three rounds found something the tier could not have caught.
+
+- **Round 1**, on the feature: four highs, eight mediums. The one that mattered
+  most was not in the stream at all. A listing fetched before an event lands
+  after it, so a laptop stopping a session while the phone happened to be
+  fetching put the row back to `running`, and nothing would ever correct it
+  because a terminal state announces nothing further. Also: a refused stream
+  never comes back, since `EventSource` retries a network error and not a
+  response it refuses; and two publishers were putting two different shapes on
+  one bus, which every client answered with a full refetch.
+- **Round 2**, on round 1's fixes only: one high, INSIDE the ordering fix.
+  Events held during a fetch carried no notion of which listing they were
+  entitled to overrule, so the rule as implemented was "an event beats any
+  fetch in flight" rather than "an event beats a listing asked for before it".
+  A fetch issued after the event is fresher and has to win.
+- **Round 3**, on round 2's fixes only: a medium, INSIDE round 2's harness fix.
+  Recording a failure instead of raising was meant to stop a stuck server from
+  skipping the tmux cleanup; the next block then raised on the same path,
+  because the loop it closes is still running when the thread would not stop.
+
+Round 2 found a defect in round 1's fix and round 3 found one in round 2's.
+Two consecutive rounds finding a defect in the previous round's fix is the
+documented stop condition, so the loop ended there rather than at its four
+round limit. Six tickets carry what was left: #71, #72, #73, #74, and #69 and
+#70 from round 1.
+
+**One thing the tier bought that was not on anybody's list.** Teardown was
+hitting its full ten second join on EVERY browser test, because uvicorn's
+shutdown gathers `wait_closed()` and since Python 3.12 that waits for open
+connections, `force_exit` or not, and every test that loads the page leaves an
+SSE stream open. Cutting the connections first took the browser tier from 498
+seconds to 97 and the whole suite from 520 to 115. The stall was also doing a
+job nobody had assigned it: giving the previous test's agents time to exit.
+Every test seeds under the same prefix, so removing the stall surfaced a real
+ordering hazard that the teardown now handles on purpose.
 ```
 
 ---
