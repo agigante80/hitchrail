@@ -1529,6 +1529,7 @@ def test_a_dead_start_carries_the_output_and_leaves_no_session(root: Path) -> No
     """
     engine, tmux, _ = start_engine(root, table=procs_from(""))
     tmux.pane_text["vessel"] = "agent: missing credential\nPane is dead (status 3)"
+    tmux.dead_panes.add("vessel")
 
     with pytest.raises(StartFailed) as raised:
         engine.start("vessel")
@@ -1536,6 +1537,41 @@ def test_a_dead_start_carries_the_output_and_leaves_no_session(root: Path) -> No
     assert "missing credential" in raised.value.output
     assert "status 3" in raised.value.output, "the exit status is the diagnostic"
     assert tmux.killed == ["vessel"], "the kept pane was not cleaned up"
+
+
+def test_a_start_that_is_merely_slow_is_not_killed(root: Path) -> None:
+    """`StartFailed` fires on a timeout, and a timeout is not proof of death.
+
+    A loaded machine, a cold cache, or a grace window that was generous
+    yesterday all produce one while the agent is starting perfectly well.
+    Killing on every timeout would end a healthy agent, which is strictly
+    worse than the empty output this whole ticket is about. The pane is
+    observably dead only when it really is.
+    """
+    engine, tmux, _ = start_engine(root, table=procs_from(""))
+    tmux.pane_text["vessel"] = "agent: still waking up"
+    # The pane is NOT marked dead, so the agent may still be coming.
+
+    with pytest.raises(StartFailed):
+        engine.start("vessel")
+
+    assert tmux.killed == [], "a slow start was killed as though it had died"
+
+
+def test_an_undeterminable_pane_counts_as_alive(root: Path) -> None:
+    """The caller acts destructively on True, so a guess is not a reason to
+    kill something."""
+    engine, tmux, _ = start_engine(root, table=procs_from(""))
+
+    def cannot_tell(project: str) -> bool:
+        raise TmuxUnavailable("tmux went away")
+
+    tmux.pane_is_dead = cannot_tell  # type: ignore[method-assign]
+
+    with pytest.raises(StartFailed):
+        engine.start("vessel")
+
+    assert tmux.killed == []
 
 
 def test_a_dead_start_reads_the_whole_scrollback(root: Path) -> None:
@@ -1584,6 +1620,7 @@ def test_a_dead_start_still_reports_when_the_cleanup_fails(root: Path) -> None:
     will not be told about it by this path."""
     engine, tmux, _ = start_engine(root, table=procs_from(""))
     tmux.pane_text["vessel"] = "agent: exploded"
+    tmux.dead_panes.add("vessel")
 
     def gone(project: str) -> None:
         raise TmuxUnavailable("tmux went away")

@@ -346,6 +346,25 @@ class Tmux:
             )
         )
 
+    def pane_is_dead(self, project: str) -> bool:
+        """Whether the pane is being kept alive past a process that exited.
+
+        Only meaningful while `remain-on-exit` is on, which is exactly the
+        window a start is in. It is what tells a session whose agent DIED from
+        one whose agent is merely slow to appear, and those need opposite
+        answers: the first should be cleaned up, the second must be left
+        alone because the agent is fine.
+
+        False when it cannot be determined, because the caller acts
+        destructively on True and a guess is not a reason to kill something.
+        """
+        result = self._try(
+            self._argv("list-panes", "-t", self.pane_target(project), "-F", "#{pane_dead}")
+        )
+        if result.returncode != 0:
+            return False
+        return result.stdout.split() == ["1"]
+
     def keep_pane_on_exit(self, project: str, keep: bool) -> None:
         """Turn `remain-on-exit` on or off for one session.
 

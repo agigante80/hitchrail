@@ -349,3 +349,40 @@ def test_clearing_the_option_lets_a_session_end_normally(server: PrivateTmux) ->
     assert "hr-obedient" not in server.sessions(), (
         "the session lingered after a normal exit, so the engine would call it stale"
     )
+
+
+def test_a_dead_pane_and_a_live_one_are_told_apart(server: PrivateTmux) -> None:
+    """The distinction the cleanup turns on, against a real tmux.
+
+    `StartFailed` fires on a timeout, and a timeout is not proof of death: a
+    loaded machine produces one while the agent is starting perfectly well.
+    Killing on every timeout would end a healthy agent, so the cleanup asks
+    whether the pane is actually dead. That answer has to be real.
+    """
+    adapter = Tmux(prefix="hr-", socket=server.socket)
+
+    dying = Path(server._dir) / "dies"
+    dying.write_text("#!/bin/sh\nexit 1\n")
+    dying.chmod(0o755)
+    adapter.new_session("dead", str(server._dir), [str(dying)])
+    server.created.append("hr-dead")
+
+    living = Path(server._dir) / "lives"
+    living.write_text("#!/bin/sh\nsleep 30\n")
+    living.chmod(0o755)
+    adapter.new_session("alive", str(server._dir), [str(living)])
+    server.created.append("hr-alive")
+
+    time.sleep(0.8)
+
+    assert adapter.pane_is_dead("dead") is True
+    assert adapter.pane_is_dead("alive") is False
+
+
+def test_a_session_that_is_not_there_is_not_reported_as_dead(
+    server: PrivateTmux,
+) -> None:
+    """False when it cannot be determined. The caller KILLS on True, so an
+    absent session must not read as a dead one."""
+    adapter = Tmux(prefix="hr-", socket=server.socket)
+    assert adapter.pane_is_dead("never-existed") is False

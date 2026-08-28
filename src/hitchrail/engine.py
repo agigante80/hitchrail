@@ -420,13 +420,32 @@ class Engine:
         scrolled above it. That status line is worth keeping: it is the exit
         code, which nothing else in this system reports.
 
-        Then the session is killed, because the pane is only being kept for
-        this read. `kill_session` is prefix scoped in the adapter and that is
-        not relaxed here.
+        The session is then killed ONLY if its pane is actually dead.
+
+        That condition is the whole of the care here. `StartFailed` also fires
+        when an agent is merely SLOW to appear: a loaded machine, a cold cache,
+        a grace window that was generous enough yesterday. Killing on every
+        timeout would end an agent that was starting perfectly well, which is
+        strictly worse than the problem this method exists to solve. A dead
+        pane is observable precisely because `new_session` kept it, and an
+        undeterminable answer counts as alive.
+
+        Left alive, the session reads as `stale`, which is honest and already
+        drawn, and a person can stop it from the interface.
+
+        `kill_session` is prefix scoped in the adapter and that is not relaxed
+        here.
         """
         output = self._safe_capture(name, lines=0)
         try:
-            self.tmux.kill_session(name)
+            if self.tmux.pane_is_dead(name):
+                self.tmux.kill_session(name)
+            else:
+                logger.info(
+                    "%s did not appear in time but its pane is alive, so it is "
+                    "left running rather than killed",
+                    name,
+                )
         except TmuxUnavailable:
             # The message matters more than the tidying. A machine that has
             # lost tmux will not be told about it by this path.

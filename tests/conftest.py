@@ -71,6 +71,7 @@ class FakeTmux(Tmux):
         self.started: list[tuple[str, str, list[str]]] = []
         self.pane_kept: list[tuple[str, bool]] = []
         self.capture_lines: list[int] = []
+        self.dead_panes: set[str] = set()
         self.sent: list[tuple[str, tuple[str, ...]]] = []
         self.pane_pids_calls = 0
         self.capture_calls = 0
@@ -108,6 +109,12 @@ class FakeTmux(Tmux):
         # no longer exists and never notice, which is exactly the mistake #66
         # is about.
         self.pane_text.pop(project, None)
+
+    def pane_is_dead(self, project: str) -> bool:
+        """Defaults to ALIVE, which is the safe answer: the caller kills on
+        True, and a fake that guessed dead would let a test pass while the
+        real code ended a healthy agent."""
+        return project in self.dead_panes
 
     def keep_pane_on_exit(self, project: str, keep: bool) -> None:
         """#66's `remain-on-exit`, recorded rather than performed.
