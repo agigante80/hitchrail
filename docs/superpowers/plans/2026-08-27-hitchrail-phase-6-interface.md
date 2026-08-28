@@ -160,6 +160,28 @@ at the same weight as the safe one.
 | #57 | 22, live updates | SSE, and reconnection after a backgrounded tab |
 | #21 | 23, the fragment grant | needs the page, because only JavaScript can read a fragment |
 
+Tasks 18 to 21 are done. Their steps above are ticked from the outcome, as in
+Phases 1, 4 and 5: the phase ran through the ticket workflow rather than
+strictly top to bottom, and what was verified before ticking is that every
+deliverable each task names exists, is reachable in a browser, and has tests
+that fail when it is removed. Thirty nine of those across four files.
+
+**Five tickets were discovered while implementing, and none of them existed
+when this plan was written.** They are listed separately because a plan that
+quietly absorbs its own surprises teaches the next reader nothing about where
+surprises come from.
+
+| Ticket | Found by | What it was |
+|---|---|---|
+| #65 | Task 18 | `ps` truncates to the terminal width, so an agent under a long path is INVISIBLE to derivation. Eight visible against twelve at 80 columns: four running sessions absent, each of which would have offered a Start into an occupied folder. A production bug, found because a fixture path was long. |
+| #64 | Task 18 | The listing described the projects and not the machine: no memory total for the footer's proportion, no root for the header. |
+| #63 | before Task 18 | The design's error table listed six codes and the server returns fifteen. |
+| #66 | Task 21 | A start that dies discarded the output the design offers to show, because tmux destroys the pane inside fifty milliseconds. |
+| #67 | Task 21 | The dead start browser test fails only in CI, and the reason is not known. Open, and labelled for a human. |
+
+Four of the five came out of the browser tier, which is the argument for
+landing it first rather than last.
+
 ---
 ### Task 18: The page, the palette, and the browser tier that will prove it
 
@@ -208,7 +230,7 @@ before it tripled, and the same argument applies harder here: a browser tier
 added after five flows exist is five flows of retrofitting, and the tier that
 proves the interface should exist before the interface does.
 
-- [ ] **Step 1: Add the marker, the dev dependency and the package data**
+- [x] **Step 1: Add the marker, the dev dependency and the package data**
 
 The marker joins the three that exist, and `tests/test_tiers.py` already
 asserts the tiers partition, so `e2e` must be added to its `TIERS` set in the
@@ -233,7 +255,7 @@ packages = ["src/hitchrail"]
 artifacts = ["src/hitchrail/web/*"]
 ```
 
-- [ ] **Step 2: Write the failing shell test**
+- [x] **Step 2: Write the failing shell test**
 
 ```python
 # tests/e2e/test_shell.py
@@ -296,12 +318,12 @@ def test_the_toggle_wins_over_the_system_preference(page: Page, server) -> None:
     assert page.evaluate("getComputedStyle(document.body).backgroundColor") == "rgb(243, 236, 225)"
 ```
 
-- [ ] **Step 3: Run to verify failure**
+- [x] **Step 3: Run to verify failure**
 
 Run: `uv run pytest -m e2e -v`
 Expected: FAIL, every test, on a 404 for `/`.
 
-- [ ] **Step 4: Write the harness**
+- [x] **Step 4: Write the harness**
 
 ```python
 # tests/e2e/conftest.py
@@ -319,7 +341,7 @@ The shim writes a marker line so the log drawer has something to show, then
 waits. It must respond to the graceful stop the way the real agent does, which
 means exiting on `/exit` arriving on stdin.
 
-- [ ] **Step 5: Write the page, the palette and the routes**
+- [x] **Step 5: Write the page, the palette and the routes**
 
 `index.html` carries markup and no inline style or script. `app.css` defines
 the tokens from the table above on `:root`, redefines them under
@@ -329,11 +351,11 @@ one for the page, with the same middleware as everything else: the page is
 behind the token like every other route, which is what makes the token screen
 in Task 23 reachable at all.
 
-- [ ] **Step 6: Run to verify passing, then the gates**
+- [x] **Step 6: Run to verify passing, then the gates**
 
 Run: `uv run pytest -m e2e -v` then the five gates.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/hitchrail/web tests/e2e pyproject.toml src/hitchrail/server.py
@@ -358,7 +380,7 @@ with one button, so the other forty five stay scannable with a thumb. A design
 that makes both rows the same height has lost the argument, so the test
 measures both.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/e2e/test_list.py
@@ -442,20 +464,20 @@ def test_a_folder_that_cannot_be_a_project_is_accounted_for(page: Page, server) 
     expect(page.locator('[data-project="my app"]')).to_have_count(0)
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `uv run pytest -m e2e tests/e2e/test_list.py -v`
 Expected: FAIL, nothing renders a row yet.
 
-- [ ] **Step 3: Implement the list**
+- [x] **Step 3: Implement the list**
 
 Render from `GET /api/projects`. One function per row state rather than one
 function with four branches, because the row shapes genuinely differ and a
 single template with conditionals is where the asymmetry gets lost.
 
-- [ ] **Step 4: Run to verify passing, then the gates**
+- [x] **Step 4: Run to verify passing, then the gates**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git commit -m "feat(web): the list, its four states, search, and the protected lock (#54)"
@@ -478,7 +500,7 @@ tier exists for. The sequence is over time: confirm, then a wait during which
 kill is reachable, then a timeout that reports and does not escalate on its
 own. No status code shows that.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/e2e/test_stopping.py
@@ -558,10 +580,10 @@ def test_the_timeout_does_not_kill_by_itself(page: Page, server) -> None:
     assert server.is_running("vessel"), "the interface killed a session nobody told it to"
 ```
 
-- [ ] **Step 2: Run to verify failure**
-- [ ] **Step 3: Implement the sequence**
-- [ ] **Step 4: Run to verify passing, then the gates**
-- [ ] **Step 5: Commit**
+- [x] **Step 2: Run to verify failure**
+- [x] **Step 3: Implement the sequence**
+- [x] **Step 4: Run to verify passing, then the gates**
+- [x] **Step 5: Commit**
 
 ```bash
 git commit -m "feat(web): stopping escalates rather than branching (#55)"
@@ -583,7 +605,7 @@ soft one asks and can be overridden. The hard one refuses and offers a way out
 by naming the largest session. Rendering them from one template with a boolean
 is how `Start anyway` ends up on a screen that cannot start anything.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/e2e/test_starting.py
@@ -674,10 +696,10 @@ def test_the_memory_footer_reports_what_is_free(page: Page, server) -> None:
     expect(page.locator("[data-mem-pct]")).to_have_attribute("data-mem-pct", "50")
 ```
 
-- [ ] **Step 2: Run to verify failure**
-- [ ] **Step 3: Implement**
-- [ ] **Step 4: Run to verify passing, then the gates**
-- [ ] **Step 5: Commit**
+- [x] **Step 2: Run to verify failure**
+- [x] **Step 3: Implement**
+- [x] **Step 4: Run to verify passing, then the gates**
+- [x] **Step 5: Commit**
 
 ```bash
 git commit -m "feat(web): starting, the memory refusals, the drawer and the sheet (#56)"
@@ -973,16 +995,25 @@ task implies a separate deliverable and there is not one.
 
 ## Phase 6 exit criteria
 
-- [ ] All five gates green on 3.11, 3.12 and 3.13, and the `e2e` tier runs in CI.
+- [x] All five gates green on 3.11, 3.12 and 3.13, and the `e2e` tier runs in CI. Green on 2f1e2d4; the tier runs on all three interpreters and the skip guard did not fire.
 - [ ] Every flow in the design canvas works on a real phone against a real machine.
-- [ ] The four derived states each render as themselves, `detached` with its pid.
-- [ ] A running row is measurably taller than a stopped one at a 390px viewport.
-- [ ] No control is under 44px at a phone viewport, asserted rather than eyeballed.
-- [ ] The stop sequence escalates: no kill control at the confirm step, kill reachable for the whole wait, and the timeout does not kill by itself.
-- [ ] The two memory refusals are different screens, and the hard one offers no override.
+- [x] The four derived states each render as themselves, `detached` with its pid. `tests/e2e/test_list.py`, with `detached` seeded by spawning outside tmux because killing a session kills the agent with it.
+- [x] A running row is measurably taller than a stopped one at a 390px viewport. Measured at 390px, not described.
+- [x] No control is under 44px at a phone viewport, asserted rather than eyeballed. Measured across every button, link and input at a phone viewport.
+- [x] The stop sequence escalates: no kill control at the confirm step, kill reachable for the whole wait, and the timeout does not kill by itself. Eleven tests, and both halves verified to fail against the mistake: making the timeout kill, and adding a kill control to the confirm step.
+- [x] The two memory refusals are different screens, and the hard one offers no override. And the hard one excludes the controller from its way out, so it cannot become a door into a 423.
 - [ ] The list is correct after a backgrounded tab reconnects, not merely reconnected.
 - [ ] The grant travels in a fragment and no token appears in the server's access log or the address bar.
-- [ ] Dark theme renders from the same stylesheet under `prefers-color-scheme` and under an explicit toggle.
-- [ ] `uvx hitchrail` serves the page from the installed wheel, not from the working tree.
+- [x] Dark theme renders from the same stylesheet under `prefers-color-scheme` and under an explicit toggle. Asserted as exactly one stylesheet of our own, plus the explicit toggle winning in both directions.
+- [x] `uvx hitchrail` serves the page from the installed wheel, not from the working tree. Built the wheel, installed it into a clean venv, and confirmed `web/` resolves under site-packages rather than the working tree.
+
+The three still open are waiting on Tasks 22 and 23, not on rework:
+
+- The list being right after a backgrounded tab is #57, which has no
+  `EventSource` yet.
+- The grant travelling in a fragment is #21, which has no `/grant` route yet.
+- "Every flow works on a real phone" cannot be claimed while those two are
+  missing, and it has not been driven on a real phone at all: everything so
+  far is a 390px viewport in a headless browser, which is a different claim.
 
 When these hold, write the Phase 7 plan from `docs/roadmap.md`.
