@@ -251,14 +251,13 @@ kill control in the state the user is really in, the layout holding at a phone
 viewport, and a forged `Host` being rejected on a live socket.
 
 
-**Test coverage:** this is where the browser tier arrives. `tests/e2e/` does
-not exist yet, and nothing in the project drives a browser until it does, so
-`docs/tech-guidelines.md` 7.4 describes it as absent rather than in the present
-tense. Playwright lands here, against the real server on a temporary root with
-a fake `claude` shim, and it drives a PRIVATE tmux server for the same reason
-the live tmux tier does. It is the only tier that can see SSE reconnection
-after a backgrounded tab, the stop escalation in the state the user is really
-in, and the layout holding at a phone viewport. That is #38.
+**Test coverage:** this is where the browser tier arrived. `tests/e2e/` runs
+Playwright against the real server on a temporary root with a fake `claude`
+shim, and it drives a PRIVATE tmux server for the same reason the live tmux
+tier does. It is the only tier that can see SSE reconnection after a
+backgrounded tab, the stop escalation in the state the user is really in, and
+the layout holding at a phone viewport. That was #38, and it is #38's tier that
+found most of what the reviews of tasks 22 and 23 reported.
 
 ## Phase 7: Release
 

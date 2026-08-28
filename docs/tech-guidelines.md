@@ -211,9 +211,9 @@ host allowlist rejecting a forged `Host` on a live socket.
 
 ### 7.4 The tiers, and what each one can prove
 
-Four tiers, and each exists because the one below it structurally cannot make
-the claim. Two carry a marker so they can be selected or excluded; the other
-two are told apart by what they touch.
+Five tiers, and each exists because the one below it structurally cannot make
+the claim. Four carry a marker so they can be selected or excluded; the unit
+tier is what is left when none of them is.
 
 | Tier | Marker | Touches | Can prove |
 |---|---|---|---|
