@@ -137,6 +137,20 @@ button[disabled] { color: var(--muted-3); cursor: not-allowed; }
    `connecting` and `open` show NOTHING. A permanent "live" badge would be
    noise on a phone, and the only state worth a person's attention is the one
    where the list has quietly stopped being true. */
+/* Announced, not shown. Not `display: none`, which takes it out of the
+   accessibility tree along with the announcement. */
+.offscreen {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 .stream-note {
   margin: 0;
   padding: 0;

@@ -240,12 +240,27 @@ function renderList() {
   const list = $("[data-list]");
   if (!list) return;
   const visible = visibleProjects();
+  // Announced through a region that is already in the markup, and only when
+  // the answer CHANGES. Inserting a live region together with its text is the
+  // case assistive technology misses, and `renderList` now runs on every event
+  // from any client, so re-cloning the empty state would announce "nothing
+  // matches" every time anything happened on the machine.
+  // Not the same words as the visible empty state. Two nodes carrying the
+  // same string put the page's own test into a strict mode violation, and
+  // saying it twice is what a person navigating the page would then hear.
+  announce(visible.length === 0 ? "No folders match." : "");
   if (visible.length === 0) {
     const template = $("[data-empty-template]");
     list.replaceChildren(template.content.cloneNode(true));
     return;
   }
   list.replaceChildren(...visible.map(renderRow));
+}
+
+function announce(message) {
+  const region = $("[data-list-status]");
+  if (!region || region.textContent === message) return;
+  region.textContent = message;
 }
 
 function renderUnsupported() {
@@ -670,15 +685,17 @@ const STREAM_MESSAGE = {
 };
 
 function setStreamState(value) {
-  // The text is WRITTEN, not selected by CSS from spans already in the markup.
-  // A live region announces a DOM mutation; a change of computed style with no
-  // node added, removed or re-texted is detected inconsistently, and the
-  // `down` to `blind` transition would mutate nothing at all.
+  // Reveal FIRST, then write. The text is written rather than selected by CSS
+  // from spans already in the markup, because a live region announces a DOM
+  // mutation and not a change of computed style: picking a span would mutate
+  // nothing at all on the `down` to `blind` step. But writing into a subtree
+  // that is still `display: none` puts the mutation somewhere that is not in
+  // the accessibility tree yet, which is the same miss by a different route.
+  document.documentElement.setAttribute("data-stream", value);
   const note = $("[data-stream-note]");
   if (note) {
     note.textContent = STREAM_MESSAGE[value] ?? "";
   }
-  document.documentElement.setAttribute("data-stream", value);
 }
 
 /* Three states, not two.
@@ -694,13 +711,20 @@ function setStreamState(value) {
    dead forever while the strip says "Reconnecting", which would be a lie of
    exactly the kind this whole feature exists to prevent. */
 const REOPEN_MS = 5000;
+const REOPEN_CEILING_MS = 60000;
+let reopenDelay = REOPEN_MS;
 
+/* Backed off and capped. The motivating case is a token the server stopped
+   accepting, which no amount of asking will fix, so a fixed five seconds would
+   be one refused request every five seconds for as long as the tab is open. */
 function scheduleReopen() {
   if (reopenTimer !== null) return;
+  const delay = reopenDelay;
+  reopenDelay = Math.min(reopenDelay * 2, REOPEN_CEILING_MS);
   reopenTimer = setTimeout(() => {
     reopenTimer = null;
     openStream();
-  }, REOPEN_MS);
+  }, delay);
 }
 
 function openStream() {
@@ -718,6 +742,7 @@ function openStream() {
 
   stream.addEventListener("open", () => {
     setStreamState("open");
+    reopenDelay = REOPEN_MS;
     if (connected) {
       // A RECONNECT. The stream was away and cannot say what it missed, so
       // the listing is re-read. The first open needs nothing: `boot` fetches.
@@ -737,17 +762,24 @@ function openStream() {
     applySession(session);
   });
 
-  stream.addEventListener("error", () => {
+  stream.addEventListener("error", (event) => {
     // Fires for a transient drop and for a final one alike. Both are `down`:
     // a list that has quietly stopped updating is indistinguishable from a
     // quiet one, and quiet is this tool's normal state.
     setStreamState("down");
-    if (stream && stream.readyState === EventSource.CLOSED) {
-      // Fatal. Nothing else would ever reopen it: `onVisible` needs the tab to
-      // be backgrounded and brought back, which a phone left on this page
-      // never does.
-      scheduleReopen();
-    }
+    // `event.target`, not the module's `stream`: this handler belongs to ONE
+    // EventSource, and a superseded one would otherwise read the readyState of
+    // whichever object replaced it.
+    if (event.target.readyState !== EventSource.CLOSED) return;
+    // Fatal. Nothing else would ever reopen it: `onVisible` needs the tab to
+    // be backgrounded and brought back, which a phone left on this page never
+    // does.
+    scheduleReopen();
+    // And ASK, once, because the reachable fatal case is a token that stopped
+    // being accepted. The strip saying "not live" is honest and useless: the
+    // listing is what turns a 401 into the screen that says how to get back
+    // in, and nothing else would call it.
+    refresh();
   });
 
   return stream;
@@ -774,7 +806,9 @@ function applySession(session) {
     return;
   }
   if (fetchesInFlight > 0) {
-    seenDuringFetch.set(session.name, session);
+    // Stamped with the generation current AT ARRIVAL, which is how a listing
+    // later decides whether this event predates it or not.
+    seenDuringFetch.set(session.name, { generation: listingGeneration, session });
   }
   const index = state.projects.findIndex((p) => p.name === session.name);
   if (index === -1) {
@@ -789,8 +823,12 @@ function applySession(session) {
 }
 
 /* One refetch for a burst, not one per event. Creating several folders in a
-   script, or any future event the client does not recognise, would otherwise
-   cost each connected client a full root scan apiece. */
+   script would otherwise cost each connected client a full root scan apiece.
+
+   A real delay, not zero. A due zero millisecond timer runs before the next
+   network delivered message, so a zero latch coalesces only frames that arrive
+   inside one task, which is not the case this exists for. */
+const COALESCE_MS = 150;
 let refreshQueued = false;
 
 function refreshSoon() {
@@ -799,7 +837,7 @@ function refreshSoon() {
   setTimeout(() => {
     refreshQueued = false;
     refresh();
-  }, 0);
+  }, COALESCE_MS);
 }
 
 /* The tab came back. `EventSource` may already have reconnected, but it
@@ -811,6 +849,29 @@ function onVisible() {
 }
 
 /* -- start ------------------------------------------------------------- */
+
+/* Take what this listing is allowed to be overruled by, and drop the rest.
+
+   The rule is NOT "an event during any fetch beats that fetch". It is "an
+   event beats a listing that was asked for BEFORE it arrived", which is what
+   the generation on each held event records. A fetch issued AFTER the event
+   is fresher and must win: an agent that exits on its own announces nothing,
+   so a listing is the only thing that can ever report it, and overwriting one
+   with an older event would hide exactly that.
+
+   Called on every completed listing that is still the newest, failed ones
+   included. Anything held at that point is either applied here or already
+   stale, since no later fetch can carry a smaller generation. Clearing only on
+   success was this fix's own bug: a 503 left an entry behind for some
+   arbitrarily later listing to apply. */
+function takeHeld(generation) {
+  const owed = new Map();
+  for (const [name, held] of seenDuringFetch) {
+    if (held.generation >= generation) owed.set(name, held.session);
+  }
+  seenDuringFetch.clear();
+  return owed;
+}
 
 let listingGeneration = 0;
 
@@ -826,13 +887,19 @@ async function refresh() {
   } catch {
     // `fetch` REJECTS when the network is gone, where a refused request
     // resolves. Silence here would leave the page asserting it is live.
+    result = { ok: false, status: 0, body: { code: "unreachable", message: "" } };
+  } finally {
     fetchesInFlight -= 1;
-    setStreamState("down");
-    return { ok: false, status: 0, body: { code: "unreachable", message: "" } };
   }
-  fetchesInFlight -= 1;
+  // Superseded. Say nothing and touch nothing: a newer listing owns the page,
+  // and reporting THIS one's failure would put "Not live" on a page that is.
   if (generation !== listingGeneration) return result;
+  const owed = takeHeld(generation);
   if (!result.ok) {
+    if (result.status === 0) {
+      setStreamState("down");
+      return result;
+    }
     if (result.status === 401) {
       // Actionable, and the only failure that is. The stream is being refused
       // too and says so; what a person needs here is the way back in.
@@ -853,13 +920,9 @@ async function refresh() {
   if (root) {
     root.textContent = result.body.root;
   }
-  state.projects = result.body.projects;
-  if (seenDuringFetch.size > 0) {
-    // These arrived after this listing was asked for, so they are newer than
-    // it whatever order the two landed in.
-    state.projects = state.projects.map((p) => seenDuringFetch.get(p.name) ?? p);
-    seenDuringFetch.clear();
-  }
+  // `owed` holds only what arrived after this listing was asked for, so those
+  // are newer than it whatever order the two landed in.
+  state.projects = result.body.projects.map((p) => owed.get(p.name) ?? p);
   state.unsupported = result.body.unsupported;
   state.unsupportedTotal = result.body.unsupported_total;
   state.root = result.body.root;

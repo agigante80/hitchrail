@@ -34,9 +34,13 @@
      from a laptop would read out a hundred and twenty rows. The strip above
      carries the status and the empty state announces itself. -->
 <main data-list></main>
+<!-- Permanent, and empty most of the time. A live region has to EXIST before
+     the text arrives, or the insertion of region and text together is the case
+     assistive technology misses. -->
+<p class="offscreen" role="status" data-list-status></p>
 
 <template data-empty-template>
-  <p class="empty-title" role="status">Nothing matches</p>
+  <p class="empty-title">Nothing matches</p>
   <p class="empty-body">No folder here is called that.</p>
 </template>
 

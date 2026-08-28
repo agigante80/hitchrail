@@ -343,3 +343,177 @@ async def test_a_frame_the_page_cannot_use_costs_nothing(page: Page, server: Har
     # And the stream still works.
     server.kill("vessel")
     await expect(row).to_have_attribute("data-state", "stopped", timeout=20_000)
+
+
+async def test_an_event_older_than_a_listing_does_not_overrule_it(
+    page: Page, server: Harness
+) -> None:
+    """The other half of the ordering rule, and the half the fix for the first
+    half got wrong.
+
+    Events held during a fetch are re-applied on top of it, so they need to
+    know WHICH fetch they may overrule. The rule is "an event beats a listing
+    asked for before the event arrived", not "an event beats any listing in
+    flight when it arrived": a fetch issued after the event is fresher.
+
+    It matters because `Engine._announce` fires on start, stop, kill and the
+    stop timer, and on nothing else. An agent that exits on its own announces
+    nothing at all, so a listing is the ONLY thing that can report it, and an
+    older event overruling one hides exactly that.
+    """
+    server.seed(running=["vessel"])
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row).to_have_attribute("data-state", "running")
+
+    # A listing that never lands, so something is in flight and events are
+    # held. It is issued first, so it is the OLDER of the two.
+    await page.evaluate(
+        """() => {
+            const real = window.fetch;
+            window.__release = null;
+            window.fetch = (...args) => {
+                const url = typeof args[0] === "string" ? args[0] : args[0].url;
+                if (!url.includes("/api/projects")) return real(...args);
+                window.fetch = real;
+                return new Promise((resolve) => { window.__release = resolve; })
+                    .then(() => real(...args));
+            };
+            window.__hitchrail.refresh();
+        }"""
+    )
+    await page.wait_for_function("() => window.__release !== null", timeout=10_000)
+
+    # An event saying `running`, which is true when it arrives and stops being
+    # true a moment later.
+    await page.evaluate(
+        f"""() => {{
+            const session = window.__hitchrail.state.projects.find(
+                (p) => p.name === "{server.project("vessel")}"
+            );
+            window.__hitchrail.stream.dispatchEvent(new MessageEvent("message", {{
+                data: JSON.stringify({{ ...session, state: "running" }}),
+            }}));
+        }}"""
+    )
+
+    # The agent dies on its own. Nothing is announced, so only a listing can
+    # ever say so.
+    server.kill_the_agent_quietly("vessel")
+
+    # A SECOND listing, issued after that event and after the death. It is the
+    # newer of the two and it is right, so nothing held may overrule it.
+    await page.evaluate("() => window.__hitchrail.refresh()")
+    # `stopped`, not `stale`: killing the agent takes the pane, and the pane
+    # takes the window, the session and the server with it, which is the tmux
+    # behaviour `remain-on-exit` exists to defeat during a start and which is
+    # cleared once a start succeeds.
+    await expect(row).to_have_attribute("data-state", "stopped", timeout=20_000)
+
+    # And the first listing landing late changes nothing.
+    await page.evaluate("() => window.__release()")
+    await expect(row).to_have_attribute("data-state", "stopped")
+
+
+async def test_a_burst_of_unknown_projects_costs_one_listing(
+    page: Page, server: Harness
+) -> None:
+    """A folder created elsewhere is the one event the page cannot patch a row
+    from, because the listing decides what exists. Creating several in a script
+    must not cost a root scan apiece, on every connected client."""
+    server.seed(stopped=["vessel"])
+    await page.goto(server.base)
+    await expect(page.locator(f'[data-project="{server.project("vessel")}"]')).to_be_visible()
+
+    fetches = await page.evaluate(
+        """async () => {
+            const real = window.fetch;
+            let count = 0;
+            window.fetch = (...args) => { count += 1; return real(...args); };
+            const stream = window.__hitchrail.stream;
+            const frame = (name) => new MessageEvent("message", {
+                data: JSON.stringify({ name, state: "stopped", display_name: name }),
+            });
+            // Separate tasks, tens of milliseconds apart, which is what a
+            // script creating folders actually looks like on the wire. A latch
+            // that only spans one task would let each of these through.
+            for (const name of ["one", "two", "three"]) {
+                stream.dispatchEvent(frame(name));
+                await new Promise((resolve) => setTimeout(resolve, 40));
+            }
+            await new Promise((resolve) => setTimeout(resolve, 600));
+            window.fetch = real;
+            return count;
+        }"""
+    )
+    assert fetches == 1, f"three unknown projects cost {fetches} listings"
+
+
+async def test_a_listing_the_server_stops_accepting_says_how_to_get_back_in(
+    page: Page, server: Harness
+) -> None:
+    """A 401 is the one listing failure a person can act on, and the screen for
+    it already exists. Left silent, the page shows a stale list and asserts it
+    is live."""
+    server.seed(stopped=["vessel"])
+    await page.goto(server.base)
+    await expect(page.locator("html")).to_have_attribute("data-stream", "open", timeout=15_000)
+
+    await page.route(
+        "**/api/projects",
+        lambda route: route.fulfill(
+            status=401,
+            content_type="application/json",
+            body='{"code": "unauthorized", "message": "a valid token is required"}',
+        ),
+    )
+    await page.evaluate("() => window.__hitchrail.refresh()")
+
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text("Not signed in any more")
+    await expect(dialog).to_contain_text("Open the link with the token again")
+
+
+async def test_a_listing_that_lands_late_does_not_win(page: Page, server: Harness) -> None:
+    """Two listings racing, no events involved.
+
+    A phone returning to the foreground fires `visibilitychange` and the
+    stream's own reopen in the same tick, so two fetches in flight is the
+    ordinary case here. Nothing orders their responses, and the older one
+    carrying the older world must not be the one that lands last and wins.
+    """
+    server.seed(running=["vessel"])
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row).to_have_attribute("data-state", "running")
+
+    # The FIRST listing's response is captured now, while the session is still
+    # running, and held. The delay is on the response, not on the request.
+    await page.evaluate(
+        """() => {
+            const real = window.fetch;
+            window.__release = null;
+            window.fetch = async (...args) => {
+                const url = typeof args[0] === "string" ? args[0] : args[0].url;
+                if (!url.includes("/api/projects")) return real(...args);
+                window.fetch = real;
+                const response = await real(...args);
+                await new Promise((resolve) => { window.__release = resolve; });
+                return response;
+            };
+            window.__hitchrail.refresh();
+        }"""
+    )
+    await page.wait_for_function("() => window.__release !== null", timeout=10_000)
+
+    # The agent dies with nothing announced, so only a listing reports it.
+    server.kill_the_agent_quietly("vessel")
+
+    # The SECOND listing sees the truth and lands first.
+    await page.evaluate("() => window.__hitchrail.refresh()")
+    await expect(row).to_have_attribute("data-state", "stopped", timeout=20_000)
+
+    # Now the first one lands, carrying a world that is two events old.
+    await page.evaluate("() => window.__release()")
+    await page.wait_for_timeout(300)
+    await expect(row).to_have_attribute("data-state", "stopped")

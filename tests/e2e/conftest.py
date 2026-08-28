@@ -41,6 +41,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -147,6 +148,7 @@ class Harness:
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._meminfo = ""
+        self.stopped_cleanly = True
         self.port = free_port()
         self.base = f"http://127.0.0.1:{self.port}"
         self.bus = EventBus()
@@ -331,7 +333,12 @@ class Harness:
         # `server_state.connections` and `.transport` are uvicorn internals. If
         # either is renamed this becomes a silent no op and the two tests that
         # depend on it fail as opaque timeouts, so it says so itself.
-        assert self._abort_connections() > 0, "nothing was cut: uvicorn's internals have moved"
+        cut = self._abort_connections()
+        assert cut > 0, (
+            "no connection was cut. Either the serving loop is not running, or "
+            "`server_state.connections` and `.transport` have moved in uvicorn. "
+            "Without this the tests that depend on it fail as opaque timeouts."
+        )
 
     def stop_serving(self) -> None:
         """Teardown, and neither exit flag can do it alone.
@@ -356,7 +363,13 @@ class Harness:
             while self._thread.is_alive() and time.monotonic() < deadline:
                 self._abort_connections()
                 self._thread.join(timeout=0.2)
-            assert not self._thread.is_alive(), "the server thread did not stop"
+            # RECORDED, not raised. This is the first thing the fixture's
+            # finalizer calls, and raising here would skip `reap_orphans`, the
+            # scoped `kill-server` and the wait for the agents, leaking a tmux
+            # server and processes under the shared `hrx-` prefix onto the
+            # machine and poisoning every test after this one. The fixture
+            # raises once it has cleaned up.
+            self.stopped_cleanly = not self._thread.is_alive()
         if self._loop is not None:
             # Cancel what force exit left behind before closing. Aborting the
             # connections cuts uvicorn's shutdown short, so the lifespan task
@@ -402,6 +415,36 @@ class Harness:
                 return
             time.sleep(0.05)
         raise RuntimeError(f"agents from {self._agent} outlived their tmux server")
+
+    def kill_the_agent_quietly(self, name: str) -> None:
+        """Kill the agent process, out of band, so NOTHING is announced.
+
+        `Engine._announce` fires on start, stop, kill and the stop timer. An
+        agent that exits on its own fires none of them, so a listing is the
+        only thing that can ever report it. That is why a listing must not be
+        overruled by an event older than itself, and this is how a test gets a
+        change the stream cannot carry.
+
+        The pane goes with the process, and the window, session and server go
+        with the pane, so this derives as `stopped` rather than `stale`. That
+        is the tmux behaviour `remain-on-exit` defeats during a start and which
+        is cleared once one succeeds.
+        """
+        target = f"--remote-control {e2e_name(name)}"
+        table = subprocess.run(
+            ["ps", "-eww", "-o", "pid,args", "--no-headers"],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout
+        pids = [
+            int(line.split(None, 1)[0])
+            for line in table.splitlines()
+            if target in line and str(self._agent) in line and "tmux" not in line
+        ]
+        assert pids, f"no agent process for {name}"
+        for pid in pids:
+            os.kill(pid, signal.SIGKILL)
 
     def break_machine(self) -> None:
         """Make the machine unreadable, through the seam the engine injects.
@@ -457,6 +500,9 @@ def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Harness]:
         )
         harness.wait_until_the_agents_are_gone()
         shutil.rmtree(sock_dir, ignore_errors=True)
+        # Last, so a server that would not stop is reported rather than
+        # swallowed, and reported only once everything else has been released.
+        assert harness.stopped_cleanly, "the server thread did not stop"
 
 
 @pytest.fixture
