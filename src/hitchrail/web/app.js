@@ -53,6 +53,12 @@ function toggleTheme() {
    One helper, so every call handles a refusal the same way. The API answers
    every failure with {code, message} except a 413, which Starlette refuses
    before the application exists. */
+/* Status 0, which no HTTP response carries, so a caller can tell "we never got
+   an answer we can use" from any answer the server actually gave. */
+function unreachable(message) {
+  return { ok: false, status: 0, body: { code: "unreachable", message } };
+}
+
 export async function api(path, options = {}) {
   let response;
   try {
@@ -68,17 +74,34 @@ export async function api(path, options = {}) {
     // success: tapping Stop with the wifi off left "Waiting for it to finish"
     // on screen for a request that was never made. An error rendered as a
     // success is worse than no guard.
-    //
-    // Status 0, which no HTTP response carries, so a caller can tell "we never
-    // reached the server" from any answer the server gave.
-    return {
-      ok: false,
-      status: 0,
-      body: { code: "unreachable", message: "The connection dropped." },
-    };
+    return unreachable("The connection dropped.");
   }
   if (response.ok) {
-    return { ok: true, status: response.status, body: await response.json() };
+    try {
+      return { ok: true, status: response.status, body: await response.json() };
+    } catch {
+      // A 200 whose body does not arrive or does not parse. The connection
+      // dropping AFTER the headers is the same wifi in a lift as above, and a
+      // captive portal answering `200 text/html` is the other one. The server
+      // refused nothing, so this is unreachable rather than a refusal, and it
+      // must not reach a caller as a success with an undefined body.
+      //
+      // Reading the body was outside the catch when it was first written, so
+      // `api` still rejected on this path while the comment below said it did
+      // not, and removing `refresh`'s own catch on the strength of that made
+      // the page keep asserting it was live when the listing had failed.
+      //
+      // The REAL status, not 0. We reached the server and it answered; what
+      // failed was reading the answer. That is a different thing from never
+      // having got one, and the listing turns the two into different words on
+      // screen: "not live" sends somebody to look at their network, and this
+      // one should not.
+      return {
+        ok: false,
+        status: response.status,
+        body: { code: "unreadable_answer", message: "The answer could not be read." },
+      };
+    }
   }
   let body = { code: "unreachable", message: response.statusText };
   try {
@@ -916,10 +939,10 @@ async function refresh() {
   try {
     result = await api("/api/projects");
   } finally {
-    // `api` no longer rejects, so this is here for a throw from `api` itself
-    // rather than from the network. The counter must come back either way:
-    // leaving it high would hold every later event as owed to a fetch that
-    // ended.
+    // `api` does not reject: it answers a dead network and an unreadable body
+    // alike with status 0. This is here for a throw from `api` itself, and the
+    // counter has to come back either way, since leaving it high would hold
+    // every later event as owed to a fetch that ended.
     fetchesInFlight -= 1;
   }
   // Superseded. Say nothing and touch nothing: a newer listing owns the page,

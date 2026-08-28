@@ -530,3 +530,37 @@ async def test_a_listing_that_lands_late_does_not_win(page: Page, server: Harnes
     await page.evaluate("() => window.__release()")
     await page.wait_for_timeout(300)
     await expect(row).to_have_attribute("data-state", "stopped")
+
+
+async def test_a_two_hundred_the_page_cannot_read_is_not_a_success(
+    page: Page, server: Harness
+) -> None:
+    """`api` answers a dead network and an unreadable body the same way.
+
+    The catch went in around `fetch` alone, and reading the body on the success
+    path stayed outside it, so `api` still rejected on this path while the
+    comment beside `refresh` said it did not. `refresh`'s own broader catch had
+    been removed on the strength of that comment, so the page kept asserting it
+    was live while the listing had failed: an error rendered as a success, in
+    the commit that cited that rule.
+
+    Reachable as the same wifi in a lift, just after the headers rather than
+    before them, or as a captive portal answering `200 text/html`.
+    """
+    server.seed(stopped=["vessel"])
+    errors: list[str] = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    await page.goto(server.base)
+    await expect(page.locator("html")).to_have_attribute("data-stream", "open", timeout=15_000)
+
+    await page.route(
+        "**/api/projects",
+        lambda route: route.fulfill(
+            status=200, content_type="application/json", body="{ truncated"
+        ),
+    )
+    await page.evaluate("() => window.__hitchrail.refresh()")
+
+    await expect(page.locator("html")).to_have_attribute("data-stream", "blind")
+    await expect(page.locator("[data-stream-note]")).to_be_visible()
+    assert errors == [], errors
