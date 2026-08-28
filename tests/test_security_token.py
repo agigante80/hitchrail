@@ -684,7 +684,7 @@ async def test_the_grant_paths_are_the_only_ones_exempt(tmp_path: Path) -> None:
 async def test_an_exempt_path_reaches_the_application(tmp_path: Path, path: str) -> None:
     """Asserted through the middleware stack rather than by reading the set.
 
-    A test that only checked `UNAUTHENTICATED_PATHS` would pass against a
+    A test that only read `UNAUTHENTICATED` would pass against a
     middleware that never consulted it.
     """
     app = Starlette(
@@ -769,8 +769,10 @@ def test_the_exemption_is_exactly_three_entries() -> None:
 
     Every other test here probes paths a test file chose, so adding
     `/api/projects` to the set left all of them green. `.claude/rules/security.md`
-    says a third entry needs the argument #21 made; this is what mechanically
-    notices there is one.
+    says an added entry needs the argument #21 made; this is what mechanically
+    notices there is one. It NAMES the entries rather than counting them, which
+    is the difference between this and the comment beside the set, which said
+    "two long" for a while after the set had three.
     """
     assert (
         frozenset(

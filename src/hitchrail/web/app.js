@@ -54,10 +54,29 @@ function toggleTheme() {
    every failure with {code, message} except a 413, which Starlette refuses
    before the application exists. */
 export async function api(path, options = {}) {
-  const response = await fetch(path, {
-    headers: { "content-type": "application/json" },
-    ...options,
-  });
+  let response;
+  try {
+    response = await fetch(path, {
+      headers: { "content-type": "application/json" },
+      ...options,
+    });
+  } catch {
+    // `fetch` REJECTS when the network is gone, where a REFUSED request
+    // resolves. Caught HERE and not at each call site, because this helper
+    // exists so every caller treats a failure the same way, and a rejection
+    // that escapes lands in a click handler that has already rendered a
+    // success: tapping Stop with the wifi off left "Waiting for it to finish"
+    // on screen for a request that was never made. An error rendered as a
+    // success is worse than no guard.
+    //
+    // Status 0, which no HTTP response carries, so a caller can tell "we never
+    // reached the server" from any answer the server gave.
+    return {
+      ok: false,
+      status: 0,
+      body: { code: "unreachable", message: "The connection dropped." },
+    };
+  }
   if (response.ok) {
     return { ok: true, status: response.status, body: await response.json() };
   }
@@ -492,11 +511,23 @@ function showRefusal(result) {
   if (result.status === 401) {
     // The token is the whole auth model, so an expired or revoked one is a
     // situation a person can actually be in, and "That did not work" leaves
-    // them with nothing to do. Reloading reaches the token screen.
+    // them with nothing to do.
+    //
+    // It used to say "open the link with the token again" and offer Reload,
+    // which was true when this page was the only one there was. #21 built
+    // `/grant`, which takes a key TYPED as well as one in a fragment, so the
+    // way back in no longer needs the original link. Reloading, meanwhile,
+    // stopped working the moment `/` went behind the token: it answers a raw
+    // JSON 401 into a browser window, which is the dead end `/grant` exists to
+    // prevent. #57 made this dialog appear on its own, so the wrong button was
+    // about to be offered to somebody who never tapped anything.
+    //
+    // Relative, for the reason `grant.html` argues at length: this page is
+    // served from the app root, wherever that is.
     showDialog({
       title: "Not signed in any more",
-      body: "This browser is no longer accepted. Open the link with the token again.",
-      actions: [["Reload", "accent", () => window.location.reload()]],
+      body: "This browser is no longer accepted. Sign in again with your access key.",
+      actions: [["Sign in", "accent", () => window.location.assign("grant")]],
     });
     return;
   }
@@ -884,11 +915,11 @@ async function refresh() {
   let result;
   try {
     result = await api("/api/projects");
-  } catch {
-    // `fetch` REJECTS when the network is gone, where a refused request
-    // resolves. Silence here would leave the page asserting it is live.
-    result = { ok: false, status: 0, body: { code: "unreachable", message: "" } };
   } finally {
+    // `api` no longer rejects, so this is here for a throw from `api` itself
+    // rather than from the network. The counter must come back either way:
+    // leaving it high would hold every later event as owed to a fetch that
+    // ended.
     fetchesInFlight -= 1;
   }
   // Superseded. Say nothing and touch nothing: a newer listing owns the page,

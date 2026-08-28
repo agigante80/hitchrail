@@ -53,9 +53,12 @@ below as a refusal with a test that asserts it, not as advice.
    log was never going to be enough on its own, and knowing that is what made
    the fragment the fix rather than a fourth mitigation.
 
-   The exemption that flow needs is `security.UNAUTHENTICATED_PATHS`, two paths
-   long. Adding a third is a change to the security boundary and needs the
-   argument #21 made, not a line in a list.
+   The exemption that flow needs is `security.UNAUTHENTICATED`, and it is a set
+   of `(scope type, method, path)` triples rather than of paths. A path alone
+   exempts every method and both scope types, so a websocket route or a second
+   method on the API route would arrive unauthenticated. Adding an entry is a
+   change to the security boundary and needs the argument #21 made, not a line
+   in a list. `test_the_exemption_is_exactly_three_entries` is what notices.
 
 ## Order matters
 

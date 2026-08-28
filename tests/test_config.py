@@ -889,49 +889,35 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # wrong, and the reason it is not belongs next to it. Split only if a
         # NEW responsibility arrives, never to reclaim these lines.
         "config.py": 413,
-        # 487. #20 moved the grant token scrub out of the grant path, where it
-        # only ran when no carrier matched, into a helper every request goes
-        # through. #21 then added the unauthenticated path set, the exemption
-        # that consults it, and `set_token_cookie`, which is shared because two
-        # carriers now set that cookie and a security control with two
-        # definitions is not one control.
+        # 537, and the number is the current one: an entry that accumulated
+        # a stack of superseded figures would be the same drift this test
+        # exists to catch, in the file that catches it.
         #
-        # No split THROUGH the boundary, and the reason is the file's subject.
-        # This module answers one question, "may this request proceed", in three
-        # controls whose order is asserted, and the growth is the argument for
-        # each answer. Half a boundary in another file is worse than a long one.
-        #
-        # 530 after #21's security review: the exemption triple, `route_path`,
-        # and the second half of the `token_matches` encoding bug, which a JSON
-        # body reintroduced. Thirteen lines of prose came back out first.
+        # No split THROUGH the boundary. This module answers one question, "may
+        # this request proceed", in three controls whose order is asserted, and
+        # the length is the argument for each answer: which three paths used to
+        # leak the token, why so few requests are reachable without one, and
+        # why the cookie is not `Secure`. Half a boundary in another file is
+        # worse than a long one.
         #
         # There IS one split that cuts through nothing, and #80 carries it: the
         # `?token=` query grant is about ninety lines and is removed before 1.0,
-        # so moving it to its own file makes the removal a deletion rather than
-        # surgery in the middle of a security module. Until then this entry is
-        # the record that the size is known and argued.
-        # 537 after round 2 of that review: HEAD, which Starlette adds to every
-        # route that has GET, so the router was serving a request the guard
-        # refused.
+        # so moving it out makes that removal a deletion rather than surgery in
+        # the middle of a security module. Until then this entry is the record
+        # that the size is known and argued.
         "security.py": 537,
-        # 474. The HTTP layer: routes, the error envelope, the SSE stream and
-        # the lifespan sweeper, which is one job described four ways. Most of
-        # the length above the guideline is the comments recording what the
-        # transport does rather than what this code does, and those are the
-        # part a reader cannot recover from the source.
+        # 481, current. The HTTP layer: routes, the error envelope, the SSE
+        # stream and the lifespan sweeper, which is one job described four
+        # ways. Most of the length above the guideline is the comments
+        # recording what the transport does rather than what this code does,
+        # and those are the part a reader cannot recover from the source.
         #
-        # #21 pushed it to 519 and the split was taken rather than the cap
-        # raised: `pages.py` now serves the two HTML pages and the two assets,
-        # which is a real seam and not an arithmetic one. Reading a file off
-        # disk is a different job from translating engine calls into JSON, and
-        # it is the only code here that reads a file chosen by a URL.
-        # 473. +#53 page and asset routes, +#64 fields, +#57 the comment on
-        # `create_project`'s publish, which records that this route once put a
-        # different shape on the bus from the engine's and that the client's
-        # refetch hid it. Four lines to stop it being written back.
-        # 481 after #21's security review: `ROUTING_404_MESSAGE`, read from
-        # Starlette so the grant's refusal cannot drift away from the one an
-        # unrouted path gives.
+        # #21 pushed it to 519, and BOTH things happened: the static page and
+        # asset serving moved to `pages.py`, which is a real seam and took it
+        # to 474, and the cap then rose to 481 for the grant route and
+        # `ROUTING_404_MESSAGE`. An earlier version of this comment claimed the
+        # split was taken "rather than" the cap raised, in the same diff that
+        # raised it.
         "server.py": 481,
     }
 

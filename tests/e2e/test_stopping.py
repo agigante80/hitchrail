@@ -232,3 +232,38 @@ async def test_a_finishing_stop_does_not_close_a_dialog_opened_since(
     assert await page.get_by_label("Folder name").input_value() == "half-typed", (
         "the sheet was rebuilt, losing what had been typed into it"
     )
+
+
+async def test_a_stop_that_never_reached_the_server_says_so(
+    page: Page, server: Harness
+) -> None:
+    """An error rendered as a success is worse than no guard.
+
+    `beginStop` shows "Waiting for it to finish" BEFORE the request, which is
+    right: the wait is the point of the screen. It becomes a lie if the request
+    never happened. `fetch` rejects when the network is gone, where a refused
+    request resolves, so the rejection used to escape into the click handler
+    and leave that screen up for a stop nobody had asked for.
+
+    Reachable rather than theoretical, because #57 tells the user the page is
+    up while the list is not live, which is exactly when somebody taps
+    something.
+    """
+    server.seed(running=["vessel"])
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row).to_have_attribute("data-state", "running")
+
+    # The network goes, after the page has loaded.
+    await page.route("**/api/sessions/**", lambda route: route.abort("failed"))
+
+    await row.get_by_role("button", name="Stop").click()
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text("Stop hrx-vessel")
+    await dialog.get_by_role("button", name="Stop", exact=True).click()
+
+    await expect(dialog).to_contain_text("That did not work")
+    await expect(dialog).to_contain_text("The connection dropped.")
+    await expect(dialog).not_to_contain_text("Waiting for it to finish")
+    # And the session is untouched, because nothing was ever sent.
+    assert server.is_running("vessel")

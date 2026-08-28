@@ -317,6 +317,12 @@ async def test_a_frame_the_page_cannot_use_costs_nothing(page: Page, server: Har
     per connected client per event.
     """
     server.seed(running=["vessel"], stopped=["koala"])
+    errors: list[str] = []
+    # `dispatchEvent` swallows a listener exception and reports it as a page
+    # error rather than propagating it, so counting fetches alone cannot tell a
+    # frame that was HANDLED from one that threw. Without this, deleting the
+    # `JSON.parse` guard leaves the test green.
+    page.on("pageerror", lambda error: errors.append(str(error)))
     await page.goto(server.base)
     row = page.locator(f'[data-project="{server.project("vessel")}"]')
     await expect(row).to_have_attribute("data-state", "running")
@@ -339,6 +345,7 @@ async def test_a_frame_the_page_cannot_use_costs_nothing(page: Page, server: Har
         }"""
     )
     assert fetches == 0, f"a frame the page cannot use cost {fetches} listings"
+    assert errors == [], errors
 
     # And the stream still works.
     server.kill("vessel")
@@ -471,7 +478,13 @@ async def test_a_listing_the_server_stops_accepting_says_how_to_get_back_in(
 
     dialog = page.locator("[data-dialog]")
     await expect(dialog).to_contain_text("Not signed in any more")
-    await expect(dialog).to_contain_text("Open the link with the token again")
+    # And the button goes somewhere that WORKS. It offered Reload, which was
+    # right when this page was the only one there was and became a dead end the
+    # moment `/` went behind the token: reloading answers a raw JSON 401 into a
+    # browser window. `/grant` takes a key typed as well as one in a fragment.
+    await dialog.get_by_role("button", name="Sign in").click()
+    await expect(page).to_have_url(f"{server.base}/grant")
+    await expect(page.get_by_label("Access key")).to_be_visible()
 
 
 async def test_a_listing_that_lands_late_does_not_win(page: Page, server: Harness) -> None:

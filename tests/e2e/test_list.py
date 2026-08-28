@@ -66,6 +66,11 @@ async def test_the_controller_row_is_badged_and_has_no_stop(
     assert await row.get_by_role("button", name="Stop").count() == 0
 
 
+# The visible empty state and the announced one deliberately use DIFFERENT
+# words. `.offscreen` clips rather than hides, so both are visible to a locator,
+# and two nodes carrying "Nothing matches" would put `get_by_text` below into a
+# strict mode violation. It would also be read out twice. See
+# `test_an_empty_list_announces_itself_once`.
 async def test_search_filters_and_says_so_when_nothing_matches(
     page: Page, server: Harness
 ) -> None:
@@ -152,3 +157,30 @@ async def test_the_memory_footer_reports_the_figure_and_the_proportion(
     footer = page.get_by_role("contentinfo")
     await expect(footer).to_contain_text("8.0 GB free")
     await expect(page.locator("[data-mem-pct]")).to_have_attribute("data-mem-pct", "25")
+
+
+async def test_an_empty_list_announces_itself_once(page: Page, server: Harness) -> None:
+    """#57 took `aria-live` off the list, because a live stream re-renders it
+    whenever anything changes on the machine and forty rows would be read out
+    for a stop somebody made on a laptop. This is what replaced it.
+
+    A region that is already in the markup, written to only when the answer
+    CHANGES. Inserting a live region together with its text is the case
+    assistive technology misses, and re-inserting it on every event is the
+    churn that removing `aria-live` was meant to end.
+    """
+    server.seed(stopped=["vessel"])
+    await page.goto(server.base)
+    region = page.locator("[data-list-status]")
+    await expect(region).to_have_count(1)
+    await expect(region).to_have_text("")
+
+    await page.get_by_role("searchbox").fill("nothing-matches-this")
+    await expect(region).to_have_text("No folders match.")
+    # Not the words the visible empty state uses. Two nodes carrying the same
+    # string would be read out twice, and would put the page's own search test
+    # into a strict mode violation, since `.offscreen` clips rather than hides.
+    await expect(page.get_by_text("Nothing matches")).to_be_visible()
+
+    await page.get_by_role("searchbox").fill("")
+    await expect(region).to_have_text("")
