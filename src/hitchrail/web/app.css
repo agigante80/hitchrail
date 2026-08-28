@@ -127,17 +127,7 @@ button[disabled] { color: var(--muted-3); cursor: not-allowed; }
 .bar-actions { display: flex; gap: 8px; flex-shrink: 0; }
 
 /* -- tabs --------------------------------------------------------------- */
-/* The stream notice.
-   Driven entirely by `data-stream` on the root, so the page says whether it
-   is live without any JavaScript that writes copy. Both messages sit in the
-   markup and CSS picks one, which is also what makes the `role="status"`
-   announcement happen: the state change toggles `display`, and a live region
-   announces what appears.
-
-   `connecting` and `open` show NOTHING. A permanent "live" badge would be
-   noise on a phone, and the only state worth a person's attention is the one
-   where the list has quietly stopped being true. */
-/* Announced, not shown. Not `display: none`, which takes it out of the
+/* Announced, not shown. Not `display: none`, which would take it out of the
    accessibility tree along with the announcement. */
 .offscreen {
   position: absolute;
@@ -151,6 +141,18 @@ button[disabled] { color: var(--muted-3); cursor: not-allowed; }
   border: 0;
 }
 
+/* The stream notice.
+   Shown or hidden by `data-stream` on the root, and that is ALL this
+   stylesheet decides. An earlier version put both messages in the markup and
+   had CSS pick one, which read as the tidier arrangement and was wrong: a live
+   region announces a DOM mutation, and swapping which span is displayed
+   mutates no node at all, so the `down` to `blind` step announced nothing.
+   `setStreamState` writes the text, and this rule only decides whether the
+   strip is on the page.
+
+   `connecting` and `open` show NOTHING. A permanent "live" badge would be
+   noise on a phone, and the only state worth a person's attention is the one
+   where the list has quietly stopped being true. */
 .stream-note {
   margin: 0;
   padding: 0;
