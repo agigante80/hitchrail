@@ -900,6 +900,29 @@ def _token_app(tmp_path: pathlib.Path) -> tuple[Engine, Config]:
 GRANT_HEADERS = {"host": "localhost", "origin": "http://localhost:8787"}
 
 
+async def test_every_route_but_the_two_grant_ones_needs_a_token(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Swept off the REAL route table, so a route added later is covered by
+    this without anybody remembering to add it."""
+    engine, config = _token_app(tmp_path)
+    app = create_app(engine=engine, config=config, bus=EventBus())
+    checked = 0
+    async with client_for(engine, config) as c:
+        for route in app.routes:
+            path = getattr(route, "path", "")
+            methods = getattr(route, "methods", set()) or {"GET"}
+            if "{" in path:
+                path = path.replace("{name}", "vessel")
+            for method in sorted(methods - {"HEAD", "OPTIONS"}):
+                if (method, path) in {("GET", "/grant"), ("POST", "/api/grant")}:
+                    continue
+                r = await c.request(method, path, headers={"host": "localhost"})
+                assert r.status_code == 401, f"{method} {path} -> {r.status_code}"
+                checked += 1
+    assert checked >= 10, f"only {checked} routes were swept"
+
+
 async def test_the_grant_page_is_served_without_a_token(tmp_path: pathlib.Path) -> None:
     engine, config = _token_app(tmp_path)
     async with client_for(engine, config) as c:
@@ -914,6 +937,10 @@ async def test_the_grant_page_names_nothing_on_the_machine(tmp_path: pathlib.Pat
     engine, config = _token_app(tmp_path)
     async with client_for(engine, config) as c:
         body = (await c.get("/grant", headers={"host": "localhost"})).text
+    # BYTE for byte the file on disk, not two substrings. Substring checks pass
+    # for a page that interpolated the host, the port, the user or the agent
+    # binary; "this page is static" is the property, and this is it stated.
+    assert body == (pages.WEB / "grant.html").read_text()
     assert "vessel" not in body
     assert str(tmp_path) not in body
 
@@ -967,6 +994,12 @@ async def test_a_wrong_token_gets_the_same_answer_as_no_token(
         missing = await c.get("/api/projects", headers=GRANT_HEADERS)
     assert wrong.status_code == missing.status_code == 401
     assert wrong.json() == missing.json()
+    # Headers too. A `WWW-Authenticate` on one of the two would be the oracle,
+    # and comparing only the body would not see it.
+    ignored = {"date", "server", "content-length"}
+    assert {k: v for k, v in wrong.headers.items() if k not in ignored} == {
+        k: v for k, v in missing.headers.items() if k not in ignored
+    }
     assert "hitchrail_token" not in wrong.cookies
 
 
@@ -978,7 +1011,14 @@ async def test_a_wrong_token_is_not_echoed_back(tmp_path: pathlib.Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "body", [{}, {"token": None}, {"token": 7}, {"token": ["s3cret"]}, {"other": "x"}]
+    "body",
+    [
+        {},
+        {"token": None},
+        {"token": 7},
+        {"token": ["s3cret"]},
+        {"other": "x"},
+    ],
 )
 async def test_a_body_without_a_string_token_is_refused(
     tmp_path: pathlib.Path, body: dict[str, object]
@@ -1001,15 +1041,51 @@ async def test_a_grant_on_a_server_with_no_token_is_not_a_way_in(
     r = await client.post("/api/grant", json={"token": "anything"}, headers=HEADERS)
     assert r.status_code == 404
     assert "hitchrail_token" not in r.cookies
+    # And the MESSAGE must not say it either. An earlier draft argued exactly
+    # this in a comment and then answered "no token is configured" in words.
+    assert "token" not in r.json()["message"].lower(), r.json()
 
 
-async def test_the_grant_is_a_post_and_not_a_link(tmp_path: pathlib.Path) -> None:
-    """A GET here would be a link that performs a mutation, which is the shape
-    the origin check exists to stop, and links are what this flow is made of."""
+@pytest.mark.parametrize("raw", [b'{"token": "\\ud800"}', b'{"token": "a\\udfffb"}'])
+async def test_a_token_json_accepts_and_utf8_cannot_encode_is_a_refusal(
+    tmp_path: pathlib.Path, raw: bytes
+) -> None:
+    """Sent as RAW BYTES, because `httpx` cannot encode it either.
+
+    A lone surrogate is a `str` Python's JSON decoder produces happily and
+    `.encode("utf-8")` refuses, so it passed the `isinstance` check and then
+    raised: an unauthenticated 500 on the one route reachable without a token,
+    where every other input gets 401. A 500 among 401s is the oracle this
+    route is written not to be.
+    """
     engine, config = _token_app(tmp_path)
     async with client_for(engine, config) as c:
-        r = await c.get("/api/grant?token=s3cret", headers=GRANT_HEADERS)
-    assert r.status_code == 405
+        r = await c.post(
+            "/api/grant",
+            content=raw,
+            headers={**GRANT_HEADERS, "content-type": "application/json"},
+        )
+    assert r.status_code == 401, r.text
+    assert "hitchrail_token" not in r.cookies
+
+
+async def test_the_fragment_grant_cannot_be_performed_by_following_a_link(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A GET that granted would be a link performing a mutation, which is the
+    shape the origin check exists to stop, and links are what this flow is made
+    of. So `/api/grant` is exempt for POST only, and a GET to it is refused
+    like anything else.
+
+    The legacy `?token=` carrier is a separate mechanism that still works on
+    any safe method, deliberately, so an already saved link keeps working. It
+    is removed before 1.0.
+    """
+    engine, config = _token_app(tmp_path)
+    async with client_for(engine, config) as c:
+        r = await c.get("/api/grant", headers=GRANT_HEADERS)
+    assert r.status_code == 401
+    assert "hitchrail_token" not in r.cookies
 
 
 def test_the_grant_page_palette_agrees_with_the_stylesheet() -> None:
@@ -1067,6 +1143,6 @@ def test_every_file_the_server_serves_exists() -> None:
     web = pages.WEB
     served = set(re.findall(r'WEB / "([^"]+)"', source))
     served |= {filename for filename, _ in pages.ASSETS.values()}
-    assert served, "no served filenames were found in server.py"
+    assert served, "no served filenames were found in pages.py"
     missing = sorted(name for name in served if not (web / name).is_file())
     assert not missing, missing

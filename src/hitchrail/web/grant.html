@@ -99,7 +99,14 @@ button {
   <p data-working hidden>Checking.</p>
   <form data-form hidden>
     <label for="key">Access key</label>
-    <input id="key" type="password" name="token" autocomplete="off" autocapitalize="off"
+    <!-- NO `name`. The form has no `action`, so a native submit would be
+         `GET /grant?token=<key>`, which is the exact leak this page exists to
+         end, and only `name` makes the value part of that submission. The
+         script reads the field through `data-key` and never through form
+         serialisation, so dropping it costs nothing. Today the fallback is
+         unreachable because the form starts hidden, and an accidental guard is
+         not one. -->
+    <input id="key" type="password" autocomplete="off" autocapitalize="off"
            autocorrect="off" spellcheck="false" data-key>
     <p class="bad" role="alert" data-error hidden></p>
     <button type="submit">Unlock</button>
@@ -127,11 +134,21 @@ function fail(message) {
 }
 
 async function grant(token) {
-  const response = await fetch("/api/grant", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ token }),
-  });
+  let response;
+  try {
+    response = await fetch("/api/grant", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+  } catch {
+    /* A rejected `fetch` is the network, not a refusal. Caught because the key
+       is already out of the address bar by now, cleared before the request
+       rather than after it, so a page stuck on "Checking." cannot be retried:
+       the person would have to go back for the link. That is the cost of the
+       clear, and this is what it buys back. */
+    return false;
+  }
   if (!response.ok) return false;
   /* No `replaceState` here. The key is already out of the address bar by this
      point, cleared before the request rather than after it, and clearing it a
@@ -153,7 +170,7 @@ form.addEventListener("submit", async (event) => {
   working.hidden = false;
   /* One message for a wrong key and for a missing one. The API refuses to be
      an oracle about which; the screen must not become the oracle instead. */
-  if (!(await grant(typed))) fail("That key was not accepted.");
+  if (!(await grant(typed))) fail("That key was not accepted. Check it and try again.");
 });
 
 const offered = new URLSearchParams(location.hash.slice(1)).get("token");
@@ -164,7 +181,7 @@ if (offered) {
      person stares at the failure. */
   history.replaceState(null, "", "/grant");
   grant(offered).then((ok) => {
-    if (!ok) fail("That key was not accepted.");
+    if (!ok) fail("That key was not accepted. Check it and try again.");
   });
 } else {
   form.hidden = false;

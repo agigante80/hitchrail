@@ -8,6 +8,7 @@ import shutil
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from urllib.parse import quote
 
 import uvicorn
 from starlette.applications import Starlette
@@ -116,13 +117,20 @@ def banner(config: Config) -> str:
         "",
         "  Open one of these on your phone:",
     ]
+    # Percent encoded, because `--token` takes anything non blank while the
+    # page parses the fragment with `URLSearchParams`. `--token 'a&b'` printed a
+    # link the page read as `a`, and `--token 'a+b'` one it read as `a b`: a
+    # link that silently carries the wrong key, which reads as "the token is
+    # wrong" rather than as "the link is wrong". The generated token is
+    # `token_urlsafe`, so this only ever shows up for an operator's own.
+    #
     # A FRAGMENT, not a query string. Everything after `#` stays in the browser
     # and is never sent to any server, so the token reaches no access log, no
     # reverse proxy log, and no `Referer` header. That is why the link is
     # generated here rather than typed: `/grant#token=` is longer to paste and
     # costs nobody anything, which is the argument #21 settled the design on.
     lines += [
-        f"    http://{h}:{config.port}/grant#token={config.token}"
+        f"    http://{h}:{config.port}/grant#token={quote(config.token, safe='')}"
         for h in reachable
         if h not in {"::1", "[::1]"}
     ]

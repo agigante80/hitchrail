@@ -212,8 +212,12 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
         if config.token is None:
             # No token configured, so there is nothing to grant and no cookie
             # that would mean anything. Refusing is not pedantry: answering 200
-            # would tell a caller the deployment is open.
-            return _error(404, "not_found", "no token is configured")
+            # would tell a caller the deployment is open. Neither does the
+            # message: an earlier draft argued exactly that and then said "no
+            # token is configured" in words, which is the disclosure the
+            # argument was about. This is the same answer any unrouted path
+            # gets.
+            return _error(404, "not_found", "no such route on this server")
         try:
             body = await request.json()
             offered = body["token"]

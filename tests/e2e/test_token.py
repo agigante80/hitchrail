@@ -18,11 +18,15 @@ TOKEN = "s3cret-key-value"
 
 
 async def test_the_fragment_never_reaches_the_server(page: Page, server: Harness) -> None:
-    """The whole point, asserted against the requests the server received.
+    """What the browser SENDS, which is not the same as what the server saw.
 
-    Not against the address bar: #20 already cleared the address bar for the
-    query grant, and it was still leaking to the proxy, the `Referer` header
-    and history sync. What changed here is that the token is not SENT.
+    Worth being exact about, because the obvious reading of this test is wrong.
+    Playwright records the URL after the browser has already stripped the
+    fragment, so this cannot fail on account of the fragment: what it does
+    constrain is that the page never BUILDS a url carrying the key, which is
+    the mistake a person would actually make (`fetch("/api/grant?token=" + t)`,
+    verified to turn this red). The server side assertion, against the access
+    line uvicorn writes, is #78 and reuses #20's live socket machinery.
     """
     server.seed(stopped=["vessel"], token=TOKEN)
     seen: list[str] = []
@@ -36,6 +40,19 @@ async def test_the_fragment_never_reaches_the_server(page: Page, server: Harness
     assert seen, "no requests were recorded"
     leaked = [url for url in seen if TOKEN in url]
     assert not leaked, leaked
+    # And the grant page itself fetched nothing but itself and the grant.
+    # A self contained page is a security property here, not a performance one:
+    # it is the only page served without a token, so anything it reaches for is
+    # either a 401 or a request to somebody else carrying a `Referer`.
+    #
+    # Sliced at the navigation to `/`, because everything after that is the app
+    # loading its own assets, which is a different page with a cookie.
+    paths = [url.removeprefix(server.base) for url in seen]
+    assert f"{server.base}/" in seen, seen
+    cut = paths.index("/")
+    before = paths[:cut]
+    assert before == ["/grant", "/api/grant"], before
+    assert all(url.startswith(server.base) for url in seen[:cut]), seen[:cut]
 
 
 async def test_the_grant_leaves_the_address_bar(page: Page, server: Harness) -> None:

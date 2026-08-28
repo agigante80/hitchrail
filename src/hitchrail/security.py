@@ -51,10 +51,39 @@ GRANT_PARAM = "token"
 # same argument #21 made, not a line in a list.
 GRANT_PAGE_PATH = "/grant"
 GRANT_API_PATH = "/api/grant"
-UNAUTHENTICATED_PATHS = frozenset({GRANT_PAGE_PATH, GRANT_API_PATH})
+
+# Keyed on the TRIPLE, not the path. A path alone exempts every method and both
+# scope types, so a `WebSocketRoute("/grant", ...)` or a second method on the
+# API route would arrive unauthenticated.
+UNAUTHENTICATED: frozenset[tuple[str, str, str]] = frozenset(
+    {
+        ("http", "GET", GRANT_PAGE_PATH),
+        ("http", "POST", GRANT_API_PATH),
+    }
+)
 # Thirty days. Long enough that a phone is not re-granted every session, short
 # enough that a device left behind stops working eventually.
 COOKIE_MAX_AGE = 60 * 60 * 24 * 30
+
+
+def route_path(scope: Scope) -> str:
+    """The path the ROUTER matches on: `path` with `root_path` stripped.
+
+    Ours rather than Starlette's because theirs is `starlette._utils`, which
+    `starlette.routing` re-exports without declaring, so mypy refuses the
+    public spelling and the private one can move in a patch release. A
+    conformance test asserts this agrees with theirs, so the duplicate fails
+    loudly here rather than quietly in production.
+    """
+    path: str = scope["path"]
+    root_path: str = scope.get("root_path", "")
+    if not root_path or not path.startswith(root_path):
+        return path
+    if path == root_path:
+        return ""
+    if path[len(root_path)] == "/":
+        return path[len(root_path) :]
+    return path
 
 
 def deny(status: int, code: str, message: str) -> JSONResponse:
@@ -226,11 +255,21 @@ def token_matches(presented: str, expected: str) -> bool:
     """Constant time, always. `==` on a secret leaks its prefix through timing.
 
     Compared as BYTES. `compare_digest` on `str` raises TypeError for anything
-    non ASCII, and `presented` comes from an attacker supplied header, cookie
-    or query value, so the str form turned `Authorization: Bearer café` into an
-    unauthenticated 500.
+    non ASCII, and `presented` comes from an attacker supplied header, cookie,
+    query value or JSON body, so the str form turned `Authorization: Bearer
+    café` into an unauthenticated 500.
+
+    `surrogatepass` on the presented side, and it is the same bug twice. Every
+    carrier that predates #21 is latin-1 decoded, so all of them produce a str
+    UTF-8 can encode. A JSON body does not: the decoder accepts a lone
+    surrogate, which passes an `isinstance` check and then fails to encode. A
+    500 where every other input gets 401 is the oracle this function exists not
+    to be. `expected` is the operator's own, where an unencodable token is a
+    configuration error rather than an attack.
     """
-    return secrets.compare_digest(presented.encode("utf-8"), expected.encode("utf-8"))
+    return secrets.compare_digest(
+        presented.encode("utf-8", "surrogatepass"), expected.encode("utf-8")
+    )
 
 
 def _bearer(header: str) -> str:
@@ -365,7 +404,11 @@ class TokenMiddleware:
         # Exact, and after the scrub so an exempt path cannot smuggle a token
         # into the access log. The Origin check still runs on `POST /api/grant`,
         # because it sits inside this middleware and a grant is mutating.
-        if scope["path"] in UNAUTHENTICATED_PATHS:
+        # `route_path`, not `scope["path"]`: the guard has to name the same
+        # route the router will serve. Behind a sub path proxy the unstripped
+        # path names a different one, and `GET /hitchrail/grant` was not exempt,
+        # so the grant flow was unreachable there.
+        if (scope["type"], scope.get("method", ""), route_path(scope)) in UNAUTHENTICATED:
             await self.app(scope, receive, send)
             return
 

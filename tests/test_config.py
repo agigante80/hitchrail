@@ -896,13 +896,21 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # carriers now set that cookie and a security control with two
         # definitions is not one control.
         #
-        # No split, and the reason is the file's subject. This module answers
-        # one question, "may this request proceed", and the growth is the
-        # argument for each answer: which three paths used to leak the token,
-        # why exactly two paths are reachable without one, and why the cookie is
-        # not `Secure`. Splitting it would put half of a security boundary in
-        # another file, and the next reader would find one half.
-        "security.py": 487,
+        # No split THROUGH the boundary, and the reason is the file's subject.
+        # This module answers one question, "may this request proceed", in three
+        # controls whose order is asserted, and the growth is the argument for
+        # each answer. Half a boundary in another file is worse than a long one.
+        #
+        # 530 after #21's security review: the exemption triple, `route_path`,
+        # and the second half of the `token_matches` encoding bug, which a JSON
+        # body reintroduced. Thirteen lines of prose came back out first.
+        #
+        # There IS one split that cuts through nothing, and #80 carries it: the
+        # `?token=` query grant is about ninety lines and is removed before 1.0,
+        # so moving it to its own file makes the removal a deletion rather than
+        # surgery in the middle of a security module. Until then this entry is
+        # the record that the size is known and argued.
+        "security.py": 530,
         # 474. The HTTP layer: routes, the error envelope, the SSE stream and
         # the lifespan sweeper, which is one job described four ways. Most of
         # the length above the guideline is the comments recording what the
@@ -918,7 +926,7 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # `create_project`'s publish, which records that this route once put a
         # different shape on the bus from the engine's and that the client's
         # refetch hid it. Four lines to stop it being written back.
-        "server.py": 474,
+        "server.py": 478,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

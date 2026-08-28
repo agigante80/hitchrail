@@ -124,9 +124,16 @@ browser, trades it for a cookie, and clears the address bar.
 copied rather than typed.
 
 Treat the link as a secret anyway, because it is one, and the phone it lands on
-is where it now lives. What changed is the set of machines that write it down:
-that used to include this server's access log, any proxy in front, and every
-device signed into the same browser profile, and it is now none of them.
+is where it now lives. What changed is the set of machines that write it down.
+Every server side one is gone: this server's access log, any proxy in front,
+and the `Referer` header on anything the page fetches.
+
+The browser is narrowed rather than cleared, and the difference is worth
+stating rather than rounding off. The page rewrites its own history entry, so
+the entry does not keep the key. Pasting the link into the address bar is
+another matter: that can leave a typed URL in autocomplete, and autocomplete
+syncs. Open the link by tapping it rather than by pasting it, and the
+distinction does not arise.
 
 The older `?token=<token>` form still works so a link already saved keeps
 working. It will be removed before 1.0, and nothing Hitchrail prints creates

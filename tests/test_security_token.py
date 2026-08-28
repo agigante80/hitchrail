@@ -25,7 +25,9 @@ from hitchrail.config import Config
 from hitchrail.security import (
     GRANT_PARAM,
     TOKEN_COOKIE,
+    UNAUTHENTICATED,
     middleware_stack,
+    route_path,
     token_matches,
 )
 
@@ -743,3 +745,139 @@ async def test_the_grant_api_still_answers_to_the_origin_check(tmp_path: Path) -
     )
     assert response.status_code == 403
     assert response.json()["code"] == "origin_rejected"
+
+
+# -- #21 round 1: what the review found -------------------------------------
+
+
+def test_the_exemption_is_exactly_two_entries() -> None:
+    """The cheapest guard there is, and it was the missing one.
+
+    Every other test here probes paths a test file chose, so adding
+    `/api/projects` to the set left all of them green. `.claude/rules/security.md`
+    says a third entry needs the argument #21 made; this is what mechanically
+    notices there is one.
+    """
+    assert (
+        frozenset({("http", "GET", "/grant"), ("http", "POST", "/api/grant")})
+        == UNAUTHENTICATED
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [("POST", "/grant"), ("DELETE", "/grant"), ("GET", "/api/grant")],
+)
+async def test_the_exemption_is_scoped_to_one_method_each(
+    tmp_path: Path, method: str, path: str
+) -> None:
+    """A path alone exempts every method on it.
+
+    The router turns the extras into 405 today, so nothing is reachable, and
+    that is the router's doing rather than the guard's. Widening
+    `/api/grant` to `methods=["POST", "DELETE"]` would have arrived
+    unauthenticated with every test green.
+    """
+    app = Starlette(
+        routes=[
+            Route("/grant", _ok, methods=["GET", "POST", "DELETE"]),
+            Route("/api/grant", _ok, methods=["GET", "POST"]),
+        ],
+        middleware=middleware_stack(Config(root=tmp_path, host="0.0.0.0", token=TOKEN)),
+    )
+    response = await call(app, method, path=path, headers=ORIGIN)
+    assert response.status_code == 401, f"{method} {path} arrived unauthenticated"
+
+
+async def test_a_websocket_to_an_exempt_path_is_not_exempt(tmp_path: Path) -> None:
+    """The exemption is keyed on the scope type as well as the method.
+
+    `test_a_websocket_handshake_is_not_waved_through` above is the same
+    argument for the general case: the token middleware once skipped every non
+    http scope, so a websocket route added later would have arrived
+    unauthenticated. An exemption keyed on the path alone would reopen that,
+    on the two paths where it matters most.
+    """
+    from hitchrail.security import TokenMiddleware
+
+    reached: list[int] = []
+
+    async def app(scope: object, receive: object, send: object) -> None:
+        reached.append(1)
+
+    middleware = TokenMiddleware(app, token=TOKEN)
+    sent: list[MutableMapping[str, Any]] = []
+
+    async def receive() -> MutableMapping[str, Any]:
+        return {"type": "websocket.connect"}
+
+    async def send(message: MutableMapping[str, Any]) -> None:
+        sent.append(message)
+
+    for path in ("/grant", "/api/grant"):
+        await middleware(
+            {"type": "websocket", "path": path, "headers": [(b"host", b"localhost")]},
+            receive,
+            send,
+        )
+        assert reached == [], f"an unauthenticated websocket reached the app at {path}"
+    assert tmp_path.is_dir()
+
+
+def test_our_route_path_agrees_with_starlettes() -> None:
+    """`security.route_path` duplicates six lines of Starlette.
+
+    Deliberately: the function lives in `starlette._utils`, and
+    `starlette.routing` re-exports it without declaring it, so the public
+    spelling fails mypy and the private one can move in a patch release. This
+    is what stops the duplicate drifting. It reads the private symbol on
+    purpose, because a TEST that stops importing is a loud failure and a guard
+    that stops importing is a deployment.
+    """
+    from starlette._utils import get_route_path as theirs
+
+    cases = [
+        ("/grant", ""),
+        ("/grant", "/"),
+        ("/hitchrail/grant", "/hitchrail"),
+        ("/hitchrail", "/hitchrail"),
+        ("/hitchrailish/grant", "/hitchrail"),
+        ("/api/grant", "/api"),
+        ("/other/grant", "/hitchrail"),
+        ("", ""),
+    ]
+    for path, root in cases:
+        scope = {"path": path, "root_path": root}
+        assert route_path(scope) == theirs(scope), (path, root)
+
+
+@pytest.mark.integration
+async def test_the_guard_and_the_router_agree_behind_a_sub_path_proxy(
+    tmp_path: Path,
+) -> None:
+    """Comparing the unstripped path meant the guard named one route and the
+    router served another. Not exploitable, because every suffix that could
+    differ is itself exempt, but behind a sub path proxy it made the grant flow
+    unreachable: `GET /hitchrail/grant` was not exempt, so it answered 401."""
+    app = Starlette(
+        routes=[Route("/grant", _ok, methods=["GET"])],
+        middleware=middleware_stack(Config(root=tmp_path, host="0.0.0.0", token=TOKEN)),
+    )
+    transport = httpx.ASGITransport(app, root_path="/hitchrail")
+    async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as c:
+        response = await c.get("/hitchrail/grant", headers=HOST)
+    assert response.status_code == 200, response.text
+
+
+def test_a_token_that_utf8_cannot_encode_is_false_and_not_a_crash() -> None:
+    """The same bug this function's docstring records as fixed, a second time.
+
+    Every carrier that existed then is decoded as latin-1, so all of them
+    produce a str UTF-8 can encode. #21 added a JSON body, and the JSON decoder
+    accepts a lone surrogate: an unauthenticated 500 on the one route reachable
+    without a token, where every other input gets 401.
+    """
+    assert token_matches("\\ud800", TOKEN) is False
+    assert token_matches("a\\udfffb", TOKEN) is False
+    assert token_matches(TOKEN, TOKEN) is True
