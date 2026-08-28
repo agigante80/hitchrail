@@ -723,7 +723,7 @@ not merely reconnected. `EventSource` retries on its own; what it cannot do is
 tell you what changed while it was away, so the reconnect has to re-fetch the
 listing rather than trust the stream to catch up.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/e2e/test_stream.py
@@ -783,18 +783,65 @@ def test_a_dropped_stream_is_visible_rather_than_silent(page: Page, server) -> N
     )
 ```
 
-- [ ] **Step 2: Run to verify failure**
-- [ ] **Step 3: Implement**
+- [x] **Step 2: Run to verify failure**
+- [x] **Step 3: Implement**
 
 `window.__hitchrail` exists so the tier can reach the stream. It is a test
 seam and it is the only one: exposing the whole application state would let a
 test assert on internals rather than on what a person sees.
 
-- [ ] **Step 4: Run to verify passing, then the gates**
-- [ ] **Step 5: Commit**
+**Three things above are wrong, and the code is what shipped.** Written down
+because each cost an hour and the next reader would spend it again.
+
+1. The sketch imports `playwright.sync_api`. The whole tier is async, decided
+   in Task 19: the sync API refuses to run inside an asyncio loop and poisons
+   every other test in the session when it tries.
+2. `test_the_stream_reconnects_on_its_own` closes the stream with
+   `stream.close()` and then waits for `open`. That test could never pass.
+   `close()` is terminal: readyState goes to CLOSED and `EventSource` does not
+   retry, by specification. Only a connection that DIES reconnects. The shipped
+   test cuts the connection at the socket instead, and asserts what actually
+   matters afterwards, which is that the row is right, not that a flag flipped.
+3. `server.stop_serving()` does not drop the connection either, and this one
+   is not obvious. `should_exit` waits for open connections and an SSE stream
+   never closes on its own; `force_exit` skips the wait, but the server is a
+   THREAD in a live process, so the accepted socket stays open and the browser
+   sees no FIN for as long as the test cares to wait (measured: readyState
+   still 1 after twelve seconds). uvicorn's own `connection.shutdown()` is no
+   better: for a response still in flight it only clears `keep_alive`. Chromium
+   offline emulation does not do it either, since it blocks new requests and
+   leaves established ones alone. The harness got `drop_connections()`, which
+   aborts each transport through the serving loop. That is why `start()` now
+   runs the loop itself rather than calling `Server.run`: aborting needs a
+   handle to schedule onto.
+
+Two things the sketch did not ask for, both of which the shipped code needed:
+
+- **A reconnect must re-fetch even when nobody touched the tab.** The sketch
+  covers `visibilitychange`, which is the phone case. A connection can also die
+  and come back while the page is in the foreground, and the reopen path there
+  is the `EventSource` object's own, which reaches no visibility handler. The
+  fix is per object rather than global: the FIRST open of a given `EventSource`
+  does not fetch, because `boot` already did and doing it twice on load is
+  visible on a phone, and every later open of the same object does.
+- **`data-stream` had to render.** The sketch asserts the attribute, and an
+  attribute nothing displays is not "visible rather than silent". A strip under
+  the header shows `down` and `blind`, driven entirely by CSS off the root
+  attribute so no JavaScript writes the copy. `connecting` and `open` show
+  nothing at all: a permanent "live" badge is noise on a phone, and the state
+  worth a person's attention is the one where the list has stopped being true.
+
+`blind` is the third state, and it is not in the sketch. Connected, with a
+machine that cannot be read. Collapsing it into `down` reports a network
+problem for a root that went away, and sends somebody to look at their wifi
+instead of their mount.
+
+- [x] **Step 4: Run to verify passing, then the gates**
+- [x] **Step 5: Commit**
 
 ```bash
 git commit -m "feat(web): live updates, and a list that is right after a reconnect (#57)"
+```
 ```
 
 ---
@@ -1002,7 +1049,11 @@ task implies a separate deliverable and there is not one.
 - [x] No control is under 44px at a phone viewport, asserted rather than eyeballed. Measured across every button, link and input at a phone viewport.
 - [x] The stop sequence escalates: no kill control at the confirm step, kill reachable for the whole wait, and the timeout does not kill by itself. Eleven tests, and both halves verified to fail against the mistake: making the timeout kill, and adding a kill control to the confirm step.
 - [x] The two memory refusals are different screens, and the hard one offers no override. And the hard one excludes the controller from its way out, so it cannot become a door into a 423.
-- [ ] The list is correct after a backgrounded tab reconnects, not merely reconnected.
+- [x] The list is correct after a backgrounded tab reconnects, not merely
+  reconnected. `tests/e2e/test_stream.py`, seven tests. Both reopen paths are
+  covered, the suspended tab and the connection that dies in the foreground,
+  and each was verified to fail against the page that reconnects without
+  re-fetching. Five mutations run, five red.
 - [ ] The grant travels in a fragment and no token appears in the server's access log or the address bar.
 - [x] Dark theme renders from the same stylesheet under `prefers-color-scheme` and under an explicit toggle. Asserted as exactly one stylesheet of our own, plus the explicit toggle winning in both directions.
 - [x] `uvx hitchrail` serves the page from the installed wheel, not from the working tree. Built the wheel, installed it into a clean venv, and confirmed `web/` resolves under site-packages rather than the working tree.
