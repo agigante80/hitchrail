@@ -83,8 +83,8 @@ export async function api(path, options = {}) {
       // A 200 whose body does not arrive or does not parse. The connection
       // dropping AFTER the headers is the same wifi in a lift as above, and a
       // captive portal answering `200 text/html` is the other one. The server
-      // refused nothing, so this is unreachable rather than a refusal, and it
-      // must not reach a caller as a success with an undefined body.
+      // refused nothing, so this is not a refusal, and it must not reach a
+      // caller as a success carrying an undefined body.
       //
       // Reading the body was outside the catch when it was first written, so
       // `api` still rejected on this path while the comment below said it did
@@ -939,10 +939,13 @@ async function refresh() {
   try {
     result = await api("/api/projects");
   } finally {
-    // `api` does not reject: it answers a dead network and an unreadable body
-    // alike with status 0. This is here for a throw from `api` itself, and the
-    // counter has to come back either way, since leaving it high would hold
-    // every later event as owed to a fetch that ended.
+    // `api` does not reject. A dead network and an unreadable body both come
+    // back as `ok: false`, the first with status 0 and the second with the
+    // status the server actually sent, which is the distinction the branch
+    // below turns into "not live" versus "cannot be read". This is here for a
+    // throw from `api` itself, and the counter has to come back either way,
+    // since leaving it high would hold every later event as owed to a fetch
+    // that ended.
     fetchesInFlight -= 1;
   }
   // Superseded. Say nothing and touch nothing: a newer listing owns the page,
