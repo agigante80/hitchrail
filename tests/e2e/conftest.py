@@ -370,7 +370,16 @@ class Harness:
             # machine and poisoning every test after this one. The fixture
             # raises once it has cleaned up.
             self.stopped_cleanly = not self._thread.is_alive()
-        if self._loop is not None:
+        if self._loop is not None and self.stopped_cleanly:
+            # Only when the thread actually stopped. If it did not, the loop is
+            # still RUNNING, and both statements below raise on a running loop:
+            # `run_until_complete` with "This event loop is already running" and
+            # `close` with "Cannot close a running event loop". That raise came
+            # straight back out of the fixture's finally and skipped the tmux
+            # cleanup, which is the leak recording `stopped_cleanly` instead of
+            # asserting was meant to prevent. A leaked loop on a path that is
+            # already failing is the cheaper of the two.
+            #
             # Cancel what force exit left behind before closing. Aborting the
             # connections cuts uvicorn's shutdown short, so the lifespan task
             # and sse-starlette's shutdown watcher are still pending; closing
@@ -430,21 +439,45 @@ class Harness:
         is the tmux behaviour `remain-on-exit` defeats during a start and which
         is cleared once one succeeds.
         """
-        target = f"--remote-control {e2e_name(name)}"
-        table = subprocess.run(
-            ["ps", "-eww", "-o", "pid,args", "--no-headers"],
-            capture_output=True,
-            text=True,
-            check=False,
-        ).stdout
-        pids = [
-            int(line.split(None, 1)[0])
-            for line in table.splitlines()
-            if target in line and str(self._agent) in line and "tmux" not in line
-        ]
+        # EXACT, on argv's last element. A substring test would match
+        # `hrx-vessel-social` for `vessel`, which is the same prefix footgun
+        # `.claude/CLAUDE.md` documents for tmux target specs, reintroduced in
+        # the harness against a different tool. `claude_ipc.launch_argv` puts
+        # the project last, so the comparison has somewhere exact to stand.
+        wanted = e2e_name(name)
+
+        def agent_pids() -> list[int]:
+            table = subprocess.run(
+                ["ps", "-eww", "-o", "pid,args", "--no-headers"],
+                capture_output=True,
+                text=True,
+                check=False,
+            ).stdout
+            found = []
+            for line in table.splitlines():
+                fields = line.split()
+                if len(fields) < 2 or fields[-1] != wanted:
+                    continue
+                if str(self._agent) not in line or "tmux" in line:
+                    continue
+                found.append(int(fields[0]))
+            return found
+
+        pids = agent_pids()
         assert pids, f"no agent process for {name}"
         for pid in pids:
             os.kill(pid, signal.SIGKILL)
+
+        # And WAIT for it. The caller's next act is a single listing, with
+        # nothing to re-fetch it afterwards, so a process still in the `ps`
+        # snapshot derives `detached` and the test fails as an opaque timeout
+        # rather than as "the kill had not landed".
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if not agent_pids():
+                return
+            time.sleep(0.02)
+        raise RuntimeError(f"the agent for {name} survived SIGKILL")
 
     def break_machine(self) -> None:
         """Make the machine unreadable, through the seam the engine injects.
