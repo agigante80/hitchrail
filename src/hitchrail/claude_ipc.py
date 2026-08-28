@@ -30,6 +30,14 @@ from typing import Literal, Protocol
 # How the agent is found in the process table. State derivation matches this as
 # a substring of a command line, so it has to be something no other process on
 # the machine carries by accident.
+#
+# The project name we pass after it is a TAG, not a name Claude Code uses.
+# Checked against a live session on 2026-08-28, with both `--remote-control X`
+# and `--remote-control=X`: the session file came back `nameSource: derived`
+# and a name built from the working directory in each case, so the argument is
+# ignored. That costs us nothing, because what the derivation needs is a unique
+# argv tail per project and this gives it one, but somebody will eventually
+# read this flag as naming the session and it does not.
 REMOTE_CONTROL_MARKER = "--remote-control"
 
 # Where a session link points. The bridge id is appended verbatim.
