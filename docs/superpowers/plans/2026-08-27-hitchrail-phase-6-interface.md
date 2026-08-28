@@ -924,7 +924,7 @@ exactly that way.
 So: `GET /grant` is the only unauthenticated route, it serves a page with no
 data on it, and `/` stays behind the token like everything else.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/e2e/test_token.py
@@ -1017,8 +1017,8 @@ def test_an_api_request_still_gets_json(page: Page, server) -> None:
     assert "application/json" in response.headers["content-type"]
 ```
 
-- [ ] **Step 2: Run to verify failure**
-- [ ] **Step 3: Implement `/grant`, the screen, and the fragment read**
+- [x] **Step 2: Run to verify failure**
+- [x] **Step 3: Implement `/grant`, the screen, and the fragment read**
 
 `/grant` is registered BEFORE the token middleware would refuse it, and it is
 the only route with that property. It serves a page carrying the token screen
@@ -1032,7 +1032,7 @@ sets the same cookie `TokenMiddleware` already accepts, then calls
 `replaceState` rather than `pushState`, or the back button walks into a URL
 that still carries the token.
 
-- [ ] **Step 4: Update the banner and the README**
+- [x] **Step 4: Update the banner and the README**
 
 `banner()` prints `http://{host}:{port}/grant#token={token}`. The README's phone
 flow, its security section and any `curl` example that shows `?token=` change
@@ -1040,12 +1040,39 @@ with it. `GRANT_PARAM` stays supported on the query for one release so an
 operator's saved link does not break, and `docs/versioning.md` decides whether
 its removal is the MAJOR that section says an operator visible change is.
 
-- [ ] **Step 5: Run to verify passing, then the gates**
-- [ ] **Step 6: Commit**
+- [x] **Step 5: Run to verify passing, then the gates**
+- [x] **Step 6: Commit**
 
 ```bash
 git commit -m "feat(web): the grant travels in a fragment, which no server sees (#21)"
 ```
+
+**What the sketch above got wrong, and what it did not ask for.**
+
+- The sketched tests import `playwright.sync_api`, for the third time in this
+  plan. The tier is async, decided in Task 19.
+- `test_the_token_field_is_masked` and
+  `test_a_wrong_token_says_so_without_confirming_anything` load `server.base`,
+  which is `/` and behind the token, so they would have been asserting against a
+  401 body. Both address `/grant` in the shipped file.
+- The page had to be SELF CONTAINED, which the sketch does not mention. Every
+  asset route stays behind the token, so a linked stylesheet or an external
+  script on the one unauthenticated page would be answered 401 and the page
+  would arrive unstyled and inert. It therefore duplicates the palette, and a
+  test asserts the duplicate agrees with the stylesheet in both themes, because
+  a price paid once and then forgotten is how a page ends up rendering last
+  year's colours next to this year's.
+- The fragment has to be cleared BEFORE the request, not after. On success the
+  page navigates away, so the address bar ends up clean whether or not anything
+  cleared it, and a test written against the success path passes for a build
+  that clears nothing. Only a REJECTED key stays on the page long enough for the
+  difference to show, which is also the case where it matters. The first draft
+  additionally cleared it inside the grant, and two mutations proved that second
+  clear did nothing; it is gone rather than left to look load bearing.
+- `server.py` reached 519 lines, which the size guard caught. The split was
+  taken rather than the cap raised: `pages.py` serves the two HTML pages and the
+  two assets, which is a real seam, and it is the only code in the project that
+  reads a file chosen by a URL.
 
 ---
 
@@ -1081,7 +1108,12 @@ task implies a separate deliverable and there is not one.
 ## Phase 6 exit criteria
 
 - [x] All five gates green on 3.11, 3.12 and 3.13, and the `e2e` tier runs in CI. Green on 2f1e2d4; the tier runs on all three interpreters and the skip guard did not fire.
-- [ ] Every flow in the design canvas works on a real phone against a real machine.
+- [ ] Every flow in the design canvas works on a real phone against a real
+  machine. **The one criterion no agent can tick**, and #75 carries it with
+  the flows to walk. The browser tier drives headless Chromium at a phone
+  VIEWPORT, which is not a phone: no thumb, no soft keyboard covering the
+  field, no address bar eating the bottom of the screen, no lift. Two of the
+  design's own commitments are about exactly those.
 - [x] The four derived states each render as themselves, `detached` with its pid. `tests/e2e/test_list.py`, with `detached` seeded by spawning outside tmux because killing a session kills the agent with it.
 - [x] A running row is measurably taller than a stopped one at a 390px viewport. Measured at 390px, not described.
 - [x] No control is under 44px at a phone viewport, asserted rather than eyeballed. Measured across every button, link and input at a phone viewport.
@@ -1092,7 +1124,14 @@ task implies a separate deliverable and there is not one.
   covered, the suspended tab and the connection that dies in the foreground,
   and each was verified to fail against the page that reconnects without
   re-fetching. Five mutations run, five red.
-- [ ] The grant travels in a fragment and no token appears in the server's access log or the address bar.
+- [x] The grant travels in a fragment and no token appears in the server's
+  access log or the address bar. `tests/e2e/test_token.py`, asserted against
+  the requests the SERVER received rather than against the address bar,
+  because the address bar is what #20 already fixed and it was still
+  leaking. Three mutations run against the page: the token moved into the
+  query string, the history entry kept, and the rejected key left in the
+  address bar. The second of those exposed a test that could not fail and
+  a line of the page that was doing nothing, and both are gone.
 - [x] Dark theme renders from the same stylesheet under `prefers-color-scheme` and under an explicit toggle. Asserted as exactly one stylesheet of our own, plus the explicit toggle winning in both directions.
 - [x] `uvx hitchrail` serves the page from the installed wheel, not from the working tree. Built the wheel, installed it into a clean venv, and confirmed `web/` resolves under site-packages rather than the working tree.
 
