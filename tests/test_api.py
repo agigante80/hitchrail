@@ -351,6 +351,40 @@ async def test_creating_a_folder_makes_it_appear(
     assert (config.root / "brand-new").is_dir()
 
 
+async def test_every_publisher_puts_the_same_shape_on_the_bus(config: Config) -> None:
+    """Two publishers, one wire.
+
+    `Engine._announce` publishes the bare session dict and `create_project`
+    once wrapped it in `{"kind": ..., "session": ...}`. The stream serialises
+    whatever is on the bus verbatim, so the client read `session.name` as
+    undefined, decided it did not know the project, and refetched the whole
+    listing: a root scan, a `ps` and a tmux call per connected client per
+    folder created. It looked correct because a refetch IS the right answer
+    for a new project, which is how it survived review.
+    """
+    bus = EventBus()
+    # `ScriptedProcs` so the start actually succeeds and therefore announces.
+    # Three entries, not two: `create_project` calls `engine.get` to build the
+    # session it publishes, which consumes a look of its own before the start
+    # has taken its pre check.
+    engine = make_engine(config, FakeTmux(), ScriptedProcs("", "", STARTED_PS))
+    async with client_for(engine, config, bus=bus) as c:
+        with bus.subscribe() as queue:
+            r = await c.post("/api/projects", json={"name": "brand-new"}, headers=HEADERS)
+            assert r.status_code == 201
+            # `await`, not `get_nowait`: the bus schedules delivery on the
+            # subscriber's loop rather than handing it over inline, so it has
+            # not necessarily arrived by the time the POST returns.
+            from_create = await asyncio.wait_for(queue.get(), timeout=2)
+
+            r = await c.post("/api/sessions/network", headers=HEADERS)
+            assert r.status_code == 201, r.text
+            from_engine = await asyncio.wait_for(queue.get(), timeout=2)
+
+    assert from_create.keys() == from_engine.keys(), (from_create, from_engine)
+    assert from_create["name"] == "brand-new"
+
+
 async def test_creating_a_traversing_folder_is_refused(
     client: httpx.AsyncClient, config: Config
 ) -> None:

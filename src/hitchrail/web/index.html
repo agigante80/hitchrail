@@ -20,10 +20,7 @@
   </div>
 </header>
 
-<p class="stream-note" role="status" data-stream-note>
-  <span data-when="down">Not live. Reconnecting.</span>
-  <span data-when="blind">Live, but this machine cannot be read.</span>
-</p>
+<p class="stream-note" role="status" data-stream-note></p>
 
 <nav class="tabs" role="tablist" aria-label="Filter projects" data-tabs></nav>
 
@@ -31,10 +28,15 @@
   <input type="search" role="searchbox" placeholder="Search folders" aria-label="Search folders" data-search>
 </div>
 
-<main data-list aria-live="polite"></main>
+<!-- No `aria-live` on the list. It was announced on every render, which used
+     to mean once per tap; a live stream re-renders it whenever anything
+     changes on the machine, from any client, so forty folders and three stops
+     from a laptop would read out a hundred and twenty rows. The strip above
+     carries the status and the empty state announces itself. -->
+<main data-list></main>
 
 <template data-empty-template>
-  <p class="empty-title">Nothing matches</p>
+  <p class="empty-title" role="status">Nothing matches</p>
   <p class="empty-body">No folder here is called that.</p>
 </template>
 

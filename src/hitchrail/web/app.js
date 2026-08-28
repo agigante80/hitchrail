@@ -659,8 +659,25 @@ async function createProject(name) {
    state. */
 
 let stream = null;
+let reopenTimer = null;
+
+/* `connecting` and `open` carry no message: a permanent "live" badge is noise
+   on a phone, and the state worth a person's attention is the one where the
+   list has stopped being true. */
+const STREAM_MESSAGE = {
+  down: "Not live. Reconnecting.",
+  blind: "Live, but this machine cannot be read.",
+};
 
 function setStreamState(value) {
+  // The text is WRITTEN, not selected by CSS from spans already in the markup.
+  // A live region announces a DOM mutation; a change of computed style with no
+  // node added, removed or re-texted is detected inconsistently, and the
+  // `down` to `blind` transition would mutate nothing at all.
+  const note = $("[data-stream-note]");
+  if (note) {
+    note.textContent = STREAM_MESSAGE[value] ?? "";
+  }
   document.documentElement.setAttribute("data-stream", value);
 }
 
@@ -670,7 +687,27 @@ function setStreamState(value) {
    `blind` we are connected and the machine cannot be read.
    The third is `503 machine_unreadable` on the re-fetch, and collapsing it
    into `down` would hide a broken tmux behind a network message. */
+/* `EventSource` retries a NETWORK error on its own. It does not retry a
+   response it refuses: a non 200 status closes it for good, by specification.
+   The reachable case is not exotic. Restarting Hitchrail mints a new token, a
+   phone still holding the old cookie is answered 401, and the stream is then
+   dead forever while the strip says "Reconnecting", which would be a lie of
+   exactly the kind this whole feature exists to prevent. */
+const REOPEN_MS = 5000;
+
+function scheduleReopen() {
+  if (reopenTimer !== null) return;
+  reopenTimer = setTimeout(() => {
+    reopenTimer = null;
+    openStream();
+  }, REOPEN_MS);
+}
+
 function openStream() {
+  if (reopenTimer !== null) {
+    clearTimeout(reopenTimer);
+    reopenTimer = null;
+  }
   if (stream) stream.close();
   stream = new EventSource("/api/events");
   // Scoped to this EventSource, so it distinguishes the object's FIRST open
@@ -701,31 +738,68 @@ function openStream() {
   });
 
   stream.addEventListener("error", () => {
-    // `EventSource` retries on its own, so this fires for a transient drop as
-    // well as a final one. Both are `down`: what a person needs to know is
-    // that the list is not live, and distinguishing "retrying" from "gave up"
-    // would be a distinction they cannot act on differently. A list that has
-    // quietly stopped updating is indistinguishable from a quiet one, and
-    // quiet is this tool's normal state.
+    // Fires for a transient drop and for a final one alike. Both are `down`:
+    // a list that has quietly stopped updating is indistinguishable from a
+    // quiet one, and quiet is this tool's normal state.
     setStreamState("down");
+    if (stream && stream.readyState === EventSource.CLOSED) {
+      // Fatal. Nothing else would ever reopen it: `onVisible` needs the tab to
+      // be backgrounded and brought back, which a phone left on this page
+      // never does.
+      scheduleReopen();
+    }
   });
 
   return stream;
 }
 
+/* A listing fetched at T0 knows nothing about an event that arrived at T0+1,
+   and it lands AFTER it. Without an ordering rule, stopping a session from a
+   laptop while the phone happens to be fetching puts the row back to `running`
+   and nothing ever corrects it: there is no polling, and a session that
+   reached a terminal state sends no further event. So an event that arrives
+   while a listing is in flight is kept and re-applied on top of it. */
+let fetchesInFlight = 0;
+const seenDuringFetch = new Map();
+
 /* Patch one row in place. The whole listing is not re-fetched per event: the
    stream carries the entire session shape precisely so a change costs no
    subprocesses on the server. */
 function applySession(session) {
+  if (!session || typeof session.name !== "string") {
+    // Not a session. The bus carries one shape and a test asserts it, so this
+    // is the belt to that braces: an unrecognised frame must not become a
+    // refetch, which is how one publisher's mistake turns into a root scan per
+    // client per event.
+    return;
+  }
+  if (fetchesInFlight > 0) {
+    seenDuringFetch.set(session.name, session);
+  }
   const index = state.projects.findIndex((p) => p.name === session.name);
   if (index === -1) {
-    // A project we do not know about. The listing decides what exists, so ask
-    // it rather than inventing a row from an event.
-    refresh();
+    // A project we do not know about, which on this wire means a folder
+    // somebody just created. The listing decides what EXISTS, so ask it rather
+    // than inventing a row from an event.
+    refreshSoon();
     return;
   }
   state.projects[index] = session;
   render();
+}
+
+/* One refetch for a burst, not one per event. Creating several folders in a
+   script, or any future event the client does not recognise, would otherwise
+   cost each connected client a full root scan apiece. */
+let refreshQueued = false;
+
+function refreshSoon() {
+  if (refreshQueued) return;
+  refreshQueued = true;
+  setTimeout(() => {
+    refreshQueued = false;
+    refresh();
+  }, 0);
 }
 
 /* The tab came back. `EventSource` may already have reconnected, but it
@@ -738,14 +812,38 @@ function onVisible() {
 
 /* -- start ------------------------------------------------------------- */
 
+let listingGeneration = 0;
+
 async function refresh() {
-  const result = await api("/api/projects");
+  // Two refetches racing is the ordinary case, not a corner: a phone returning
+  // to the foreground fires `visibilitychange` and the stream's own reopen in
+  // the same tick. Whichever was issued last owns the list, however they land.
+  const generation = ++listingGeneration;
+  fetchesInFlight += 1;
+  let result;
+  try {
+    result = await api("/api/projects");
+  } catch {
+    // `fetch` REJECTS when the network is gone, where a refused request
+    // resolves. Silence here would leave the page asserting it is live.
+    fetchesInFlight -= 1;
+    setStreamState("down");
+    return { ok: false, status: 0, body: { code: "unreachable", message: "" } };
+  }
+  fetchesInFlight -= 1;
+  if (generation !== listingGeneration) return result;
   if (!result.ok) {
-    // Connected, and the machine cannot be read. Distinct from `down`, which
-    // means we are not connected at all.
-    if (result.body.code === "machine_unreadable" || result.body.code === "root_unavailable") {
-      setStreamState("blind");
+    if (result.status === 401) {
+      // Actionable, and the only failure that is. The stream is being refused
+      // too and says so; what a person needs here is the way back in.
+      showRefusal(result);
+      return result;
     }
+    // Connected, and the listing could not be read. Every remaining failure is
+    // that, whether the root went away, tmux broke or the server faulted.
+    // None of them is `down`: reporting a network problem for a root that was
+    // unmounted sends somebody to look at their wifi instead of their mount.
+    setStreamState("blind");
     return result;
   }
   if (document.documentElement.getAttribute("data-stream") === "blind") {
@@ -756,6 +854,12 @@ async function refresh() {
     root.textContent = result.body.root;
   }
   state.projects = result.body.projects;
+  if (seenDuringFetch.size > 0) {
+    // These arrived after this listing was asked for, so they are newer than
+    // it whatever order the two landed in.
+    state.projects = state.projects.map((p) => seenDuringFetch.get(p.name) ?? p);
+    seenDuringFetch.clear();
+  }
   state.unsupported = result.body.unsupported;
   state.unsupportedTotal = result.body.unsupported_total;
   state.root = result.body.root;

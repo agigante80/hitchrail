@@ -141,17 +141,20 @@ button[disabled] { color: var(--muted-3); cursor: not-allowed; }
   margin: 0;
   padding: 0;
   font-size: 13px;
-  color: var(--warn);
+  /* `--ink` on the tint, not the tint's own hue on the tint. `--warn` on
+     `--warn-tint` is 3.2:1 and `--danger` on `--danger-tint` is 1.5:1 in dark,
+     which is fine for a badge you recognise by shape and position and not for
+     the one line on the page whose whole job is to be read. The hue carries on
+     the rule at the edge instead, where contrast is not a legibility question. */
+  color: var(--ink);
   background: var(--warn-tint);
   border-bottom: 1px solid var(--line);
+  border-left: 4px solid var(--warn);
   display: none;
 }
-.stream-note span { display: none; }
 :root[data-stream="down"] .stream-note,
 :root[data-stream="blind"] .stream-note { display: block; padding: 8px 16px; }
-:root[data-stream="down"] .stream-note span[data-when="down"],
-:root[data-stream="blind"] .stream-note span[data-when="blind"] { display: inline; }
-:root[data-stream="blind"] .stream-note { color: var(--danger); background: var(--danger-tint); }
+:root[data-stream="blind"] .stream-note { background: var(--danger-tint); border-left-color: var(--danger); }
 
 .tabs { display: flex; gap: 8px; padding: 12px 16px 0; overflow-x: auto; }
 .tabs button {

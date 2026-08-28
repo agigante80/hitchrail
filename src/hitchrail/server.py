@@ -223,7 +223,11 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
             # caller which guard caught it describes the filesystem to them.
             return _error(400, "invalid_name", str(exc))
         session = await in_thread(engine.get, name)
-        events.publish({"kind": "session", "session": session.as_dict()})
+        # The BARE dict, the shape `Engine._announce` publishes. An envelope
+        # here left `session.name` undefined on the wire, so every client
+        # refetched the whole listing instead of patching a row. It looked
+        # right because a refetch IS correct for a new project.
+        events.publish(session.as_dict())
         return JSONResponse(session.as_dict(), status_code=201)
 
     async def start(request: Request) -> Response:

@@ -900,7 +900,11 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # the length above the guideline is the comments recording what the
         # transport does rather than what this code does, and those are the
         # part a reader cannot recover from the source.
-        "server.py": 469,  # +#53 page and asset routes, +#64 fields
+        # 473. +#53 page and asset routes, +#64 fields, +#57 the comment on
+        # `create_project`'s publish, which records that this route once put a
+        # different shape on the bus from the engine's and that the client's
+        # refetch hid it. Four lines to stop it being written back.
+        "server.py": 473,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

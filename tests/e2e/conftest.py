@@ -146,6 +146,7 @@ class Harness:
         self._server: uvicorn.Server | None = None
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._meminfo = ""
         self.port = free_port()
         self.base = f"http://127.0.0.1:{self.port}"
         self.bus = EventBus()
@@ -193,7 +194,9 @@ class Harness:
         for name in unsupported or []:
             (self.root / name).mkdir(exist_ok=True)
 
-        meminfo = f"MemTotal: 33554432 kB\nMemAvailable: {(available_mb or 24608) * 1024} kB\n"
+        self._meminfo = (
+            f"MemTotal: 33554432 kB\nMemAvailable: {(available_mb or 24608) * 1024} kB\n"
+        )
         sessions = self.root / ".sessions"
         sessions.mkdir(exist_ok=True)
 
@@ -241,7 +244,9 @@ class Harness:
             time.sleep(0.4)
 
         self._config = build(e2e_name(self_project) if self_project else None)
-        self.engine = Engine(config=self._config, meminfo_fn=lambda: meminfo)
+        # Read through the attribute rather than closed over, so `break_machine`
+        # can make the reading unreadable mid test.
+        self.engine = Engine(config=self._config, meminfo_fn=lambda: self._meminfo)
         self.start()
 
     # -- lifecycle ------------------------------------------------------
@@ -284,46 +289,134 @@ class Harness:
                 orphan.kill()
         self._orphans.clear()
 
-    def drop_connections(self) -> None:
-        """Cut every live connection at the socket, leaving the server up.
+    def _abort_connections(self) -> int:
+        """Abort every live connection's transport, from the serving loop.
 
-        What a phone losing its network looks like from the page: the stream
-        dies and the server is still there to reconnect to.
-
-        Nothing gentler works. `should_exit` waits for open connections and an
-        SSE stream never closes on its own; `force_exit` skips the wait but
-        this server is a THREAD in a live process, so the accepted sockets stay
-        open and the browser sees no FIN at all. uvicorn's own
+        Nothing gentler reaches an SSE stream. `should_exit` waits for open
+        connections and a stream never closes on its own. `force_exit` skips
+        that wait and still does not help, because `Server.shutdown` first
+        gathers `wait_closed()` on the asyncio servers and since Python 3.12
+        that waits for the connections too. uvicorn's own
         `connection.shutdown()` is no better: for a response still in flight it
-        only clears `keep_alive`. Aborting the transport is the one thing the
-        peer actually notices.
+        only clears `keep_alive`. And the browser notices none of it, because
+        this server is a THREAD in a live process, so an accepted socket nobody
+        closed stays open (measured: readyState still 1 after twelve seconds).
         """
         server, loop = self._server, self._loop
-        if server is None or loop is None:
-            return
+        if server is None or loop is None or not loop.is_running():
+            return 0
 
-        def cut() -> None:
+        cut = 0
+
+        def cut_and_signal() -> None:
+            nonlocal cut
             for connection in list(server.server_state.connections):
                 transport = getattr(connection, "transport", None)
                 if transport is not None:
                     transport.abort()
+                    cut += 1
+            done.set()
 
-        loop.call_soon_threadsafe(cut)
+        done = threading.Event()
+        loop.call_soon_threadsafe(cut_and_signal)
+        done.wait(timeout=5)
+        return cut
+
+    def drop_connections(self) -> None:
+        """Cut every live connection, leaving the server up.
+
+        What a phone losing its network looks like from the page: the stream
+        dies, and the server is still there to reconnect to.
+        """
+        # `server_state.connections` and `.transport` are uvicorn internals. If
+        # either is renamed this becomes a silent no op and the two tests that
+        # depend on it fail as opaque timeouts, so it says so itself.
+        assert self._abort_connections() > 0, "nothing was cut: uvicorn's internals have moved"
 
     def stop_serving(self) -> None:
-        """Teardown. `force_exit` so an open SSE stream cannot hold the join.
+        """Teardown, and neither exit flag can do it alone.
 
-        A graceful uvicorn shutdown waits for open connections, and every test
-        that loaded the page leaves one, so without this each teardown stalls
-        for the full join timeout.
+        Measured before this loop existed: the join hit its full ten second
+        timeout on EVERY browser test and the loop was still running
+        afterwards, because `Server.shutdown` gathers `wait_closed()` on the
+        asyncio servers and since Python 3.12 that waits for the open
+        connections too, `force_exit` or not. Every test that loaded the page
+        leaves an SSE stream open, so every teardown paid ten seconds.
+
+        Flags first, then cut, then cut again until the thread is gone. One cut
+        is not enough: the page's `EventSource` reconnects the instant its
+        connection dies, and a connection accepted between the abort and the
+        listener closing puts `wait_closed` back where it started.
         """
         if self._server is not None:
             self._server.should_exit = True
             self._server.force_exit = True
         if self._thread is not None:
-            self._thread.join(timeout=10)
+            deadline = time.monotonic() + 10
+            while self._thread.is_alive() and time.monotonic() < deadline:
+                self._abort_connections()
+                self._thread.join(timeout=0.2)
+            assert not self._thread.is_alive(), "the server thread did not stop"
+        if self._loop is not None:
+            # Cancel what force exit left behind before closing. Aborting the
+            # connections cuts uvicorn's shutdown short, so the lifespan task
+            # and sse-starlette's shutdown watcher are still pending; closing
+            # the loop under them logs "Task was destroyed but it is pending"
+            # once per test, which is noise that trains people to ignore
+            # asyncio errors in this suite.
+            pending = asyncio.all_tasks(self._loop)
+            for task in pending:
+                task.cancel()
+            if pending:
+                self._loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            # The fixture is function scoped, so an unclosed loop leaks its
+            # epoll and self pipe descriptors once per browser test.
+            self._loop.close()
+            self._loop = None
 
     # -- asking the machine, not the page -------------------------------
+
+    def wait_until_the_agents_are_gone(self, timeout: float = 15.0) -> None:
+        """Block until no process still runs THIS harness's agent shim.
+
+        `tmux kill-server` returns as soon as the server is told, and the
+        agents it owned are then leaving rather than gone. Every browser test
+        seeds under the same `hrx-` prefix, so an agent still exiting is seen
+        by the NEXT test's derivation and reported as `running`, which fails
+        its seed with `AlreadyRunning`. This was invisible while teardown
+        stalled for ten seconds on the join: the stall was doing this job by
+        accident, and fixing the stall is what surfaced it.
+
+        Matched on the shim's own path, which is unique per harness, rather
+        than on the session prefix, which is not.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            table = subprocess.run(
+                ["ps", "-eww", "-o", "args", "--no-headers"],
+                capture_output=True,
+                text=True,
+                check=False,
+            ).stdout
+            if str(self._agent) not in table:
+                return
+            time.sleep(0.05)
+        raise RuntimeError(f"agents from {self._agent} outlived their tmux server")
+
+    def break_machine(self) -> None:
+        """Make the machine unreadable, through the seam the engine injects.
+
+        The memory reading, because it is the one external surface a test can
+        corrupt without corrupting the developer's actual machine: an
+        unparseable `meminfo` is `MachineUnreadable` at `engine.py:185`, which
+        is a 503 `machine_unreadable` on the listing. `ps` and tmux reach the
+        same state and neither can be broken from here without breaking them
+        for real.
+        """
+        self._meminfo = "not a meminfo"
+
+    def heal_machine(self) -> None:
+        self._meminfo = "MemTotal: 33554432 kB\nMemAvailable: 25198592 kB\n"
 
     def is_running(self, name: str) -> bool:
         assert self.engine is not None
@@ -362,6 +455,7 @@ def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Harness]:
             env={k: v for k, v in os.environ.items() if k != "TMUX"},
             check=False,
         )
+        harness.wait_until_the_agents_are_gone()
         shutil.rmtree(sock_dir, ignore_errors=True)
 
 
