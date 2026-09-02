@@ -872,10 +872,25 @@ def test_every_module_is_under_the_size_guideline() -> None:
     # Raise this only for a change that adds behaviour, and say what in the
     # commit. If it passes roughly 550, look for a seam again with fresh eyes.
     caps = {
+        # 430, and this one does NOT want splitting, which is why it is here
+        # rather than in a ticket like #93. The whole value of `claude_ipc` is
+        # that it is ONE module: when Claude Code moves, exactly one file
+        # changes and the interface degrades rather than reporting something
+        # false. Two quarantine modules is two places to look and two places to
+        # forget, and the seam anyone would cut on, "talking to a running
+        # agent" against "finding its session link", puts undocumented vendor
+        # knowledge on both sides of it.
+        #
+        # The growth is #89: the stop sequence now reads the input box and
+        # verifies it between steps, and most of the added length is the three
+        # captured rows and why each is what it is. Those captures are the
+        # reason the check is right, and a description of them is what was
+        # wrong twice.
+        "claude_ipc.py": 430,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.
-        "engine.py": 675,
+        "engine.py": 679,
         # 466. tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -919,7 +934,7 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # the middle of a security module. Until then this entry is the record
         # that the size is known and argued.
         "security.py": 537,
-        # 487, current. The HTTP layer: routes, the error envelope, the SSE
+        # 492, current. The HTTP layer: routes, the error envelope, the SSE
         # stream and the lifespan sweeper, which is one job described four
         # ways. Most of the length above the guideline is the comments
         # recording what the transport does rather than what this code does,
@@ -934,7 +949,7 @@ def test_every_module_is_under_the_size_guideline() -> None:
         #
         # 487 since #89, for one `except` arm and the reason it answers 409
         # rather than 503. A refusal handler is the shape this file is made of.
-        "server.py": 487,
+        "server.py": 492,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

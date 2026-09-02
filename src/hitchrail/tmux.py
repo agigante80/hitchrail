@@ -180,7 +180,7 @@ class Tmux:
         different server than the rest of the class, which presents as a
         session that exists and does not.
         """
-        base = ["tmux"]
+        base = [BINARY]
         if self.socket:
             base += ["-S", self.socket]
         return [*base, *args]

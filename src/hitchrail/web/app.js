@@ -657,17 +657,25 @@ function showRefusal(result) {
     return;
   }
   if (code === "stop_unsafe") {
-    // #89. Not a failure: the graceful stop looked at the agent's input box,
-    // found text in it, and typed nothing. "That did not work" would describe
-    // a request that was sent and refused, and this one was never sent, so the
-    // session is exactly as it was. The title says which of those happened.
+    // #89. Not a failure: the stop looked at the agent's input box, would not
+    // vouch for it, and stopped before asking it to exit. "That did not work"
+    // describes a request that was made and refused, and this one was never
+    // made.
+    //
+    // It does NOT say "nothing was sent", which was the first wording here and
+    // was false. The sequence clears the box and interrupts before either
+    // check runs, so keys have gone out by the time this dialog appears and a
+    // turn in progress may have been cut short. Claiming the session is
+    // untouched is the same untruth this ticket exists to remove, one screen
+    // over. The exit command is the thing that was not sent, and that is what
+    // the title says.
     //
     // No Kill button here. The person asked to stop gently and got an honest
     // "not from here"; putting the destructive path in front of them as the
     // answer to that is the escalation-by-default section 7 forbids. Kill is
     // still on the row, which is where they chose it deliberately.
     showDialog({
-      title: "Nothing was sent",
+      title: "It was not asked to exit",
       body: message,
       actions: [["Close", "ghost", () => closeDialog()]],
     });

@@ -485,8 +485,12 @@ class Engine:
         except claude_ipc.StopNotSafe as exc:
             # The marker goes back for the same reason a vanished tmux takes it
             # back: a wait must not outlive a request that was never sent. The
-            # adapter looked at the pane and declined, so the agent is exactly
-            # as it was and a spinner would be describing nothing.
+            # adapter looked at the pane and declined to ask the agent to exit,
+            # so nothing is coming and a spinner would be describing nothing.
+            #
+            # Not "the agent is exactly as it was", which is what this said
+            # first and is false: the adapter sends keys before it decides.
+            # What is true is that no exit was requested.
             #
             # Translated at this boundary rather than let through. The server
             # catching a `claude_ipc` exception would put Claude Code knowledge

@@ -70,6 +70,9 @@ class FakePane:
         self.captured.append(project)
         if not self._captures:
             return ""
+        # The LAST entry repeats, so a one element script means "always this".
+        # A longer one is read in order, which is what lets a test say "dirty,
+        # dirty, dirty, then unreadable".
         return self._captures.pop(0) if len(self._captures) > 1 else self._captures[0]
 
 
@@ -176,6 +179,33 @@ def test_a_pane_that_is_not_this_agent_at_all_is_still_stopped() -> None:
     pane = FakePane(["hitchrail-shim: started\nsome output and no input row\n"])
     request_stop(pane, "vessel")
     assert any("/exit" in sent for sent in pane.sent), "refused a pane with no box to protect"
+
+
+def test_a_box_seen_dirty_once_is_never_downgraded_to_unknown() -> None:
+    """Round 1 of review found this, and it is the hazard this check exists for.
+
+    The retry loop kept only the LAST attempt's verdict while "did we see a
+    pane" was sticky across all of them. So a box read as dirty three times and
+    then unreadable on the fourth landed in the "layout we do not know, proceed"
+    branch and typed into the operator's draft: the precise #91 failure, arrived
+    at through the guard rather than around it.
+
+    A `False` anywhere is evidence, and evidence does not expire because a later
+    read failed.
+    """
+    dirty = pane_text(DRAFT_BOX)
+    pane = FakePane([dirty, dirty, dirty, ""])
+    with pytest.raises(StopNotSafe):
+        request_stop(pane, "vessel")
+
+    # Asserted on the keys, not on the exception. With the bug the FIRST
+    # checkpoint proceeds, `Escape` goes out, and the second checkpoint raises
+    # on a pane it cannot read: the same exception type for a different and
+    # much worse reason, with a turn interrupted on the way. Only the key list
+    # tells those apart.
+    assert [sent[1:] for sent in pane.sent] == [GRACEFUL_STOP_KEYS[0]], (
+        "the first checkpoint let a box it had read as dirty through"
+    )
 
 
 def test_request_stop_refuses_a_pane_it_cannot_read() -> None:

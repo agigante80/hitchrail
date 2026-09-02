@@ -113,13 +113,17 @@ while True:
 # Ignores the graceful request. For the stop escalation tests, where the point
 # is what the interface does while nothing is happening.
 #
-# It has to ignore SIGINT, not just `/exit`. The graceful stop is `C-c C-c`
-# and then `/exit`, sent through `send-keys`, and `C-c` in a pane raises
-# SIGINT in the foreground process: a "stubborn" fake that only declines to
-# read `/exit` still dies on the first keystroke. The symptom was a stop
-# escalation test whose session had already stopped, so the dialog closed
-# before the assertion ran and the kill control looked absent when it was
-# there.
+# The SIGINT guard is kept and is no longer what makes this stubborn. It was
+# added when the sequence was `C-c C-c` then `/exit`: `C-c` raises SIGINT in a
+# pane's foreground process, so a fake that only declined to read `/exit` died
+# on the first keystroke, and a stop escalation test found its session already
+# stopped with the kill control apparently absent.
+#
+# #89 replaced those interrupts with `C-u` and `Escape`, neither of which
+# signals anything, so today this body is stubborn because it never reads
+# stdin at all. The guard stays because nothing says the sequence will not
+# carry a signal again, and a fake that dies on one is a confusing failure a
+# long way from its cause.
 STUBBORN_BODY = """
 import signal
 signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -127,19 +131,27 @@ while True:
     time.sleep(0.2)
 """
 
-# Paints a Claude Code input row with a DRAFT in it, then sits there.
+# Paints a bright Claude Code input row and leaves it there.
 #
-# #89: the graceful stop reads the box before it types, and refuses when what
-# it finds is bright text, because appending a stop command to a half typed
-# sentence submits the pair with the operator's authority (#91). Nothing else
-# in this tier can produce that state, and the ordinary shim paints no box at
-# all, so without this the refusal path has no browser test.
+# #89: the graceful stop reads the box before it asks the agent to exit, and
+# refuses when what it finds is bright text, because appending an exit command
+# to a half typed sentence submits the pair with the operator's authority
+# (#91). The ordinary shim paints no input row at all, so without this the
+# refusal path has no browser test.
+#
+# **This models a box that will NOT CLEAR, not a draft**, and the distinction
+# is worth stating because the first version of this comment got it wrong. The
+# row here is printed output, so `C-u` cannot erase it, whereas a real draft
+# lives in the agent's input buffer and `C-u` does erase it. That makes this
+# the MODAL case (#88): a bright row that survives the clear. It is also the
+# only case the first checkpoint can catch in production, since an ordinary
+# draft is gone before the box is ever read.
 #
 # The row is the real one, captured from a live session: U+276F, U+00A0, then
 # text with no dim attribute. `\x1b[39m` in front of it is what the real
 # terminal emits and is kept so the fixture is not a tidied version of the
 # thing it stands in for.
-DRAFT_IN_THE_BOX_BODY = """
+UNCLEARABLE_BOX_BODY = """
 print("\\x1b[39m\\u276f\\u00a0half a sentence", flush=True)
 while True:
     time.sleep(0.2)
@@ -208,7 +220,7 @@ class Harness:
         available_mb: int | None = None,
         stop_timeout: float = 30.0,
         ignores_graceful_stop: bool = False,
-        has_a_draft_in_the_box: bool = False,
+        box_will_not_clear: bool = False,
         agent_exits_immediately: bool = False,
         token: str | None = None,
     ) -> None:
@@ -216,8 +228,8 @@ class Harness:
         body = SHIM_BODY
         if ignores_graceful_stop:
             body = STUBBORN_BODY
-        if has_a_draft_in_the_box:
-            body = DRAFT_IN_THE_BOX_BODY
+        if box_will_not_clear:
+            body = UNCLEARABLE_BOX_BODY
         if agent_exits_immediately:
             body = DYING_BODY
         self._write_shim(_SHIM_HEAD.format(python=sys.executable) + body)

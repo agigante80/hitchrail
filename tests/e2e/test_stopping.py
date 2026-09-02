@@ -68,27 +68,36 @@ async def test_cancel_stops_nothing(page: Page, server: Harness) -> None:
     assert server.is_running("vessel"), "Cancel stopped the session"
 
 
-async def test_a_draft_in_the_box_refuses_the_stop_and_types_nothing(
-    page: Page, server: Harness
-) -> None:
+async def test_a_box_that_will_not_clear_refuses_the_stop(page: Page, server: Harness) -> None:
     """#89, through the whole stack: pane, adapter, engine, API, dialog.
 
-    The agent's input row holds something a person typed. Sending the exit
-    command there appends it to that sentence and submits the pair with their
-    authority (#91), so the sequence reads the box first and declines.
+    The agent's input row is bright and stays bright after the clear, which is
+    the modal case (#88) and the only one the first checkpoint can catch: an
+    ordinary draft is erased by `C-u` before the box is ever read. Sending the
+    exit command into a row like this appends it to whatever is there and
+    submits the pair with the operator's authority (#91), so the sequence reads
+    the box first and declines.
 
     Asserted as words on the screen rather than as a status code, because the
     part that matters is what the person is told: not "that did not work",
-    which describes a request that was made and refused, but that nothing was
-    sent and the session is as they left it.
+    which describes a request that was made and refused, but that the agent was
+    never asked to exit.
+
+    Deliberately NOT "nothing was sent". Round 1 of review caught that wording
+    as false: `C-u` goes out before the first check and `Escape` before the
+    second, so keys have been sent and a turn may have been interrupted by the
+    time this dialog appears. The negative assertion below is the guard.
     """
-    server.seed(running=["vessel"], has_a_draft_in_the_box=True)
+    server.seed(running=["vessel"], box_will_not_clear=True)
     await _open_stop(page, server)
 
     dialog = page.locator("[data-dialog]")
     await dialog.get_by_role("button", name="Stop", exact=True).click()
 
-    await expect(dialog).to_contain_text("Nothing was sent")
+    await expect(dialog).to_contain_text("It was not asked to exit")
+    assert "Nothing was sent" not in (await dialog.inner_text()), (
+        "the dialog claims the session was untouched, and keys were sent"
+    )
     # The session is still there, and still running.
     assert server.is_running("vessel"), "a refused stop stopped something"
     # And it is not showing a spinner for a request nobody made.

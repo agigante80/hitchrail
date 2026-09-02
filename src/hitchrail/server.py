@@ -294,8 +294,13 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
         except eng.StopRefused as exc:
             # 409 and not 503: nothing is broken and asking again changes
             # nothing. The session is in a state where this action is wrong,
-            # which is what every other 409 on this API means. The engine sent
-            # no keys, so there is nothing to undo and nothing in flight.
+            # which is what every other 409 on this API means.
+            #
+            # The agent was NOT left untouched, and an earlier comment here
+            # said it was. The sequence clears the input box and interrupts
+            # before it decides, so a refusal can follow an interrupted turn.
+            # What did not happen is the exit command, which is why there is
+            # nothing in flight and no stop to wait for.
             return _error(409, "stop_unsafe", str(exc))
         except eng.MachineUnreadable as exc:
             return _error(503, "machine_unreadable", str(exc))

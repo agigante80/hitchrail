@@ -109,6 +109,16 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 _SETTLE_S = 0.15
 _SETTLE_TRIES = 4
 
+# Ends every refusal. The person can see the pane and we cannot, so the useful
+# instruction is always the same one.
+_LOOK_YOURSELF = "Open the session in a terminal to see what it is waiting on."
+
+# What every refusal claims, and the precision is the point. Keys have already
+# gone out by the time any check runs: the box was cleared, and at the second
+# checkpoint a turn was interrupted. "Nothing was sent" was the first wording
+# and it was false, which is the exact untruth #89 exists to remove.
+_NOT_SENT = "it was never asked to exit"
+
 
 class StopNotSafe(RuntimeError):
     """The graceful stop was abandoned before anything was typed.
@@ -211,9 +221,23 @@ def request_stop(pane: Pane, project: str, settle: Callable[[], None] | None = N
     channel: nothing the agent sends back could be distinguished from output it
     was already printing, so every check is a look at the pane.
 
-    The box is verified TWICE, and both times before anything is typed into it.
-    The first guards a draft that was already there. The second guards whatever
-    `Escape` did.
+    The box is verified TWICE, and both times before the exit command is typed.
+
+    **The first checkpoint cannot catch an ordinary draft**, and saying that it
+    does was wrong: `C-u` runs before it and erases one. What it catches is a
+    box `C-u` did NOT clear, which is the interesting case rather than a lesser
+    one. A modal is exactly that: the trust prompt at #88 keeps its bright
+    selected row whatever is typed at it, so it arrives here still dirty.
+
+    So `C-u` destroys an unsent draft as a matter of course. That is the trade
+    the sequence makes on purpose, because the alternative is appending an exit
+    command to that draft and submitting the pair with the operator's authority
+    (#91), and a draft in a session somebody is stopping is being discarded
+    either way. Every refusal below says the EXIT COMMAND was not sent rather
+    than that nothing was, because keys have already gone out by then and
+    saying otherwise is the untruth #89 exists to remove, one layer down.
+
+    The second checkpoint guards whatever `Escape` did.
 
     **The second check is not "did the pane change".** That was the agreed
     sequence on #89 and it cannot work: an idle agent has nothing to interrupt,
@@ -232,9 +256,11 @@ def request_stop(pane: Pane, project: str, settle: Callable[[], None] | None = N
     clear, interrupt, quit_keys = GRACEFUL_STOP_KEYS
 
     pane.send_keys(project, *clear)
-    _require_clear(pane, project, wait, "the input box still held text after it was cleared")
+    _require_clear(pane, project, wait, f"the input box in {project} did not come back empty")
     pane.send_keys(project, *interrupt)
-    _require_clear(pane, project, wait, "the input box was not clear after the interrupt")
+    _require_clear(
+        pane, project, wait, f"the input box in {project} filled after the interrupt"
+    )
     pane.send_keys(project, *quit_keys)
 
 
@@ -244,17 +270,30 @@ def _require_clear(pane: Pane, project: str, wait: Callable[[], None], complaint
     `escapes=True` is load bearing: without it the placeholder and a draft are
     the same characters and the distinction this function exists to make cannot
     be made.
+
+    `complaint` names the project itself rather than taking it as a suffix, so
+    each refusal reads as a sentence about a session instead of a fragment with
+    a name appended.
     """
-    saw_something = False
-    verdict: bool | None = None
+    saw_a_box = False
+    saw_a_pane = False
     for attempt in range(_SETTLE_TRIES):
         if attempt:
             wait()
         text = pane.capture_pane(project, escapes=True)
-        saw_something = saw_something or bool(text.strip())
         verdict = input_is_clear(text)
         if verdict is True:
             return
+        # STICKY, both of them. An earlier version kept only the last attempt's
+        # verdict while "did we see a pane" accumulated, so a box read as dirty
+        # three times and unreadable on the fourth fell through to the "layout
+        # we do not know" branch below and was typed into. Evidence of a box
+        # does not expire because a later read failed.
+        saw_a_box = saw_a_box or verdict is False
+        saw_a_pane = saw_a_pane or bool(text.strip())
+
+    if saw_a_box:
+        raise StopNotSafe(f"{complaint}, so {_NOT_SENT}. {_LOOK_YOURSELF}")
 
     # A pane with text in it and no input row at all is not a box we know. It
     # is a vendor whose interface we have never seen, or a version of this one
@@ -270,15 +309,16 @@ def _require_clear(pane: Pane, project: str, wait: Callable[[], None], complaint
     #
     # Decided AFTER the retries, not on the first look, so a session that is
     # merely slow to paint gets its chances first.
-    if verdict is None and saw_something:
+    if saw_a_pane:
         return
 
-    # Nothing readable at all is the other case, and it stays a refusal. An
-    # empty capture is not an empty box: it is a pane we could not see, and
-    # `input_is_clear` returning None for it says exactly that.
+    # Nothing readable at all, on any attempt, and it gets its OWN words. An
+    # empty capture is not an empty box, and it is not a dirty one either:
+    # reusing the caller's complaint here told the person their input box held
+    # text when what actually happened is that the pane could not be read at
+    # all, which sends them looking for the wrong thing.
     raise StopNotSafe(
-        f"{complaint}, so nothing was typed into {project}; "
-        "open the session in a terminal to see what it is waiting on"
+        f"the pane for {project} could not be read, so {_NOT_SENT}. {_LOOK_YOURSELF}"
     )
 
 
