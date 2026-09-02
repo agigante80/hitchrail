@@ -336,6 +336,11 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
             return _error(423, "self_protected", str(exc))
         except eng.NotRunning as exc:
             return _error(409, "not_running", str(exc))
+        except eng.NoAgent as exc:
+            # A detached agent has no session for this route to kill (#83). It
+            # answered 200 while the agent went on running, which a client
+            # cannot tell from a kill that worked.
+            return _error(409, "no_agent", str(exc))
         except eng.MachineUnreadable as exc:
             return _error(503, "machine_unreadable", str(exc))
         return JSONResponse(session.as_dict(), status_code=200)

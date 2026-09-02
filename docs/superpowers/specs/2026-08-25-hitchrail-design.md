@@ -243,6 +243,25 @@ So the state table in 4.1 gains one transient overlay, not a fifth derived
 state: any session may additionally be marked `stopping` while a request is in
 flight. Every consumer treats an unknown or expired marker as absent.
 
+**A second overlay, on the same argument, added at #88.** A running session may
+additionally be marked `awaiting_trust`: the agent is alive and owns its pane,
+and it is sitting on the workspace trust prompt, which only somebody at a
+terminal can answer. `running` is true of it and useless, and the flow
+guaranteed to produce it is Hitchrail's own New folder button, since every
+folder it creates is one the agent has never seen.
+
+Read from the agent's own config, not from the pane. Which folders have been
+trusted is recorded per absolute path in an undocumented file that section 4.4
+quarantines, so this costs one file read for the whole listing rather than a
+`capture-pane` per running row, and it answers the question exactly rather than
+by recognising a wording that is the vendor's to change. When that file cannot
+be read or has moved, the answer is that we do not know, and no row claims
+anything: an empty answer would put the warning on every row at once.
+
+Hitchrail does not answer that prompt. Agreeing to trust a folder on the
+operator's behalf, silently, is a different power from anything else here and
+would need its own argument in section 5.
+
 ### 4.4 Claude Code internals are quarantined
 
 The session link comes from `~/.claude/sessions/<pid>.json`, key

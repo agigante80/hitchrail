@@ -212,6 +212,11 @@ class Harness:
         # tab counts read one too high and every count assertion is off by the
         # harness rather than by the code.
         self._agent = root.parent / f"{root.name}-bin" / "agent"
+        # Beside the shim rather than inside the root, so it is never mistaken
+        # for a project folder by discovery.
+        self._agent_config = root.parent / f"{root.name}-bin" / "agent-config.json"
+        self._agent_config.parent.mkdir(parents=True, exist_ok=True)
+        self._agent_config.write_text("{}")
 
     # -- setup ----------------------------------------------------------
 
@@ -226,6 +231,7 @@ class Harness:
         stopped: list[str] | None = None,
         detached: list[str] | None = None,
         stale: list[str] | None = None,
+        untrusted: list[str] | None = None,
         unsupported: list[str] | None = None,
         self_project: str | None = None,
         available_mb: int | None = None,
@@ -245,7 +251,13 @@ class Harness:
             body = DYING_BODY
         self._write_shim(_SHIM_HEAD.format(python=sys.executable) + body)
 
-        for name in (running or []) + (stopped or []) + (detached or []) + (stale or []):
+        for name in (
+            (running or [])
+            + (stopped or [])
+            + (detached or [])
+            + (stale or [])
+            + (untrusted or [])
+        ):
             (self.root / e2e_name(name)).mkdir(exist_ok=True)
         # NOT prefixed: an unsupported folder is one Hitchrail cannot use, so
         # its name is the point and it never becomes a session.
@@ -258,10 +270,41 @@ class Harness:
         sessions = self.root / ".sessions"
         sessions.mkdir(exist_ok=True)
 
+        # Every seeded project is trusted unless a test says otherwise, because
+        # a real machine has already accepted the folders it works in: 50 of 69
+        # on the development machine. `untrusted` is the fresh folder case,
+        # which is the one Hitchrail's own New folder button guarantees (#88).
+        untrusted_names = {e2e_name(n) for n in untrusted or []}
+        self._agent_config.write_text(
+            json.dumps(
+                {
+                    "projects": {
+                        str(self.root / e2e_name(n)): {"hasTrustDialogAccepted": True}
+                        for n in (running or [])
+                        + (stopped or [])
+                        + (detached or [])
+                        + (stale or [])
+                        if e2e_name(n) not in untrusted_names
+                    }
+                    # A project of our own, always, so the map is never empty:
+                    # an empty `projects` is a shape this reader treats as
+                    # unknown, which would make `untrusted` silently do nothing.
+                    | {str(self.root / ".hitchrail-anchor"): {"hasTrustDialogAccepted": True}}
+                }
+            )
+        )
+
         def build(protect: str | None) -> Config:
             return Config(
                 root=self.root,
                 sessions_dir=sessions,
+                # OURS, never the developer's `~/.claude.json` (#88). That file
+                # decides whether a row says "waiting to be trusted", and every
+                # folder this harness creates is under a pytest temp path that
+                # no real config has ever heard of, so the default would put
+                # that warning on every seeded row and the suite's answer would
+                # depend on whose home directory ran it.
+                agent_config_path=self._agent_config,
                 port=self.port,
                 tmux_socket=self._sock,
                 agent_binary=str(self._agent),

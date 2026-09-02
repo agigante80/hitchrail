@@ -79,6 +79,7 @@ def engine_for(
     table: str = "",
     procs_fn: Callable[[], ProcTable] | None = None,
     self_project: str | None = None,
+    agent_config: Path | None = None,
 ) -> tuple[Engine, FakeTmux]:
     tmux = FakeTmux(sessions=sessions)
     # Pinned INSIDE the temporary root. Without it `Config` defaults to
@@ -89,7 +90,16 @@ def engine_for(
     # collisions with real sessions.
     sessions_dir = root / ".sessions"
     sessions_dir.mkdir(exist_ok=True)
-    config = Config(root=root, self_project=self_project, sessions_dir=sessions_dir)
+    config = Config(
+        root=root,
+        self_project=self_project,
+        sessions_dir=sessions_dir,
+        # Defaults to a path that does not exist, so no test reads the
+        # developer's real `~/.claude.json`. That file decides whether a row
+        # says "waiting to be trusted", and a suite whose answer depends on
+        # which folders this machine happens to have opened is not hermetic.
+        agent_config_path=agent_config or (root / "no-agent-config.json"),
+    )
     return (
         Engine(
             config,
@@ -132,6 +142,83 @@ def test_stale_when_the_only_agent_belongs_to_another_pane(root: Path) -> None:
     engine, _ = engine_for(root, sessions={"vessel": PANE, "vessel-social": 600}, table=table)
     assert state_of(engine, "vessel") is State.STALE
     assert state_of(engine, "vessel-social") is State.RUNNING
+
+
+# -- #88: a running agent that is actually waiting for a person -----------
+
+
+def agent_config(root: Path, trusted: list[str] | None) -> Path:
+    """Claude Code's own config, with the trust map this test wants.
+
+    `None` writes a file whose shape we do not recognise, which is how the
+    quarantine reports "cannot tell" rather than "nothing is trusted".
+    """
+    import json
+
+    path = root / "agent.json"
+    if trusted is None:
+        path.write_text(json.dumps({"something": "else"}))
+    else:
+        path.write_text(
+            json.dumps({"projects": {p: {"hasTrustDialogAccepted": True} for p in trusted}})
+        )
+    return path
+
+
+def test_a_running_agent_in_an_untrusted_folder_says_it_is_waiting(root: Path) -> None:
+    """#88, observed on a real machine: the row said `running`, `url` was null,
+    and the agent was sitting on a trust prompt forever.
+
+    `running` is true by the derivation's own definition, the tmux session is
+    alive and owns a live agent, and it is also useless. The interface cannot
+    answer that prompt and neither can the person holding the phone.
+
+    Read from Claude Code's config rather than from the screen. That answers
+    the question exactly, costs one file read per look rather than a
+    `capture-pane` per running row, and does not depend on a wording that is
+    Claude Code's to change.
+    """
+    engine, _ = engine_for(
+        root,
+        sessions={"vessel": PANE},
+        table=RUNNING_MACHINE[1],
+        agent_config=agent_config(root, trusted=[]),
+    )
+    session = engine.get("vessel")
+    assert session.state is State.RUNNING, "it IS running; that is what makes it a trap"
+    assert session.awaiting_trust is True
+
+
+def test_a_running_agent_in_a_trusted_folder_is_not_waiting(root: Path) -> None:
+    """The positive case, without which flagging everything would pass."""
+    engine, _ = engine_for(
+        root,
+        sessions={"vessel": PANE},
+        table=RUNNING_MACHINE[1],
+        agent_config=agent_config(root, trusted=[str(root / "vessel")]),
+    )
+    assert engine.get("vessel").awaiting_trust is False
+
+
+def test_a_config_we_cannot_read_claims_nothing(root: Path) -> None:
+    """Unknown is not untrusted. A shape change in that undocumented file must
+    not put a warning on every running row at once."""
+    engine, _ = engine_for(
+        root,
+        sessions={"vessel": PANE},
+        table=RUNNING_MACHINE[1],
+        agent_config=agent_config(root, trusted=None),
+    )
+    assert engine.get("vessel").awaiting_trust is False
+
+
+def test_only_a_running_session_can_be_awaiting_trust(root: Path) -> None:
+    """A stopped project in an untrusted folder is not waiting for anything.
+    It would be if somebody started it, and warning before the fact is a
+    different feature from describing what is on screen now."""
+    engine, _ = engine_for(root, agent_config=agent_config(root, trusted=[]))
+    assert engine.get("vessel").state is State.STOPPED
+    assert engine.get("vessel").awaiting_trust is False
 
 
 def test_detached_is_not_stopped(root: Path) -> None:
@@ -1357,6 +1444,48 @@ def test_stopping_a_detached_agent_is_refused_by_state_too(root: Path) -> None:
     assert "no tmux session" in str(refusal.value).lower()
     assert tmux.sent == []
     assert engine.stopping_since("vessel") is None
+
+
+def test_killing_a_detached_agent_does_not_report_a_success_it_did_not_have(
+    root: Path,
+) -> None:
+    """#83, the half that needs no decision about signalling pids.
+
+    `kill` is the reliable path precisely because it kills the tmux SESSION,
+    which works whatever is running in it. A detached agent has no session by
+    definition, so there is nothing for it to target: `kill_session` addressed
+    a name that does not exist, `Tmux._try` discarded the non zero return,
+    `_await_gone` polled a process that never left, and the route answered 200
+    with the agent alive.
+
+    Reporting success for something that did not happen is worse than refusing,
+    and it is the same defect #98 fixed on `stop`, on the other route. Whether
+    Hitchrail should gain the power to signal a bare pid is a separate question
+    and stays open on the ticket.
+    """
+    engine, tmux = engine_for(root, table=ps_row(ORPHAN, 1, project="vessel"))
+    assert state_of(engine, "vessel") is State.DETACHED
+
+    with pytest.raises(NoAgent) as refusal:
+        engine.kill("vessel")
+
+    assert "no tmux session" in str(refusal.value).lower()
+    assert tmux.killed == [], "targeted a session that does not exist"
+    assert state_of(engine, "vessel") is State.DETACHED, "the agent should be untouched"
+
+
+def test_killing_a_stale_session_still_works(root: Path) -> None:
+    """The other half of the same guard, and the reason it is not a blanket ban.
+
+    A stale session HAS a tmux session; only the agent is gone. Killing it is
+    exactly what `Clear` on the row does, and it must keep working, or the one
+    control a stale row offers stops doing anything.
+    """
+    engine, tmux = engine_for(root, sessions={"vessel": PANE}, table=ps_row(PANE, 1))
+    assert state_of(engine, "vessel") is State.STALE
+
+    engine.kill("vessel")
+    assert tmux.killed == ["vessel"]
 
 
 def test_a_failed_kill_keeps_the_stop_indicator(root: Path) -> None:

@@ -114,7 +114,7 @@ class Engine:
     # -- reading -------------------------------------------------------
 
     def _look(self) -> Machine:
-        return derive.look(self._procs_fn, self.tmux)
+        return derive.look(self._procs_fn, self.tmux, self.config.agent_config_path)
 
     def _derive(self, name: str, machine: Machine) -> Session:
         # `self._stopping` is passed unguarded on purpose: see the note on
@@ -540,8 +540,26 @@ class Engine:
 
         Deliberately not agent specific: killing the tmux session works
         whatever is running in it, which is exactly why it is reliable.
+
+        **And why it cannot touch a detached agent** (#83). That agent has no
+        session, so there is nothing here to target. The route used to answer
+        200 anyway: `kill_session` addressed a name that does not exist,
+        `Tmux._try` discarded the non zero return, and `_await_gone` polled a
+        process that never left. Success reported for something that did not
+        happen, which is worse than a refusal.
+
+        Whether Hitchrail should gain the power to signal a bare pid is a
+        design question with a security argument attached, and it stays open on
+        #83. Every destructive path today is scoped by the session prefix, and
+        a pid is not.
         """
-        self._require_live(name)
+        session = self._require_live(name)
+        if session.state is State.DETACHED:
+            raise NoAgent(
+                f"the agent for {name} has no tmux session, so there is "
+                f"nothing here to kill; its process, {session.pid}, has to be "
+                "ended directly"
+            )
         try:
             self.tmux.kill_session(name)
         except TmuxUnavailable as exc:

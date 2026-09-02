@@ -209,6 +209,7 @@ async def test_the_stream_carries_the_whole_session_shape(live: Fixture) -> None
         "url",
         "stopping",
         "protected",
+        "awaiting_trust",
     }
 
 

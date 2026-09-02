@@ -286,3 +286,41 @@ async def test_a_link_that_does_not_point_at_claude_is_not_rendered(
             hostile,
         )
         assert rendered == 0, f"{hostile} was rendered as a link"
+
+
+# -- #88: a running agent that is waiting for a person ---------------------
+
+
+async def test_an_untrusted_folder_does_not_render_as_an_ordinary_running_row(
+    page: Page, server: Harness
+) -> None:
+    """#88, through the whole stack.
+
+    Observed on a real machine: the row said `running`, `url` was null, and the
+    agent sat on a trust prompt forever. `running` is true by the derivation's
+    own definition and it is also useless, because nothing in this interface
+    can answer that prompt and neither can a person holding a phone.
+
+    The flow that guarantees this is Hitchrail's own: every folder its New
+    folder button creates is one Claude Code has never seen.
+    """
+    server.seed(running=["vessel"], untrusted=["vessel"])
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row).to_be_visible()
+
+    # Still running, because it is. The badge is what must not say so alone.
+    await expect(row).to_have_attribute("data-state", "running")
+    await expect(row).to_contain_text("waiting")
+    await expect(row).to_contain_text("open it once in a terminal")
+
+
+async def test_a_trusted_folder_renders_as_an_ordinary_running_row(
+    page: Page, server: Harness
+) -> None:
+    """The positive half. Without it, a warning on every row would pass."""
+    server.seed(running=["vessel"])
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row).to_have_attribute("data-state", "running")
+    assert "waiting to be trusted" not in (await row.inner_text())

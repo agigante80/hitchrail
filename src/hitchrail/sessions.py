@@ -168,6 +168,12 @@ class Session:
     url: str | None = None
     stopping: bool = False
     protected: bool = False
+    # An OVERLAY on the four states, like `stopping`, and not a fifth one (#88).
+    # The session really is running: the tmux session is alive and owns a live
+    # agent. It is also stuck on a prompt only a person at a terminal can
+    # answer, so a row that says nothing but `running` is telling the truth and
+    # misleading anyway.
+    awaiting_trust: bool = False
 
     def as_dict(self) -> dict[str, object]:
         """Serialising a session is not HTTP knowledge.
@@ -185,4 +191,5 @@ class Session:
             "url": self.url,
             "stopping": self.stopping,
             "protected": self.protected,
+            "awaiting_trust": self.awaiting_trust,
         }

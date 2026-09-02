@@ -196,6 +196,12 @@ function badgeFor(project) {
   // controller badge replaces the state badge rather than sitting beside it.
   if (project.protected) return "controller";
   if (project.stopping) return "stopping";
+  // #88. `running` is true and useless here: the agent is alive and sitting on
+  // a prompt that only somebody at a terminal can answer, so it will sit there
+  // forever. A row saying nothing but "running" is the interface asserting
+  // something it knows to be misleading, which the design forbids everywhere
+  // else. An overlay like `stopping`, not a fifth state.
+  if (project.awaiting_trust) return "waiting";
   return project.state;
 }
 
@@ -206,6 +212,11 @@ function metaFor(project) {
     return `pid ${project.pid}  ·  no tmux session`;
   }
   if (project.state === "stale") return "no agent in the session";
+  // Says what to do, because nothing here can do it. Hitchrail cannot answer
+  // that prompt on the operator's behalf: that would be agreeing to trust a
+  // folder for them, silently, which needs its own argument and does not have
+  // one (#88).
+  if (project.awaiting_trust) return "waiting to be trusted  ·  open it once in a terminal";
   if (project.pid === null) return "";
   return `${formatMb(project.ram_mb)}  ·  up ${formatUptime(project.uptime_s)}`;
 }

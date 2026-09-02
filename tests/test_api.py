@@ -33,6 +33,14 @@ from hitchrail.tmux import TmuxUnavailable
 pytestmark = pytest.mark.integration
 
 
+# A path that does not exist, so `trusted_folders` answers "cannot tell" and no
+# row claims anything about trust. Without it every Config here defaults to the
+# real `~/.claude.json`, and whether a test row says "waiting to be trusted"
+# would depend on which folders the machine running the suite has opened. Same
+# hazard as #94, one file over.
+NO_AGENT_CONFIG = pathlib.Path("/nonexistent/hitchrail-tests/agent.json")
+
+
 @pytest.fixture
 def root(tmp_path: pathlib.Path) -> pathlib.Path:
     """`vessel-social` and `dotted.site` are not decoration.
@@ -48,7 +56,7 @@ def root(tmp_path: pathlib.Path) -> pathlib.Path:
 
 @pytest.fixture
 def config(root: pathlib.Path) -> Config:
-    return Config(root=root, sessions_dir=root / ".sessions")
+    return Config(root=root, sessions_dir=root / ".sessions", agent_config_path=NO_AGENT_CONFIG)
 
 
 RUNNING_PS = """\
@@ -62,6 +70,12 @@ RUNNING_PS = """\
 # has to carry it.
 STALE_PS = """\
  500     1   4096   600 tmux new-session -d -s hr-vessel
+"""
+
+# An agent with no tmux session owning it: `detached`. There is no tmux server
+# row here at all, which is what makes the pane map empty for this project.
+DETACHED_PS = """\
+ 900     1 512000   600 claude --dangerously-skip-permissions --remote-control vessel
 """
 
 STARTED_PS = """\
@@ -361,6 +375,34 @@ async def test_delete_never_kills_whatever_the_query_string(
     assert tmux.killed == [], "a query parameter reached the kill path"
 
 
+async def test_killing_a_detached_agent_is_409_and_not_a_false_200(
+    config: Config,
+) -> None:
+    """#83. The route answered 200 with the agent still alive.
+
+    `kill_session` targets `hr-<name>`, and a detached agent is by definition
+    one no such session owns, so there was nothing to kill and nothing said so.
+    A client cannot tell that from a kill that worked, which is the whole
+    problem: the interface would render the row as gone and the next listing
+    would bring it back.
+    """
+    # No tmux sessions at all: an agent no pane owns is the whole of what
+    # `detached` means, so the module fixture's `{"vessel": 500}` would make
+    # this stale instead.
+    tmux = FakeTmux(sessions={})
+    detached = make_engine(config, tmux, procs_from(DETACHED_PS))
+    async with client_for(detached, config) as c:
+        listed = (await c.get("/api/projects", headers=HEADERS)).json()["projects"]
+        row = next(p for p in listed if p["name"] == "vessel")
+        assert row["state"] == "detached", "the machine under this test is not detached"
+
+        r = await c.post("/api/sessions/vessel/kill", headers=HEADERS)
+
+    assert r.status_code == 409
+    assert r.json()["code"] == "no_agent"
+    assert tmux.killed == [], "targeted a session that does not exist"
+
+
 async def test_kill_without_a_preceding_stop_is_accepted_by_the_api(
     client: httpx.AsyncClient, engine: Engine, tmux: FakeTmux
 ) -> None:
@@ -385,7 +427,12 @@ async def test_the_kill_route_is_origin_checked_like_every_mutating_route(
 async def test_the_protected_project_is_423(root: pathlib.Path, config: Config) -> None:
     from hitchrail.config import Config
 
-    cfg = Config(root=root, sessions_dir=root / ".s", self_project="vessel")
+    cfg = Config(
+        root=root,
+        sessions_dir=root / ".s",
+        agent_config_path=NO_AGENT_CONFIG,
+        self_project="vessel",
+    )
     engine = make_engine(cfg, FakeTmux(sessions={"vessel": 500}), procs_from(RUNNING_PS))
     async with client_for(engine, cfg) as c:
         r = await c.delete("/api/sessions/vessel", headers=HEADERS)
@@ -580,7 +627,12 @@ async def test_a_root_that_has_gone_away_is_503_not_an_empty_list(
 async def test_starting_the_self_project_is_423_not_500(root: pathlib.Path) -> None:
     """The route where the protection matters most: it is the one that would
     put a SECOND agent in the folder Hitchrail is running in."""
-    config = Config(root=root, sessions_dir=root / ".sessions", self_project="vessel")
+    config = Config(
+        root=root,
+        sessions_dir=root / ".sessions",
+        agent_config_path=NO_AGENT_CONFIG,
+        self_project="vessel",
+    )
     engine = make_engine(config, FakeTmux(), procs_from(""))
     async with client_for(engine, config) as c:
         r = await c.post("/api/sessions/vessel", headers=HEADERS)
@@ -592,7 +644,12 @@ async def test_starting_the_self_project_is_423_not_500(root: pathlib.Path) -> N
 async def test_the_self_project_cannot_be_stopped_or_killed(
     root: pathlib.Path, path: str
 ) -> None:
-    config = Config(root=root, sessions_dir=root / ".sessions", self_project="vessel")
+    config = Config(
+        root=root,
+        sessions_dir=root / ".sessions",
+        agent_config_path=NO_AGENT_CONFIG,
+        self_project="vessel",
+    )
     engine = make_engine(config, FakeTmux(sessions={"vessel": 500}), procs_from(RUNNING_PS))
     method = "POST" if path.endswith("/kill") else "DELETE"
     async with client_for(engine, config) as c:
@@ -960,7 +1017,12 @@ async def test_the_page_is_behind_the_token(tmp_path: pathlib.Path) -> None:
     """#21 argued it and kept it behind the token: `/grant` is the door, and
     the shell stays shut so no future addition to it inherits an exemption."""
     (tmp_path / "vessel").mkdir()
-    config = Config(root=tmp_path, sessions_dir=tmp_path / ".s", token="s3cret")
+    config = Config(
+        root=tmp_path,
+        sessions_dir=tmp_path / ".s",
+        agent_config_path=NO_AGENT_CONFIG,
+        token="s3cret",
+    )
     engine = make_engine(config, FakeTmux(), procs_from(""))
     async with client_for(engine, config) as c:
         for path in ("/", "/app.css", "/app.js"):
@@ -972,7 +1034,12 @@ async def test_the_page_is_behind_the_token(tmp_path: pathlib.Path) -> None:
 
 def _token_app(tmp_path: pathlib.Path) -> tuple[Engine, Config]:
     (tmp_path / "vessel").mkdir()
-    config = Config(root=tmp_path, sessions_dir=tmp_path / ".s", token="s3cret")
+    config = Config(
+        root=tmp_path,
+        sessions_dir=tmp_path / ".s",
+        agent_config_path=NO_AGENT_CONFIG,
+        token="s3cret",
+    )
     return make_engine(config, FakeTmux(), procs_from("")), config
 
 

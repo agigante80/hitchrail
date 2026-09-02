@@ -215,6 +215,59 @@ class Pane(Protocol):
     ) -> str: ...
 
 
+# Where Claude Code records which folders it has been trusted with, and the one
+# key we read out of it.
+#
+# Confirmed against a real file on 2026-09-02: `projects` is a map keyed by
+# ABSOLUTE PATH, and each entry carries `hasTrustDialogAccepted`. That machine
+# had 69 entries, 50 of them accepted, which is why every real project started
+# cleanly and why #88 was invisible until Hitchrail met a fresh root.
+_PROJECTS_KEY = "projects"
+_TRUST_KEY = "hasTrustDialogAccepted"
+
+
+def trusted_folders(config_path: Path) -> frozenset[str] | None:
+    """Absolute paths Claude Code will not show a trust prompt for, or `None`.
+
+    `None` means we could not tell, and it is deliberately not an empty set.
+    Empty would say every folder is untrusted, which would put a warning on
+    every running row at once the first time this file changes shape. Unknown
+    says nothing, which is what the quarantine promises when Claude Code moves.
+
+    **Only the trust flag is read.** That file holds a great deal more, 248KB
+    of it on the development machine: MCP server definitions, per project token
+    counts and costs, session ids, an account email. Returning a set of paths
+    rather than the parsed document is what keeps any of it from reaching a
+    row, a log or an event.
+
+    A file rather than a pane, and that is the point (#88). Reading the screen
+    would cost a `capture-pane` per running row on every listing, which is the
+    cost the design refused for the session link. This is one file read per
+    look, and it answers the question exactly rather than by recognising a
+    wording that is Claude Code's to change.
+
+    Present and false is not the same as absent, and both mean the prompt will
+    appear, so only an explicit true counts.
+    """
+    try:
+        raw = json.loads(config_path.read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    projects = raw.get(_PROJECTS_KEY)
+    if not isinstance(projects, dict):
+        return None
+    entries = {p: e for p, e in projects.items() if isinstance(e, dict)}
+    if projects and not entries:
+        # A populated map in which nothing is a recognisable entry is a shape
+        # change, not a machine with odd projects, and the answer to a shape
+        # change is that we do not know. One strange entry among many is the
+        # other case and is simply skipped: an empty set here would be a claim.
+        return None
+    return frozenset(p for p, e in entries.items() if e.get(_TRUST_KEY) is True)
+
+
 def launch_argv(binary: str, project: str) -> list[str]:
     """The argv that starts an agent. A LIST, never a string.
 

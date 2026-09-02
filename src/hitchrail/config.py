@@ -88,6 +88,11 @@ class Config:
     # The default is Claude Code's state directory. The field name is neutral
     # because the directory is the agent adapter's business, not the server's.
     sessions_dir: Path = field(default_factory=lambda: Path.home() / ".claude" / "sessions")
+    # Where the agent records which folders it has been trusted with (#88).
+    # A seam like `sessions_dir` beside it, for the same reason: the engine has
+    # to be testable without the developer's own home directory deciding what
+    # a row says.
+    agent_config_path: Path = field(default_factory=lambda: Path.home() / ".claude.json")
     tmux_socket: str | None = None
     self_project: str | None = None
     resolver: Resolver | None = None

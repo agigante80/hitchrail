@@ -19,6 +19,7 @@ from hitchrail.claude_ipc import (
     input_is_clear,
     launch_argv,
     request_stop,
+    trusted_folders,
 )
 
 SRC = Path(__file__).parent.parent / "src" / "hitchrail"
@@ -566,3 +567,87 @@ def test_a_pane_agreeing_with_the_bridge_logs_nothing(
     with caplog.at_level(logging.DEBUG, logger="hitchrail.claude_ipc"):
         claude_ipc.session_url(31, tmp_path, pane_text="https://claude.ai/code/session_same")
     assert not [r for r in caplog.records if "differ" in r.message]
+
+
+# -- #88: which folders Claude Code has been trusted with ------------------
+
+
+def write_agent_config(tmp_path: Path, payload: object) -> Path:
+    import json
+
+    path = tmp_path / "agent.json"
+    path.write_text(json.dumps(payload))
+    return path
+
+
+def test_a_trusted_folder_is_read_from_the_projects_map(tmp_path: Path) -> None:
+    """The shape, confirmed against a real `~/.claude.json` on 2026-09-02: a
+    `projects` map keyed by ABSOLUTE PATH, each carrying
+    `hasTrustDialogAccepted`. 69 entries on that machine, 50 accepted."""
+    path = write_agent_config(
+        tmp_path,
+        {"projects": {"/srv/a": {"hasTrustDialogAccepted": True}}},
+    )
+    assert trusted_folders(path) == frozenset({"/srv/a"})
+
+
+def test_a_folder_that_declined_the_prompt_is_not_trusted(tmp_path: Path) -> None:
+    """Present and false is a different thing from absent, and both mean the
+    prompt will appear. Only an explicit true counts."""
+    path = write_agent_config(
+        tmp_path,
+        {
+            "projects": {
+                "/srv/yes": {"hasTrustDialogAccepted": True},
+                "/srv/no": {"hasTrustDialogAccepted": False},
+                "/srv/never-asked": {},
+            }
+        },
+    )
+    assert trusted_folders(path) == frozenset({"/srv/yes"})
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [{}, {"projects": []}, {"projects": {"/srv/a": "not a dict"}}, "not an object"],
+    ids=["no projects key", "projects is a list", "entry is not a map", "not an object"],
+)
+def test_an_unrecognised_config_is_unknown_rather_than_untrusted(
+    tmp_path: Path, payload: object
+) -> None:
+    """`None`, never an empty set. This file is undocumented and will change,
+    and an empty set would say every folder is untrusted, which would put a
+    warning on every running row at once. Unknown says nothing, which is what
+    the quarantine promises when Claude Code moves."""
+    assert trusted_folders(write_agent_config(tmp_path, payload)) is None
+
+
+def test_a_missing_config_is_unknown(tmp_path: Path) -> None:
+    assert trusted_folders(tmp_path / "nope.json") is None
+
+
+def test_unreadable_json_is_unknown(tmp_path: Path) -> None:
+    path = tmp_path / "broken.json"
+    path.write_text("{not json")
+    assert trusted_folders(path) is None
+
+
+def test_only_the_trust_flag_is_read_out_of_that_file(tmp_path: Path) -> None:
+    """It holds far more than this, 248KB of it on the development machine:
+    MCP server definitions, per project token counts, session ids. This reads
+    one boolean per project and returns paths, so nothing else can leak into a
+    row, a log or an event."""
+    path = write_agent_config(
+        tmp_path,
+        {
+            "oauthAccount": {"emailAddress": "someone@example.com"},
+            "projects": {
+                "/srv/a": {
+                    "hasTrustDialogAccepted": True,
+                    "mcpServers": {"secret": {"command": "/usr/bin/thing"}},
+                    "lastSessionId": "session_abc",
+                }
+            },
+        },
+    )
+    assert trusted_folders(path) == frozenset({"/srv/a"})

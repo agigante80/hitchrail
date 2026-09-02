@@ -238,6 +238,11 @@ main { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
 .badge[data-badge="stale"] { background: var(--warn-tint); color: var(--warn); }
 .badge[data-badge="controller"] { background: var(--accent); color: #FFFDFA; }
 .badge[data-badge="stopping"] { background: var(--warn); color: #FFFDFA; }
+/* #88. Warn rather than running: the agent is alive and going nowhere until
+   somebody answers a prompt at a terminal, which is a state to notice and not
+   a healthy one. Solid rather than tinted, like `stopping`, because both are
+   overlays that say the row needs watching rather than describing what it is. */
+.badge[data-badge="waiting"] { background: var(--warn); color: #FFFDFA; }
 
 .empty-title { font-family: 'Zilla Slab', Georgia, serif; font-size: 18px; margin: 24px 0 4px; }
 .empty-body { color: var(--muted); margin: 0 0 24px; }
