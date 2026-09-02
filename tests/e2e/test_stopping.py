@@ -37,6 +37,22 @@ async def test_the_confirm_step_offers_only_cancel_and_stop(
     assert await dialog.get_by_role("button", name="kill").count() == 0
 
 
+async def test_the_confirm_step_does_not_promise_a_graceful_finish(
+    page: Page, server: Harness
+) -> None:
+    """#89: the screen said "It will be asked to finish what it is doing" while
+    the mechanism sent an interrupt first. The interface may not describe an
+    etiquette the sequence does not perform, and the negative half is the half
+    that matters: a body that says both things passes the positive check."""
+    server.seed(running=["vessel"])
+    await _open_stop(page, server)
+
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text("interrupted")
+    await expect(dialog).to_contain_text("part way through may be lost")
+    assert "finish what it is doing" not in (await dialog.inner_text())
+
+
 async def test_cancel_stops_nothing(page: Page, server: Harness) -> None:
     """The safe exit has to actually be safe."""
     server.seed(running=["vessel"])

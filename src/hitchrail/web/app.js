@@ -518,7 +518,14 @@ function showDialog({ title, body, actions, extra, forProject }) {
 function confirmStop(project) {
   showDialog({
     title: `Stop ${project.name}?`,
-    body: "It will be asked to finish what it is doing.",
+    // #89: this used to say "It will be asked to finish what it is doing",
+    // which no version of the sequence has ever done. The first thing sent is
+    // an interrupt. Say that, and carry the warning about part done work here
+    // rather than only on the kill screen, because the interrupt is where the
+    // work is lost and the kill screen is thirty seconds too late to say so.
+    body:
+      "It will be interrupted, then asked to exit. " +
+      "Anything it is part way through may be lost.",
     // Cancel and Stop, and nothing else. A kill control at this step puts the
     // destructive path under the thumb at the same weight as the safe one.
     actions: [
@@ -544,7 +551,10 @@ async function beginStop(project) {
 function showWaiting(project) {
   showDialog({
     title: `Stopping ${project.name}`,
-    body: "Waiting for it to finish.",
+    // Waiting for it to exit, not to finish: the interrupt has already been
+    // sent by the time this screen appears, so the wait is for the process to
+    // go, not room for the agent to land.
+    body: "Waiting for it to exit.",
     forProject: project.name,
     actions: [
       // "Hide, keep stopping" first: a modal that owns a phone screen for
