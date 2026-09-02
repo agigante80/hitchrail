@@ -899,7 +899,7 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.
         "engine.py": 731,
-        # 466. tmux.py is the module that encodes what tmux actually does
+        # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
         # `list-panes` and `set-option` both need, a rewritten dot, a pane that
@@ -908,15 +908,21 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # Deleting them to reclaim lines would delete the reason the
         # workarounds look wrong, which is the one thing a reader needs.
         #
-        # Raised from 425 for #84's `is_tmux_argv` and again for #89's `-e`
-        # capture option, both added behaviour rather than growth, which the
-        # note above permits with a reason.
+        # Raised from 425 for #84's `is_tmux_argv`, again for #89's `-e`
+        # capture option, and again for #67's call bound and the note about
+        # what a timeout leaves behind. All added behaviour rather than growth,
+        # which the note above permits with a reason.
+        #
+        # The number is not repeated in this comment any more. It was written
+        # as "466." while the cap said 485, which is the same decay the
+        # security.py note below warns about and this file's own test forbids
+        # in the documents.
         # **There IS a seam here now**, and it is #93 rather than a bump next
         # time: `sanitize`, `_needs_encoding` and their two constants are the
         # name vocabulary, pure and subprocess free, sitting beside an adapter
         # that spawns things. That is the same split #18 already made when it
         # took the host vocabulary out of config.py into hostnames.py.
-        "tmux.py": 485,
+        "tmux.py": 505,
         # 413, and thirteen lines over the guideline is not a second job. #18
         # already took the host vocabulary out of this file, and what is left
         # is one dataclass and its startup refusals, which is one thing. The

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import subprocess
+import tempfile
 import time
 from pathlib import Path
+
 import pytest
 from playwright.async_api import Page, expect
 
@@ -343,7 +345,13 @@ async def test_the_leak_detectors_can_actually_see_a_stray_server(
     so cannot leave the thing these are looking for. The real leak arrives when
     a session is created after that kill, which a test body cannot arrange.
     """
-    sock = str(tmp_path / "s")
+    # A SHORT socket path, from `tempfile.mkdtemp`, not from `tmp_path`. The
+    # `server` fixture goes out of its way to do the same: a unix socket path is
+    # capped near 108 bytes and a pytest temp path plus a name can exceed it,
+    # which surfaces as an opaque tmux error rather than as a length problem,
+    # and `check=True` below would turn that into a puzzling failure.
+    sock_dir = tempfile.mkdtemp(prefix="hrleak")
+    sock = str(Path(sock_dir) / "s")
     subprocess.run(
         [
             "env",

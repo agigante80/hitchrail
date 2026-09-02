@@ -263,9 +263,18 @@ class Tmux:
             # Both mean we did not get an answer, and the honest report for
             # that is the same one: we cannot say what is running. A traceback
             # out of a request handler would say something much less useful.
+            #
+            # The REASON, never the exception's own text. `TimeoutExpired`
+            # stringifies as the entire argv, and this message becomes the body
+            # of a 503 that a client reads, so it would hand over the socket
+            # path, the projects root and the agent binary's path to anyone who
+            # could make tmux hang. The `OSError` arm did not have that problem
+            # and quietly acquired it when the timeout was folded in. The
+            # original is chained, so a log still has everything.
             raise TmuxUnavailable(
-                f"tmux could not be run ({exc}), so no session state can be "
-                "determined; this is not the same as no sessions existing"
+                f"tmux could not be run ({type(exc).__name__}), so no session "
+                "state can be determined; this is not the same as no sessions "
+                "existing"
             ) from exc
 
     def has_session(self, project: str) -> bool:
@@ -381,6 +390,17 @@ class Tmux:
         succeeds, because left on it changes the normal path too: a graceful
         exit would leave a dead pane, the session would linger, and the engine
         would derive `stale` where the truth is `stopped`.
+
+        **A timeout here leaves a mess this method cannot clean** (#67, found in
+        review). `subprocess` kills the tmux CLIENT it was waiting on, not the
+        server, so the session may exist with `remain-on-exit` still on while
+        the caller is told tmux was unavailable and never reaches the release.
+        That session then reads `stale` for as long as it lives.
+        Deliberately not handled here: guessing at whether a session was created
+        means asking tmux again, which is the call that just failed, and the
+        honest report is still that we do not know. The engine's dead start
+        cleanup is the place that already reasons about a start that did not
+        come up, and #102 carries it.
         """
         self._try(
             self._argv(

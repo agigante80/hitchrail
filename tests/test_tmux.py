@@ -13,7 +13,9 @@ from pathlib import Path
 
 import pytest
 
+from hitchrail.procs import _default_runner as procs_runner
 from hitchrail.tmux import NotOurSession, Tmux, TmuxUnavailable, sanitize
+from hitchrail.tmux import _default_runner as tmux_runner
 
 # -- sanitize --------------------------------------------------------------
 
@@ -432,34 +434,38 @@ def test_a_tmux_that_runs_and_says_no_is_still_just_no() -> None:
 # -- #67: an unbounded subprocess call in a request path is a hang ---------
 
 
-def test_the_tmux_runner_bounds_how_long_it_will_wait() -> None:
-    """#67's third candidate, and the one that is a defect whatever CI is doing.
+@pytest.mark.parametrize(
+    "runner",
+    [tmux_runner, procs_runner],
+    ids=["tmux", "process table"],
+)
+def test_both_default_runners_pass_a_bound_to_subprocess(
+    runner: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#67's third candidate, and a defect whatever CI is doing.
 
-    Every one of these runs inside an HTTP handler. `subprocess.run` with no
-    timeout waits forever, so a tmux that blocks, on a loaded machine, an NFS
-    home, a server mid restart, does not make the listing slow: it makes the
-    request never answer, and the browser wait with it.
+    Both of these run inside an HTTP handler. `subprocess.run` with no timeout
+    waits forever, so a tmux that blocks, on a loaded machine, an NFS home, a
+    server part way through a restart, does not make the listing slow: it makes
+    the request never answer and the browser wait with it.
 
-    Driven against a real process that would outlast the bound, because a fake
-    would only prove the argument was passed.
+    Asserted on the CALL rather than by spawning something slow. This tier is
+    hermetic with every external surface faked, per `.claude/CLAUDE.md`, and a
+    real `sleep 30` in it is exactly the kind of thing that tier exists not to
+    have. That the bound then WORKS is `subprocess`'s business and is checked
+    where a real process is already allowed, in `test_live_tmux.py`.
     """
-    import subprocess
+    seen: dict[str, object] = {}
 
-    from hitchrail.tmux import _default_runner
+    def fake_run(argv: list[str], **kw: object) -> object:
+        seen.update(kw)
+        return subprocess.CompletedProcess(argv, 0, "", "")
 
-    with pytest.raises(subprocess.TimeoutExpired):
-        _default_runner(["sleep", "30"], timeout=0.3)
-
-
-def test_the_process_table_runner_bounds_it_too() -> None:
-    """The same call in the other adapter. `ps` blocks on a wedged filesystem
-    the same way, and it runs on every listing."""
-    import subprocess
-
-    from hitchrail.procs import _default_runner
-
-    with pytest.raises(subprocess.TimeoutExpired):
-        _default_runner(["sleep", "30"], timeout=0.3)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    runner(["tmux", "list-panes"])  # type: ignore[operator]
+    bound = seen.get("timeout")
+    assert isinstance(bound, float), "no bound reached subprocess.run"
+    assert 0 < bound <= 30, "the bound is not a bound"
 
 
 def test_a_tmux_that_never_answers_becomes_an_honest_refusal() -> None:

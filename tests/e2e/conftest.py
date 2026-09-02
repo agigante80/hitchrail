@@ -39,6 +39,7 @@ socket path is capped near 108 bytes and a pytest tmp_path can exceed it.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import shutil
@@ -437,13 +438,46 @@ class Harness:
         )
         return result.stdout.split() if result.returncode == 0 else []
 
-    def processes_still_naming(self, sock: str) -> list[str]:
+    def processes_still_naming(self, sock: str, grace: float = 0.0) -> list[str]:
         """Any process whose argv mentions this socket, tmux servers included.
 
         Deliberately NOT excluding tmux here, unlike the agent reaper: a tmux
         server is exactly what this is looking for.
+
+        `grace` because a server told to die is not dead yet, and a scan taken
+        the instant `kill-server` returns fails a run over one that was about to
+        exit. Returns as soon as nothing is left, so the wait costs nothing on
+        the ordinary path.
         """
-        return self._rows_mentioning(sock, agents_only=False)
+        deadline = time.monotonic() + grace
+        while True:
+            rows = self._rows_mentioning(sock, agents_only=False)
+            if not rows or time.monotonic() >= deadline:
+                return rows
+            time.sleep(0.05)
+
+    def end_stragglers(self, rows: list[str]) -> None:
+        """Kill what the scan found, by pid, so it cannot outlive the run.
+
+        Matched back to pids through a second `ps` rather than parsed out of the
+        rows, because the rows are argv only. Signals nothing whose argv does
+        not still name this harness's socket, which is the whole scoping here:
+        these are processes only this run could have created.
+        """
+        if not rows:
+            return
+        table = subprocess.run(
+            ["ps", "-eww", "-o", "pid,args", "--no-headers"],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout
+        wanted = set(rows)
+        for line in table.splitlines():
+            pid, _, args = line.strip().partition(" ")
+            if args.strip() in wanted and pid.isdigit():
+                with contextlib.suppress(OSError):
+                    os.kill(int(pid), signal.SIGTERM)
 
     def reap_orphans(self) -> None:
         """Anything spawned outside tmux is ours to clean up.
@@ -752,15 +786,27 @@ def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Harness]:
         #
         # Asked of the SERVER, before the socket is removed.
         survivors = harness.sessions_on_the_socket(sock)
-        # And of `ps` afterwards, which is the check that would actually have
-        # caught the leak: that server's socket directory was already gone, so
+        # And of `ps`, which is the check that would actually have caught the
+        # observed leak: that server's socket directory was already gone, so
         # nothing could address it, while its argv still named the socket. A
         # session created between the kill above and this line lands here too,
         # which is the suspected mechanism and what #67 may also be.
+        #
+        # BEFORE the socket directory is removed, and with a grace period.
+        # Scanning after the `rmtree` made teardown ITSELF the thing that put
+        # the server beyond reach, so the assertion announced the accumulation
+        # it exists to stop while doing nothing about it. Scanning with no wait
+        # failed a passing run over a server milliseconds from exiting.
+        stragglers = harness.processes_still_naming(sock, grace=3.0)
+        # Reported AND ended. A check that only complains leaves the next run to
+        # meet the same server, which is how one of these reached 3.4 hours.
+        harness.end_stragglers(stragglers)
         shutil.rmtree(sock_dir, ignore_errors=True)
-        stragglers = harness.processes_still_naming(sock)
-        # Last, so a server that would not stop is reported rather than
-        # swallowed, and reported only once everything else has been released.
+        # FIRST of the three, because a serving thread that would not stop is
+        # the failure most likely to have caused the other two, and an assert
+        # that fires swallows every assert after it. An earlier version of this
+        # comment said "last, so it is reported rather than swallowed", which
+        # was true when it was the only one.
         assert harness.stopped_cleanly, "the server thread did not stop"
         assert survivors == [], f"sessions outlived the kill-server: {survivors}"
         assert stragglers == [], (
