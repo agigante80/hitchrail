@@ -319,3 +319,45 @@ async def test_a_stop_that_never_reached_the_server_says_so(
     await expect(dialog).not_to_contain_text("Waiting for it to finish")
     # And the session is untouched, because nothing was ever sent.
     assert server.is_running("vessel")
+
+
+# -- #98: a session with no agent in it ------------------------------------
+
+
+async def test_a_stale_row_offers_clear_rather_than_a_stop_that_would_refuse(
+    page: Page, server: Harness
+) -> None:
+    """#98. A stale session has no agent, so there is nothing to ask to exit.
+
+    The API answers `no_agent` every time, and the row used to offer Stop
+    anyway. `renderRow` already carries the argument against that, about a
+    different status code: an interface that lets you reach a refusal has
+    failed the person holding the phone, because refusing after the tap is
+    worse than not offering the tap.
+    """
+    server.seed(stale=["vessel"])
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row).to_have_attribute("data-state", "stale")
+
+    await expect(row.get_by_role("button", name="Clear")).to_be_visible()
+    assert await row.get_by_role("button", name="Stop").count() == 0
+
+
+async def test_clearing_a_stale_session_removes_it(page: Page, server: Harness) -> None:
+    """The control has to ACT, not merely appear.
+
+    #83 is the same control on a detached row with no handler behind it, found
+    by a browser test that asserted visibility and nothing else. Asserting the
+    session is gone is what that test should have done.
+    """
+    server.seed(stale=["vessel"])
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await row.get_by_role("button", name="Clear").click()
+
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text(f"Clear {server.project('vessel')}?")
+    await dialog.get_by_role("button", name="Clear", exact=True).click()
+
+    await expect(row).to_have_attribute("data-state", "stopped", timeout=15_000)

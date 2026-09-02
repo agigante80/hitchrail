@@ -56,6 +56,12 @@ RUNNING_PS = """\
  501   500 512000   600 claude --dangerously-skip-permissions --remote-control vessel
 """
 
+# The tmux session is alive and nothing of ours is in it. `stale`, which is the
+# state the interface still offers Stop on.
+STALE_PS = """\
+ 500     1   4096   600 tmux new-session -d -s hr-vessel
+"""
+
 STARTED_PS = """\
  1001     1   4096      5 tmux new-session -d -s hr-network
  1002  1001 300000      5 claude --dangerously-skip-permissions --remote-control network
@@ -288,6 +294,37 @@ async def test_a_refused_stop_leaves_the_session_alone(
     listed = (await client.get("/api/projects", headers=HEADERS)).json()["projects"]
     row = next(s for s in listed if s["name"] == "vessel")
     assert row["stopping"] is False
+
+
+async def test_stopping_a_stale_session_is_409_no_agent(config: Config, tmux: FakeTmux) -> None:
+    """#98. A different refusal from `stop_unsafe`, because it leads somewhere
+    different.
+
+    `stop_unsafe` means the screen could not be vouched for, and the answer is
+    to go and look. This means there is no agent to ask at all, and the answer
+    is that a kill clears the session and loses nothing. A client cannot tell
+    those apart from one code, and our own interface offers Stop on a stale
+    row, so it is a refusal a person actually reaches.
+    """
+    # A stale machine, built here rather than skipped for. The module fixture
+    # is a RUNNING one, and a test that skips when it does not get the world it
+    # wants is a test that reports coverage while proving nothing.
+    #
+    # `STALE_PS` is the tmux server and no agent under it, which is what stale
+    # means: a session that is alive with nothing of ours in it.
+    tmux.pane_text["vessel"] = "user@host:/tmp$ "
+    stale = make_engine(config, tmux, procs_from(STALE_PS))
+    async with client_for(stale, config) as c:
+        listed = (await c.get("/api/projects", headers=HEADERS)).json()["projects"]
+        row = next(p for p in listed if p["name"] == "vessel")
+        assert row["state"] == "stale", "the machine under this test is not stale"
+
+        r = await c.delete("/api/sessions/vessel", headers=HEADERS)
+
+    assert r.status_code == 409
+    assert r.json()["code"] == "no_agent"
+    assert tmux.sent == [], "typed at a shell"
+    assert tmux.killed == [], "a refusal escalated"
 
 
 async def test_the_kill_route_kills(

@@ -48,6 +48,7 @@ from hitchrail.sessions import (
     MachineUnreadable,
     MemoryNeedsAck,
     MemoryRefused,
+    NoAgent,
     NotRunning,
     Protected,
     Session,
@@ -467,7 +468,38 @@ class Engine:
 
     def stop(self, name: str) -> Session:
         """Ask the agent to finish. Nothing is killed."""
-        self._require_live(name)
+        session = self._require_live(name)
+        # Refused from the STATE, before any subprocess and before any key
+        # (#98). `_require_live` admits `stale` and `detached`, and neither has
+        # an agent to ask:
+        #
+        # `stale` is a tmux session whose agent is gone, so the pane holds a
+        # shell. The old sequence typed at it and achieved nothing, verified
+        # against a real tmux: the quit command an agent understands is not one
+        # a shell does, so bash answers "No such file or directory" and the
+        # session survives the whole thirty second wait. Typing there was the
+        # #91 authority hazard bought for nothing.
+        #
+        # `detached` has no tmux session at all, so the keys went to a pane
+        # that was not there and the API still answered 202: a stop reporting
+        # success that could not have worked.
+        #
+        # Deciding here rather than letting the adapter fail to recognise the
+        # screen, because the engine derived both facts already. A refusal
+        # built on a capture that came back empty cannot tell these apart from
+        # a capture that failed.
+        if session.state is State.STALE:
+            raise NoAgent(
+                f"the tmux session for {name} holds no agent, so there is "
+                "nothing to ask to exit; killing the session clears it and "
+                "no agent is lost, though the pane may still hold something "
+                "else"
+            )
+        if session.state is State.DETACHED:
+            raise NoAgent(
+                f"the agent for {name} has no tmux session, so there is no "
+                "terminal to type into; it can only be ended by its pid"
+            )
         with self._stopping_guard:
             self._stopping[name] = self._clock()
         # One call, and the engine does not learn what a stop physically is.
@@ -669,6 +701,7 @@ __all__ = [
     "MachineUnreadable",
     "MemoryNeedsAck",
     "MemoryRefused",
+    "NoAgent",
     "NotRunning",
     "Protected",
     "Session",

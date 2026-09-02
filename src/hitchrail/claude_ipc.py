@@ -355,12 +355,16 @@ def _require_clear(pane: Pane, project: str, wait: Callable[[], None], complaint
         )
 
     # Nothing readable at all, on any attempt, and it gets its OWN words. An
-    # empty capture is not an empty box: most often it is no pane, which is
-    # what a detached agent has. Telling that person to open the session in a
-    # terminal would send them to one that does not exist.
+    # empty capture is not an empty box.
+    #
+    # It does NOT say why. An earlier version asserted the pane was gone
+    # because the agent had outlived its terminal, which is one cause among
+    # several: `capture_pane` returns "" for ANY non zero tmux exit, so a live
+    # session whose capture failed once was told something false about itself
+    # and lost the one instruction it could act on. The states where there
+    # genuinely is no pane are refused by the engine before this runs (#98).
     raise StopNotSafe(
-        f"the pane for {project} could not be read, so {_NOT_SENT}. "
-        "An agent that outlived its terminal has no session to type into."
+        f"the pane for {project} could not be read, so {_NOT_SENT}. {_LOOK_YOURSELF}"
     )
 
 

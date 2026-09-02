@@ -357,6 +357,19 @@ section 6, which names error codes the first plan draft did not deliver:
   which made any HTTPS service on port 443 of the same machine a same origin
   caller. A TLS terminating proxy's origin cannot be derived at all, because
   the scheme and the port are both the proxy's, so it is configured.
+- **`no_agent`** is returned when a stop arrives for a session with no agent in
+  it, and **a stale row offers Clear rather than Stop**. Both come from #98.
+  The design's stop flow assumes there is an agent to ask, and two of the four
+  derived states have none: `stale` is a tmux session whose agent is gone, and
+  `detached` is an agent with no tmux session. Verified against a real tmux
+  rather than assumed, because the old behaviour looked like it worked: the
+  quit command an agent understands is not one a shell does, so a stale
+  session survived the graceful stop and the whole thirty second wait before
+  offering a kill. Stop on such a row could only ever refuse, and the
+  interface's own rule is that offering a tap that refuses has already failed
+  the person holding the phone. Clear is the kill route, confirmed and styled
+  as destructive, because `stale` says only that no AGENT is in the session
+  and the pane may be running something else.
 - **`locked`** is returned when a start arrives while another start is in flight
   for the same folder. The design asks for concurrent starts to serialize; a web
   UI makes double submission easy, and answering the second tap immediately and

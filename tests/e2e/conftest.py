@@ -224,6 +224,7 @@ class Harness:
         running: list[str] | None = None,
         stopped: list[str] | None = None,
         detached: list[str] | None = None,
+        stale: list[str] | None = None,
         unsupported: list[str] | None = None,
         self_project: str | None = None,
         available_mb: int | None = None,
@@ -243,7 +244,7 @@ class Harness:
             body = DYING_BODY
         self._write_shim(_SHIM_HEAD.format(python=sys.executable) + body)
 
-        for name in (running or []) + (stopped or []) + (detached or []):
+        for name in (running or []) + (stopped or []) + (detached or []) + (stale or []):
             (self.root / e2e_name(name)).mkdir(exist_ok=True)
         # NOT prefixed: an unsupported folder is one Hitchrail cannot use, so
         # its name is the point and it never becomes a session.
@@ -297,6 +298,39 @@ class Harness:
                 )
             )
         if detached:
+            time.sleep(0.4)
+
+        # `stale` is a tmux session of ours with no agent in it, so it is
+        # created with a command that is NOT the agent. That is the whole of
+        # the state: derivation looks for the agent's argv tail under the
+        # pane, finds nothing, and the session is alive regardless.
+        #
+        # Not created by starting an agent and killing it. The pane goes with
+        # the process, and the session goes with the pane, which leaves
+        # `stopped`. This is the same reason `detached` above is spawned
+        # outside tmux rather than faked by breaking the tmux half.
+        for name in stale or []:
+            subprocess.run(
+                [
+                    "env",
+                    "-u",
+                    "TMUX",
+                    "tmux",
+                    "-S",
+                    self._sock,
+                    "new-session",
+                    "-d",
+                    "-s",
+                    f"hr-{e2e_name(name)}",
+                    "-c",
+                    str(self.root / e2e_name(name)),
+                    "sleep",
+                    "300",
+                ],
+                check=False,
+                capture_output=True,
+            )
+        if stale:
             time.sleep(0.4)
 
         self._config = build(e2e_name(self_project) if self_project else None)

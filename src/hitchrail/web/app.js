@@ -362,8 +362,22 @@ function buildActions(project, actions) {
   // No Stop control on the controller row, ever. The API answers 423, and an
   // interface that lets you reach a 423 has already failed the person holding
   // the phone: refusing after the tap is worse than not offering the tap.
-  if (!project.protected && (isRunning(project) || project.state === "stale")) {
+  if (!project.protected && isRunning(project)) {
     add("Stop", "").addEventListener("click", () => confirmStop(project));
+  }
+  // A stale session gets Clear, not Stop (#98). Stop asks the agent to exit
+  // and there is no agent here, so the API answers `no_agent` every time: the
+  // comment above says what that costs, and it applies to a 409 exactly as it
+  // does to a 423. Verified against a real tmux rather than assumed, because
+  // the old sequence looked like it worked: the quit command an agent
+  // understands is not one a shell does, so bash answered "No such file or
+  // directory" and the session survived the whole thirty second wait.
+  //
+  // Clear is the kill route, and it is styled and confirmed as destructive
+  // even though no agent can be lost, because `stale` says only that no AGENT
+  // is in the session. The pane can be running anything else.
+  if (!project.protected && project.state === "stale") {
+    add("Clear", "danger").addEventListener("click", () => confirmClear(project));
   }
   if (project.state === "detached" && !project.protected) {
     add(`Kill pid ${project.pid}`, "danger");
@@ -531,6 +545,19 @@ function confirmStop(project) {
     actions: [
       ["Cancel", "ghost", () => closeDialog()],
       ["Stop", "", () => beginStop(project)],
+    ],
+  });
+}
+
+function confirmClear(project) {
+  showDialog({
+    title: `Clear ${project.name}?`,
+    body:
+      "The session has no agent in it. Clearing removes the session, and "
+      + "anything else still running in it goes too.",
+    actions: [
+      ["Cancel", "ghost", () => closeDialog()],
+      ["Clear", "danger", () => killNow(project)],
     ],
   });
 }

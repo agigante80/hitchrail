@@ -872,7 +872,7 @@ def test_every_module_is_under_the_size_guideline() -> None:
     # Raise this only for a change that adds behaviour, and say what in the
     # commit. If it passes roughly 550, look for a seam again with fresh eyes.
     caps = {
-        # 472, and this one does NOT want splitting, which is why it is here
+        # 476, and this one does NOT want splitting, which is why it is here
         # rather than in a ticket like #93. The whole value of `claude_ipc` is
         # that it is ONE module: when Claude Code moves, exactly one file
         # changes and the interface degrades rather than reporting something
@@ -894,11 +894,11 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # escape stripper went back to the narrower pattern after the wider one
         # introduced a worse defect than it fixed. Those are the comments a
         # further round would otherwise re-litigate.
-        "claude_ipc.py": 472,
+        "claude_ipc.py": 476,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.
-        "engine.py": 679,
+        "engine.py": 712,
         # 466. tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -942,7 +942,7 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # the middle of a security module. Until then this entry is the record
         # that the size is known and argued.
         "security.py": 537,
-        # 492, current. The HTTP layer: routes, the error envelope, the SSE
+        # 500, current. The HTTP layer: routes, the error envelope, the SSE
         # stream and the lifespan sweeper, which is one job described four
         # ways. Most of the length above the guideline is the comments
         # recording what the transport does rather than what this code does,
@@ -955,9 +955,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # split was taken "rather than" the cap raised, in the same diff that
         # raised it.
         #
-        # 487 since #89, for one `except` arm and the reason it answers 409
-        # rather than 503. A refusal handler is the shape this file is made of.
-        "server.py": 492,
+        # 492 since #89 and 500 since #98, for two `except` arms and the
+        # reasons they answer 409 rather than 503, and why they are two codes
+        # rather than one. A refusal handler is the shape this file is made of.
+        "server.py": 500,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

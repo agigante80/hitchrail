@@ -82,6 +82,27 @@ class MemoryNeedsAck(_MemoryVerdict):
     """
 
 
+class NoAgent(EngineError):
+    """There is nothing here to ask to exit (#98).
+
+    Distinct from `StopRefused`, and the difference is what the person should
+    do next. `StopRefused` means we looked at the screen and would not risk
+    typing, so the answer is to go and look. This means the state itself rules
+    the action out: a `stale` session holds no agent, and a `detached` one
+    holds no tmux session to type into. Nothing about the screen would change
+    either answer.
+
+    Derived rather than discovered, which is the point. The engine already
+    knows both facts before it touches the machine, so refusing here costs no
+    subprocess and cannot be confused with a capture that happened to fail.
+
+    Not `NotRunning`. Something IS running in both cases, which is exactly why
+    the row is not offering Start, and telling a person "there is no session"
+    about a session they can see is the collapsed answer `_require_live` exists
+    to avoid.
+    """
+
+
 class StopRefused(EngineError):
     """The graceful stop was abandoned before anything was typed (#89).
 

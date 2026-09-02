@@ -291,6 +291,14 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
             return _error(423, "self_protected", str(exc))
         except eng.NotRunning as exc:
             return _error(409, "not_running", str(exc))
+        except eng.NoAgent as exc:
+            # Its own code, not `stop_unsafe`, because the two lead somewhere
+            # different. `stop_unsafe` means the screen could not be vouched
+            # for and the answer is to go and look. This means there is nothing
+            # here to ask, and for a stale session the answer is that a kill
+            # clears it and loses nothing. One code for both would make a
+            # client guess which it had.
+            return _error(409, "no_agent", str(exc))
         except eng.StopRefused as exc:
             # 409 and not 503: nothing is broken and asking again changes
             # nothing. The session is in a state where this action is wrong,

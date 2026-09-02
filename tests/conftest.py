@@ -144,6 +144,14 @@ class FakeTmux(Tmux):
             # project with no tmux session returns nothing, and handing back a
             # tidy empty box there made a detached agent look stoppable by
             # keystroke when it has no pane to type into at all.
+            #
+            # A session existing is still not the same as an AGENT being in it.
+            # A `stale` pane holds a shell and draws no agent input box at all,
+            # and this fake cannot tell the two apart because staleness is
+            # derived from the process table, which it never sees. A test about
+            # a pane that is not an agent has to say so through `pane_text`,
+            # and `test_stopping_a_stale_session_is_refused_by_state_not_by_
+            # screen` is what that looks like.
             return CLEAR_INPUT_BOX if project in self.sessions else ""
         return self.pane_text.get(project, "")
 

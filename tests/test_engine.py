@@ -35,6 +35,7 @@ from hitchrail.engine import (
     MachineUnreadable,
     MemoryNeedsAck,
     MemoryRefused,
+    NoAgent,
     NotRunning,
     Protected,
     StartFailed,
@@ -1301,28 +1302,60 @@ def test_a_refused_stop_types_nothing(root: Path) -> None:
     )
 
 
-def test_stopping_a_detached_agent_is_refused_and_says_why(root: Path) -> None:
-    """Round 2 of review: a behaviour change that was untested in both
-    directions, so neither was on purpose.
+def test_stopping_a_stale_session_is_refused_by_state_not_by_screen(
+    root: Path,
+) -> None:
+    """#98. A stale session has a tmux session and no agent in it.
 
-    `_require_live` admits `detached`, and a detached agent has no tmux session
-    by definition. The old sequence sent keys at a pane that was not there,
-    tmux did nothing, and the API answered 202: a stop that reported success
-    and could not possibly have worked.
+    **The old sequence never worked here**, which the ticket first got wrong
+    and a real tmux settled: `/exit` is not `exit`, so a shell answers
+    "No such file or directory" and the session survives. The person then
+    waited out the whole thirty second timeout to be offered Kill.
 
-    It refuses now, because the capture comes back empty and an empty capture
-    is not an empty box. The message is the point: it must not tell somebody to
-    open a terminal, because the whole meaning of `detached` is that there is
-    not one. Killing by pid is the answer, and that is #83.
+    So this is not a lost capability. What it is is a refusal that should come
+    from the STATE, which the engine already derived, rather than from failing
+    to recognise the screen: the engine knows there is no agent here without
+    looking, and a refusal that says so is one a person can act on. Typing at
+    that shell with the operator's authority buys nothing and is the #91
+    hazard for free.
     """
-    engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, project="vessel"))
-    assert state_of(engine, "vessel") is State.DETACHED
+    tmux = FakeTmux(sessions={"vessel": PANE})
+    # A shell, which is what is actually in a stale pane. The fake paints a
+    # Claude Code box for anything with a session, so a test about a pane that
+    # is NOT an agent has to say so.
+    tmux.pane_text["vessel"] = "user@host:/tmp$ "
+    engine, _ = engine_for(root, sessions={"vessel": PANE}, table=ps_row(PANE, 1))
+    engine.tmux = tmux
+    assert state_of(engine, "vessel") is State.STALE
 
-    with pytest.raises(StopRefused) as refusal:
+    with pytest.raises(NoAgent) as refusal:
         engine.stop("vessel")
 
-    assert "outlived its terminal" in str(refusal.value)
-    assert "open the session in a terminal" not in str(refusal.value).lower()
+    assert "no agent" in str(refusal.value).lower()
+    assert tmux.sent == [], "typed at a shell with the operator's authority"
+    assert engine.stopping_since("vessel") is None
+    assert tmux.killed == [], "a refused stop escalated"
+
+
+def test_stopping_a_detached_agent_is_refused_by_state_too(root: Path) -> None:
+    """The other half, and the same argument.
+
+    A detached agent has no tmux session by definition, so there is no pane to
+    type into. The old sequence sent keys at one that was not there, tmux did
+    nothing, and the API answered 202: a stop that reported success and could
+    not possibly have worked.
+
+    Refused from the state rather than from an empty capture, because an empty
+    capture has other causes and this one is knowable without guessing.
+    """
+    engine, tmux = engine_for(root, table=ps_row(ORPHAN, 1, project="vessel"))
+    assert state_of(engine, "vessel") is State.DETACHED
+
+    with pytest.raises(NoAgent) as refusal:
+        engine.stop("vessel")
+
+    assert "no tmux session" in str(refusal.value).lower()
+    assert tmux.sent == []
     assert engine.stopping_since("vessel") is None
 
 
