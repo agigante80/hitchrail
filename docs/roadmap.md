@@ -257,7 +257,7 @@ Open and blocking, all P1 except #67:
 
 | Issue | What |
 |---|---|
-| #89 | The graceful stop interrupts twice and quits. Measured: `C-c C-c` alone exits in 1s so `/exit` is dead code, and a session stopped mid task lost 13 of 40 seconds of work. The copy half landed at `56d1f5c`, so the screen no longer claims an etiquette that never happened; the mechanism is still the blind three key sequence. |
+| #89 | Mostly landed. The copy was corrected at `56d1f5c` and the mechanism replaced: `C-u`, `Escape`, `/exit`, with the agent's input box read and verified between the steps, and a `stop_unsafe` refusal when it holds text. What is left is the one thing an agent cannot do, running the assembled sequence against a session that is MID TASK rather than idle. |
 | #88 | A session in a folder Claude Code has not seen hangs on a startup modal and is reported `running` with a null link. Broader than the trust prompt: any modal. |
 | #84 | The tmux server's own argv still carries the command line that started the first session, so it matches the agent pattern and a row can show the server's pid and RSS. |
 | #83 | The `Kill pid N` button on a detached row has no handler, and no API behind it. |

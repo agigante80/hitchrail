@@ -94,6 +94,17 @@ while True:
         # EOF, which a detached pane gives immediately. Not a reason to stop.
         time.sleep(0.2)
         continue
+    # Everything up to the last ESC is control input, not text.
+    #
+    # This fake reads LINES from a pty in canonical mode, so the Escape the
+    # stop sequence sends (#89) arrives as a 0x1b byte at the head of the next
+    # line and the comparison below never matches. A real agent puts its
+    # terminal in raw mode and consumes ESC as a keypress, which is the whole
+    # reason the sequence can use it to interrupt a turn.
+    #
+    # Modelling that, rather than removing the key from the sequence to suit
+    # the fake: the fake is the thing that is wrong here.
+    line = line.rsplit("\\x1b", 1)[-1]
     if line.strip() == "/exit":
         print("hitchrail-shim: exiting", flush=True)
         sys.exit(0)
@@ -112,6 +123,24 @@ while True:
 STUBBORN_BODY = """
 import signal
 signal.signal(signal.SIGINT, signal.SIG_IGN)
+while True:
+    time.sleep(0.2)
+"""
+
+# Paints a Claude Code input row with a DRAFT in it, then sits there.
+#
+# #89: the graceful stop reads the box before it types, and refuses when what
+# it finds is bright text, because appending a stop command to a half typed
+# sentence submits the pair with the operator's authority (#91). Nothing else
+# in this tier can produce that state, and the ordinary shim paints no box at
+# all, so without this the refusal path has no browser test.
+#
+# The row is the real one, captured from a live session: U+276F, U+00A0, then
+# text with no dim attribute. `\x1b[39m` in front of it is what the real
+# terminal emits and is kept so the fixture is not a tidied version of the
+# thing it stands in for.
+DRAFT_IN_THE_BOX_BODY = """
+print("\\x1b[39m\\u276f\\u00a0half a sentence", flush=True)
 while True:
     time.sleep(0.2)
 """
@@ -179,6 +208,7 @@ class Harness:
         available_mb: int | None = None,
         stop_timeout: float = 30.0,
         ignores_graceful_stop: bool = False,
+        has_a_draft_in_the_box: bool = False,
         agent_exits_immediately: bool = False,
         token: str | None = None,
     ) -> None:
@@ -186,6 +216,8 @@ class Harness:
         body = SHIM_BODY
         if ignores_graceful_stop:
             body = STUBBORN_BODY
+        if has_a_draft_in_the_box:
+            body = DRAFT_IN_THE_BOX_BODY
         if agent_exits_immediately:
             body = DYING_BODY
         self._write_shim(_SHIM_HEAD.format(python=sys.executable) + body)

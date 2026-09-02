@@ -53,6 +53,7 @@ from hitchrail.sessions import (
     Session,
     StartFailed,
     State,
+    StopRefused,
     UnknownProject,
 )
 from hitchrail.tmux import Tmux, TmuxUnavailable
@@ -481,6 +482,18 @@ class Engine:
             with self._stopping_guard:
                 self._stopping.pop(name, None)
             raise MachineUnreadable(str(exc)) from exc
+        except claude_ipc.StopNotSafe as exc:
+            # The marker goes back for the same reason a vanished tmux takes it
+            # back: a wait must not outlive a request that was never sent. The
+            # adapter looked at the pane and declined, so the agent is exactly
+            # as it was and a spinner would be describing nothing.
+            #
+            # Translated at this boundary rather than let through. The server
+            # catching a `claude_ipc` exception would put Claude Code knowledge
+            # in the HTTP layer, which is the whole point of the quarantine.
+            with self._stopping_guard:
+                self._stopping.pop(name, None)
+            raise StopRefused(str(exc)) from exc
         updated = self.get(name)
         self._announce(updated)
         return updated
@@ -657,5 +670,6 @@ __all__ = [
     "Session",
     "StartFailed",
     "State",
+    "StopRefused",
     "UnknownProject",
 ]

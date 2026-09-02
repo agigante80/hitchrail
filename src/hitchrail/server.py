@@ -291,6 +291,12 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
             return _error(423, "self_protected", str(exc))
         except eng.NotRunning as exc:
             return _error(409, "not_running", str(exc))
+        except eng.StopRefused as exc:
+            # 409 and not 503: nothing is broken and asking again changes
+            # nothing. The session is in a state where this action is wrong,
+            # which is what every other 409 on this API means. The engine sent
+            # no keys, so there is nothing to undo and nothing in flight.
+            return _error(409, "stop_unsafe", str(exc))
         except eng.MachineUnreadable as exc:
             return _error(503, "machine_unreadable", str(exc))
         return JSONResponse(session.as_dict(), status_code=202)

@@ -15,6 +15,8 @@ from hitchrail import claude_ipc
 from hitchrail.claude_ipc import (
     GRACEFUL_STOP_KEYS,
     REMOTE_CONTROL_MARKER,
+    StopNotSafe,
+    input_is_clear,
     launch_argv,
     request_stop,
 )
@@ -22,14 +24,53 @@ from hitchrail.claude_ipc import (
 SRC = Path(__file__).parent.parent / "src" / "hitchrail"
 
 
+# Exact input rows captured from a real Claude Code session on 2026-09-02,
+# `capture-pane -p -J -e`, in a throwaway directory on a private tmux socket.
+# Pasted as bytes rather than described, because every earlier description of
+# this row has been subtly wrong and the whole check turns on it.
+#
+# The prompt is U+276F plus U+00A0. What follows is one of three
+# things, and only the third is a draft.
+CLEAR_BOX = "\x1b[39m\u276f\xa0                     "
+PLACEHOLDER_BOX = '\x1b[39m\u276f\xa0\x1b[2mTry "how does <filepath> work?"'
+DRAFT_BOX = "\x1b[39m\u276f\xa0draft text here          "
+
+# The trust modal's selected row, #88, from the same capture.
+#
+# **Note what is NOT here: the NBSP.** The input box is `\u276f\xa0` and this
+# is `\u276f` followed by a colour reset and an ordinary space. An earlier
+# version of this constant was written from memory with the NBSP in it, and it
+# passed, while the real row matched nothing and the stop sequence would have
+# typed into the trust prompt. The prompt anchor is the ornament alone for
+# exactly this reason.
+MODAL_BOX = "\x1b[39m \x1b[38;5;153m\u276f\x1b[39m \x1b[38;5;153mNo,\x1b[39m \x1b[38;5;153mexit"
+
+
+def pane_text(input_row: str) -> str:
+    """A capture with the usual noise above the row that matters."""
+    return (
+        "some output\n\x1b[38;5;244m────────────\n" + input_row + "\n  bypass permissions on\n"
+    )
+
+
 class FakePane:
     """Anything with send_keys satisfies the Pane protocol. Deliberately not a Tmux."""
 
-    def __init__(self) -> None:
+    def __init__(self, captures: list[str] | None = None) -> None:
         self.sent: list[tuple[str, ...]] = []
+        self.captured: list[str] = []
+        # Defaults to a clear box, so a test about key ORDER does not have to
+        # say anything about what the pane looked like.
+        self._captures = captures if captures is not None else [pane_text(CLEAR_BOX)] * 4
 
     def send_keys(self, project: str, *keys: str) -> None:
         self.sent.append((project, *keys))
+
+    def capture_pane(self, project: str, lines: int = 40, escapes: bool = False) -> str:
+        self.captured.append(project)
+        if not self._captures:
+            return ""
+        return self._captures.pop(0) if len(self._captures) > 1 else self._captures[0]
 
 
 # -- launching -------------------------------------------------------------
@@ -55,10 +96,124 @@ def test_launch_argv_carries_the_marker_the_process_table_looks_for() -> None:
 # -- stopping --------------------------------------------------------------
 
 
-def test_request_stop_sends_the_documented_sequence() -> None:
+def test_the_clear_box_is_read_as_clear() -> None:
+    """The resting state of an idle session: prompt, then nothing but padding.
+
+    This is the COMMON case and the one a placeholder based check gets wrong.
+    The placeholder is transient: it appeared about nine seconds after start on
+    the real session and was gone on the next sample, and a box cleared with
+    `C-u` comes back with no placeholder at all.
+    """
+    assert input_is_clear(pane_text(CLEAR_BOX)) is True
+
+
+def test_the_placeholder_is_read_as_clear() -> None:
+    """Dim text is Claude Code's own suggestion, not something a person typed."""
+    assert input_is_clear(pane_text(PLACEHOLDER_BOX)) is True
+
+
+def test_a_draft_is_not_read_as_clear() -> None:
+    """The whole reason the check exists. Bright text is the operator's, and
+    `/exit` appended to it is an instruction we send with their authority."""
+    assert input_is_clear(pane_text(DRAFT_BOX)) is False
+
+
+def test_a_modal_is_not_read_as_clear() -> None:
+    """#88, and it falls out rather than being detected.
+
+    The trust modal renders its selected entry with the same prompt marker and
+    bright colour a draft has, so refusing bright text refuses the modal too,
+    with no list of modal wordings to keep current.
+    """
+    assert input_is_clear(pane_text(MODAL_BOX)) is False
+
+
+def test_a_pane_with_no_input_row_cannot_be_judged() -> None:
+    """`None`, not `False` and not `True`. A capture that failed, a pane still
+    painting, a future layout: none of them is evidence the box is clear, and
+    none is evidence a draft is there either."""
+    assert input_is_clear("just some output\nand more\n") is None
+    assert input_is_clear("") is None
+
+
+def test_request_stop_clears_before_it_interrupts() -> None:
+    """The ordering that removes the authority hazard, and the reason it is
+    first: `C-u` is safe whatever state the pane is in, and doing it after an
+    interrupt leaves a window where a draft is still present."""
     pane = FakePane()
     request_stop(pane, "vessel")
     assert [sent[1:] for sent in pane.sent] == list(GRACEFUL_STOP_KEYS)
+    assert GRACEFUL_STOP_KEYS[0] == ("C-u",)
+
+
+def test_request_stop_verifies_the_box_before_typing_into_it() -> None:
+    """Two captures, and both before `/exit`. The first guards a draft that was
+    already there, the second guards whatever `Escape` did."""
+    pane = FakePane()
+    request_stop(pane, "vessel")
+    assert len(pane.captured) == 2
+
+
+def test_request_stop_refuses_when_a_draft_survived_the_clear() -> None:
+    """`C-u` is verified, not assumed. If the box is still bright then
+    something we do not understand is happening, and appending `/exit` to it
+    submits the pair with the operator's authority."""
+    pane = FakePane([pane_text(DRAFT_BOX)])
+    with pytest.raises(StopNotSafe):
+        request_stop(pane, "vessel")
+    assert not any("/exit" in sent for sent in pane.sent), "typed anyway"
+
+
+def test_a_pane_that_is_not_this_agent_at_all_is_still_stopped() -> None:
+    """The quarantine's own rule, applied to the check rather than to a field.
+
+    A pane with output and no input row is a vendor we have not seen, or this
+    one after a layout change. The hazard being guarded is text the OPERATOR
+    typed sitting in a box we are about to append to, and there is no box, so
+    there is no such text. Refusing here would turn any redesign of the input
+    row into "graceful stop no longer works, use Kill", silently.
+    """
+    pane = FakePane(["hitchrail-shim: started\nsome output and no input row\n"])
+    request_stop(pane, "vessel")
+    assert any("/exit" in sent for sent in pane.sent), "refused a pane with no box to protect"
+
+
+def test_request_stop_refuses_a_pane_it_cannot_read() -> None:
+    """Fails closed. An unreadable pane is not an empty one."""
+    pane = FakePane([""])
+    with pytest.raises(StopNotSafe):
+        request_stop(pane, "vessel")
+    assert not any("/exit" in sent for sent in pane.sent)
+
+
+def test_request_stop_refuses_when_escape_leaves_the_box_dirty() -> None:
+    """The second verification, and it is not the same as the first.
+
+    The agreed sequence on #89 said to check that the pane CHANGED after
+    `Escape`. That cannot work: an idle session has nothing to interrupt, so
+    nothing changes, and the most ordinary stop there is would be refused. The
+    question worth asking twice is the same one, "is the box still clear", so
+    a pane that Escape put somewhere unexpected is caught without punishing a
+    session that was simply idle.
+    """
+    pane = FakePane([pane_text(CLEAR_BOX), pane_text(DRAFT_BOX)])
+    with pytest.raises(StopNotSafe):
+        request_stop(pane, "vessel")
+    assert not any("/exit" in sent for sent in pane.sent)
+
+
+def test_request_stop_captures_with_escape_sequences() -> None:
+    """Without `-e` the placeholder and a draft are the same characters, and
+    the check that exists to tell them apart cannot."""
+    seen: list[bool] = []
+
+    class Recording(FakePane):
+        def capture_pane(self, project: str, lines: int = 40, escapes: bool = False) -> str:
+            seen.append(escapes)
+            return super().capture_pane(project, lines, escapes)
+
+    request_stop(Recording(), "vessel")
+    assert seen and all(seen), "captured without escapes, so dim and bright are one thing"
 
 
 def test_request_stop_targets_the_project_it_was_given() -> None:
@@ -83,6 +238,11 @@ def test_request_stop_takes_anything_shaped_like_a_pane() -> None:
 
         def send_keys(self, project: str, *keys: str) -> None:
             self.count += 1
+
+        # Part of the protocol since #89: the sequence verifies between its
+        # steps, so a pane that cannot be READ cannot be typed into either.
+        def capture_pane(self, project: str, lines: int = 40, escapes: bool = False) -> str:
+            return pane_text(CLEAR_BOX)
 
     pane = NotATmux()
     request_stop(pane, "vessel")

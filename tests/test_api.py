@@ -12,7 +12,14 @@ import httpx
 import pytest
 from starlette.responses import Response
 
-from conftest import FakeClock, FakeTmux, ScriptedProcs, failing_procs, procs_from
+from conftest import (
+    DIRTY_INPUT_BOX,
+    FakeClock,
+    FakeTmux,
+    ScriptedProcs,
+    failing_procs,
+    procs_from,
+)
 from hitchrail import pages, server
 from hitchrail.config import Config
 from hitchrail.engine import Engine
@@ -252,6 +259,35 @@ async def test_delete_begins_a_graceful_stop_and_kills_nothing(
     assert r.status_code == 202
     assert r.json()["stopping"] is True
     assert tmux.killed == []
+
+
+async def test_a_stop_the_adapter_declined_is_409_stop_unsafe(
+    client: httpx.AsyncClient, engine: Engine, tmux: FakeTmux
+) -> None:
+    """#89. A box we cannot vouch for is a refusal with a code, not a 500.
+
+    409 rather than 503: nothing is broken and looking again will not help.
+    The session is in a state where this action is wrong, which is what every
+    other 409 on this API means.
+    """
+    tmux.pane_text["vessel"] = DIRTY_INPUT_BOX
+    r = await client.delete("/api/sessions/vessel", headers=HEADERS)
+    assert r.status_code == 409
+    assert r.json()["code"] == "stop_unsafe"
+    assert tmux.killed == [], "a refused graceful stop must not escalate"
+
+
+async def test_a_refused_stop_leaves_the_session_alone(
+    client: httpx.AsyncClient, engine: Engine, tmux: FakeTmux
+) -> None:
+    """Nothing typed, and no stopping marker to show a spinner for."""
+    tmux.pane_text["vessel"] = DIRTY_INPUT_BOX
+    await client.delete("/api/sessions/vessel", headers=HEADERS)
+    assert not any("/exit" in keys for _, keys in tmux.sent)
+
+    listed = (await client.get("/api/projects", headers=HEADERS)).json()["projects"]
+    row = next(s for s in listed if s["name"] == "vessel")
+    assert row["stopping"] is False
 
 
 async def test_the_kill_route_kills(

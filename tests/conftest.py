@@ -71,6 +71,7 @@ class FakeTmux(Tmux):
         self.started: list[tuple[str, str, list[str]]] = []
         self.pane_kept: list[tuple[str, bool]] = []
         self.capture_lines: list[int] = []
+        self.capture_escapes: list[bool] = []
         self.dead_panes: set[str] = set()
         self.sent: list[tuple[str, tuple[str, ...]]] = []
         self.pane_pids_calls = 0
@@ -126,11 +127,19 @@ class FakeTmux(Tmux):
         """
         self.pane_kept.append((project, keep))
 
-    def capture_pane(self, project: str, lines: int = 40) -> str:
+    def capture_pane(self, project: str, lines: int = 40, escapes: bool = False) -> str:
         self.capture_calls += 1
         # Recorded, because #66 turns on WHICH read was asked for: a dead
         # start needs the whole scrollback and a log tail does not.
         self.capture_lines.append(lines)
+        self.capture_escapes.append(escapes)
+        if escapes and project not in self.pane_text:
+            # The graceful stop verifies the input box before it types (#89),
+            # and a fake with nothing to say would refuse every stop in the
+            # suite. A test that cares what the box holds sets `pane_text`;
+            # every other one is about the lifecycle around the stop rather
+            # than about the box, and gets a clear one.
+            return CLEAR_INPUT_BOX
         return self.pane_text.get(project, "")
 
     def send_keys(self, project: str, *keys: str) -> None:
@@ -186,6 +195,16 @@ class ScriptedProcs:
         text = self.stages[min(self.reads, len(self.stages) - 1)]
         self.reads += 1
         return ProcTable(parse_ps(text))
+
+
+# A real Claude Code input box with nothing typed in it, captured on
+# 2026-09-02. The prompt is U+276F plus U+00A0. `tests/
+# test_claude_ipc.py` holds the other two states and the argument for them.
+CLEAR_INPUT_BOX = "\x1b[39m\u276f\xa0                     \n"
+
+# The same row with something a person typed in it. Bright, which is the only
+# thing that distinguishes it from the agent's own dim suggestion.
+DIRTY_INPUT_BOX = "\x1b[39m\u276f\xa0half a sentence\n"
 
 
 def ps_row(

@@ -656,6 +656,23 @@ function showRefusal(result) {
     });
     return;
   }
+  if (code === "stop_unsafe") {
+    // #89. Not a failure: the graceful stop looked at the agent's input box,
+    // found text in it, and typed nothing. "That did not work" would describe
+    // a request that was sent and refused, and this one was never sent, so the
+    // session is exactly as it was. The title says which of those happened.
+    //
+    // No Kill button here. The person asked to stop gently and got an honest
+    // "not from here"; putting the destructive path in front of them as the
+    // answer to that is the escalation-by-default section 7 forbids. Kill is
+    // still on the row, which is where they chose it deliberately.
+    showDialog({
+      title: "Nothing was sent",
+      body: message,
+      actions: [["Close", "ghost", () => closeDialog()]],
+    });
+    return;
+  }
   showDialog({
     title: code === "self_protected" ? "That one is protected" : "That did not work",
     body: message,

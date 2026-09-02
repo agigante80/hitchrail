@@ -23,6 +23,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
@@ -53,13 +55,111 @@ logger = logging.getLogger(__name__)
 
 # What to type at a running agent to ask it to finish, as a sequence of key
 # GROUPS. Each group is one send_keys call, because tmux distinguishes a key
-# from literal text by argument position: two interrupts, then the exit
-# command, then the newline that submits it.
+# from literal text by argument position.
+#
+# **This was `C-c`, `C-c`, `/exit` and that was wrong twice** (#89). Measured
+# against a real session: `C-c C-c` alone exits an idle agent in about one
+# second, so the `/exit` group never ran and the sequence was a double
+# interrupt quit rather than the request the interface described. Stopped mid
+# task, a forty second job lost thirteen seconds of work.
+#
+# `C-u` is FIRST, and it is the step that matters most. `Escape` interrupts a
+# turn but does NOT clear an unsent draft (tested live, sentinel typed, draft
+# still there), so an `/exit` sent after it appends to whatever the person had
+# half typed, and the `Enter` submits the pair. `send-keys` writes to the pty
+# and nothing marks those characters as ours, so that submission carries the
+# operator's authority (#91). `C-u` removes the hazard and is safe whatever
+# state the pane is in, which is why it cannot be second.
+#
+# Verification runs BETWEEN these groups; see `request_stop`. The constant is
+# still the sequence, and nothing outside this module may iterate it.
 GRACEFUL_STOP_KEYS: tuple[tuple[str, ...], ...] = (
-    ("C-c",),
-    ("C-c",),
+    ("C-u",),
+    ("Escape",),
     ("/exit", "Enter"),
 )
+
+# The prompt ornament, captured from a real session rather than described.
+# Written as an escape rather than pasted: U+276F is confusable with a plain
+# `>` in every editor.
+#
+# **The ornament ALONE, deliberately.** The input box renders it followed by a
+# non breaking space, and the first version of this anchor included that NBSP.
+# The trust modal (#88) renders the same ornament with a colour reset and an
+# ORDINARY space after it, so the longer anchor matched nothing on a modal, the
+# row came back unjudged, and the sequence would have typed into a prompt whose
+# entries are actionable. That is the case this check most needs to catch, so
+# the anchor is the part both rows share.
+_PROMPT = "\u276f"
+
+# Dim. Claude Code renders its own suggested prompt with this and a person's
+# draft without it, which is the only thing that tells the two apart.
+_DIM = "\x1b[2m"
+
+# CSI sequences, for deciding whether what is left is only padding.
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+
+# A keystroke reaches the pty at once and the agent repaints when it gets
+# round to it, and nothing tells us when that was. So the box is read, and
+# re-read after a pause if it does not yet look clear.
+#
+# POLLED rather than slept before reading, which matters in both directions: a
+# pane that has already repainted costs nothing, and a slow one gets more than
+# one guess instead of a single wait that was either wasteful or too short.
+_SETTLE_S = 0.15
+_SETTLE_TRIES = 4
+
+
+class StopNotSafe(RuntimeError):
+    """The graceful stop was abandoned before anything was typed.
+
+    Raised rather than returned, because every caller's correct response is the
+    same: do not continue, and tell the person. A boolean return invites a
+    caller to carry on with a warning, and carrying on here means submitting
+    text into somebody else's session.
+    """
+
+
+def input_is_clear(pane: str) -> bool | None:
+    """Whether the agent's input box holds nothing the operator typed.
+
+    `None` means the question could not be answered, and it is deliberately not
+    `False`: a capture that failed, a pane still painting, or a layout we have
+    not seen is not evidence of a draft, and reporting one would refuse a stop
+    on no evidence. What the caller does with `None` depends on whether it saw
+    a pane at all, and `_require_clear` is where that is decided; this function
+    only reports what it can and cannot see.
+
+    The three states, captured from a real session on 2026-09-02:
+
+        clear        '\x1b[39m\u276f\xa0                     '
+        placeholder  '\x1b[39m\u276f\xa0\x1b[2mTry "how does <filepath> work?"'
+        draft        '\x1b[39m\u276f\xa0draft text here          '
+
+    **The placeholder is transient**, which is the part every description of
+    this row has missed. It appeared about nine seconds after start and was
+    gone on the next sample, and a box cleared with `C-u` comes back with no
+    placeholder at all. A check written as "the dim placeholder came back"
+    therefore fails on the ordinary resting state of an idle session, which is
+    most stops, and it fails closed so it would have looked like the mechanism
+    working.
+
+    The last matching row is the input box, because that box is at the bottom
+    of the screen and agent output above it may say anything.
+
+    #88's trust modal renders its selected entry with the same ornament and
+    bright colour, so it reads as not clear and the stop is refused. That is
+    the right answer arrived at without a list of modal wordings to maintain,
+    and there is a test for it built from the captured row rather than from a
+    description of it, which is what caught the anchor being too long.
+    """
+    row = next((line for line in reversed(pane.splitlines()) if _PROMPT in line), None)
+    if row is None:
+        return None
+    after = row.split(_PROMPT, 1)[1]
+    if after.lstrip().startswith(_DIM):
+        return True
+    return _ANSI.sub("", after).strip() == ""
 
 
 class Pane(Protocol):
@@ -79,6 +179,10 @@ class Pane(Protocol):
 
     def send_keys(self, project: str, *keys: str) -> None: ...  # pragma: no cover
 
+    def capture_pane(  # pragma: no cover
+        self, project: str, lines: int = 40, escapes: bool = False
+    ) -> str: ...
+
 
 def launch_argv(binary: str, project: str) -> list[str]:
     """The argv that starts an agent. A LIST, never a string.
@@ -93,22 +197,89 @@ def launch_argv(binary: str, project: str) -> list[str]:
     return [binary, "--dangerously-skip-permissions", REMOTE_CONTROL_MARKER, project]
 
 
-def request_stop(pane: Pane, project: str) -> None:
-    """Ask the agent to finish, by whatever means this agent understands.
+def request_stop(pane: Pane, project: str, settle: Callable[[], None] | None = None) -> None:
+    """Ask the agent to exit, verifying between steps. Raises `StopNotSafe`.
 
     The engine calls this and learns nothing more. Iterating GRACEFUL_STOP_KEYS
     at the call site instead would teach the engine three Claude Code facts:
     that stopping is keystrokes, that it is a sequence of them, and that they
     travel through a pane. None of those is true of an agent that wants a
-    signal, a subcommand or an HTTP call.
+    signal, a subcommand or an HTTP call. It would now also have to know what a
+    cleared input box looks like, which is the most volatile fact here.
+
+    **Request by keystroke, confirm by observation** (#89). There is no reply
+    channel: nothing the agent sends back could be distinguished from output it
+    was already printing, so every check is a look at the pane.
+
+    The box is verified TWICE, and both times before anything is typed into it.
+    The first guards a draft that was already there. The second guards whatever
+    `Escape` did.
+
+    **The second check is not "did the pane change".** That was the agreed
+    sequence on #89 and it cannot work: an idle agent has nothing to interrupt,
+    so `Escape` changes nothing, and the most ordinary stop there is would be
+    refused. Asking the same question twice catches a pane that `Escape` put
+    somewhere unexpected without punishing a session that was merely idle. The
+    modal case that check was reaching for is already refused by the first one,
+    because a modal's selected row is bright text on this same prompt.
 
     GRACEFUL_STOP_KEYS stays public because the test asserting the exact
     sequence needs it. The rule is that nothing outside this module ITERATES
     it, and there is a grep test for that, because no import contract can see
     a `for` loop.
     """
-    for keys in GRACEFUL_STOP_KEYS:
-        pane.send_keys(project, *keys)
+    wait = settle or (lambda: time.sleep(_SETTLE_S))
+    clear, interrupt, quit_keys = GRACEFUL_STOP_KEYS
+
+    pane.send_keys(project, *clear)
+    _require_clear(pane, project, wait, "the input box still held text after it was cleared")
+    pane.send_keys(project, *interrupt)
+    _require_clear(pane, project, wait, "the input box was not clear after the interrupt")
+    pane.send_keys(project, *quit_keys)
+
+
+def _require_clear(pane: Pane, project: str, wait: Callable[[], None], complaint: str) -> None:
+    """Look at the box, and refuse unless it is certainly clear.
+
+    `escapes=True` is load bearing: without it the placeholder and a draft are
+    the same characters and the distinction this function exists to make cannot
+    be made.
+    """
+    saw_something = False
+    verdict: bool | None = None
+    for attempt in range(_SETTLE_TRIES):
+        if attempt:
+            wait()
+        text = pane.capture_pane(project, escapes=True)
+        saw_something = saw_something or bool(text.strip())
+        verdict = input_is_clear(text)
+        if verdict is True:
+            return
+
+    # A pane with text in it and no input row at all is not a box we know. It
+    # is a vendor whose interface we have never seen, or a version of this one
+    # that has moved, and the hazard this check exists for is not established
+    # there: the risk is text the OPERATOR typed sitting in a box we are about
+    # to append to, and no box means no such text.
+    #
+    # So we proceed, which is what the quarantine asks for everywhere else in
+    # this module: when Claude Code moves, degrade rather than report something
+    # false. Refusing instead would turn any layout change into "the graceful
+    # stop no longer works, use Kill", which is worse than the behaviour this
+    # replaced and would arrive without warning.
+    #
+    # Decided AFTER the retries, not on the first look, so a session that is
+    # merely slow to paint gets its chances first.
+    if verdict is None and saw_something:
+        return
+
+    # Nothing readable at all is the other case, and it stays a refusal. An
+    # empty capture is not an empty box: it is a pane we could not see, and
+    # `input_is_clear` returning None for it says exactly that.
+    raise StopNotSafe(
+        f"{complaint}, so nothing was typed into {project}; "
+        "open the session in a terminal to see what it is waiting on"
+    )
 
 
 @dataclass(frozen=True)

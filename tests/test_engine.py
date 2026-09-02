@@ -17,7 +17,14 @@ from pathlib import Path
 
 import pytest
 
-from conftest import FakeClock, FakeTmux, ScriptedProcs, procs_from, ps_row
+from conftest import (
+    DIRTY_INPUT_BOX,
+    FakeClock,
+    FakeTmux,
+    ScriptedProcs,
+    procs_from,
+    ps_row,
+)
 from hitchrail import discovery
 from hitchrail.claude_ipc import GRACEFUL_STOP_KEYS, launch_argv
 from hitchrail.config import Config
@@ -32,6 +39,7 @@ from hitchrail.engine import (
     Protected,
     StartFailed,
     State,
+    StopRefused,
     UnknownProject,
 )
 from hitchrail.procs import ProcTable
@@ -909,7 +917,6 @@ def test_stopping_asks_and_kills_nothing(root: Path) -> None:
 
 def test_the_stop_sequence_comes_from_the_quarantine(root: Path) -> None:
     """The engine must not know what a stop physically is."""
-    from hitchrail.claude_ipc import GRACEFUL_STOP_KEYS
 
     engine, tmux, _ = live_engine(root)
     engine.stop("vessel")
@@ -1190,6 +1197,18 @@ class VanishingTmux(FakeTmux):
         if self.calls > self.fail_after:
             raise TmuxUnavailable("tmux is gone")
 
+    def vanish_next(self) -> None:
+        """Work until now, fail from the next call on.
+
+        For a test that wants one operation to succeed and the next to fail
+        without knowing how many tmux calls the first one makes. `fail_after`
+        with a hand counted number encodes the mechanism into the test: the
+        one below said "three, because the stop sequence is three key groups"
+        and went red when #89 added the two captures that verify the box, for
+        a reason that had nothing to do with what it was testing.
+        """
+        self.fail_after = self.calls
+
     def kill_session(self, project: str) -> None:
         self._maybe_vanish()
         super().kill_session(project)
@@ -1198,9 +1217,9 @@ class VanishingTmux(FakeTmux):
         self._maybe_vanish()
         super().new_session(project, cwd, argv)
 
-    def capture_pane(self, project: str, lines: int = 40) -> str:
+    def capture_pane(self, project: str, lines: int = 40, escapes: bool = False) -> str:
         self._maybe_vanish()
-        return super().capture_pane(project, lines)
+        return super().capture_pane(project, lines, escapes)
 
     def send_keys(self, project: str, *keys: str) -> None:
         self._maybe_vanish()
@@ -1251,16 +1270,52 @@ def test_a_failed_stop_does_not_leave_a_phantom_marker(root: Path) -> None:
     assert engine.stopping_since("vessel") is None
 
 
+def test_a_stop_the_adapter_will_not_send_is_an_honest_refusal(root: Path) -> None:
+    """#89. The sequence verifies the input box before it types, and a box it
+    cannot vouch for stops the whole thing.
+
+    The engine's job is to turn that into a refusal rather than a 500, and to
+    take the marker back with it: a wait must not outlive a request that was
+    never sent, which is the same rule `test_a_failed_stop_does_not_leave_a_
+    phantom_marker` states for a tmux that vanished.
+    """
+    engine, tmux = engine_for(root, sessions={"vessel": PANE}, table=RUNNING_MACHINE[1])
+    tmux.pane_text["vessel"] = DIRTY_INPUT_BOX
+
+    with pytest.raises(StopRefused):
+        engine.stop("vessel")
+    assert engine.stopping_since("vessel") is None
+
+
+def test_a_refused_stop_types_nothing(root: Path) -> None:
+    """The half that matters. A refusal that had already sent `/exit` would be
+    a refusal in name only, and the thing being refused is submitting text into
+    somebody else's session with their authority (#91)."""
+    engine, tmux = engine_for(root, sessions={"vessel": PANE}, table=RUNNING_MACHINE[1])
+    tmux.pane_text["vessel"] = DIRTY_INPUT_BOX
+
+    with pytest.raises(StopRefused):
+        engine.stop("vessel")
+    assert not any("/exit" in keys for _, keys in tmux.sent), (
+        "typed into a box it could not read"
+    )
+
+
 def test_a_failed_kill_keeps_the_stop_indicator(root: Path) -> None:
     """The pop moved AFTER the kill. Popping first meant a kill that failed
     took the indicator with it, so a graceful stop still in flight looked as
     though nobody had asked."""
-    # Three, because the stop sequence is three key groups and each is one
-    # call: the kill is the fourth. A smaller number breaks the stop instead,
-    # which is a different test.
-    engine = vanishing_engine(root, fail_after=len(GRACEFUL_STOP_KEYS))
+    # A working stop, and then tmux goes away. Armed after the fact rather than
+    # counted in advance, so this test says what it means: the KILL is the call
+    # that fails.
+    engine = vanishing_engine(root, fail_after=99)
     engine.stop("vessel")
     assert engine.stopping_since("vessel") is not None
+
+    tmux = engine.tmux
+    assert isinstance(tmux, VanishingTmux)
+    tmux.vanish_next()
+
     with pytest.raises(MachineUnreadable):
         engine.kill("vessel")
     assert engine.stopping_since("vessel") is not None
@@ -1313,7 +1368,7 @@ def test_a_failed_start_reports_why_even_when_the_pane_cannot_be_read(
     sessions_dir.mkdir(exist_ok=True)
 
     class CaptureFails(FakeTmux):
-        def capture_pane(self, project: str, lines: int = 40) -> str:
+        def capture_pane(self, project: str, lines: int = 40, escapes: bool = False) -> str:
             raise TmuxUnavailable("tmux is gone")
 
     clock = FakeClock()

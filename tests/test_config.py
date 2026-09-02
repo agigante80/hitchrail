@@ -872,8 +872,11 @@ def test_every_module_is_under_the_size_guideline() -> None:
     # Raise this only for a change that adds behaviour, and say what in the
     # commit. If it passes roughly 550, look for a seam again with fresh eyes.
     caps = {
-        "engine.py": 661,  # +_await_gone, +list(...), +#47 split, +#64, +#66
-        # 458. tmux.py is the module that encodes what tmux actually does
+        # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
+        # `except` arm: the adapter can now decline to type, and the marker has
+        # to come back the same way a vanished tmux takes it back.
+        "engine.py": 675,
+        # 466. tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
         # `list-panes` and `set-option` both need, a rewritten dot, a pane that
@@ -882,14 +885,15 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # Deleting them to reclaim lines would delete the reason the
         # workarounds look wrong, which is the one thing a reader needs.
         #
-        # Raised from 425 for #84's `is_tmux_argv`, which is added behaviour
-        # rather than growth, and the note above permits that with a reason.
+        # Raised from 425 for #84's `is_tmux_argv` and again for #89's `-e`
+        # capture option, both added behaviour rather than growth, which the
+        # note above permits with a reason.
         # **There IS a seam here now**, and it is #93 rather than a bump next
         # time: `sanitize`, `_needs_encoding` and their two constants are the
         # name vocabulary, pure and subprocess free, sitting beside an adapter
         # that spawns things. That is the same split #18 already made when it
         # took the host vocabulary out of config.py into hostnames.py.
-        "tmux.py": 458,
+        "tmux.py": 466,
         # 413, and thirteen lines over the guideline is not a second job. #18
         # already took the host vocabulary out of this file, and what is left
         # is one dataclass and its startup refusals, which is one thing. The
@@ -915,7 +919,7 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # the middle of a security module. Until then this entry is the record
         # that the size is known and argued.
         "security.py": 537,
-        # 481, current. The HTTP layer: routes, the error envelope, the SSE
+        # 487, current. The HTTP layer: routes, the error envelope, the SSE
         # stream and the lifespan sweeper, which is one job described four
         # ways. Most of the length above the guideline is the comments
         # recording what the transport does rather than what this code does,
@@ -927,7 +931,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # `ROUTING_404_MESSAGE`. An earlier version of this comment claimed the
         # split was taken "rather than" the cap raised, in the same diff that
         # raised it.
-        "server.py": 481,
+        #
+        # 487 since #89, for one `except` arm and the reason it answers 409
+        # rather than 503. A refusal handler is the shape this file is made of.
+        "server.py": 487,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

@@ -300,7 +300,7 @@ class Tmux:
         except ValueError:
             return None
 
-    def capture_pane(self, project: str, lines: int = 40) -> str:
+    def capture_pane(self, project: str, lines: int = 40, escapes: bool = False) -> str:
         """The tail of a pane. Empty when it cannot be read, never an exception.
 
         `-J` joins wrapped lines, so a long line reads as one line rather than
@@ -312,12 +312,20 @@ class Tmux:
         into the visible pane, so a bounded read of a dead pane can return that
         and nothing else, while what the agent actually printed has scrolled
         above it.
+
+        `escapes=True` adds `-e`, which keeps the colour sequences. OFF by
+        default because every other caller shows this text to a person or puts
+        it in an error, where the escapes are noise. The one caller that wants
+        them needs to tell dim text from bright, which is the only difference
+        between what a program suggested and what a person typed, and it is
+        invisible without them.
         """
         result = self._try(
             self._argv(
                 "capture-pane",
                 "-p",
                 "-J",
+                *(("-e",) if escapes else ()),
                 "-S",
                 "-" if lines == 0 else f"-{lines}",
                 "-t",

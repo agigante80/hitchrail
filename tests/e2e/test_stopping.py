@@ -68,6 +68,33 @@ async def test_cancel_stops_nothing(page: Page, server: Harness) -> None:
     assert server.is_running("vessel"), "Cancel stopped the session"
 
 
+async def test_a_draft_in_the_box_refuses_the_stop_and_types_nothing(
+    page: Page, server: Harness
+) -> None:
+    """#89, through the whole stack: pane, adapter, engine, API, dialog.
+
+    The agent's input row holds something a person typed. Sending the exit
+    command there appends it to that sentence and submits the pair with their
+    authority (#91), so the sequence reads the box first and declines.
+
+    Asserted as words on the screen rather than as a status code, because the
+    part that matters is what the person is told: not "that did not work",
+    which describes a request that was made and refused, but that nothing was
+    sent and the session is as they left it.
+    """
+    server.seed(running=["vessel"], has_a_draft_in_the_box=True)
+    await _open_stop(page, server)
+
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop", exact=True).click()
+
+    await expect(dialog).to_contain_text("Nothing was sent")
+    # The session is still there, and still running.
+    assert server.is_running("vessel"), "a refused stop stopped something"
+    # And it is not showing a spinner for a request nobody made.
+    await expect(dialog.get_by_role("button", name="Do not wait, kill it now")).to_have_count(0)
+
+
 async def test_kill_appears_once_the_wait_is_under_way_and_stays(
     page: Page, server: Harness
 ) -> None:

@@ -1221,6 +1221,23 @@ git commit -m "feat(ram): memory guard deciding on what is left after starting"
 
 ---
 
+## Superseded after this phase closed
+
+This plan's `GRACEFUL_STOP_KEYS` is `C-c`, `C-c`, `/exit`, and that is what
+Phase 3 delivered. **It is no longer what the code does.** #89 measured the
+sequence against a real Claude Code session on 2026-08-28 and found `C-c C-c`
+alone exits an idle agent in about a second, so the `/exit` group never ran:
+the "polite" stop was a double interrupt quit, and a session stopped mid task
+lost thirteen seconds of work.
+
+The sequence is now `C-u`, `Escape`, `/exit`, with the input box read and
+verified between the steps. `src/hitchrail/claude_ipc.py` carries the argument.
+
+Recorded here rather than edited above, because a closed phase's plan is a
+record of what was built and rewriting it would lose the fact that this was
+believed and shipped. Anyone reading the snippet for the current sequence
+should read the module instead.
+
 ## Phase 3 exit criteria
 
 - [x] All five gates green on 3.11, 3.12 and 3.13. verified locally and in CI on 3.11, 3.12 and 3.13.
