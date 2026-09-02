@@ -226,6 +226,15 @@ _PROJECTS_KEY = "projects"
 _TRUST_KEY = "hasTrustDialogAccepted"
 
 
+# The last file we parsed, keyed by what would make it different. That file is
+# 248KB on the development machine and `look()` runs on every listing AND on
+# every tick of the start poll, which is roughly 32 reads in the eight seconds
+# after a start, none of which consults the answer. Cached on (mtime, size)
+# rather than on a timer: it changes when the operator accepts a folder, which
+# is exactly when we want to notice, and a stat is cheap where a parse is not.
+_trust_cache: tuple[tuple[str, int, int], frozenset[str] | None] | None = None
+
+
 def trusted_folders(config_path: Path) -> frozenset[str] | None:
     """Absolute paths Claude Code will not show a trust prompt for, or `None`.
 
@@ -249,10 +258,26 @@ def trusted_folders(config_path: Path) -> frozenset[str] | None:
     Present and false is not the same as absent, and both mean the prompt will
     appear, so only an explicit true counts.
     """
+    global _trust_cache
+    try:
+        stat = config_path.stat()
+    except OSError:
+        return None
+    key = (str(config_path), stat.st_mtime_ns, stat.st_size)
+    if _trust_cache is not None and _trust_cache[0] == key:
+        return _trust_cache[1]
     try:
         raw = json.loads(config_path.read_text())
     except (OSError, ValueError):
+        _trust_cache = (key, None)
         return None
+    answer = _read_trust(raw)
+    _trust_cache = (key, answer)
+    return answer
+
+
+def _read_trust(raw: object) -> frozenset[str] | None:
+    """The parsing, separated so the caching above has one place to store."""
     if not isinstance(raw, dict):
         return None
     projects = raw.get(_PROJECTS_KEY)
@@ -260,10 +285,14 @@ def trusted_folders(config_path: Path) -> frozenset[str] | None:
         return None
     entries = {p: e for p, e in projects.items() if isinstance(e, dict)}
     if projects and not entries:
-        # A populated map in which nothing is a recognisable entry is a shape
+        # A POPULATED map in which nothing is a recognisable entry is a shape
         # change, not a machine with odd projects, and the answer to a shape
         # change is that we do not know. One strange entry among many is the
-        # other case and is simply skipped: an empty set here would be a claim.
+        # other case and is simply skipped: an empty set there would be a claim.
+        #
+        # An EMPTY map is neither, and it deliberately answers "nothing is
+        # trusted" rather than "cannot tell". A fresh install really has
+        # accepted no folders, so every row warning is the truth about it.
         return None
     return frozenset(p for p, e in entries.items() if e.get(_TRUST_KEY) is True)
 

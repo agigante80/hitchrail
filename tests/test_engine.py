@@ -195,9 +195,40 @@ def test_a_running_agent_in_a_trusted_folder_is_not_waiting(root: Path) -> None:
         root,
         sessions={"vessel": PANE},
         table=RUNNING_MACHINE[1],
-        agent_config=agent_config(root, trusted=[str(root / "vessel")]),
+        agent_config=agent_config(root, trusted=[str(discovery.project_path(root, "vessel"))]),
     )
     assert engine.get("vessel").awaiting_trust is False
+
+
+def test_trust_is_matched_on_the_path_the_agent_was_actually_started_in(
+    root: Path, tmp_path: Path
+) -> None:
+    """The comparison has to survive a root that is not already resolved.
+
+    `--root` defaults to `"."`, and `Config` does not resolve it, so the naive
+    `root / name` join produces the RELATIVE string `"vessel"` while the agent
+    was launched by `tmux -c` with the absolute resolved path, which is the key
+    Claude Code records. Under that mismatch nothing ever matches and EVERY
+    running row carries the warning, permanently.
+
+    A symlinked root is the same failure and is what this test uses, because a
+    `tmp_path` root is already absolute and resolved: seeding the fixture with
+    the same join the code makes is how the first version of these tests agreed
+    with the bug instead of catching it.
+    """
+    link = tmp_path / "by-another-name"
+    link.symlink_to(root, target_is_directory=True)
+    assert str(link / "vessel") != str(discovery.project_path(link, "vessel"))
+
+    engine, _ = engine_for(
+        link,
+        sessions={"vessel": PANE},
+        table=RUNNING_MACHINE[1],
+        agent_config=agent_config(root, trusted=[str(discovery.project_path(link, "vessel"))]),
+    )
+    assert engine.get("vessel").awaiting_trust is False, (
+        "the trust map is keyed on the resolved path the agent was started in"
+    )
 
 
 def test_a_config_we_cannot_read_claims_nothing(root: Path) -> None:

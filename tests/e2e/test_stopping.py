@@ -361,3 +361,73 @@ async def test_clearing_a_stale_session_removes_it(page: Page, server: Harness) 
     await dialog.get_by_role("button", name="Clear", exact=True).click()
 
     await expect(row).to_have_attribute("data-state", "stopped", timeout=15_000)
+
+
+# -- #81: the wait must not claim what it could not read -------------------
+
+
+async def _stop_and_hold(page: Page, server: Harness, patience_ms: int = 1500) -> None:
+    """Load the page, shorten the wait, tap through the confirm, and hold.
+
+    The patience is set AFTER the navigation and not before, which is the whole
+    reason this helper exists rather than calling `_open_stop`: that one does
+    its own `goto`, and a seam set before it is wiped by the reload. The first
+    version of these tests did exactly that and sat on "Stopping" until the
+    assertion timed out, which reads like the fix not working.
+    """
+    await page.goto(server.base)
+    await page.evaluate(f"() => window.__hitchrail.setStopPatience({patience_ms})")
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row).to_be_visible()
+    await row.get_by_role("button", name="Stop").click()
+    await page.locator("[data-dialog]").get_by_role("button", name="Stop", exact=True).click()
+    await expect(page.locator("[data-dialog]")).to_contain_text(
+        f"Stopping {server.project('vessel')}"
+    )
+
+
+async def test_a_wait_whose_listings_all_failed_does_not_claim_it_did_not_finish(
+    page: Page, server: Harness
+) -> None:
+    """#81, the 503 shape.
+
+    The machine goes unreadable for the whole wait. The old timeout screen
+    stated "It has not finished" and offered Kill, on the strength of listings
+    that all failed, which is the design's rule inverted at the exact moment it
+    warns about.
+    """
+    # The PAGE's patience, not the server's. Shortening the server's
+    # `stop_timeout` instead would make the engine drop its stopping marker
+    # first, the row would read `running` again, and the wait would close as
+    # though the session had finished, which is a different bug and not this
+    # one.
+    server.seed(running=["vessel"], ignores_graceful_stop=True)
+    await _stop_and_hold(page, server)
+    server.break_machine()
+
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text(
+        f"Lost track of {server.project('vessel')}", timeout=20_000
+    )
+    await expect(dialog).to_contain_text("cannot say whether the session finished")
+    assert await dialog.get_by_role("button", name="Kill it").count() == 0
+    assert "It has not finished" not in (await dialog.inner_text())
+
+
+async def test_a_wait_whose_listings_are_refused_does_not_claim_it_did_not_finish(
+    page: Page, server: Harness
+) -> None:
+    """#81, the 401 shape: the token stops being accepted mid stop.
+
+    Reached by clearing the cookie the grant set, which is what a rotated token
+    looks like from this page. The old code replaced the refusal dialog with a
+    kill offer for a session this browser is no longer authenticated for.
+    """
+    server.seed(running=["vessel"], ignores_graceful_stop=True, token="s3cret")
+    await page.goto(f"{server.base}/grant#token=s3cret")
+    await _stop_and_hold(page, server)
+    await page.context.clear_cookies()
+
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text("Lost track of", timeout=20_000)
+    assert await dialog.get_by_role("button", name="Kill it").count() == 0

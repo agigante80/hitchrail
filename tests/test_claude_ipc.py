@@ -651,3 +651,31 @@ def test_only_the_trust_flag_is_read_out_of_that_file(tmp_path: Path) -> None:
         },
     )
     assert trusted_folders(path) == frozenset({"/srv/a"})
+
+
+def test_a_changed_config_is_noticed_rather_than_cached_forever(tmp_path: Path) -> None:
+    """The cache is keyed on mtime and size, and the thing it must notice is a
+    person accepting a folder, which is the moment the answer changes."""
+    import os
+    import time
+
+    path = write_agent_config(
+        tmp_path, {"projects": {"/srv/a": {"hasTrustDialogAccepted": True}}}
+    )
+    assert trusted_folders(path) == frozenset({"/srv/a"})
+
+    write_agent_config(
+        tmp_path,
+        {
+            "projects": {
+                "/srv/a": {"hasTrustDialogAccepted": True},
+                "/srv/b": {"hasTrustDialogAccepted": True},
+            }
+        },
+    )
+    # Same path, so a cache that ignored the file's own timestamps would answer
+    # from the first read. A test that merely rewrote the same LENGTH of JSON
+    # would pass against a size-only key, which is why the second map is bigger
+    # and the mtime is nudged as well.
+    os.utime(path, (time.time() + 1, time.time() + 1))
+    assert trusted_folders(path) == frozenset({"/srv/a", "/srv/b"})

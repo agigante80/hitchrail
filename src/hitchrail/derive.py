@@ -17,7 +17,7 @@ from collections.abc import Callable, Container
 from dataclasses import dataclass
 from pathlib import Path
 
-from hitchrail import claude_ipc
+from hitchrail import claude_ipc, discovery
 from hitchrail.config import Config
 from hitchrail.procs import ProcTable
 from hitchrail.sessions import MachineUnreadable, Session, State
@@ -200,12 +200,27 @@ def _awaiting_trust(name: str, machine: Machine, config: Config) -> bool:
     and claiming otherwise would put a warning on every running row at once the
     first time that undocumented file changes shape.
 
-    The folder is resolved the same way `discovery` builds it, so a symlinked
-    project compares as the path the agent was actually started in.
+    Resolved through `discovery`, and that is the whole of the correctness
+    here. `engine.start` passes `discovery.project_path(...)` to `tmux -c`, so
+    the path the agent was launched in, and therefore the key Claude Code
+    records, is the RESOLVED one. `--root` defaults to `"."` and `Config` does
+    not resolve it, so a naive `root / name` join produces the relative string
+    `"vessel"` under the default invocation, matches nothing, and puts the
+    warning on every running row permanently. A symlinked root fails the same
+    way, and that is what the regression test uses, since a `tmp_path` root is
+    already resolved and would agree with the mistake.
+
+    A project that has gone away between the listing and here is not trusted as
+    far as we can tell, which is the same answer as unknown and reaches nobody:
+    a row for a folder that no longer exists is not rendered.
     """
     if machine.trusted is None:
         return False
-    return str(config.root / name) not in machine.trusted
+    try:
+        folder = discovery.project_path(config.root, name)
+    except (discovery.NoSuchProject, ValueError):
+        return False
+    return str(folder) not in machine.trusted
 
 
 def live(

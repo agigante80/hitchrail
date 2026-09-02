@@ -431,7 +431,7 @@ one and a client cannot tell the difference:
 | `locked` | 409 | a start is already in flight for this folder |
 | `ram_soft` | 409 | starting would leave the machine short; resubmit acknowledged |
 | `url_pending` | 409 | the session has no link yet; ask again shortly |
-| `no_agent` | 409 | the session holds no agent to ask; only a kill clears it |
+| `no_agent` | 409 | the state rules the action out: nothing to ask, or nothing to kill |
 | `stop_unsafe` | 409 | the agent's screen could not be vouched for; it was not asked to exit |
 | `self_protected` | 423 | this is the folder Hitchrail is running in |
 | `start_died` | 502 | the session did not come up within the grace window |

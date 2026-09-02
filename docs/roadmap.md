@@ -357,8 +357,11 @@ section 6, which names error codes the first plan draft did not deliver:
   which made any HTTPS service on port 443 of the same machine a same origin
   caller. A TLS terminating proxy's origin cannot be derived at all, because
   the scheme and the port are both the proxy's, so it is configured.
-- **`no_agent`** is returned when a stop arrives for a session with no agent in
-  it, and **a stale row offers Clear rather than Stop**. Both come from #98.
+- **`no_agent`** is returned when the derived state rules the action out, and
+  **a stale row offers Clear rather than Stop**. Both come from #98, and #83
+  widened the first: a stop finds nothing to ask in a `stale` or `detached`
+  session, and a kill finds nothing to kill in a `detached` one, because a kill
+  targets the tmux session and that state is defined by not having one.
   The design's stop flow assumes there is an agent to ask, and two of the four
   derived states have none: `stale` is a tmux session whose agent is gone, and
   `detached` is an agent with no tmux session. Verified against a real tmux

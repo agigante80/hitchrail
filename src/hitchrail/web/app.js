@@ -612,6 +612,21 @@ function showWaiting(project) {
 
 function awaitStopped(project) {
   const deadline = Date.now() + stopTimeoutMs();
+  // #81. `refresh()` returns whether the listing could be read, and this loop
+  // used to discard it. Every listing during the wait could fail and the
+  // timeout screen would still state, as fact, that the session has not
+  // finished, and offer Kill on the strength of it.
+  //
+  // That is the project's own rule inverted, at the worst moment. The design
+  // says an unreadable machine is an error rather than a state, and control 7
+  // says Hitchrail says so rather than guessing. Here it guessed, in the
+  // direction of the destructive action, at the point the design itself calls
+  // the one where a person is "most likely to reach for it and least likely to
+  // have thought about uncommitted work".
+  //
+  // Starts true because the DELETE that got us here succeeded, so the page did
+  // have a good reading a moment ago.
+  let lastReadOk = true;
   const tick = async () => {
     const current = state.projects.find((p) => p.name === project.name);
     if (!current || !current.stopping) {
@@ -619,13 +634,32 @@ function awaitStopped(project) {
       return;
     }
     if (Date.now() >= deadline) {
-      showTimedOut(project);
+      // The LAST reading, not "did they all fail". At the deadline the question
+      // is what is true NOW, and the answer comes from the most recent listing.
+      // If that one failed, the page cannot answer, and one blip costing an
+      // honest screen instead of a claim is the right way round to be wrong.
+      if (lastReadOk) showTimedOut(project);
+      else showLostTrack(project);
       return;
     }
-    await refresh();
+    lastReadOk = (await refresh()).ok;
     window.setTimeout(tick, 700);
   };
   window.setTimeout(tick, 700);
+}
+
+function showLostTrack(project) {
+  showDialog({
+    title: `Lost track of ${project.name}`,
+    body:
+      "The stop was requested. This browser cannot read the machine, so it "
+      + "cannot say whether the session finished.",
+    forProject: project.name,
+    // NO Kill. Offering the destructive path as the resolution to a reading
+    // that failed is the thing this whole change exists to stop: the page
+    // would be proposing to end a process it cannot currently see.
+    actions: [["Close", "ghost", () => closeDialog()]],
+  });
 }
 
 function showTimedOut(project) {
@@ -706,7 +740,11 @@ function showRefusal(result) {
     // one was declined before anything was sent, which is the distinction the
     // `stop_unsafe` comment below argues at length.
     showDialog({
-      title: "There is no agent to ask",
+      // Not "there is no agent to ask": this code now comes back from the KILL
+      // route too, where a detached row has a live agent and simply no session
+      // to kill. The engine's message names which case it is; the title has to
+      // be true of both.
+      title: "Hitchrail cannot reach it",
       body: message,
       actions: [["Close", "ghost", () => closeDialog()]],
     });

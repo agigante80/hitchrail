@@ -56,7 +56,7 @@ import pytest
 import uvicorn
 from playwright.async_api import Page, async_playwright
 
-from hitchrail import claude_ipc
+from hitchrail import claude_ipc, discovery
 from hitchrail.config import Config
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
@@ -274,22 +274,26 @@ class Harness:
         # a real machine has already accepted the folders it works in: 50 of 69
         # on the development machine. `untrusted` is the fresh folder case,
         # which is the one Hitchrail's own New folder button guarantees (#88).
+        #
+        # Keyed through `discovery.project_path`, the same call `start` gives
+        # `tmux -c`, and NOT by joining the root to the name. The first version
+        # of this seeding did the naive join, which is the join the code itself
+        # was making, so the fixture agreed with a bug that put the warning on
+        # every running row under the default `--root .` and could never have
+        # caught it. A fixture built from the production path fails when the
+        # production path is wrong, which is the only reason to have one.
         untrusted_names = {e2e_name(n) for n in untrusted or []}
+        seeded = (running or []) + (stopped or []) + (detached or []) + (stale or [])
         self._agent_config.write_text(
             json.dumps(
                 {
                     "projects": {
-                        str(self.root / e2e_name(n)): {"hasTrustDialogAccepted": True}
-                        for n in (running or [])
-                        + (stopped or [])
-                        + (detached or [])
-                        + (stale or [])
+                        str(discovery.project_path(self.root, e2e_name(n))): {
+                            "hasTrustDialogAccepted": True
+                        }
+                        for n in seeded
                         if e2e_name(n) not in untrusted_names
                     }
-                    # A project of our own, always, so the map is never empty:
-                    # an empty `projects` is a shape this reader treats as
-                    # unknown, which would make `untrusted` silently do nothing.
-                    | {str(self.root / ".hitchrail-anchor"): {"hasTrustDialogAccepted": True}}
                 }
             )
         )

@@ -894,7 +894,7 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # escape stripper went back to the narrower pattern after the wider one
         # introduced a worse defect than it fixed. Those are the comments a
         # further round would otherwise re-litigate.
-        "claude_ipc.py": 534,
+        "claude_ipc.py": 563,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.
