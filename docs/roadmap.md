@@ -235,24 +235,37 @@ Claude session.
 
 **Plan: [`superpowers/plans/2026-08-27-hitchrail-phase-6-interface.md`](superpowers/plans/2026-08-27-hitchrail-phase-6-interface.md)**
 
-**Status as of 2026-08-28.** All six tasks are implemented and eleven of the
-twelve exit criteria are ticked with evidence. The phase is NOT closed, and the
-reason is worth reading before picking it up: the twelfth criterion is running
+**Status as of 2026-09-02.** All six tasks are implemented and ten of the
+eleven exit criteria are ticked with evidence. The phase is NOT closed, and the
+reason is worth reading before picking it up: the eleventh criterion is running
 it against a real machine, and the first hour of doing that found five defects
 no tier of the suite could reach.
 
-Open and blocking, all P1:
+The count was written here as "eleven of twelve" for five days, against a plan
+that has eleven criteria and ten ticks. Nothing checks a number in prose against
+the boxes it describes, which is the same failure `tests/test_docs_are_true.py`
+exists to catch in its other forms.
+
+**Closing the phase means closing all seven open tickets in the milestone**, not
+only the criterion. The unticked criterion is #75, the walk on a real phone, and
+the five defects below are what that walk will meet: a walk done before they are
+fixed cannot tick it. #67 is separate and it undercuts a criterion already
+ticked, because a browser test that fails only in CI means the gates are not
+green on the runner.
+
+Open and blocking, all P1 except #67:
 
 | Issue | What |
 |---|---|
-| #89 | The graceful stop interrupts twice and quits while the screen says it is asking the agent to finish. Measured: `C-c C-c` alone exits in 1s so `/exit` is dead code, and a session stopped mid task lost 13 of 40 seconds of work. |
+| #89 | The graceful stop interrupts twice and quits. Measured: `C-c C-c` alone exits in 1s so `/exit` is dead code, and a session stopped mid task lost 13 of 40 seconds of work. The copy half landed at `56d1f5c`, so the screen no longer claims an etiquette that never happened; the mechanism is still the blind three key sequence. |
 | #88 | A session in a folder Claude Code has not seen hangs on a startup modal and is reported `running` with a null link. Broader than the trust prompt: any modal. |
 | #84 | The tmux server's own argv still carries the command line that started the first session, so it matches the agent pattern and a row can show the server's pid and RSS. |
 | #83 | The `Kill pid N` button on a detached row has no handler, and no API behind it. |
 | #81 | The stop timeout states "it has not finished" from a listing it may have failed to read, and offers Kill on that basis. |
 
 Plus #75, walking the flows on a phone, and #67, a CI only failure. Both need a
-person rather than an agent.
+person rather than an agent, and both are in the milestone, so the phase is
+seven tickets from closed rather than five.
 
 **What that hour taught, beyond the list.** Every fixture in the suite starts
 from an empty private tmux server and a fresh temp directory, so the tests

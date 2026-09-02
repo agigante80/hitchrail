@@ -1135,13 +1135,22 @@ task implies a separate deliverable and there is not one.
 - [x] Dark theme renders from the same stylesheet under `prefers-color-scheme` and under an explicit toggle. Asserted as exactly one stylesheet of our own, plus the explicit toggle winning in both directions.
 - [x] `uvx hitchrail` serves the page from the installed wheel, not from the working tree. Built the wheel, installed it into a clean venv, and confirmed `web/` resolves under site-packages rather than the working tree.
 
-The three still open are waiting on Tasks 22 and 23, not on rework:
+Two of the three that were open here are now ticked above: #57 landed the
+`EventSource` and #21 moved the grant into a fragment. This paragraph named them
+as blocked on Tasks 22 and 23 for as long as those tasks stayed done, which is
+how a plan goes stale: the boxes get ticked and the prose underneath does not.
 
-- The list being right after a backgrounded tab is #57, which has no
-  `EventSource` yet.
-- The grant travelling in a fragment is #21, which has no `/grant` route yet.
-- "Every flow works on a real phone" cannot be claimed while those two are
-  missing, and it has not been driven on a real phone at all: everything so
-  far is a 390px viewport in a headless browser, which is a different claim.
+**One criterion is left, and it is #75.** Everything so far is a 390px viewport
+in a headless browser, which is a different claim from a phone: no thumb, no
+soft keyboard over the field, no address bar eating the bottom, no lift.
 
-When these hold, write the Phase 7 plan from `docs/roadmap.md`.
+That criterion cannot be honestly ticked before the five defects the first real
+machine run found, because the walk is what meets them: #89 the stop mechanism,
+#88 a session stuck on a startup modal, #84 the tmux server's own pid in a row,
+#83 an inert Kill control, #81 a timeout asserting from a listing it may not
+have read. #67 belongs with them: a browser test that fails only in CI means the
+first criterion above is ticked against this machine and not against the runner.
+
+So the phase closes when the seven open tickets in the milestone close, and #75
+is walked last, after the other six. Then write the Phase 7 plan from
+`docs/roadmap.md`.
