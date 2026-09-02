@@ -31,7 +31,11 @@ from pathlib import Path
 
 import pytest
 
+from hitchrail import derive
+from hitchrail.claude_ipc import launch_argv
+from hitchrail.config import Config
 from hitchrail.procs import snapshot
+from hitchrail.sessions import State
 from hitchrail.tmux import Tmux, sanitize
 
 pytestmark = [
@@ -386,3 +390,140 @@ def test_a_session_that_is_not_there_is_not_reported_as_dead(
     absent session must not read as a dead one."""
     adapter = Tmux(prefix="hr-", socket=server.socket)
     assert adapter.pane_is_dead("never-existed") is False
+
+
+# -- #84: the server's own argv, which only a real server has ---------------
+
+
+# A project name no real project can have. This tier calls `snapshot()`, which
+# reads the WHOLE process table of the machine running the suite, and orphan
+# attribution deliberately strips the binary so it matches on
+# `--dangerously-skip-permissions --remote-control <name>` alone. Written first
+# with the plain fixture name `vessel`, this test failed on a real agent for a
+# real project of that name, 8 hours old, which the developer's machine was
+# running at the time. It could as easily have passed on one.
+#
+# The browser tier already does this with `E2E_PREFIX`; nothing said the live
+# tier needs it too, and it does the moment a test derives rather than only
+# driving tmux.
+LIVE_PROJECT = "hrlt-vessel"
+
+# Another tool's session prefix, and the reason this test exists at all. See
+# the docstring below: our own `new_session` cannot produce #84.
+FOREIGN_PREFIX = "hrlt-other-"
+
+
+def _foreign_server(server: PrivateTmux, agent: Path, project: str) -> None:
+    """Start the server the way a DIFFERENT tool does, agent argv last.
+
+    Deliberately not `Tmux.new_session`. Ours chains `; set-option -t =name:
+    remain-on-exit on` into the same invocation (#66), so the agent argv is not
+    at the end of our server's command line and the suffix match never claims
+    it. Every session created through the adapter is therefore safe from #84,
+    which is why writing this test through the adapter passed against the
+    unfixed code.
+
+    The invocation reproduced here is the one observed on the real machine,
+    from `another tool`:
+
+        tmux new-session -d -s cc-workstation -c /home/.../workstation \
+            claude --dangerously-skip-permissions --remote-control workstation
+
+    Nothing stops that server from being the one Hitchrail talks to: with no
+    `tmux_socket` configured both use the default socket, so the foreign
+    server IS our server.
+    """
+    server.run(
+        "new-session",
+        "-d",
+        "-s",
+        f"{FOREIGN_PREFIX}{project}",
+        "-c",
+        str(agent.parent),
+        *launch_argv(str(agent), project),
+    )
+    server.created.append(f"{FOREIGN_PREFIX}{project}")
+
+
+def _config(root: Path, sessions: Path, agent: Path) -> Config:
+    return Config(
+        root=root, agent_binary=str(agent), session_prefix=PREFIX, sessions_dir=sessions
+    )
+
+
+@pytest.fixture
+def machine(server: PrivateTmux, tmp_path: Path) -> tuple[Config, Tmux, Path]:
+    root = tmp_path / "root"
+    (root / LIVE_PROJECT).mkdir(parents=True)
+    sessions = tmp_path / "sessions"
+    sessions.mkdir()
+    agent = Path(server._dir) / "agent"
+    agent.write_text("#!/bin/sh\nsleep 30\n")
+    agent.chmod(0o755)
+    return _config(root, sessions, agent), Tmux(prefix=PREFIX, socket=server.socket), agent
+
+
+def test_a_foreign_tmux_servers_argv_is_not_read_as_our_detached_agent(
+    server: PrivateTmux, machine: tuple[Config, Tmux, Path]
+) -> None:
+    """#84 as observed, and the reason no other tier could reach it.
+
+    Every other fixture spawns the agent directly, or through a server whose
+    argv belongs to a different session. Here the server's FIRST invocation
+    carries the agent command line, so the server's own argv ends with the
+    exact suffix orphan attribution matches, for as long as the server lives.
+
+    On the real machine this rendered as `detached <project> pid=<the tmux
+    server>`: the row showed the server's pid, RSS and uptime, and `ram_mb`
+    feeds the memory guard that decides whether a start is allowed.
+    """
+    config, adapter, agent = machine
+    _foreign_server(server, agent, LIVE_PROJECT)
+    time.sleep(0.5)
+    server_pid = int(server.run("display-message", "-p", "#{pid}").stdout.strip())
+
+    pane_pid = int(
+        server.run(
+            "list-panes", "-t", f"={FOREIGN_PREFIX}{LIVE_PROJECT}:", "-F", "#{pane_pid}"
+        ).stdout.split()[0]
+    )
+    session = derive.derive(LIVE_PROJECT, derive.look(snapshot, adapter), config, adapter, ())
+
+    # The #84 assertion, and only it: WHICH process the row points at. That it
+    # comes back `detached` at all is #85, because `pane_pids` keeps only
+    # sessions carrying our own prefix, so a foreign session's pane never lands
+    # in `owned` and the agent inside it looks orphaned. Asserting a state here
+    # would make this test fail the day #85 is fixed, for a reason that has
+    # nothing to do with #84.
+    assert session.pid != server_pid, "the row is showing the tmux server's pid"
+    assert session.pid == pane_pid, "the row must point at the agent in the pane"
+
+
+def test_the_servers_argv_outlives_the_agent_that_gave_it(
+    server: PrivateTmux, machine: tuple[Config, Tmux, Path]
+) -> None:
+    """The half a parent/child preference cannot rescue, and the state a long
+    lived server spends most of its life in.
+
+    Once that first session is gone the agent is gone with it, and the server
+    keeps the command line anyway. Nothing is left to prefer over it, so a fix
+    that merely chose the descendant would report the server here.
+
+    The keep-alive session is created SECOND on purpose: a server takes the
+    argv of the invocation that started it, so creating it first would leave
+    the server with a harmless command line and nothing to detect.
+    """
+    config, adapter, agent = machine
+    _foreign_server(server, agent, LIVE_PROJECT)
+    server.new_session(f"{PREFIX}keepalive")
+    time.sleep(0.5)
+    server_pid = int(server.run("display-message", "-p", "#{pid}").stdout.strip())
+
+    server.run("kill-session", "-t", f"={FOREIGN_PREFIX}{LIVE_PROJECT}")
+    server.created.remove(f"{FOREIGN_PREFIX}{LIVE_PROJECT}")
+    time.sleep(0.5)
+    assert server_pid in snapshot().by_pid, "the server exited, so the test proves nothing"
+
+    session = derive.derive(LIVE_PROJECT, derive.look(snapshot, adapter), config, adapter, ())
+    assert session.state is State.STOPPED, "the server's stale argv derived as a detached agent"
+    assert session.pid is None

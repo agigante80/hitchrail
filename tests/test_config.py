@@ -873,14 +873,23 @@ def test_every_module_is_under_the_size_guideline() -> None:
     # commit. If it passes roughly 550, look for a seam again with fresh eyes.
     caps = {
         "engine.py": 661,  # +_await_gone, +list(...), +#47 split, +#64, +#66
-        # 406. tmux.py is the module that encodes what tmux actually does
+        # 458. tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
-        # `list-panes` and `set-option` both need, a rewritten dot, and now a
-        # pane that vanishes before it can be read. The length is those
-        # explanations. Deleting them to reclaim lines would delete the reason
-        # the workarounds look wrong, which is the one thing a reader needs.
-        "tmux.py": 425,
+        # `list-panes` and `set-option` both need, a rewritten dot, a pane that
+        # vanishes before it can be read, and now a server that keeps the argv
+        # of whatever started it (#84). The length is those explanations.
+        # Deleting them to reclaim lines would delete the reason the
+        # workarounds look wrong, which is the one thing a reader needs.
+        #
+        # Raised from 425 for #84's `is_tmux_argv`, which is added behaviour
+        # rather than growth, and the note above permits that with a reason.
+        # **There IS a seam here now**, and it is #93 rather than a bump next
+        # time: `sanitize`, `_needs_encoding` and their two constants are the
+        # name vocabulary, pure and subprocess free, sitting beside an adapter
+        # that spawns things. That is the same split #18 already made when it
+        # took the host vocabulary out of config.py into hostnames.py.
+        "tmux.py": 458,
         # 413, and thirteen lines over the guideline is not a second job. #18
         # already took the host vocabulary out of this file, and what is left
         # is one dataclass and its startup refusals, which is one thing. The

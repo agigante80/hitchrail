@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Callable
+from pathlib import PurePosixPath
 
 # What a subprocess call looks like from here. Injected so the whole engine can
 # be tested without a machine, which is the single seam the architecture rests
@@ -28,6 +29,38 @@ _SEPARATORS = (".", ":")
 # otherwise start with it is encoded as well, which is what keeps the encoded
 # and unencoded forms disjoint and therefore the whole mapping injective.
 _ENCODED_PREFIX = "e-"
+
+# The binary every call in this class invokes. Named once so `is_tmux_argv`
+# below and `_argv` cannot disagree about what tmux is called.
+BINARY = "tmux"
+
+
+def is_tmux_argv(args: str) -> bool:
+    """Whether a command line is an invocation of tmux itself.
+
+    A tmux server keeps the argv of the invocation that started it, for life,
+    and that invocation ends with the command the first session was asked to
+    run. So a scan looking for a program by its argv tail finds the server too.
+    #84, and `derive.find_detached` is where that costs something.
+
+    Two mechanics, both checked against `ps -eww -o args` output on 2026-09-02
+    rather than assumed.
+
+    **argv[0], not a substring anywhere.** The argument after `-c` is a path we
+    do not control, so a search of the whole line refuses anything running
+    under a directory called tmux.
+
+    **Its basename, because argv[0] is however the caller spelled it.** A
+    leading `env -u TMUX` does not survive into the process: env execs tmux and
+    is replaced by it, so argv[0] arrives as `tmux` under the private socket
+    tiers exactly as it does elsewhere.
+
+    Deliberately NOT a check for `new-session`. `-S <socket>` sits between the
+    binary and the subcommand, so anything anchored on those two as one string
+    stops working under the invocation our own live tiers make.
+    """
+    head = args.split(maxsplit=1)
+    return bool(head) and PurePosixPath(head[0]).name == BINARY
 
 
 class NotOurSession(ValueError):

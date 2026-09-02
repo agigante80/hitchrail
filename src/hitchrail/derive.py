@@ -20,7 +20,7 @@ from hitchrail import claude_ipc
 from hitchrail.config import Config
 from hitchrail.procs import ProcTable
 from hitchrail.sessions import MachineUnreadable, Session, State
-from hitchrail.tmux import Tmux, TmuxUnavailable
+from hitchrail.tmux import Tmux, TmuxUnavailable, is_tmux_argv
 
 
 @dataclass(frozen=True)
@@ -134,6 +134,28 @@ def find_detached(name: str, machine: Machine, config: Config) -> int | None:
     suffix = " ".join(claude_ipc.launch_argv(config.agent_binary, name)[1:])
     for proc in machine.table.matching(claude_ipc.REMOTE_CONTROL_MARKER):
         if proc.pid in machine.owned:
+            continue
+        # #84. A tmux server keeps the argv of the invocation that started it,
+        # and that invocation ends with the command line of the first session,
+        # so the server satisfies the suffix match above for whichever project
+        # started it. Observed on a real machine as a row showing the server's
+        # pid, RSS and uptime, and `ram_mb` is what the memory guard reads
+        # before allowing a start.
+        #
+        # **Not reachable through our own `new_session`**, which chains
+        # `; set-option ... remain-on-exit on` into the same command (#66) and
+        # therefore does not end with the agent's argv. The server that carries
+        # this shape is one somebody else started, and with no `tmux_socket`
+        # configured that is the same server we talk to. A test written through
+        # our adapter passes against the unfixed code, which is what happened.
+        #
+        # Skipped here rather than preferring the agent underneath it, because
+        # the argv outlives the agent: once that first session ends, the server
+        # keeps the command line and there is no child left to prefer.
+        #
+        # Only this direction needs it. The pane direction searches a pane's
+        # DESCENDANTS, and the server is the pane's parent, never below it.
+        if is_tmux_argv(proc.args):
             continue
         if proc.args.rstrip().endswith(suffix):
             return proc.pid

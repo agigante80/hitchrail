@@ -231,6 +231,90 @@ def test_a_real_agent_is_still_detached_after_that_tightening(root: Path) -> Non
     assert state_of(engine, "vessel") is State.DETACHED
 
 
+# #84: the wrapper we spawn through carries the whole agent argv as its own.
+
+
+# The shape seen on the development machine on 2026-09-02: a tmux server whose
+# argv ends with the entire command line of the session it was started for, and
+# the agent itself one pid later as its child. The server was 14041 and the
+# agent 14042, and every row on that machine but one was correct, because only
+# the first session's command line survives as the server's argv.
+TMUX_SERVER = 800
+
+
+def _server_args(project: str, socket: str | None = None) -> str:
+    """A tmux server's argv, built from `launch_argv` like every other row.
+
+    Pasting the agent half would let a reorder of `launch_argv` pass this test
+    while the real server's argv changed shape underneath it.
+    """
+    flags = ["-S", socket] if socket else []
+    return " ".join(
+        [
+            "tmux",
+            *flags,
+            "new-session",
+            "-d",
+            "-s",
+            f"hr-{project}",
+            "-c",
+            f"/root/{project}",
+            *launch_argv("claude", project),
+        ]
+    )
+
+
+def test_the_tmux_server_is_not_a_detached_agent(root: Path) -> None:
+    """#84, observed on a real machine with 52 projects.
+
+    `tmux new-session ... claude --dangerously-skip-permissions --remote-control X`
+    stays as the SERVER's own argv for as long as the server lives, so it ends
+    with the exact suffix the orphan scan matches. The project whose session
+    was started first then reports the server's pid, RSS and uptime as if they
+    were the agent's, and `ram_mb` feeds the start guard's memory decision.
+    """
+    engine, _ = engine_for(root, table=ps_row(TMUX_SERVER, 1, args=_server_args("vessel")))
+    assert state_of(engine, "vessel") is State.STOPPED
+
+
+def test_the_agent_is_reported_rather_than_the_server_that_spawned_it(root: Path) -> None:
+    """The observed shape entire: both rows present, parent and child.
+
+    Asserting only that the server is refused would pass against a scan that
+    refused everything, and this is the half that says which pid a row shows.
+    """
+    table = ps_row(TMUX_SERVER, 1, args=_server_args("vessel")) + ps_row(
+        ORPHAN, TMUX_SERVER, project="vessel"
+    )
+    engine, _ = engine_for(root, table=table)
+    session = engine.get("vessel")
+    assert session.state is State.DETACHED
+    assert session.pid == ORPHAN, "the row must show the agent, not the server above it"
+
+
+def test_a_tmux_server_on_a_private_socket_is_refused_too(root: Path) -> None:
+    """`-S` sits between the binary and the subcommand, which is where a check
+    anchored on `tmux new-session` as one string stops working. The e2e and
+    live_tmux tiers both run this shape, so it is the one our own suite makes."""
+    engine, _ = engine_for(
+        root,
+        table=ps_row(TMUX_SERVER, 1, args=_server_args("vessel", socket="/run/user/1000/hr/s")),
+    )
+    assert state_of(engine, "vessel") is State.STOPPED
+
+
+def test_the_server_is_refused_even_with_no_agent_left_under_it(root: Path) -> None:
+    """The case the parent/child relationship cannot rescue.
+
+    Once the first session's agent exits, the server keeps that command line
+    and there is no child to prefer over it. Anything that merely preferred the
+    descendant would report the server here, which is the state a long lived
+    server spends most of its life in.
+    """
+    engine, _ = engine_for(root, table=ps_row(TMUX_SERVER, 1, args=_server_args("vessel")))
+    assert engine.get("vessel").pid is None
+
+
 def test_the_binary_does_not_influence_the_match(root: Path) -> None:
     """A MISMATCH, because the same binary on both sides proves nothing.
 
