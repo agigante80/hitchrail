@@ -86,20 +86,23 @@ class StopRefused(EngineError):
     """The graceful stop was abandoned before anything was typed (#89).
 
     Separate from `MachineUnreadable`, which says we could not look at the
-    machine. This says we looked, and what we saw is a reason not to act: the
-    agent's input box holds text, so it is either a draft the operator left or
-    a modal waiting on an answer. `send-keys` writes to the pty and nothing
-    marks those characters as ours, so a stop command typed there would append
-    to what is already in the box and submit the pair with the operator's
-    authority (#91).
+    machine. This says we looked, and what we saw is a reason not to finish:
+    the agent's input box holds text, or could not be found, or the pane could
+    not be read at all. `send-keys` writes to the pty and nothing marks those
+    characters as ours, so a stop command typed into a box with something
+    already in it would submit the pair with the operator's authority (#91),
+    and the Enter that follows it accepts whatever a dialog has highlighted.
 
     What that command is stays in `claude_ipc`, which is why this docstring
     does not name it: the grep guarding the quarantine cannot tell a mention
     in prose from a second copy of the sequence, and it is right not to.
 
-    Not a state, and not a failure of the stop either: nothing was sent, so the
-    agent is exactly as it was. The right answer for the person is to open the
-    session in a terminal and look.
+    Not a state, and not a failure of the stop either. **It does not mean
+    nothing was sent**, which is what this said first and is the same untruth
+    #89 exists to remove: the adapter clears the box and interrupts before it
+    decides, so keys have gone out and a turn may have been cut short. What did
+    not happen is the request to exit, so nothing is in flight and there is no
+    stop to wait for. The message carries the rest.
     """
 
 

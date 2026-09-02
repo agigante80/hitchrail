@@ -551,9 +551,14 @@ async function beginStop(project) {
 function showWaiting(project) {
   showDialog({
     title: `Stopping ${project.name}`,
-    // Waiting for it to exit, not to finish: the interrupt has already been
-    // sent by the time this screen appears, so the wait is for the process to
-    // go, not room for the agent to land.
+    // Waiting for it to exit, not to finish. The sequence interrupts before it
+    // asks anything, so once the request lands there is no grace period being
+    // observed: the wait is for the process to go.
+    //
+    // Careful with "already": `beginStop` paints this BEFORE it awaits the
+    // DELETE, so for the first moments nothing has been sent at all. An
+    // earlier version of this comment said the interrupt had already happened
+    // when the screen appeared, which is the wrong way round.
     body: "Waiting for it to exit.",
     forProject: project.name,
     actions: [

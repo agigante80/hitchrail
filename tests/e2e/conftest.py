@@ -84,6 +84,15 @@ STARTUP_TIMEOUT = 15.0
 _SHIM_HEAD = """#!{python}
 import sys, time
 print("hitchrail-shim: started as " + " ".join(sys.argv[1:]), flush=True)
+# An EMPTY input row, the real one, captured from a live session: U+276F then
+# U+00A0 and padding.
+#
+# Added at round 2 of #89's review, when the graceful stop stopped typing into
+# panes it does not recognise. Before that this fake painted no input box at
+# all and was stopped anyway, which is the shape the project keeps finding:
+# the fake was easier to satisfy than the thing it stands in for. A shim that
+# draws no box now refuses, correctly, so it draws one.
+print("\\x1b[39m\\u276f\\u00a0                     ", flush=True)
 """
 
 # Waits, and exits on the graceful request the engine sends through send-keys.

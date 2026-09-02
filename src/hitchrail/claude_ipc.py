@@ -96,8 +96,19 @@ _PROMPT = "\u276f"
 # draft without it, which is the only thing that tells the two apart.
 _DIM = "\x1b[2m"
 
-# CSI sequences, for deciding whether what is left is only padding.
-_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+# Escape sequences, for deciding whether what is left is only padding.
+#
+# Three alternatives, and the third is the one that matters: CSI (`ESC [ ... `),
+# OSC (`ESC ] ... BEL` or `ST`), and then ANY other two character escape. A
+# terminal emits plenty of those, `ESC ( B` to select the ASCII character set
+# being the common one, and an earlier version of this pattern matched only the
+# first two. One such sequence surviving into an otherwise empty box makes the
+# box read as DIRTY, which refuses every graceful stop on that machine. It
+# fails closed, and it fails closed totally, which is the worst shape a guard
+# can have: correct, and useless.
+_ANSI = re.compile(
+    r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_][0-9A-Za-z]?"
+)
 
 # A keystroke reaches the pty at once and the agent repaints when it gets
 # round to it, and nothing tells us when that was. So the box is read, and
@@ -253,6 +264,10 @@ def request_stop(pane: Pane, project: str, settle: Callable[[], None] | None = N
     a `for` loop.
     """
     wait = settle or (lambda: time.sleep(_SETTLE_S))
+    # Unpacked rather than iterated, deliberately. Verification happens between
+    # the groups, so a fourth one is not something this function could absorb
+    # by looping: it needs a decision about where its checkpoint goes. The
+    # unpack raises at the one place that has to change, which is the point.
     clear, interrupt, quit_keys = GRACEFUL_STOP_KEYS
 
     pane.send_keys(project, *clear)
@@ -277,9 +292,19 @@ def _require_clear(pane: Pane, project: str, wait: Callable[[], None], complaint
     """
     saw_a_box = False
     saw_a_pane = False
-    for attempt in range(_SETTLE_TRIES):
-        if attempt:
-            wait()
+    for _ in range(_SETTLE_TRIES):
+        # BEFORE the first read, not only between retries. The keys were sent
+        # a moment ago and the agent has not necessarily repainted, so attempt
+        # zero can judge the frame from before them.
+        #
+        # That is harmless at the first checkpoint and vacuous at the second.
+        # A stale read after `C-u` still shows the draft, so the box reads
+        # dirty and we retry: it fails safe. A stale read after `Escape` shows
+        # the box that was clear a moment ago, so it returns True at once and
+        # the check never sees what `Escape` did: it fails OPEN, and the guard
+        # is worth nothing. Waiting first costs one settle on the happy path
+        # and is what makes the second checkpoint mean anything.
+        wait()
         text = pane.capture_pane(project, escapes=True)
         verdict = input_is_clear(text)
         if verdict is True:
@@ -295,30 +320,37 @@ def _require_clear(pane: Pane, project: str, wait: Callable[[], None], complaint
     if saw_a_box:
         raise StopNotSafe(f"{complaint}, so {_NOT_SENT}. {_LOOK_YOURSELF}")
 
-    # A pane with text in it and no input row at all is not a box we know. It
-    # is a vendor whose interface we have never seen, or a version of this one
-    # that has moved, and the hazard this check exists for is not established
-    # there: the risk is text the OPERATOR typed sitting in a box we are about
-    # to append to, and no box means no such text.
+    # **This branch used to PROCEED, and that was wrong.** The argument for it
+    # was graceful degradation: a pane with output and no input row is a vendor
+    # we have not seen or this one after a redesign, and the hazard being
+    # guarded is text the OPERATOR left in a box we are about to append to, so
+    # no box meant no such text.
     #
-    # So we proceed, which is what the quarantine asks for everywhere else in
-    # this module: when Claude Code moves, degrade rather than report something
-    # false. Refusing instead would turn any layout change into "the graceful
-    # stop no longer works, use Kill", which is worse than the behaviour this
-    # replaced and would arrive without warning.
+    # The hole is #88. A modal that does not draw the prompt ornament lands
+    # here, and what gets typed is not only an exit command: it is that command
+    # followed by ENTER, which accepts whatever entry a dialog has highlighted.
+    # On the trust prompt the highlighted entry is the one that grants a folder
+    # full permissions. The trade was argued against the ONE modal that had
+    # been captured, and #88 is about any of them.
     #
-    # Decided AFTER the retries, not on the first look, so a session that is
-    # merely slow to paint gets its chances first.
+    # So an unrecognised pane refuses. The cost is real and is the smaller one:
+    # a redesign of that row turns the graceful stop into an honest refusal
+    # that names itself, with Kill still on the row, rather than into a stop
+    # that silently answers dialogs.
     if saw_a_pane:
-        return
+        raise StopNotSafe(
+            f"the input box in {project} could not be found, so {_NOT_SENT}. "
+            "Something is on screen that this version does not recognise. "
+            f"{_LOOK_YOURSELF}"
+        )
 
     # Nothing readable at all, on any attempt, and it gets its OWN words. An
-    # empty capture is not an empty box, and it is not a dirty one either:
-    # reusing the caller's complaint here told the person their input box held
-    # text when what actually happened is that the pane could not be read at
-    # all, which sends them looking for the wrong thing.
+    # empty capture is not an empty box: most often it is no pane, which is
+    # what a detached agent has. Telling that person to open the session in a
+    # terminal would send them to one that does not exist.
     raise StopNotSafe(
-        f"the pane for {project} could not be read, so {_NOT_SENT}. {_LOOK_YOURSELF}"
+        f"the pane for {project} could not be read, so {_NOT_SENT}. "
+        "An agent that outlived its terminal has no session to type into."
     )
 
 

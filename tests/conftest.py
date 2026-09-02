@@ -139,7 +139,12 @@ class FakeTmux(Tmux):
             # suite. A test that cares what the box holds sets `pane_text`;
             # every other one is about the lifecycle around the stop rather
             # than about the box, and gets a clear one.
-            return CLEAR_INPUT_BOX
+            #
+            # ONLY where a session exists. A real `capture-pane` against a
+            # project with no tmux session returns nothing, and handing back a
+            # tidy empty box there made a detached agent look stoppable by
+            # keystroke when it has no pane to type into at all.
+            return CLEAR_INPUT_BOX if project in self.sessions else ""
         return self.pane_text.get(project, "")
 
     def send_keys(self, project: str, *keys: str) -> None:

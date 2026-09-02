@@ -1301,6 +1301,31 @@ def test_a_refused_stop_types_nothing(root: Path) -> None:
     )
 
 
+def test_stopping_a_detached_agent_is_refused_and_says_why(root: Path) -> None:
+    """Round 2 of review: a behaviour change that was untested in both
+    directions, so neither was on purpose.
+
+    `_require_live` admits `detached`, and a detached agent has no tmux session
+    by definition. The old sequence sent keys at a pane that was not there,
+    tmux did nothing, and the API answered 202: a stop that reported success
+    and could not possibly have worked.
+
+    It refuses now, because the capture comes back empty and an empty capture
+    is not an empty box. The message is the point: it must not tell somebody to
+    open a terminal, because the whole meaning of `detached` is that there is
+    not one. Killing by pid is the answer, and that is #83.
+    """
+    engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, project="vessel"))
+    assert state_of(engine, "vessel") is State.DETACHED
+
+    with pytest.raises(StopRefused) as refusal:
+        engine.stop("vessel")
+
+    assert "outlived its terminal" in str(refusal.value)
+    assert "open the session in a terminal" not in str(refusal.value).lower()
+    assert engine.stopping_since("vessel") is None
+
+
 def test_a_failed_kill_keeps_the_stop_indicator(root: Path) -> None:
     """The pop moved AFTER the kill. Popping first meant a kill that failed
     took the indicator with it, so a graceful stop still in flight looked as

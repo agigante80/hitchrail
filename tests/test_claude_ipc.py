@@ -144,7 +144,7 @@ def test_request_stop_clears_before_it_interrupts() -> None:
     first: `C-u` is safe whatever state the pane is in, and doing it after an
     interrupt leaves a window where a draft is still present."""
     pane = FakePane()
-    request_stop(pane, "vessel")
+    request_stop(pane, "vessel", settle=lambda: None)
     assert [sent[1:] for sent in pane.sent] == list(GRACEFUL_STOP_KEYS)
     assert GRACEFUL_STOP_KEYS[0] == ("C-u",)
 
@@ -153,7 +153,7 @@ def test_request_stop_verifies_the_box_before_typing_into_it() -> None:
     """Two captures, and both before `/exit`. The first guards a draft that was
     already there, the second guards whatever `Escape` did."""
     pane = FakePane()
-    request_stop(pane, "vessel")
+    request_stop(pane, "vessel", settle=lambda: None)
     assert len(pane.captured) == 2
 
 
@@ -163,22 +163,31 @@ def test_request_stop_refuses_when_a_draft_survived_the_clear() -> None:
     submits the pair with the operator's authority."""
     pane = FakePane([pane_text(DRAFT_BOX)])
     with pytest.raises(StopNotSafe):
-        request_stop(pane, "vessel")
+        request_stop(pane, "vessel", settle=lambda: None)
     assert not any("/exit" in sent for sent in pane.sent), "typed anyway"
 
 
-def test_a_pane_that_is_not_this_agent_at_all_is_still_stopped() -> None:
-    """The quarantine's own rule, applied to the check rather than to a field.
+def test_a_pane_with_no_input_box_is_refused_rather_than_typed_into() -> None:
+    """**This assertion is the reverse of what it was**, and the reversal is
+    round 2 of review rather than a change of taste.
 
-    A pane with output and no input row is a vendor we have not seen, or this
-    one after a layout change. The hazard being guarded is text the OPERATOR
-    typed sitting in a box we are about to append to, and there is no box, so
-    there is no such text. Refusing here would turn any redesign of the input
-    row into "graceful stop no longer works, use Kill", silently.
+    It first proceeded here, on a graceful degradation argument: a pane with
+    output and no input row is a vendor we have not seen or this one after a
+    redesign, the hazard is text the OPERATOR left in a box we are about to
+    append to, and no box means no such text. Refusing would turn a redesign
+    into "graceful stop no longer works", silently.
+
+    The hole is #88. What gets typed is not only an exit command, it is that
+    command and then ENTER, which accepts whatever entry a dialog has
+    highlighted, and a modal that does not draw the prompt ornament lands in
+    exactly this branch. The trade had been argued against the one modal that
+    had been captured, and #88 is about any of them. A stop that silently
+    answers dialogs is worse than one that stops working loudly.
     """
     pane = FakePane(["hitchrail-shim: started\nsome output and no input row\n"])
-    request_stop(pane, "vessel")
-    assert any("/exit" in sent for sent in pane.sent), "refused a pane with no box to protect"
+    with pytest.raises(StopNotSafe):
+        request_stop(pane, "vessel", settle=lambda: None)
+    assert not any("/exit" in sent for sent in pane.sent)
 
 
 def test_a_box_seen_dirty_once_is_never_downgraded_to_unknown() -> None:
@@ -196,7 +205,7 @@ def test_a_box_seen_dirty_once_is_never_downgraded_to_unknown() -> None:
     dirty = pane_text(DRAFT_BOX)
     pane = FakePane([dirty, dirty, dirty, ""])
     with pytest.raises(StopNotSafe):
-        request_stop(pane, "vessel")
+        request_stop(pane, "vessel", settle=lambda: None)
 
     # Asserted on the keys, not on the exception. With the bug the FIRST
     # checkpoint proceeds, `Escape` goes out, and the second checkpoint raises
@@ -212,7 +221,7 @@ def test_request_stop_refuses_a_pane_it_cannot_read() -> None:
     """Fails closed. An unreadable pane is not an empty one."""
     pane = FakePane([""])
     with pytest.raises(StopNotSafe):
-        request_stop(pane, "vessel")
+        request_stop(pane, "vessel", settle=lambda: None)
     assert not any("/exit" in sent for sent in pane.sent)
 
 
@@ -228,7 +237,7 @@ def test_request_stop_refuses_when_escape_leaves_the_box_dirty() -> None:
     """
     pane = FakePane([pane_text(CLEAR_BOX), pane_text(DRAFT_BOX)])
     with pytest.raises(StopNotSafe):
-        request_stop(pane, "vessel")
+        request_stop(pane, "vessel", settle=lambda: None)
     assert not any("/exit" in sent for sent in pane.sent)
 
 
@@ -242,13 +251,13 @@ def test_request_stop_captures_with_escape_sequences() -> None:
             seen.append(escapes)
             return super().capture_pane(project, lines, escapes)
 
-    request_stop(Recording(), "vessel")
+    request_stop(Recording(), "vessel", settle=lambda: None)
     assert seen and all(seen), "captured without escapes, so dim and bright are one thing"
 
 
 def test_request_stop_targets_the_project_it_was_given() -> None:
     pane = FakePane()
-    request_stop(pane, "vessel")
+    request_stop(pane, "vessel", settle=lambda: None)
     assert {sent[0] for sent in pane.sent} == {"vessel"}
 
 
@@ -275,7 +284,7 @@ def test_request_stop_takes_anything_shaped_like_a_pane() -> None:
             return pane_text(CLEAR_BOX)
 
     pane = NotATmux()
-    request_stop(pane, "vessel")
+    request_stop(pane, "vessel", settle=lambda: None)
     assert pane.count == len(GRACEFUL_STOP_KEYS)
 
 
