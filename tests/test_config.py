@@ -872,7 +872,7 @@ def test_every_module_is_under_the_size_guideline() -> None:
     # Raise this only for a change that adds behaviour, and say what in the
     # commit. If it passes roughly 550, look for a seam again with fresh eyes.
     caps = {
-        # 462, and this one does NOT want splitting, which is why it is here
+        # 472, and this one does NOT want splitting, which is why it is here
         # rather than in a ticket like #93. The whole value of `claude_ipc` is
         # that it is ONE module: when Claude Code moves, exactly one file
         # changes and the interface degrades rather than reporting something
@@ -887,12 +887,14 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # reason the check is right, and a description of them is what was
         # wrong twice.
         #
-        # 430 to 460 is two rounds of review reversing decisions inside
-        # `_require_clear`, each of which left its reason behind: why the read
-        # settles before the FIRST look rather than only between retries, and
-        # why an unrecognised pane refuses where it used to proceed. Those are
-        # the comments a third round would otherwise re-litigate.
-        "claude_ipc.py": 462,
+        # The growth from 419 is review reversing decisions inside
+        # `_require_clear` and leaving each reason behind: why the read settles
+        # before the FIRST look rather than only between retries, why an
+        # unrecognised pane refuses where it used to proceed, and why the
+        # escape stripper went back to the narrower pattern after the wider one
+        # introduced a worse defect than it fixed. Those are the comments a
+        # further round would otherwise re-litigate.
+        "claude_ipc.py": 472,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.

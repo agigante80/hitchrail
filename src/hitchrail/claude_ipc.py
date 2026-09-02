@@ -96,27 +96,37 @@ _PROMPT = "\u276f"
 # draft without it, which is the only thing that tells the two apart.
 _DIM = "\x1b[2m"
 
-# Escape sequences, for deciding whether what is left is only padding.
+# CSI and OSC sequences, for deciding whether what is left is only padding.
 #
-# Three alternatives, and the third is the one that matters: CSI (`ESC [ ... `),
-# OSC (`ESC ] ... BEL` or `ST`), and then ANY other two character escape. A
-# terminal emits plenty of those, `ESC ( B` to select the ASCII character set
-# being the common one, and an earlier version of this pattern matched only the
-# first two. One such sequence surviving into an otherwise empty box makes the
-# box read as DIRTY, which refuses every graceful stop on that machine. It
-# fails closed, and it fails closed totally, which is the worst shape a guard
-# can have: correct, and useless.
-_ANSI = re.compile(
-    r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_][0-9A-Za-z]?"
-)
+# **Narrower than it looks like it should be, on purpose.** Round 2 of #89's
+# review widened this to strip any two character escape as well, because an
+# `ESC ( B` charset designator surviving into an otherwise empty box makes the
+# box read as dirty and refuses every graceful stop on that terminal.
+#
+# That widening introduced something worse than the problem. `\x1b[@-Z\\-_]`
+# followed by an optional trailing character ate one PRINTABLE character after
+# a two character escape, so a one character draft read as an empty box and the
+# exit command would have been appended to it and submitted with the
+# operator's authority: the guard producing the exact failure it exists to
+# prevent (#91).
+#
+# Round 3 found that, which put two consecutive review rounds on defects inside
+# the previous round's fix. The project's own rule is to stop there rather than
+# patch again, so this went BACK to the narrower pattern instead of being
+# adjusted a third time. The `ESC ( B` case is still open, as #97, and it fails
+# CLOSED: such a terminal refuses stops rather than mistyping into them, which
+# is the direction to be wrong in.
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 
 # A keystroke reaches the pty at once and the agent repaints when it gets
-# round to it, and nothing tells us when that was. So the box is read, and
-# re-read after a pause if it does not yet look clear.
+# round to it, and nothing tells us when that was. So the box is read after a
+# pause, and re-read after another if it does not look clear yet.
 #
-# POLLED rather than slept before reading, which matters in both directions: a
-# pane that has already repainted costs nothing, and a slow one gets more than
-# one guess instead of a single wait that was either wasteful or too short.
+# An earlier version of this comment said the read came FIRST and that a pane
+# which had already repainted therefore cost nothing. That stopped being true
+# when the settle moved ahead of the first read: a stale read after `Escape`
+# returned True immediately and made the second checkpoint vacuous. One settle
+# on the happy path is what that checkpoint costs, and it is worth it.
 _SETTLE_S = 0.15
 _SETTLE_TRIES = 4
 

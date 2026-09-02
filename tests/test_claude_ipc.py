@@ -167,6 +167,28 @@ def test_request_stop_refuses_when_a_draft_survived_the_clear() -> None:
     assert not any("/exit" in sent for sent in pane.sent), "typed anyway"
 
 
+@pytest.mark.parametrize(
+    "after",
+    ["a", "\x1bMa", "x    ", "\x1b(Bq"],
+    ids=["one char", "after a two char escape", "one char and padding", "after a charset"],
+)
+def test_a_single_character_is_never_read_as_an_empty_box(after: str) -> None:
+    """The hazard this guard exists for, at its smallest.
+
+    Round 2 widened the escape stripper to cover sequences that are neither CSI
+    nor OSC, and the widened pattern ate one printable character after a two
+    character escape. `\x1bMa` then read as EMPTY, so an exit command would be
+    appended to a one character draft and submitted with the operator's
+    authority (#91): the guard producing the failure it was built to stop.
+
+    Round 3 found that, which put two consecutive rounds on defects inside the
+    previous round's fix, so the stripper went back to the narrower pattern
+    rather than being adjusted again. This test is what makes the revert
+    permanent.
+    """
+    assert input_is_clear(pane_text("\x1b[39m\u276f\xa0" + after)) is False
+
+
 def test_a_pane_with_no_input_box_is_refused_rather_than_typed_into() -> None:
     """**This assertion is the reverse of what it was**, and the reversal is
     round 2 of review rather than a change of taste.
