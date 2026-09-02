@@ -10,3 +10,4 @@ docs/design/hitchrail-session-manager.html
 .claude/settings.local.json
 CLAUDE.local.md
 .coverage
+.claude/overnight/
