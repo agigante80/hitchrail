@@ -61,6 +61,7 @@ from hitchrail.config import Config
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
 from hitchrail.server import create_app
+from hitchrail.tmux import Tmux
 
 pytestmark = pytest.mark.e2e
 
@@ -309,6 +310,16 @@ class Harness:
         # the process, and the session goes with the pane, which leaves
         # `stopped`. This is the same reason `detached` above is spawned
         # outside tmux rather than faked by breaking the tmux half.
+        # The session NAME comes from the adapter, not from an f-string. It
+        # applies the configured prefix and the sanitising that makes a name
+        # like `dotted.site` addressable, and a hand built `hr-<name>` agrees
+        # with it only by luck. When it stopped agreeing, these tests would
+        # fail as "expected stale, got stopped", which says nothing about the
+        # cause, and leave a session behind on the socket.
+        #
+        # `check=True`, likewise. A `new-session` that fails silently produces
+        # the same opaque failure one step later.
+        namer = Tmux(prefix=Config(root=self.root).session_prefix, socket=self._sock)
         for name in stale or []:
             subprocess.run(
                 [
@@ -321,13 +332,13 @@ class Harness:
                     "new-session",
                     "-d",
                     "-s",
-                    f"hr-{e2e_name(name)}",
+                    namer.session_name(e2e_name(name)),
                     "-c",
                     str(self.root / e2e_name(name)),
                     "sleep",
                     "300",
                 ],
-                check=False,
+                check=True,
                 capture_output=True,
             )
         if stale:

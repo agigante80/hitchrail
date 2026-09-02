@@ -498,7 +498,8 @@ class Engine:
         if session.state is State.DETACHED:
             raise NoAgent(
                 f"the agent for {name} has no tmux session, so there is no "
-                "terminal to type into; it can only be ended by its pid"
+                f"terminal to type into; its process, {session.pid}, has to be "
+                "ended directly"
             )
         with self._stopping_guard:
             self._stopping[name] = self._clock()

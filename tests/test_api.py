@@ -56,8 +56,10 @@ RUNNING_PS = """\
  501   500 512000   600 claude --dangerously-skip-permissions --remote-control vessel
 """
 
-# The tmux session is alive and nothing of ours is in it. `stale`, which is the
-# state the interface still offers Stop on.
+# The tmux session is alive and nothing of ours is in it: `stale`. The
+# interface offers Clear on such a row rather than Stop, so this refusal is
+# reached through the API rather than by tapping, which is exactly why the API
+# has to carry it.
 STALE_PS = """\
  500     1   4096   600 tmux new-session -d -s hr-vessel
 """
@@ -302,9 +304,13 @@ async def test_stopping_a_stale_session_is_409_no_agent(config: Config, tmux: Fa
 
     `stop_unsafe` means the screen could not be vouched for, and the answer is
     to go and look. This means there is no agent to ask at all, and the answer
-    is that a kill clears the session and loses nothing. A client cannot tell
-    those apart from one code, and our own interface offers Stop on a stale
-    row, so it is a refusal a person actually reaches.
+    is that a kill clears the session. A client cannot tell those apart from
+    one code.
+
+    Our own interface offers Clear rather than Stop on a stale row, so it does
+    not normally reach this. That is not a reason to leave the API vague: a row
+    can go stale between the render and the tap, and every other client of this
+    API has only the code to go on.
     """
     # A stale machine, built here rather than skipped for. The module fixture
     # is a RUNNING one, and a test that skips when it does not get the world it

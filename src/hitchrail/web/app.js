@@ -688,6 +688,19 @@ function showRefusal(result) {
     });
     return;
   }
+  if (code === "no_agent") {
+    // #98. Reachable even though no row offers Stop where this applies: a
+    // running row can go stale between the render and the tap. Falling through
+    // to "That did not work" would describe a request that failed, and this
+    // one was declined before anything was sent, which is the distinction the
+    // `stop_unsafe` comment below argues at length.
+    showDialog({
+      title: "There is no agent to ask",
+      body: message,
+      actions: [["Close", "ghost", () => closeDialog()]],
+    });
+    return;
+  }
   if (code === "stop_unsafe") {
     // #89. Not a failure: the stop looked at the agent's input box, would not
     // vouch for it, and stopped before asking it to exit. "That did not work"
@@ -771,8 +784,17 @@ function showSoftMemory(project, body) {
 function showHardMemory(project, body) {
   // NO "Start anyway" anywhere on this screen. 507 is not overridable, and a
   // control that cannot work is worse than no control.
+  // `isRunning`, not "has a pid". A `detached` row has one and no tmux session
+  // to type into, so the API answers `no_agent` and this screen would offer a
+  // Stop that cannot work. That is the same defect the stale row had in the
+  // commit that added this comment, one screen over, and the same rule
+  // decides it: do not offer a tap that refuses.
+  //
+  // A detached agent can still be the largest thing on the machine. Leaving it
+  // out of the SUGGESTION does not hide it: it is on the list with its pid and
+  // its memory, which is where it can be acted on.
   const largest = [...state.projects]
-    .filter((candidate) => candidate.pid !== null && !candidate.protected)
+    .filter((candidate) => isRunning(candidate) && !candidate.protected)
     .sort((a, b) => b.ram_mb - a.ram_mb)[0];
 
   const actions = [["Cancel", "ghost", () => closeDialog()]];

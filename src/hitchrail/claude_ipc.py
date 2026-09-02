@@ -361,8 +361,13 @@ def _require_clear(pane: Pane, project: str, wait: Callable[[], None], complaint
     # because the agent had outlived its terminal, which is one cause among
     # several: `capture_pane` returns "" for ANY non zero tmux exit, so a live
     # session whose capture failed once was told something false about itself
-    # and lost the one instruction it could act on. The states where there
-    # genuinely is no pane are refused by the engine before this runs (#98).
+    # and lost the one instruction it could act on.
+    #
+    # The engine refuses the states that have no pane before calling this
+    # (#98), and that is not the same as them being impossible here: the state
+    # was derived a moment earlier, so an agent that exits in between arrives
+    # with no pane after all. One more reason for this branch to describe what
+    # it saw rather than to name a cause.
     raise StopNotSafe(
         f"the pane for {project} could not be read, so {_NOT_SENT}. {_LOOK_YOURSELF}"
     )
