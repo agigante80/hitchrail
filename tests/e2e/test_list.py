@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import subprocess
+import time
+from pathlib import Path
 import pytest
 from playwright.async_api import Page, expect
 
@@ -324,3 +327,56 @@ async def test_a_trusted_folder_renders_as_an_ordinary_running_row(
     row = page.locator(f'[data-project="{server.project("vessel")}"]')
     await expect(row).to_have_attribute("data-state", "running")
     assert "waiting to be trusted" not in (await row.inner_text())
+
+
+# -- #99: the teardown's own leak detectors --------------------------------
+
+
+async def test_the_leak_detectors_can_actually_see_a_stray_server(
+    server: Harness, tmp_path: Path
+) -> None:
+    """#99 added two checks to teardown, and a check that cannot fire is worse
+    than none: it reports safety it is not providing.
+
+    Exercised against a server on a DIFFERENT socket, created and killed here,
+    because the fixture's own `kill-server` takes everything on its socket and
+    so cannot leave the thing these are looking for. The real leak arrives when
+    a session is created after that kill, which a test body cannot arrange.
+    """
+    sock = str(tmp_path / "s")
+    subprocess.run(
+        [
+            "env",
+            "-u",
+            "TMUX",
+            "tmux",
+            "-S",
+            sock,
+            "new-session",
+            "-d",
+            "-s",
+            "hrleak",
+            "sleep",
+            "60",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    try:
+        assert server.sessions_on_the_socket(sock) == ["hrleak"]
+        naming = server.processes_still_naming(sock)
+        assert naming, "a tmux server holding this socket was not seen in ps"
+        assert any(sock in row for row in naming)
+    finally:
+        subprocess.run(
+            ["env", "-u", "TMUX", "tmux", "-S", sock, "kill-session", "-t", "=hrleak"],
+            check=False,
+            capture_output=True,
+        )
+
+    # And they go quiet once it is gone, or every run would fail on nothing.
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and server.processes_still_naming(sock):
+        time.sleep(0.1)
+    assert server.sessions_on_the_socket(sock) == []
+    assert server.processes_still_naming(sock) == []

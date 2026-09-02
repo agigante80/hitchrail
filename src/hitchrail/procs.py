@@ -80,8 +80,17 @@ def parse_ps(text: str) -> list[Proc]:
     return procs
 
 
-def _default_runner(argv: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(argv, capture_output=True, text=True, check=False)
+# The same bound as the tmux adapter, for the same reason (#67): this runs in
+# an HTTP handler, and `ps` blocks on a wedged filesystem the way tmux blocks on
+# a busy server. Kept here rather than imported so each adapter states its own
+# reason; they are the same today and need not stay so.
+_CALL_TIMEOUT_S = 10.0
+
+
+def _default_runner(
+    argv: list[str], timeout: float = _CALL_TIMEOUT_S
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(argv, capture_output=True, text=True, check=False, timeout=timeout)
 
 
 @dataclass
@@ -178,11 +187,15 @@ def snapshot(run: Runner | None = None) -> ProcTable:
     runner = run or _default_runner
     try:
         result = runner(PS_ARGV)
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         # `subprocess.run` raises before there is a returncode when the binary
         # is absent or not executable: a container without procps, a broken
         # PATH. The docstring promises this never raises for a failed call, and
         # "could not be executed" is the most failed a call gets.
+        #
+        # A timeout joins it (#67). "It never answered" is as failed as "it
+        # could not start", and both have to become `ok=False` rather than an
+        # exception, or one wedged `ps` takes the whole listing with it.
         return ProcTable([], ok=False)
     if result.returncode != 0:
         return ProcTable([], ok=False)

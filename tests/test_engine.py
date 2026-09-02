@@ -43,7 +43,7 @@ from hitchrail.engine import (
     StopRefused,
     UnknownProject,
 )
-from hitchrail.procs import ProcTable
+from hitchrail.procs import ProcTable, snapshot
 from hitchrail.tmux import Tmux, TmuxUnavailable
 
 PANE = 500
@@ -1517,6 +1517,20 @@ def test_killing_a_stale_session_still_works(root: Path) -> None:
 
     engine.kill("vessel")
     assert tmux.killed == ["vessel"]
+
+
+def test_a_process_table_that_never_answers_is_not_an_empty_machine(root: Path) -> None:
+    """The other adapter, and the direction that matters: a wedged `ps` must
+    not read as "nothing is running", which would report every live agent as
+    stopped and offer to start a second one in the same folder."""
+    import subprocess
+
+    def wedged(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(argv, 10.0)
+
+    table = snapshot(wedged)
+    assert table.ok is False
+    assert table.procs == []
 
 
 def test_a_failed_kill_keeps_the_stop_indicator(root: Path) -> None:

@@ -61,7 +61,7 @@ from hitchrail.config import Config
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
 from hitchrail.server import create_app
-from hitchrail.tmux import Tmux
+from hitchrail.tmux import Tmux, is_tmux_argv
 
 pytestmark = pytest.mark.e2e
 
@@ -422,6 +422,29 @@ class Harness:
         asyncio.set_event_loop(self._loop)
         self._loop.run_until_complete(self._server.serve())
 
+    def sessions_on_the_socket(self, sock: str) -> list[str]:
+        """What the server on this socket still holds, or nothing if it is gone.
+
+        A non zero return is the ordinary success case here: it means no server
+        is listening, which is what a kill-server that worked leaves behind.
+        """
+        result = subprocess.run(
+            ["tmux", "-S", sock, "list-sessions", "-F", "#{session_name}"],
+            capture_output=True,
+            text=True,
+            env={k: v for k, v in os.environ.items() if k != "TMUX"},
+            check=False,
+        )
+        return result.stdout.split() if result.returncode == 0 else []
+
+    def processes_still_naming(self, sock: str) -> list[str]:
+        """Any process whose argv mentions this socket, tmux servers included.
+
+        Deliberately NOT excluding tmux here, unlike the agent reaper: a tmux
+        server is exactly what this is looking for.
+        """
+        return self._rows_mentioning(sock, agents_only=False)
+
     def reap_orphans(self) -> None:
         """Anything spawned outside tmux is ours to clean up.
 
@@ -560,16 +583,36 @@ class Harness:
         """
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            table = subprocess.run(
-                ["ps", "-eww", "-o", "args", "--no-headers"],
-                capture_output=True,
-                text=True,
-                check=False,
-            ).stdout
-            if str(self._agent) not in table:
+            if not self._rows_mentioning(str(self._agent), agents_only=True):
                 return
             time.sleep(0.05)
         raise RuntimeError(f"agents from {self._agent} outlived their tmux server")
+
+    @staticmethod
+    def _rows_mentioning(needle: str, *, agents_only: bool) -> list[str]:
+        """`ps` rows carrying a string, optionally excluding tmux's own.
+
+        The exclusion is #84's shape inside this harness. A tmux server keeps
+        the argv of the invocation that started it, and ours names the shim, so
+        a plain substring search over `ps` sees the SERVER as an agent. The
+        reaper above would then wait its full timeout and report that "agents
+        outlived their tmux server", naming the wrong thing entirely: what
+        outlived is the server, and there is no agent.
+
+        `is_tmux_argv` is the production predicate, not a copy, so this cannot
+        drift from what derivation believes a tmux process looks like.
+        """
+        table = subprocess.run(
+            ["ps", "-eww", "-o", "args", "--no-headers"],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout
+        return [
+            line
+            for line in table.splitlines()
+            if needle in line and not (agents_only and is_tmux_argv(line))
+        ]
 
     def kill_the_agent_quietly(self, name: str) -> None:
         """Kill the agent process, out of band, so NOTHING is announced.
@@ -692,17 +735,39 @@ def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Harness]:
         harness.stop_serving()
         harness.reap_orphans()
         # Scoped kill, never a bare `tmux kill-server`: this socket only.
-        subprocess.run(
+        killed = subprocess.run(
             ["tmux", "-S", sock, "kill-server"],
             capture_output=True,
+            text=True,
             env={k: v for k, v in os.environ.items() if k != "TMUX"},
             check=False,
         )
         harness.wait_until_the_agents_are_gone()
+        # #99. A tmux server outlived a green run and accumulated for hours,
+        # found by looking at `ps` for an unrelated reason, because nothing
+        # here looked. `tests/test_live_tmux.py` learned this already and its
+        # `PrivateTmux.close` says why the order matters: after the socket goes
+        # `list-sessions` cannot connect and returns nothing, so an assertion
+        # made then is vacuously true.
+        #
+        # Asked of the SERVER, before the socket is removed.
+        survivors = harness.sessions_on_the_socket(sock)
+        # And of `ps` afterwards, which is the check that would actually have
+        # caught the leak: that server's socket directory was already gone, so
+        # nothing could address it, while its argv still named the socket. A
+        # session created between the kill above and this line lands here too,
+        # which is the suspected mechanism and what #67 may also be.
         shutil.rmtree(sock_dir, ignore_errors=True)
+        stragglers = harness.processes_still_naming(sock)
         # Last, so a server that would not stop is reported rather than
         # swallowed, and reported only once everything else has been released.
         assert harness.stopped_cleanly, "the server thread did not stop"
+        assert survivors == [], f"sessions outlived the kill-server: {survivors}"
+        assert stragglers == [], (
+            f"a tmux server outlived teardown and is now unreachable "
+            f"(its socket is gone): {stragglers}. kill-server said "
+            f"{killed.returncode}: {killed.stderr.strip()!r}"
+        )
 
 
 @pytest.fixture

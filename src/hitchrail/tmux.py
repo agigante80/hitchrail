@@ -129,7 +129,22 @@ def _needs_encoding(name: str) -> bool:
     return any(sep in name for sep in _SEPARATORS) or name.startswith(_ENCODED_PREFIX)
 
 
-def _default_runner(argv: list[str]) -> subprocess.CompletedProcess[str]:
+# How long any single tmux call may take before it is abandoned (#67).
+#
+# **Bounded because these run inside an HTTP handler.** `subprocess.run` with no
+# timeout waits forever, so a tmux that blocks, on a loaded machine, an NFS
+# home, a server part way through a restart, does not make the listing slow: it
+# makes the request never answer and the browser wait with it. A hang is a
+# different failure from a slow answer and needs a different guard.
+#
+# Ten seconds is far beyond anything tmux does when it is working, which is
+# milliseconds, so this can only fire on the case it is for.
+_CALL_TIMEOUT_S = 10.0
+
+
+def _default_runner(
+    argv: list[str], timeout: float = _CALL_TIMEOUT_S
+) -> subprocess.CompletedProcess[str]:
     """The real one. An argument list, never a shell, and never checked.
 
     `check=False` because a non zero return is normal here: `has-session` says
@@ -138,7 +153,7 @@ def _default_runner(argv: list[str]) -> subprocess.CompletedProcess[str]:
     """
     # S603 is ignored for this module in pyproject.toml, not inline: every
     # call here is an argument list built by `_argv`, and there is no shell.
-    return subprocess.run(argv, capture_output=True, text=True, check=False)
+    return subprocess.run(argv, capture_output=True, text=True, check=False, timeout=timeout)
 
 
 class Tmux:
@@ -243,7 +258,11 @@ class Tmux:
         """
         try:
             return self._run(argv)
-        except OSError as exc:
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            # A timeout joins "could not be run" rather than becoming a 500.
+            # Both mean we did not get an answer, and the honest report for
+            # that is the same one: we cannot say what is running. A traceback
+            # out of a request handler would say something much less useful.
             raise TmuxUnavailable(
                 f"tmux could not be run ({exc}), so no session state can be "
                 "determined; this is not the same as no sessions existing"

@@ -427,3 +427,54 @@ def test_a_tmux_that_runs_and_says_no_is_still_just_no() -> None:
     assert tmux.has_session("p") is False
     assert tmux.pane_pid("p") is None
     assert tmux.capture_pane("p") == ""
+
+
+# -- #67: an unbounded subprocess call in a request path is a hang ---------
+
+
+def test_the_tmux_runner_bounds_how_long_it_will_wait() -> None:
+    """#67's third candidate, and the one that is a defect whatever CI is doing.
+
+    Every one of these runs inside an HTTP handler. `subprocess.run` with no
+    timeout waits forever, so a tmux that blocks, on a loaded machine, an NFS
+    home, a server mid restart, does not make the listing slow: it makes the
+    request never answer, and the browser wait with it.
+
+    Driven against a real process that would outlast the bound, because a fake
+    would only prove the argument was passed.
+    """
+    import subprocess
+
+    from hitchrail.tmux import _default_runner
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        _default_runner(["sleep", "30"], timeout=0.3)
+
+
+def test_the_process_table_runner_bounds_it_too() -> None:
+    """The same call in the other adapter. `ps` blocks on a wedged filesystem
+    the same way, and it runs on every listing."""
+    import subprocess
+
+    from hitchrail.procs import _default_runner
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        _default_runner(["sleep", "30"], timeout=0.3)
+
+
+def test_a_tmux_that_never_answers_becomes_an_honest_refusal() -> None:
+    """#67. The bound is half of it; what happens when it fires is the rest.
+
+    `TimeoutExpired` is a `SubprocessError` and not an `OSError`, so before
+    this it left the adapter unhandled and reached the client as a 500 with a
+    traceback. "We did not get an answer" is exactly what `TmuxUnavailable`
+    exists to say, and the engine turns that into the honest 503 rather than
+    into "nothing is running".
+    """
+    import subprocess
+
+    def wedged(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(argv, 10.0)
+
+    with pytest.raises(TmuxUnavailable):
+        Tmux(prefix="hr-", run=wedged).pane_pids()

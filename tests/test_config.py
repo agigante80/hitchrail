@@ -916,7 +916,7 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # name vocabulary, pure and subprocess free, sitting beside an adapter
         # that spawns things. That is the same split #18 already made when it
         # took the host vocabulary out of config.py into hostnames.py.
-        "tmux.py": 466,
+        "tmux.py": 485,
         # 413, and thirteen lines over the guideline is not a second job. #18
         # already took the host vocabulary out of this file, and what is left
         # is one dataclass and its startup refusals, which is one thing. The
