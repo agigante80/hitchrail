@@ -290,8 +290,41 @@ colliding pair, and one asserted three things about host normalisation that a
 one sided strip satisfies. A property that cannot fail is the same trap as a
 teardown assertion that runs after its socket is deleted.
 
-Mutation testing is still a ticket, #35, scoped to the five security modules
-in Phase 7.
+Mutation testing is adopted too, scoped to the five modules between a web page
+and a shell and to nothing else: `security`, `hostnames`, `config`,
+`projectnames` and `discovery`. Its own dependency group, so `uv sync` does not
+pull it:
+
+```sh
+uv sync --group mutation
+uv run mutmut run          # about a minute
+uv run mutmut results      # the survivors
+uv run mutmut show <name>  # one survivor as a diff
+```
+
+**Reported, never gated, for the same reason coverage is not.** A mutation
+score is satisfiable without improving anything. What the run is for is the
+list of survivors, and survivors are READ rather than counted: each one names
+an operator that was flipped while every test stayed green, which is one
+assertion that is missing or too loose.
+
+The first pass found real ones, and the worst was an open redirect. Changing
+`path[1:2]` to `path[2:2]` in `_safe_redirect_path` makes that slice always
+empty, so the guard collapses to `startswith("/")` and `//evil.example`
+survives as a `Location`. There WAS a test for it, parametrised with a
+`protocol-relative` case, and it could not fail: httpx resolves
+`//evil.example` as a netloc against its base url, so the application received
+`scope["path"] == "/"`. The case had never tested anything.
+
+Two lessons from that pass are worth keeping:
+
+- **Scope the tests as carefully as the modules.** A first run excluded
+  `tests/test_api.py` and reported gaps in the suite that were really gaps in
+  the selection.
+- **The repo shape guards must be deselected.** mutmut writes every mutant of a
+  module into one file, so under a run `security.py` is 20877 lines. Any test
+  that reads the source is inspecting a tree nobody wrote, and the size cap
+  guard fails on every mutant before one is scored.
 
 ### 7.6 Standing rules
 

@@ -47,6 +47,17 @@ dev = [
   "hypothesis>=6.165.10",
   "playwright>=1.50",
 ]
+# Its own group, NOT in `dev`, and that is the point. Mutation testing is a
+# Phase 7 pre release check run on demand, not a gate: `uv sync` should not
+# pull nineteen more packages on every machine for a tool nobody runs daily.
+# `uv sync --group mutation` when you want it.
+#
+# It cannot be `uvx`ed, which was the first plan. mutmut imports the test
+# modules and runs pytest in process, so it needs an environment that already
+# has starlette, httpx and the rest; an isolated tool install has none of them.
+mutation = [
+  "mutmut>=3.7,<4",
+]
 
 [tool.ruff]
 line-length = 96
@@ -148,3 +159,87 @@ forbidden_modules = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/hitchrail"]
 artifacts = ["src/hitchrail/web/*"]
+
+# #35. Mutation testing over the five modules between a web page and a shell,
+# and only those. Coverage says whether a line RAN; this says whether any
+# assertion would have noticed the line being WRONG. Three defects in this
+# project shipped green at 98% branch coverage, and one of them was a teardown
+# assertion that ran after its socket was deleted and therefore could not fail.
+#
+# NOT the whole tree, and never a gate. A full run is slow enough that nobody
+# runs it, and a check nobody runs is documentation. A score is satisfiable
+# without improving anything, exactly like coverage, which `docs/tech-guidelines.md`
+# 7.5 already refuses to gate on.
+#
+# Surviving mutants are READ, not counted. The output that matters is "this
+# operator was flipped and every test still passed", which names one assertion
+# that is missing or too loose.
+[tool.mutmut]
+source_paths = [
+  "src/hitchrail/security.py",
+  "src/hitchrail/hostnames.py",
+  "src/hitchrail/config.py",
+  "src/hitchrail/projectnames.py",
+  "src/hitchrail/discovery.py",
+]
+# The tests that actually exercise those five. The full suite takes 34 seconds
+# and would make a single run hours; these 441 take 1.5, which is what makes
+# the difference between a check that runs and one that is described.
+# The five mutated modules are copied mutated; everything else the tests import
+# has to be copied verbatim or the package will not import. Listed rather than
+# globbed on `src/hitchrail/`, which would copy the mutated files back over
+# themselves and make every run report zero mutants killed.
+also_copy = [
+  "src/hitchrail/__init__.py",
+  "src/hitchrail/claude_ipc.py",
+  "src/hitchrail/cli.py",
+  "src/hitchrail/derive.py",
+  "src/hitchrail/engine.py",
+  "src/hitchrail/events.py",
+  "src/hitchrail/headers.py",
+  "src/hitchrail/pages.py",
+  "src/hitchrail/procs.py",
+  "src/hitchrail/ram.py",
+  "src/hitchrail/server.py",
+  "src/hitchrail/sessions.py",
+  "src/hitchrail/tmux.py",
+  "src/hitchrail/web",
+  # The whole directory, not `tests/conftest.py`: `also_copy` does not create
+  # parent directories, so naming the file alone fails on a clean `mutants/`
+  # and only appeared to work while a previous run had left the tree behind.
+  "tests",
+]
+# **The repo shape guards have to come out, and the reason is instructive.**
+# mutmut copies the tree and writes every mutant of a module into one file, so
+# under a run `security.py` is 20877 lines and `hostnames.py` 4205. Any test
+# that reads the SOURCE is then inspecting a tree that is not the repository:
+# the size cap guard fails on every mutant, the import contract sees a shape
+# nobody wrote, and `-x` stops the run before a single mutant is scored.
+#
+# They are not weakened by this. They run in the ordinary suite, where the tree
+# they inspect is the real one, which is the only place their answer means
+# anything.
+pytest_add_cli_args = [
+  "--deselect=tests/test_config.py::test_every_module_is_under_the_size_guideline",
+  "--deselect=tests/test_config.py::test_the_import_contract_covers_every_engine_layer_module",
+  "--deselect=tests/test_config.py::test_projectnames_does_not_import_config",
+  "--deselect=tests/test_config.py::test_hostnames_does_not_import_config",
+]
+pytest_add_cli_args_test_selection = [
+  "tests/test_security_host.py",
+  "tests/test_security_token.py",
+  "tests/test_security_origin.py",
+  "tests/test_headers.py",
+  "tests/test_config.py",
+  "tests/test_discovery.py",
+  "tests/test_properties.py",
+  # The integration tier belongs here even though it costs four seconds a
+  # mutant instead of one and a half. Without it, mutants in the three
+  # middlewares survive against test doubles that never read a request body or
+  # exercise a real route, and the run reports a gap in the suite that is
+  # really a gap in this list.
+  "tests/test_api.py",
+  # The assertions this check produced. They belong in the selection or the
+  # next run reports the mutants they kill as surviving again.
+  "tests/test_mutation_survivors.py",
+]
