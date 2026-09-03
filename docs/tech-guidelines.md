@@ -133,8 +133,18 @@ non negotiable and each has a test that asserts the refusal.
    somewhere we do not control. #21 ended it by moving the grant into a URL
    fragment, which no server ever receives: `hitchrail` now prints
    `/grant#token=`, and `GET /grant` serves a page whose only job is to read
-   the fragment in the browser and POST it. The `?token=` form still works so
-   an already saved link does not break, and is removed before 1.0.
+   the fragment in the browser and POST it. The `?token=` form was kept so an
+   already saved link would not break, and #115 deleted it before the first
+   release rather than before 1.0.
+
+   **The timing changed because the premise did.** "An already saved link"
+   assumes something was published. Nothing had been: no tags, no release, and
+   nothing had generated a query link since `banner()` moved to
+   `/grant#token=`. The carrier was accept only, protecting compatibility with
+   a version that never existed, and the window in which deleting it was free
+   closed at the first release. Deleting it took `_scrub_grant_param` with it,
+   and with that the whole class of "the token reaches the access log", plus a
+   documented dependency on where uvicorn emits its access line.
 
    Read the whole arc rather than the ending. #20 cleared the token from our
    own access line, which was real and was not the fix; the guidelines said so

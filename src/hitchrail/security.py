@@ -17,11 +17,10 @@ starts processes rather than reporting on them.
 from __future__ import annotations
 
 import secrets
-from urllib.parse import parse_qsl, urlencode
 
 from starlette.middleware import Middleware
 from starlette.requests import cookie_parser
-from starlette.responses import JSONResponse, RedirectResponse, Response
+from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from hitchrail.config import Config
@@ -30,7 +29,6 @@ from hitchrail.hostnames import normalise_origin
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 # The cookie NAME, not a secret. S105 pattern matches on the word "token".
 TOKEN_COOKIE = "hitchrail_token"  # noqa: S105
-GRANT_PARAM = "token"
 
 # The ONLY requests reachable without a token, and the set is small on purpose.
 #
@@ -291,65 +289,22 @@ def _bearer(header: str) -> str:
     return credential
 
 
-def _safe_redirect_path(path: str) -> str:
-    r"""A path is not automatically a safe redirect target.
-
-    `/\evil.example` survives as `scope["path"]`, and browsers normalise the
-    backslash, so a Location built from it leaves the site. `//evil.example` is
-    protocol relative and does the same thing more obviously. One client under
-    test normalised the second away by itself, which is exactly why this cannot
-    be left to the client.
-    """
-    if not path.startswith("/") or path[1:2] in {"/", "\\"}:
-        return "/"
-    # ASGI has already percent decoded the path, and RedirectResponse treats
-    # `#` and `?` as safe characters, so a `%23` in the request path became a
-    # real fragment in the Location and the browser silently dropped
-    # everything after it. Verified live: `/p/foo%23bar` redirected to
-    # `/p/foo#bar`. Re-encode both rather than trying to guess intent.
-    return path.replace("%", "%25").replace("#", "%23").replace("?", "%3F")
-
-
-def _scrub_grant_param(scope: Scope) -> str | None:
-    """Remove the grant token from the scope and RETURN it, keeping the rest.
-
-    Returning it is what lets the scrub happen first. The grant still needs the
-    value, and reading it back out of the scope afterwards would mean either
-    not scrubbing yet or scrubbing twice.
-
-    uvicorn writes its access line AFTER the app returns and builds it from
-    this same dict, so overwriting the value here is what the logger ends up
-    printing. That depends on a uvicorn implementation detail rather than on
-    anything ASGI guarantees, which is the same dependency `_maybe_grant`
-    already carries a warning about.
-
-    latin-1 for the reason `header_map` spells out: an attacker picks these
-    bytes, and a strict `.decode()` raises `UnicodeDecodeError` on anything
-    over 0x7f, which would be an unauthenticated 500 rather than a refusal.
-    """
-    raw = scope.get("query_string", b"")
-    if not raw or GRANT_PARAM.encode("latin-1") not in raw:
-        return None
-    params = parse_qsl(raw.decode("latin-1"), keep_blank_values=True)
-    offered = next((v for k, v in params if k == GRANT_PARAM), None)
-    if offered is None:
-        # The name appeared as a substring of some other key or value. Nothing
-        # to remove, and re encoding would needlessly rewrite the caller's
-        # query string.
-        return None
-    kept = [(k, v) for k, v in params if k != GRANT_PARAM]
-    scope["query_string"] = urlencode(kept).encode("latin-1")
-    return str(offered)
-
-
 class TokenMiddleware:
-    """One shared token, over three carriers.
+    """One shared token, over two carriers.
 
     `EventSource` cannot set request headers, so a token that lives only in
     `Authorization` authenticates every route except the live update stream,
     which is the one the interface exists to use. The cookie is the carrier
-    `EventSource` can use; the query grant is how that cookie gets set from a
-    link you open on a phone.
+    `EventSource` can use, and `POST /api/grant` is how it gets set from a link
+    you open on a phone.
+
+    **There were three** until #115. The `?token=` query grant was accepted so
+    that a link saved before #21 kept working, and it was removed before the
+    first release rather than before 1.0 as originally written, because nothing
+    had shipped: there were no saved links, and nothing had generated one since
+    the banner moved to `/grant#token=`. Deleting it took the access log scrub
+    with it, and with that a documented dependency on where uvicorn emits its
+    access line.
 
     The cookie is `SameSite=Lax`, not `Strict`, and the origin check still runs
     on every mutating request. Either alone would cover the cases we can think
@@ -377,37 +332,11 @@ class TokenMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # BEFORE the three carrier checks below, not inside `_maybe_grant`.
-        #
-        # The grant path already scrubbed the token from the scope, but it is
-        # only reached when no valid header and no valid cookie were presented
-        # AND the method is safe. Three reachable paths therefore still logged
-        # the token in cleartext, and the one that matters is ordinary re use
-        # of the intended flow: the README's phone link is a link, so a tab
-        # restore, the back button or re tapping a bookmark sends the cookie
-        # set the first time AND the still present `?token=`, and uvicorn logs
-        # the query string.
-        #
-        # Rewriting the scope for requests that go on to reach the application
-        # is deliberate rather than collateral. No route should ever see an
-        # auth token as query data, so stripping it centrally also guarantees
-        # no future handler can reflect it into a response body or a log of its
-        # own. See #20.
-        #
-        # NOT a complete fix, and it must not be described as one. The README
-        # recommends a TLS terminating proxy, and nginx's default combined
-        # format logs the query string, so in the recommended deployment the
-        # token still lands in the proxy's log whatever we do here. #21 moves
-        # the grant into a URL fragment, which is never sent to any server, and
-        # is the actual fix.
-        offered_grant = _scrub_grant_param(scope)
-
         # The exemption, and it is a PATH test rather than a content type one.
         # `Accept: text/html` on any 401 would mean the API starts answering a
         # script with HTML the moment somebody sends a browser shaped header.
         #
-        # Exact, and after the scrub so an exempt path cannot smuggle a token
-        # into the access log. The Origin check still runs on `POST /api/grant`,
+        # Exact. The Origin check still runs on `POST /api/grant`,
         # because it sits inside this middleware and a grant is mutating.
         # `route_path`, not `scope["path"]`: the guard has to name the same
         # route the router will serve, and behind a sub path proxy the
@@ -434,79 +363,17 @@ class TokenMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # The grant is an HTTP redirect, so it has no meaning for a websocket
-        # handshake; such a connection is refused rather than granted.
-        if (
-            scope["type"] == "http"
-            and scope["method"] in SAFE_METHODS
-            and await self._maybe_grant(scope, receive, send, offered_grant)
-        ):
-            return
-
         await deny(401, "unauthorized", "a valid token is required")(scope, receive, send)
-
-    async def _maybe_grant(
-        self, scope: Scope, receive: Receive, send: Send, offered: str | None
-    ) -> bool:
-        """Trade `?token=` for a cookie, then redirect the token out of the URL.
-
-        Safe methods only. A grant on a mutating request would let a link
-        perform an action, which is the shape of the attack the origin check
-        exists to stop.
-
-        Returns True when it answered the request.
-        """
-        assert self.token is not None
-        # `offered` was taken by `_scrub_grant_param` before any carrier check
-        # ran, and the scope no longer holds it. Re reading it here would mean
-        # either scrubbing later, which is the leak #20 is about, or scrubbing
-        # twice.
-        if offered is None or not token_matches(offered, self.token):
-            return False
-
-        # Already scrubbed, so this IS the remaining query string.
-        remaining = scope.get("query_string", b"").decode("latin-1")
-        path = _safe_redirect_path(scope["path"])
-        location = f"{path}?{remaining}" if remaining else path
-
-        # Take the token out of the scope, not only out of the Location.
-        #
-        # uvicorn writes its access line AFTER the app returns, and it builds
-        # that line from this same dict: get_path_with_query_string reads
-        # scope["query_string"] at logging time. Redirecting the token out of
-        # the address bar therefore did nothing for the server's own log, where
-        # every grant landed as `"GET /?token=<the real token>" 303` in
-        # cleartext, in a file that gets tailed, shipped and pasted into bug
-        # reports. Overwriting the value here is what the logger ends up
-        # printing, verified on a live socket by test_live_socket.py.
-        #
-        # This depends on a uvicorn implementation detail, NOT on anything ASGI
-        # guarantees. h11_impl emits the access line inside send() while
-        # handling http.response.start, and protocols/utils builds it from the
-        # live scope, so a rewrite before `await response(...)` lands in the
-        # log. Verified against uvicorn 0.52.4 on a real socket. If that
-        # ordering changes, test_the_grant_keeps_the_token_out_of_the_access_log
-        # fails, which is the point of pinning it with a live test rather than
-        # a unit test. Nothing downstream reads the value: this request is
-        # answered here with a 303.
-        #
-        # This covers the grant path ONLY. A request that already carries a
-        # valid cookie or Bearer header returns before reaching this function,
-        # so re-opening the same link still logs the token. See #20.
-        scope["query_string"] = remaining.encode("latin-1")
-
-        response = RedirectResponse(location, status_code=303)
-        set_token_cookie(response, self.token)
-        await response(scope, receive, send)
-        return True
 
 
 def set_token_cookie(response: Response, token: str) -> None:
-    """One place, because two carriers now set it.
+    """One place, because more than one caller sets it.
 
-    The query grant redirects and the fragment grant answers a POST, and a
-    cookie that differed between them would be a security control with two
-    definitions. Not `Secure`, for the reason in `TokenMiddleware`'s docstring:
+    `POST /api/grant` in `server.py` sets it, and the query grant used to until
+    #115. A cookie that differed between callers would be a security control
+    with two definitions, which is why this stayed one function even now that
+    the second carrier is gone. Not `Secure`, for the reason in
+    `TokenMiddleware`'s docstring:
     over plain HTTP on a LAN, a supported deployment, a `Secure` cookie is never
     sent and the tool silently stops working.
     """

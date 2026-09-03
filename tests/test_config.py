@@ -961,48 +961,22 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # it binds. Most of the addition is the argument for why a proxied
         # loopback bind is not local, which is the thing that was wrong.
         "config.py": 468,
-        # 537, and the number is the current one: an entry that accumulated
-        # a stack of superseded figures would be the same drift this test
-        # exists to catch, in the file that catches it.
+        # 409, nine lines over, down from 542. #115 deleted the `?token=`
+        # carrier: 135 lines once the two blocks inside `TokenMiddleware`
+        # that only served it are counted.
         #
-        # No split THROUGH the boundary. This module answers one question, "may
-        # this request proceed", in three controls whose order is asserted, and
-        # the length is the argument for each answer: which three paths used to
-        # leak the token, why so few requests are reachable without one, and
-        # why the cookie is not `Secure`. Half a boundary in another file is
-        # worse than a long one.
+        # Nine over is not a second job, the same judgement config.py's entry
+        # makes at thirteen. What is gone is the long exception this entry used
+        # to carry, arguing that a boundary should not be split.
         #
-        # There IS one split that cuts through nothing, and #80 carries it: the
-        # `?token=` query grant is about ninety lines and is removed before 1.0,
-        # so moving it out makes that removal a deletion rather than surgery in
-        # the middle of a security module. Until then this entry is the record
-        # that the size is known and argued.
-        # Raised from 537 for #77's `no-store` on the one response that carries
-        # the credential. Behaviour, which is the only reason the note above
-        # permits. The response HEADERS middleware went to `headers.py` rather
-        # than here, because this module answers "may this request proceed" and
-        # nothing in that one refuses anything.
-        "security.py": 542,
-        # Raised from 500 for #77, which adds behaviour: the security headers
-        # middleware is wired outermost so refusals carry the headers too, and
-        # the reason it sits outside `middleware_stack` rather than inside it
-        # is written where the list is built.
+        # **#80 could not have reached even this**, which is why it was closed
+        # rather than done: the unit it proposed moving was 101 lines against a
+        # 542 line file, landing near 435 with the exception intact. The query
+        # grant was never what made this file long.
         #
-        # 500, current. The HTTP layer: routes, the error envelope, the SSE
-        # stream and the lifespan sweeper, which is one job described four
-        # ways. Most of the length above the guideline is the comments
-        # recording what the transport does rather than what this code does,
-        # and those are the part a reader cannot recover from the source.
-        #
-        # #21 pushed it to 519, and BOTH things happened: the static page and
-        # asset serving moved to `pages.py`, which is a real seam and took it
-        # to 474, and the cap then rose to 481 for the grant route and
-        # `ROUTING_404_MESSAGE`. An earlier version of this comment claimed the
-        # split was taken "rather than" the cap raised, in the same diff that
-        # raised it.
-        #
-        # 492 since #89 and 500 since #98, for two `except` arms and the
-        # reasons they answer 409 rather than 503, and why they are two codes
+        # If it grows again the seam is `TokenMiddleware`, still the largest
+        # thing here. Look there before raising this number.
+        "security.py": 409,
         # rather than one. A refusal handler is the shape this file is made of.
         "server.py": 513,
     }

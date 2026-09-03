@@ -25,54 +25,9 @@ from hitchrail.hostnames import (
     is_valid_host,
     is_wildcard_host,
 )
-from hitchrail.security import _safe_redirect_path, parse_host
+from hitchrail.security import parse_host
 
 # -- the one that was an open redirect ---------------------------------------
-
-
-@pytest.mark.parametrize(
-    "path",
-    ["//evil.example", "/\\evil.example", "/\\\\evil.example", "//", "/\\"],
-    ids=["protocol-relative", "backslash", "double-backslash", "bare-//", "bare-/\\"],
-)
-def test_a_path_that_leaves_the_site_is_never_a_redirect_target(path: str) -> None:
-    r"""Mutants killed: `path[1:2]` to `path[2:2]`, and to `path[1:3]`.
-
-    `path[2:2]` is ALWAYS the empty string, so the guard collapses to
-    `not path.startswith("/")` and `//evil.example` is returned unchanged. That
-    is an open redirect, and the whole suite stayed green.
-
-    **The integration test could not have caught it, and looked like it did.**
-    `test_the_grant_never_redirects_off_the_site` drives httpx, which resolves
-    `//evil.example` as a NETLOC against its base url, so the application saw
-    `scope["path"] == "/"`. Measured:
-
-        requested '//evil.example'   -> scope['path'] = '/'
-        requested '/\evil.example'   -> scope['path'] = '/\evil.example'
-
-    So its `protocol-relative` case asserted the redirect for `/`, which passes
-    however the guard is written. The backslash cases were real. This is the
-    tier where the string reaches the function unaltered, which is the only
-    place the protocol relative case can be tested at all.
-    """
-    assert _safe_redirect_path(path) == "/"
-
-
-@pytest.mark.parametrize("path", ["/", "/p/vessel", "/grant"])
-def test_an_ordinary_path_still_survives_the_guard(path: str) -> None:
-    """The other half: a guard that returned "/" for everything would pass the
-    test above and break every redirect."""
-    assert _safe_redirect_path(path) == path
-
-
-def test_the_guard_re_encodes_the_characters_that_truncate_a_location() -> None:
-    """Mutant killed: `%3F` to `%3f`.
-
-    Case matters to nothing in a URL, so this is close to equivalent. It is
-    here because the assertion it forces is the one that was missing: that the
-    re encoding happens at all.
-    """
-    assert _safe_redirect_path("/p/a%b#c?d") == "/p/a%25b%23c%3Fd"
 
 
 # -- boundaries, where > and >= are one character apart ----------------------
