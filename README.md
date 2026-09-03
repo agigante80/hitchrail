@@ -84,6 +84,25 @@ because that is what you do to put Hitchrail behind a proxy such as
 reaches no server log. Over plain HTTP the cookie it becomes still crosses your
 network in clear, so put TLS in front of it if that matters to you.
 
+### Where the token comes from
+
+In order: `--token`, then `HITCHRAIL_TOKEN` in the environment, then one
+generated for you and printed.
+
+**Prefer the environment variable to the flag on any machine you share.** On
+Linux `/proc/<pid>/cmdline` is world readable and `/proc/<pid>/environ` is not,
+so `--token` shows your token to every other account on the box, and `ps` does
+it for them without their having to try. The environment is readable only by
+you and root.
+
+`HITCHRAIL_TOKEN` set but empty is refused rather than treated as absent. An
+operator who writes it into a file and leaves the value off has not configured
+authentication, and Hitchrail says so instead of quietly generating one.
+
+It is also what makes a long running Hitchrail usable: a generated token
+changes on every start, so a service that restarts invalidates the link saved
+on your phone. A token from the environment survives.
+
 ## Install
 
 **Not yet.** `hitchrail` is not on PyPI, so none of these work today. They are

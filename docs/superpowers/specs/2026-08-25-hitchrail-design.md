@@ -354,6 +354,22 @@ exception, so the token path is the main path.
    header, as a `hitchrail_token` cookie, and as a one time `?token=` query
    grant that trades itself for that cookie and redirects.
 
+   **Amended by #109: how the token is SUPPLIED is a control, not a
+   convenience.** It may come from `--token`, from `HITCHRAIL_TOKEN` in the
+   environment, or be generated, in that precedence. argv is the weakest of the
+   three and the only one that was available: `/proc/<pid>/cmdline` is world
+   readable where `/proc/<pid>/environ` is owner only, so a flag publishes the
+   token to every account on the machine. Set but empty is refused rather than
+   read as absent, because an operator who wrote the variable and left it blank
+   believes they configured authentication.
+
+   A supplied token is also stable across restarts, which a generated one is
+   not, and that is what a long running deployment needs. The banner therefore
+   prints a token it generated and not one the operator already holds. That is
+   not a fix for the log: the grant links still carry it, so under a service
+   the journal holds the secret, and what the banner should do there is an open
+   question rather than a solved one.
+
    The cookie is `SameSite=Lax`, because `Strict` is withheld on cross site top
    level navigation and a valid cookie would answer 401 to somebody tapping a
    link to Hitchrail from another page. It is deliberately not `Secure`,

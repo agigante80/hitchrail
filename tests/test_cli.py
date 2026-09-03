@@ -7,7 +7,7 @@ import pytest
 
 from hitchrail import cli
 from hitchrail.cli import banner, build_config, main, parse_args, preflight
-from hitchrail.config import Config, is_loopback_host
+from hitchrail.config import Config, ConfigError, is_loopback_host
 
 
 @pytest.fixture(autouse=True)
@@ -409,3 +409,91 @@ def test_an_explicit_token_still_wins_over_a_generated_one(tmp_path: Path) -> No
         )
     )
     assert cfg.token == "mine"
+
+
+# -- #109: the token can arrive in the environment ---------------------------
+#
+# `--token` puts the secret in argv, and argv is world readable. Measured
+# rather than assumed:
+#
+#   -r--r--r--  /proc/<pid>/cmdline
+#   -r--------  /proc/<pid>/environ
+#   proc /proc proc rw,nosuid,nodev,noexec,relatime   (no hidepid)
+#
+# So any local user can read the token out of a running Hitchrail's argv, and
+# `ps` shows it to them without trying. The environment is owner only. That is
+# the reason this exists, ahead of the daemon convenience.
+
+ENV_VAR = "HITCHRAIL_TOKEN"
+
+
+def test_an_env_token_is_used(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(ENV_VAR, "abc123")
+    cfg = build_config(parse_args(["--root", str(tmp_path), "--host", "0.0.0.0"]))
+    assert cfg.token == "abc123"
+
+
+def test_the_flag_beats_the_env_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An explicit argument overrides an ambient one, so a one off run does not
+    need the unit edited. It is also the worse carrier, and choosing it has to
+    stay possible."""
+    monkeypatch.setenv(ENV_VAR, "abc123")
+    cfg = build_config(
+        parse_args(["--root", str(tmp_path), "--host", "0.0.0.0", "--token", "xyz789"])
+    )
+    assert cfg.token == "xyz789"
+
+
+def test_an_unset_env_still_generates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(ENV_VAR, raising=False)
+    cfg = build_config(parse_args(["--root", str(tmp_path), "--host", "0.0.0.0"]))
+    assert cfg.token and cfg.token != "abc123"
+
+
+@pytest.mark.parametrize("value", ["", "   ", "\t\n"])
+def test_a_blank_env_token_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    """Set and empty is not the same as unset.
+
+    Unset means "not supplied" and falls through to generation. Set to nothing
+    means the operator believes they configured authentication and did not,
+    which is the trap `Config._check_token` was written about. Generating a
+    token here would hide it, and an `EnvironmentFile` line reading
+    `HITCHRAIL_TOKEN=` produces exactly this.
+    """
+    monkeypatch.setenv(ENV_VAR, value)
+    with pytest.raises(ConfigError) as excinfo:
+        build_config(parse_args(["--root", str(tmp_path), "--host", "0.0.0.0"]))
+    assert ENV_VAR in str(excinfo.value), "the message must name where to look"
+
+
+def test_an_env_token_switches_auth_on_at_loopback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Supplying a token always switches authentication on, whatever the bind.
+    This is the case a proxied deployment needs."""
+    monkeypatch.setenv(ENV_VAR, "abc123")
+    assert build_config(parse_args(["--root", str(tmp_path)])).token == "abc123"
+
+
+def test_the_banner_does_not_reprint_an_env_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Under a service the banner is journald, and a stable token in a
+    persistent log is worse than today's per start one. The operator supplied
+    this, so they have it; printing it again only writes it somewhere new."""
+    monkeypatch.setenv(ENV_VAR, "abc123")
+    text = banner(build_config(parse_args(["--root", str(tmp_path), "--host", "0.0.0.0"])))
+    assert "/grant#token=abc123" in text, "the tappable link is still the point"
+    assert not any(line.strip().startswith("token:") for line in text.splitlines())
+
+
+def test_the_banner_still_prints_a_generated_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The case that must not change. A generated token is unknowable any other
+    way, so not printing it would make the server unusable."""
+    monkeypatch.delenv(ENV_VAR, raising=False)
+    text = banner(build_config(parse_args(["--root", str(tmp_path), "--host", "0.0.0.0"])))
+    assert any(line.strip().startswith("token:") for line in text.splitlines())

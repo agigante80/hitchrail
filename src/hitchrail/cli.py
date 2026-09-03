@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import secrets
 import shutil
 import sys
@@ -84,8 +85,48 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+# The one setting that may arrive in the environment, and the only one that
+# ever will. Every other option stays a flag: this is not the start of an
+# environment based configuration layer.
+#
+# It exists because argv is world readable and the environment is not. Measured
+# on Linux rather than recalled: `/proc/<pid>/cmdline` is mode 444 and
+# `/proc/<pid>/environ` is mode 400, and a `/proc` mounted without `hidepid`
+# lets any local user read the first. So `--token` shows the secret to every
+# account on the machine, and `ps` does it for them.
+TOKEN_ENV = "HITCHRAIL_TOKEN"  # noqa: S105  the NAME of a variable, not a secret
+
+
+def token_from_env() -> str | None:
+    """The token the environment supplies, or None if it supplies none.
+
+    **Unset and set-but-empty are different, and conflating them is the bug
+    this function exists to avoid.** Unset means "not supplied" and the caller
+    falls through to generating one. Set to empty or blank means the operator
+    believes they configured authentication and did not, which is the trap
+    `Config._check_token` already documents, reached there by
+    `--token "$HITCHRAIL_TOKEN"` with the variable unset. Generating a token
+    here would hide it a second way, so this refuses instead.
+
+    An `EnvironmentFile` line reading `HITCHRAIL_TOKEN=` produces exactly the
+    blank case, which is why whitespace counts as empty rather than as a token.
+    """
+    raw = os.environ.get(TOKEN_ENV)
+    if raw is None:
+        return None
+    if not raw.strip():
+        raise ConfigError(
+            f"{TOKEN_ENV} is set but empty, which is not a token. Give it a "
+            f"real value, or unset it entirely to let Hitchrail generate one"
+        )
+    return raw
+
+
 def build_config(args: argparse.Namespace) -> Config:
-    token = args.token
+    # Precedence: the flag, then the environment, then generated. An explicit
+    # argument overriding an ambient one is the usual rule, and it keeps a one
+    # off run possible without editing a unit file.
+    token = args.token or token_from_env()
     # `remote_reach` is imported rather than reimplemented. Two copies of this
     # rule would drift, and the one that drifts is the one deciding whether a
     # token is demanded at all.
@@ -123,13 +164,19 @@ def banner(config: Config) -> str:
         return ""
 
     reachable = [h for h in config.allowed_hosts if not is_wildcard_host(h)]
-    lines = [
-        "",
-        f"  token: {config.token}",
-        "  Anyone with this token can run code on this machine as you.",
-        "",
-        "  Open one of these on your phone:",
-    ]
+    lines = ["", "  Anyone with this token can run code on this machine as you."]
+    # Only a token the operator does not already have. A generated one is
+    # unknowable any other way, so not printing it would make the server
+    # unusable; one they put in the environment they can already read.
+    #
+    # This matters under a service, where stdout is journald and the token is
+    # now stable rather than per start: a persistent secret in the system log.
+    # **It is not a fix for that**, and saying so is the point. The links below
+    # still carry the token, so the journal still holds it. What the banner
+    # should do under a unit is #110's decision, taken with the unit in hand.
+    if config.token != token_from_env():
+        lines.insert(1, f"  token: {config.token}")
+    lines += ["", "  Open one of these on your phone:"]
     # Percent encoded, because `--token` takes anything non blank while the
     # page parses the fragment with `URLSearchParams`. `--token 'a&b'` printed a
     # link the page read as `a`, and `--token 'a+b'` one it read as `a b`: a

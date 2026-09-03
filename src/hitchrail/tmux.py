@@ -367,6 +367,15 @@ class Tmux:
     def new_session(self, project: str, cwd: str, argv: list[str]) -> None:
         """Detached, in the project's directory, running the given argv.
 
+        **The child inherits our whole environment, `HITCHRAIL_TOKEN` with it**
+        (#109). Measured: a session started here can `printenv` it. Accepted,
+        because the agent runs as this user with permissions skipped and could
+        read the operator's `EnvironmentFile` anyway, so the variable grants it
+        nothing. It does make the token easy to stumble into, since an agent
+        told to dump its environment prints it into a pane the log drawer
+        shows. #113 carries stripping it, which is not a one liner: tmux hands
+        panes the SERVER's environment, not one client call's.
+
         Created with the plain session NAME. Only targets carry the `=` anchor;
         passing an anchored string to `-s` would create a session whose name
         begins with an equals sign.
