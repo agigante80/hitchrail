@@ -679,3 +679,33 @@ def test_a_changed_config_is_noticed_rather_than_cached_forever(tmp_path: Path) 
     # and the mtime is nudged as well.
     os.utime(path, (time.time() + 1, time.time() + 1))
     assert trusted_folders(path) == frozenset({"/srv/a", "/srv/b"})
+
+
+def test_only_the_quarantine_types_into_a_pane() -> None:
+    """#91 turns a described property into a checked one.
+
+    `Tmux.send_keys` writes to the pty, and an agent reading its stdin cannot
+    tell those characters from the keyboard. So anything Hitchrail types is
+    attributed to the operator. That is the relay the graceful stop depends on,
+    and it holds only while the relayed content is what a person asked for.
+
+    Today the single call site is `claude_ipc.request_stop`, which sends the
+    stop keys and nothing else. Nothing structural kept it that way, and the
+    design now names keystroke injection as a capability of the API, so the
+    narrowness is worth asserting rather than trusting.
+
+    `lint-imports` cannot see a method call, and enforcing this inside
+    `send_keys` would mean the tmux adapter importing the quarantine, which
+    inverts the layering: tmux is the lower module and must not know what an
+    agent is. A grep is the control that fits.
+    """
+    callers = sorted(
+        p.name
+        for p in SRC.glob("*.py")
+        if p.name != "claude_ipc.py" and ".send_keys(" in p.read_text()
+    )
+    assert callers == [], (
+        f"{callers} types into a pane. What goes to an agent's stdin is "
+        "claude_ipc's business: a second caller is a second place that can "
+        "put words in the operator's mouth."
+    )

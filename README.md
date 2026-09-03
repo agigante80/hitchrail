@@ -199,6 +199,18 @@ one any more.
 Hitchrail does not sandbox the sessions it starts. It is a launcher. The agent it
 launches has whatever access you have.
 
+**Whoever holds the token can cause characters to be typed into any agent
+session under your root.** Stopping an agent works by sending it keystrokes
+through its terminal, and an agent reading its own input cannot tell those from
+you typing. That is what makes a gentle stop possible at all, and it is worth
+reading rather than discovering. Hitchrail only ever sends the stop sequence,
+and one test enforces that only the module owning it may send anything.
+
+Hitchrail cannot end a `detached` agent, the state where a process outlived its
+terminal. It shows the pid and stops there, because everything it can destroy
+is addressed by the session name it created, and signalling a bare pid would be
+the first thing outside that.
+
 ## Not affiliated with Anthropic
 
 Hitchrail is an independent open source tool. Claude and Claude Code are

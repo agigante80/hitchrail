@@ -510,5 +510,13 @@ class Tmux:
         `claude_ipc`; a `stop()` convenience here would put the agent's
         semantics in the tmux adapter, where a second agent could not replace
         them.
+
+        **What this writes is attributed to the operator** (#91). It goes to
+        the pty, and an agent reading its stdin cannot tell it from a keyboard.
+        That is the whole reason the graceful stop works, and it means a caller
+        here can put words in a person's mouth. `claude_ipc` is the only module
+        allowed to call this, asserted by a grep in `tests/test_claude_ipc.py`,
+        because `lint-imports` cannot see a method call and enforcing it here
+        would mean this module importing the quarantine.
         """
         self._try(self._argv("send-keys", "-t", self.pane_target(project), *keys))

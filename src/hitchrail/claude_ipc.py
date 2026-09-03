@@ -324,6 +324,14 @@ def request_stop(pane: Pane, project: str, settle: Callable[[], None] | None = N
     channel: nothing the agent sends back could be distinguished from output it
     was already printing, so every check is a look at the pane.
 
+    **Relay, not impersonation** (#91). A person tapped Stop and this passes it
+    on the way a keyboard would. The agent cannot tell the difference, so the
+    framing holds only while what is relayed is what the person asked for. This
+    is the sole call site that types into a pane, and a grep keeps it so; a
+    future one that sent a typed instruction on the user's behalf would be a
+    different product with a different risk, and it would not look different
+    from here.
+
     The box is verified TWICE, and both times before the exit command is typed.
 
     **The first checkpoint cannot catch an ordinary draft**, and saying that it

@@ -901,7 +901,13 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # escape stripper went back to the narrower pattern after the wider one
         # introduced a worse defect than it fixed. Those are the comments a
         # further round would otherwise re-litigate.
-        "claude_ipc.py": 563,
+        # 563 to 571 for #91: the relay framing, written at the one call site
+        # that types into a pane. Documentation rather than behaviour, and the
+        # note above allows the exception to be argued rather than assumed.
+        # This is the module whose whole value is being the one place that
+        # knows how an agent is talked to, so what that costs the operator
+        # belongs in it.
+        "claude_ipc.py": 571,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.
@@ -936,7 +942,12 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # decision about what the spawn hands a child has to be readable at the
         # spawn. That is the same argument this entry already makes for its
         # length, which is that the explanations are the value.
-        "tmux.py": 514,
+        # 514 to 523 for #91, documentation again rather than behaviour, and
+        # again argued here rather than waved through: `send_keys` writes to a
+        # pty and what it writes is attributed to the operator, so the one
+        # module allowed to call it is recorded at the method a future caller
+        # would read first.
+        "tmux.py": 522,
         # 413, and thirteen lines over the guideline is not a second job. #18
         # already took the host vocabulary out of this file, and what is left
         # is one dataclass and its startup refusals, which is one thing. The

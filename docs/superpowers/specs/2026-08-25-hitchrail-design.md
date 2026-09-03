@@ -448,6 +448,53 @@ Sources:
 - https://github.com/nicolargo/glances/security/advisories/GHSA-hhcg-r27j-fhv9
 - https://www.starlette.io/middleware/
 
+### 5.2b What the API can actually do
+
+The controls above say who may reach the API. This says what reaching it gets
+you, because two of the powers are not obvious from the route table and were
+never written down (#91).
+
+**Keystroke injection into a live pane.** `Tmux.send_keys` runs
+`tmux send-keys -t <pane>`, which writes to the pty. The agent reads characters
+arriving on stdin and nothing in that channel marks them as coming from
+anything but the keyboard, so **anything Hitchrail types is attributed by the
+agent to its user**.
+
+That is not a defect, it is the reason the graceful stop works here at all. A
+peer asking over a message bus announces itself and is increasingly refused by
+hardened agents, while a `/exit` we type is simply the user typing `/exit`. #89
+is where that distinction reversed the design.
+
+The honest framing is **relay, not impersonation**: a person tapped Stop, and
+Hitchrail passed that to the pane the way a keyboard would. It holds exactly as
+long as the relayed content is what the person asked for. Today there is one
+call site, `claude_ipc.request_stop`, which sends only the stop keys, and
+nothing structural keeps it that narrow. A future feature that sent a typed
+instruction on the user's behalf would be a different product with a different
+risk and would not look different from here.
+
+Stated plainly for an outside reader: **whoever holds the token can cause
+characters to be typed into any agent session under the configured root.** That
+follows from everything above and is defensible. It should be read rather than
+discovered.
+
+**Pid signalling, which does not exist and is the next thing somebody adds.**
+A `detached` agent has no tmux session, so nothing Hitchrail can currently do
+touches it, and on a phone there is no shell to fall back to. The row names the
+pid and explains, and that is where it stops.
+
+Every destructive path here is scoped by construction rather than by a check.
+`Tmux.kill_session` can only address `hr-<name>`; what protects the operator's
+other sessions is the empty prefix refusal in `Tmux.__init__`, and the obvious
+guard inside the kill was removed as a tautology. The property is that
+**Hitchrail can only kill things it named.**
+
+A bare pid has no name and no prefix. Signalling one would be the first path
+outside that property, and the pid is derived by matching an argv tail out of
+`ps`, a match that has been wrong twice (#84, #96). A pid is good enough to
+SHOW. Signalling it is a higher bar than showing it, and #107 carries the
+argument rather than the code.
+
 ### 5.3 Stated limitations
 
 Documented in the README rather than hidden:
