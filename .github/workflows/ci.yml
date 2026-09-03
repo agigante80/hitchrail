@@ -1,5 +1,11 @@
 # The five blocking gates, on every interpreter the package claims to support.
 # All five are blocking on purpose: a gate that can be ignored is documentation.
+# **Third party actions are pinned to a commit SHA, and the trailing `# vX.Y.Z` is
+# documentation.** A tag is a mutable pointer: whoever controls the action
+# repository can move it, and the code it lands on runs here. The SHA is the
+# contract, the comment is only there so a human can read what version it is,
+# and the two can disagree if somebody edits one. Resolve a new one with
+# `gh api repos/<owner>/<repo>/commits/<tag> --jq .sha`. See #4.
 name: ci
 
 on:
@@ -22,10 +28,12 @@ jobs:
       matrix:
         python: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v7
-      # setup-uv stopped publishing moving major tags after v7, so this is
-      # pinned exactly rather than to a major that would never move again.
-      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      # This used to read "setup-uv stopped publishing moving major tags after
+      # v7, so this is pinned exactly". That reason is spent: since #4 every
+      # action here is pinned to a SHA, so no tag mutability argument applies
+      # to any one of them in particular.
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
           enable-cache: true
       # --locked asserts uv.lock is current rather than quietly updating it,

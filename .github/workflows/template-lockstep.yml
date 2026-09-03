@@ -5,6 +5,12 @@
 # This is a standalone workflow rather than a job in the main CI matrix on purpose: it is a
 # governance check on the committed .github/ tree, it needs no Python and no dependency install,
 # and it must stay green independently of whether the test matrix is passing.
+# **Third party actions are pinned to a commit SHA, and the trailing `# vX.Y.Z` is
+# documentation.** A tag is a mutable pointer: whoever controls the action
+# repository can move it, and the code it lands on runs here. The SHA is the
+# contract, the comment is only there so a human can read what version it is,
+# and the two can disagree if somebody edits one. Resolve a new one with
+# `gh api repos/<owner>/<repo>/commits/<tag> --jq .sha`. See #4.
 name: Template lockstep
 
 on:
@@ -28,6 +34,6 @@ jobs:
   lockstep:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - run: bash scripts/check-template-lockstep.sh
       - run: bash scripts/test-template-lockstep.sh

@@ -14,6 +14,12 @@
 # on purpose, and add a build-time dependency to a project whose whole discipline is having three.
 # pyproject.toml is the single canonical source and nothing mirrors it, so there is no drift to
 # guard against; hitchrail.__version__ is read at runtime from importlib.metadata.
+# **Third party actions are pinned to a commit SHA, and the trailing `# vX.Y.Z` is
+# documentation.** A tag is a mutable pointer: whoever controls the action
+# repository can move it, and the code it lands on runs here. The SHA is the
+# contract, the comment is only there so a human can read what version it is,
+# and the two can disagree if somebody edits one. Resolve a new one with
+# `gh api repos/<owner>/<repo>/commits/<tag> --jq .sha`. See #4.
 name: Release Gate
 
 on:
@@ -31,7 +37,7 @@ jobs:
       TAG_GLOB: 'v*'
       TAG_PREFIX: v
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0      # full history + tags, or the version to tag compare is wrong
           fetch-tags: true
