@@ -83,6 +83,70 @@ body {
   -webkit-text-size-adjust: 100%;
 }
 
+/* -- typefaces ----------------------------------------------------------
+   Self hosted, and the reason is not aesthetics (#76). The page used to link
+   `fonts.googleapis.com`, which meant an outbound request to a third party on
+   every load of a tool whose whole point is running on your own machine: it
+   told Google when the page was opened, it failed with no internet, and it
+   made a Content Security Policy worth having impossible, which is what left
+   #77 blocked.
+
+   SIX faces, not the nine that link asked for. The three dropped are the ones
+   no selector in this file can reach: Karla 500, Zilla Slab 600 and IBM Plex
+   Mono 500 were being downloaded and never drawn.
+
+   **Zilla Slab 500 is here and 400 is not, and that looks wrong.** `h1` and
+   `h2` are bold by default so they take 700, but `.empty-title` is a `<p>`,
+   which asks for 400. CSS font matching does not fall back downwards from 400:
+   for a request of exactly 400 it checks 500 FIRST. So that paragraph has
+   always rendered in 500, the link above never offered 400 either, and
+   shipping 400 here would CHANGE it. Faithful beats tidy.
+
+   `font-display: swap` matches what the link requested, so text is readable
+   before the face arrives rather than invisible. */
+@font-face {
+  font-family: 'Zilla Slab';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('fonts/ZillaSlab-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Zilla Slab';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('fonts/ZillaSlab-700.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Karla';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('fonts/Karla-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Karla';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('fonts/Karla-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Karla';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('fonts/Karla-700.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('fonts/IBMPlexMono-400.woff2') format('woff2');
+}
+
 h1, h2, .display {
   font-family: 'Zilla Slab', Georgia, serif;
   letter-spacing: -0.015em;

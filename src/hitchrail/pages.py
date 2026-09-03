@@ -21,6 +21,7 @@ from starlette.responses import FileResponse, Response
 WEB = Path(__file__).parent / "web"
 
 HTML = "text/html; charset=utf-8"
+WOFF2 = "font/woff2"
 
 # Fixed names, fixed types, no path parameter anywhere. A route that built a
 # path out of the request would make `/../../etc/passwd` reachable. This does
@@ -28,6 +29,15 @@ HTML = "text/html; charset=utf-8"
 ASSETS = {
     "/app.css": ("app.css", "text/css; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    # Self hosted, not fetched from Google (#76). Six faces, and only six: the
+    # ones the stylesheet can actually reach. See `app.css` for why the display
+    # face needs 500 rather than 400, which is not obvious.
+    "/fonts/ZillaSlab-500.woff2": ("fonts/ZillaSlab-500.woff2", WOFF2),
+    "/fonts/ZillaSlab-700.woff2": ("fonts/ZillaSlab-700.woff2", WOFF2),
+    "/fonts/Karla-400.woff2": ("fonts/Karla-400.woff2", WOFF2),
+    "/fonts/Karla-600.woff2": ("fonts/Karla-600.woff2", WOFF2),
+    "/fonts/Karla-700.woff2": ("fonts/Karla-700.woff2", WOFF2),
+    "/fonts/IBMPlexMono-400.woff2": ("fonts/IBMPlexMono-400.woff2", WOFF2),
 }
 
 

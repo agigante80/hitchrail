@@ -66,6 +66,17 @@ body {
   padding: 24px;
   background: var(--ground);
   color: var(--ink);
+  /* System fonts here, and the difference from the main page is deliberate
+     rather than left over (#76).
+
+     This page is the one thing served WITHOUT a token, and it is self
+     contained for that reason: every asset route stays behind the token, so a
+     linked font would be answered 401 and arrive as nothing. The alternatives
+     were an unauthenticated font route, which is public surface for something
+     nobody needs, or inlining about 68KB of base64 into a door shown once.
+
+     Named families first, so a machine that happens to have them installed
+     matches the main page anyway. */
   font-family: Karla, system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: 16px;
   line-height: 1.5;

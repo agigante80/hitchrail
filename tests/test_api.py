@@ -1332,3 +1332,38 @@ async def test_every_page_and_asset_is_revalidated_rather_than_heuristically_cac
             f"{path} carries {r.headers.get('cache-control')!r}, so a browser "
             "may serve it from cache without asking"
         )
+
+
+async def test_the_interface_asks_no_third_party_for_anything(
+    client: httpx.AsyncClient,
+) -> None:
+    """#76, and it is a privacy property before it is a styling one.
+
+    The page linked `fonts.googleapis.com`, so a tool whose whole point is
+    running on your own machine told a third party every time it was opened,
+    failed with no internet, and could not carry a Content Security Policy
+    worth having, which is what left #77 blocked.
+
+    Asserted against BOTH pages and as "no external origin at all" rather than
+    "no Google": the next font, analytics snippet or icon set is the same
+    defect, and naming one vendor tests the symptom.
+    """
+    for path in ("/", "/grant"):
+        body = (await client.get(path, headers=HEADERS)).text
+        external = re.findall(r"""(?:href|src)=["'](https?://[^"']+)""", body)
+        assert not external, f"{path} loads {external} from off this machine"
+
+
+async def test_every_font_the_stylesheet_names_is_actually_served(
+    client: httpx.AsyncClient,
+) -> None:
+    """A `@font-face` pointing at a route that does not exist fails silently:
+    the browser falls back and the page merely looks slightly wrong, which is
+    the kind of thing nobody notices for months."""
+    css = (await client.get("/app.css", headers=HEADERS)).text
+    urls = re.findall(r"url\('([^']+\.woff2)'\)", css)
+    assert urls, "the stylesheet names no font files at all"
+    for url in urls:
+        r = await client.get(f"/{url}", headers=HEADERS)
+        assert r.status_code == 200, f"{url} is named by app.css and 404s"
+        assert r.headers["content-type"] == "font/woff2"
