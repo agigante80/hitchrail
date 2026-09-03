@@ -274,23 +274,107 @@ tier does. It is the only tier that can see SSE reconnection after a
 backgrounded tab, the stop escalation in the state the user is really in, and
 the layout holding at a phone viewport. That was #38.
 
-## Phase 7: Release
+## Phase 7: The security argument holds
 
-**Test coverage:** before shipping something that spawns
-`claude --dangerously-skip-permissions`, prove the security tests actually
-assert. Mutation testing scoped to the five modules standing between a web page
-and a shell is the check that the suite would NOTICE a changed line, which
-coverage cannot tell you: three defects in this project shipped green at 98%
-branch coverage. That is #35.
+**Objective: everything the design promises about safety is true and asserted,
+before anything is published.**
 
+This comes BEFORE the release and did not used to. The roadmap's own words are
+why: prove the security tests actually assert *before* shipping something that
+spawns an agent with permissions skipped, "because three defects in this project
+shipped green at 98% branch coverage". A release is the one step that cannot be
+taken back, and every ticket here is a claim the design makes that nothing
+currently checks.
 
-Delivers: PyPI publication as `hitchrail`, a tagged GitHub release, a README
-that a stranger can follow, and a security policy telling people how to report
-something.
+Delivers: security headers on every response, mutation testing over the five
+modules between a web page and a shell, the threat model naming the powers the
+API actually has, and the CI supply chain pinned.
+
+**Done when:** a changed line in any of those five modules makes a test fail,
+every response carries the headers with a test per refusal, and section 5 names
+keystroke injection and pid signalling as capabilities rather than leaving them
+to be discovered.
+
+Tickets: #35, #77, #79, #80, #91, #4, #107.
+
+## Phase 8: Release
+
+**Objective: a stranger can install it, understand it, and report a hole in it.**
+
+The original Phase 7, narrowed back to what it actually said it was. Everything
+that accumulated in it because "Release" was the only bucket left has moved to a
+phase about that thing instead.
+
+Delivers: PyPI publication as `hitchrail`, a tagged GitHub release, a README a
+stranger can follow with screenshots of the phone case, a security policy, and
+the contribution rules written where a person and a non Claude agent can both
+find them.
 
 **Done when:** `uvx hitchrail` works on a machine that has never seen this
 repository, and the security section is the first thing a reader meets after
 learning what the tool does.
+
+**#106 blocks this phase and nothing else can start it.** The pre scrub commits
+are still served by the GitHub API until its garbage collection runs, so
+publishing reopens a leak that is currently closed by the repository being
+quiet.
+
+Tickets: #106, #59, #60, #61, #62, #58, #105, #17.
+
+## Phase 9: The truth on a shared machine
+
+**Objective: derivation is right on a machine Hitchrail does not own.**
+
+Every defect in this phase was found the same way: by running against a real
+root with another tool's sessions on it. The suite's fixtures describe a machine
+where Hitchrail is the only thing that has ever run, which is why none of these
+was reachable from it.
+
+Delivers: derivation that agrees with itself in both directions, adapters that
+survive a tmux they did not start, and the input box check that stopped being
+fragile.
+
+**Done when:** an agent inside another tool's session, a tmux binary under
+another name, and a terminal that emits an unusual escape all produce an honest
+answer rather than a confident wrong one.
+
+Tickets: #85, #46, #49, #32, #96, #102, #97, #100, #95, #93.
+
+## Phase 10: A suite that would notice
+
+**Objective: the tests fail when the code is wrong, and only then.**
+
+The recurring failure this phase exists for: a fixture written to agree with the
+code. It happened three times in one session, and each time the test passed
+while the thing it named was broken.
+
+Delivers: fixtures that cannot agree with the bug, a tier that reads the real
+machine without depending on it, a device tier that makes the phone flows
+repeatable, and the gates checking what they claim to.
+
+**Done when:** the fixtures are built from the production path rather than
+beside it, no tier's result depends on what the machine running it happens to
+have, and a phase's progress count in prose is checked against the boxes it
+describes.
+
+Tickets: #94, #104, #70, #73, #92, #67, #30, #10, #86, #5, #51.
+
+## Phase 11: The interface in every state
+
+**Objective: every state the interface can be in says something true, legibly.**
+
+What is left of the browser work after Phase 6 closed: the states that are rare,
+the wordings that are wrong, and the one module that has grown past the point
+where anybody reads all of it.
+
+Delivers: a stream that reports its own failures honestly, dialogs whose titles
+match what happened, colour that passes AA on its own tints, a memory footer
+with a ceiling, and `app.js` split along the seam it already has.
+
+**Done when:** no screen states something it did not read, every token pair
+passes AA, and no file in `web/` does more than one thing.
+
+Tickets: #68, #69, #71, #72, #78, #82, #90.
 
 ## Deliberately later
 
