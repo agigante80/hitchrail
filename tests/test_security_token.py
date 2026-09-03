@@ -912,3 +912,65 @@ def test_a_token_that_utf8_cannot_encode_is_false_and_not_a_crash() -> None:
     assert token_matches("\ud800", TOKEN) is False
     assert token_matches("a\udfffb", TOKEN) is False
     assert token_matches(TOKEN, TOKEN) is True
+
+
+# -- #112: which refusal answers first --------------------------------------
+#
+# `middleware_stack` promises "Order matters, and it is asserted by a test
+# rather than left to habit". Host outermost was asserted, by
+# `test_an_exempt_path_still_answers_to_the_host_allowlist` above. Token before
+# Origin was asserted by nothing, because `tests/test_security_origin.py`
+# builds almost every case with a tokenless loopback config and therefore runs
+# with the middleware under discussion switched off.
+#
+# The property is not cosmetic: if Origin answered first, a caller with no
+# token could enumerate the origin allowlist by watching 403 turn into 401, and
+# that allowlist names the hosts this machine answers to.
+
+FOREIGN = {**HOST, "origin": "http://evil.example"}
+
+
+@pytest.mark.integration
+async def test_a_missing_token_answers_before_the_origin_check(tmp_path: Path) -> None:
+    response = await call(guarded(tmp_path), "POST", headers=FOREIGN)
+    assert response.status_code == 401
+    assert response.json()["code"] == "unauthorized"
+
+
+@pytest.mark.integration
+async def test_a_wrong_token_answers_before_the_origin_check(tmp_path: Path) -> None:
+    """A wrong token must not be distinguishable from a missing one here
+    either, or the ordering buys nothing: both have to stop short of Origin."""
+    response = await call(
+        guarded(tmp_path), "POST", headers={**FOREIGN, "authorization": "Bearer wrong"}
+    )
+    assert response.status_code == 401
+    assert response.json()["code"] == "unauthorized"
+
+
+@pytest.mark.integration
+async def test_a_valid_token_still_meets_the_origin_check(tmp_path: Path) -> None:
+    """The control the two tests above must not have disabled. Authenticating
+    gets you past the token, not past CSRF."""
+    response = await call(
+        guarded(tmp_path), "POST", headers={**FOREIGN, "authorization": f"Bearer {TOKEN}"}
+    )
+    assert response.status_code == 403
+    assert response.json()["code"] == "origin_rejected"
+
+
+@pytest.mark.integration
+async def test_a_forged_host_answers_before_both(tmp_path: Path) -> None:
+    """Host stays outermost even when every other credential is wrong, so the
+    full precedence reads in one place rather than across three files."""
+    response = await call(
+        guarded(tmp_path),
+        "POST",
+        headers={
+            "host": "evil.lan",
+            "origin": "http://evil.example",
+            "authorization": "Bearer wrong",
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == "host_rejected"

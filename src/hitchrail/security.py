@@ -521,14 +521,14 @@ def set_token_cookie(response: Response, token: str) -> None:
 
 
 def middleware_stack(config: Config) -> list[Middleware]:
-    """Order matters, and it is asserted by a test rather than left to habit.
+    """Order matters, and both halves of it are asserted, not left to habit.
 
-    Starlette applies this list as an onion: the first entry is outermost and
-    runs first.
-
+    Starlette applies this list as an onion: the first entry is outermost.
     Host is outermost so a rebound request never reaches anything that could
     leak whether a token is even correct. Token sits before Origin so an
-    unauthenticated caller cannot learn which origins this server accepts.
+    unauthenticated caller cannot enumerate the origin allowlist by watching a
+    403 turn into a 401. Both are asserted in `tests/test_security_token.py`
+    (#112), and `.claude/CLAUDE.md` had the order backwards until #111.
     """
     return [
         Middleware(HostAllowlistMiddleware, allowed_hosts=frozenset(config.allowed_hosts)),
