@@ -221,6 +221,11 @@ function metaFor(project) {
   return `${formatMb(project.ram_mb)}  ·  up ${formatUptime(project.uptime_s)}`;
 }
 
+/* The states whose row is a column: a badge and up to three controls cannot
+   share a line with a name on a phone. Named once, because the stylesheet
+   lists the same three and the two must not drift. */
+const TALL_STATES = new Set(["running", "detached", "stale"]);
+
 function renderRow(project) {
   const row = document.createElement("article");
   row.className = "row";
@@ -247,8 +252,28 @@ function renderRow(project) {
 
   const actions = document.createElement("div");
   actions.className = "row-actions";
-  head.append(actions);
+  // WHERE the actions go is the whole of the mobile layout, and it depends on
+  // how many there are (#75, found on a real phone).
+  //
+  // A stopped row has one control, so it sits on the name's line and the row
+  // stays one line tall: that asymmetry is the design's argument for scanning
+  // forty rows with a thumb.
+  //
+  // A tall row has up to three, plus a badge, and they do NOT fit beside a
+  // name at 390px. `.row-actions` is `flex-shrink: 0`, so with them inside the
+  // head the name was the only thing that could give, and `overflow-wrap:
+  // anywhere` let it give down to ONE CHARACTER per line: a five letter
+  // project rendered as five stacked letters with `Stop` cut off past the
+  // edge. They get their own line instead.
+  //
+  // The stylesheet already assumed this. `.row[data-state="running"]
+  // .row-actions { margin-left: 0 }` only means anything for actions that are
+  // a child of the row, and the desktop query putting `auto` back only means
+  // anything on a line of their own. The markup was the half that disagreed.
+  const ownLine = TALL_STATES.has(project.state);
+  if (!ownLine) head.append(actions);
   row.append(head);
+  if (ownLine) row.append(actions);
 
   const meta = metaFor(project);
   if (meta) {

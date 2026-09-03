@@ -388,3 +388,40 @@ async def test_the_leak_detectors_can_actually_see_a_stray_server(
         time.sleep(0.1)
     assert server.sessions_on_the_socket(sock) == []
     assert server.processes_still_naming(sock) == []
+
+
+async def test_a_running_row_with_every_control_does_not_crush_its_name(
+    page: Page, server: Harness
+) -> None:
+    """Found on a real phone, which is what #75 is for, and missed by every
+    test here until now.
+
+    A running row whose session link has not arrived carries a badge and three
+    controls: Open, Get link, Stop. `.row-actions` is `flex-shrink: 0` and sat
+    INSIDE `.row-head`, so the name was the only thing in that line that could
+    give, and `overflow-wrap: anywhere` let it give all the way down to one
+    character per line. The screenshot showed `alpha` as five stacked letters
+    and `Stop` cut off past the right edge.
+
+    Two assertions, because either alone passes the broken layout: nothing may
+    overflow the viewport horizontally, and the name must occupy one line.
+    """
+    await page.set_viewport_size({"width": 390, "height": 844})
+    server.seed(running=["alpha"], untrusted=["alpha"])
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("alpha")}"]')
+    await expect(row).to_be_visible()
+    # The state that produces the widest row: no session link yet, so `Get
+    # link` is there too.
+    await expect(row.get_by_role("button", name="Get link")).to_be_visible()
+
+    overflow = await page.evaluate(
+        "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
+    )
+    assert overflow <= 0, f"the page scrolls sideways by {overflow}px at a phone width"
+
+    name_lines = await row.locator(".row-name").evaluate(
+        "el => el.getBoundingClientRect().height /"
+        " parseFloat(getComputedStyle(el).lineHeight || '20')"
+    )
+    assert name_lines < 2, f"the project name wrapped onto {name_lines:.1f} lines"
