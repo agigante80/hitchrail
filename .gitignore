@@ -11,3 +11,8 @@ docs/design/hitchrail-session-manager.html
 CLAUDE.local.md
 .coverage
 .claude/overnight/
+
+# Never published. It holds the project rules, agents and skills that name
+# this machine and its projects, and a public repository is the wrong place
+# for any of that. Kept locally, deliberately.
+.claude/

@@ -146,9 +146,16 @@ async def client(engine: Engine, config: Config) -> AsyncIterator[httpx.AsyncCli
 async def test_projects_lists_every_folder_with_its_state(client: httpx.AsyncClient) -> None:
     body = (await client.get("/api/projects", headers=HEADERS)).json()
     names = [p["name"] for p in body["projects"]]
-    assert names == ["vessel", "vessel-social", "network", "dotted.site"]
-    assert body["projects"][0]["state"] == "running"
-    assert body["projects"][2]["state"] == "stopped"
+    # Sorted, which is the listing's contract. Spelled out rather than
+    # computed, so a change to the ORDER fails here rather than passing
+    # against a sort of whatever came back.
+    assert names == ["dotted.site", "network", "vessel", "vessel-social"]
+    # By NAME, not by index. These were index 0 and index 2, which quietly
+    # meant "whichever rows those happen to be" and broke when the fixture
+    # names changed and the alphabetical order moved under them.
+    state = {p["name"]: p["state"] for p in body["projects"]}
+    assert state["vessel"] == "running"
+    assert state["network"] == "stopped"
 
 
 async def test_projects_reports_available_memory(client: httpx.AsyncClient) -> None:
