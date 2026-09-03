@@ -43,7 +43,27 @@
 * { box-sizing: border-box; }
 body {
   margin: 0;
+  /* `dvh` after `vh`, so a browser that knows only the older unit keeps the
+     older value and a browser that knows both takes the second.
+
+     It matters here more than anywhere else in this interface, because this is
+     the FIRST page a phone sees: the operator taps a grant link. Mobile Chrome
+     grows and shrinks its toolbar as you scroll, and `100vh` is measured
+     against the LARGEST height the viewport ever has. So a page centred in
+     `100vh` is centred in a box taller than what is actually visible, and its
+     content sits low, under the address bar, until you scroll. `dvh` is the
+     height the viewport has right now.
+
+     Reported from real Android devices as the second of the things a headless
+     run structurally cannot see: a fixed viewport can never reproduce a
+     toolbar that changes size mid gesture. #75 walks it.
+
+     No names in here, deliberately. This page is served WITHOUT a token, so
+     every byte of it is public, and folder names are among the things the
+     token protects. `test_the_grant_page_names_nothing_on_the_machine` caught
+     an attribution in this very comment. */
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
