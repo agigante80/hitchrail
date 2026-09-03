@@ -295,7 +295,39 @@ every response carries the headers with a test per refusal, and section 5 names
 keystroke injection and pid signalling as capabilities rather than leaving them
 to be discovered.
 
-Tickets: #4, #35, #77, #79, #80, #91, #108, #109, #111, #112.
+**All three exit criteria above are met as of 2026-09-03**, and the phase is
+not closed, because closing it is a decision about #80 rather than about the
+criteria.
+
+| Done | |
+|---|---|
+| #4 | every action pinned to a SHA, and a guard so the next one cannot arrive on a tag |
+| #35 | mutation testing on the five modules: 836 mutants, 680 killed, the survivors read and categorised |
+| #77 | nosniff, framing refused, a CSP per route |
+| #79 | the fragment grant asserted against the server's log rather than the browser's |
+| #91 | keystroke injection and pid signalling named in section 5, and a grep keeping the first one narrow |
+| #108 | the token demand follows reach, not the bind address |
+| #109 | `HITCHRAIL_TOKEN`, because argv is world readable |
+| #111 | the documented middleware order was the reverse of the real one |
+| #112 | token before origin was a promise nothing checked |
+
+Open: **#80**, which cannot reach its own "done when": the movable unit is 107
+lines and `security.py` is 542, so the file stays over the guideline either way,
+and moving `_maybe_grant` creates an import cycle. Four options are written on
+the ticket. It asserts nothing and changes no behaviour, so it is also the one
+ticket here that does not belong to this phase's objective.
+
+Three tickets came out of the work rather than into it: #113 (a spawned agent
+inherits `HITCHRAIL_TOKEN`, Phase 9), #114 (two tests that failed in CI and
+passed on rerun, Phase 10), and #107, which moved to Phase 9 because it depended
+on two tickets that live there.
+
+**What the phase was for, in one example.** #35 found that
+`_safe_redirect_path` could be turned into an open redirect by changing
+`path[1:2]` to `path[2:2]`, while the test written for exactly that case could
+not fail: httpx resolves `//evil.example` as a netloc, so the application never
+saw it. A test that had been green since Phase 2 was asserting nothing about
+the thing it was named for.
 
 #107 moved to Phase 9 on 2026-09-03. It depends on #96 and #85, which live
 there, and a phase cannot depend on a later one. Its documentation half, the
