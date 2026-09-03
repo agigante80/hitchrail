@@ -1108,12 +1108,25 @@ task implies a separate deliverable and there is not one.
 ## Phase 6 exit criteria
 
 - [x] All five gates green on 3.11, 3.12 and 3.13, and the `e2e` tier runs in CI. Green on 2f1e2d4; the tier runs on all three interpreters and the skip guard did not fire.
-- [ ] Every flow in the design canvas works on a real phone against a real
-  machine. **The one criterion no agent can tick**, and #75 carries it with
-  the flows to walk. The browser tier drives headless Chromium at a phone
-  VIEWPORT, which is not a phone: no thumb, no soft keyboard covering the
-  field, no address bar eating the bottom of the screen, no lift. Two of the
-  design's own commitments are about exactly those.
+- [x] Every flow in the design canvas works on a real phone against a real
+  machine. **Ticked by the operator on 2026-09-03, on partial evidence, and the
+  partiality is recorded rather than glossed.** Three of the seven flows were
+  walked against a real server on two Android devices and three browser
+  engines: the soft keyboard, the log drawer against a real agent's output, and
+  the grant link opened by intent. Four were not: thumb reach and a real radio
+  dropping are not simulable, OS dark mode at dusk means changing a setting on
+  somebody's personal phone, and no iOS device exists on this network, which
+  leaves #103's `visualViewport` fallback never exercised on the platform it
+  was written for.
+
+  What justifies the tick is that the walk did its job: every Android defect it
+  was meant to find was found and fixed. #103 the keyboard burying the sheet's
+  primary action, the row that crushed its name to one character per line, the
+  assets served with no `cache-control` so a fix could ship and not be seen, and
+  #101 the stop that reported "it has not finished" when the agent was asking a
+  question. None of those was reachable from the browser tier.
+
+  Residual findings get their own tickets. See #75 for the full record.
 - [x] The four derived states each render as themselves, `detached` with its pid. `tests/e2e/test_list.py`, with `detached` seeded by spawning outside tmux because killing a session kills the agent with it.
 - [x] A running row is measurably taller than a stopped one at a 390px viewport. Measured at 390px, not described.
 - [x] No control is under 44px at a phone viewport, asserted rather than eyeballed. Measured across every button, link and input at a phone viewport.

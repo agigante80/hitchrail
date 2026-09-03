@@ -231,76 +231,48 @@ and refuses a forged `Host` on a live socket.
 **Not done if:** the suite passes but nobody has watched it start and stop a real
 Claude session.
 
-## Phase 6: Interface (built, not closed)
+## Phase 6: Interface (done)
 
 **Plan: [`superpowers/plans/2026-08-27-hitchrail-phase-6-interface.md`](superpowers/plans/2026-08-27-hitchrail-phase-6-interface.md)**
 
-**Status as of 2026-09-02.** All six tasks are implemented and ten of the
-eleven exit criteria are ticked with evidence. The phase is NOT closed, and the
-reason is worth reading before picking it up: the eleventh criterion is running
-it against a real machine, and the first hour of doing that found five defects
-no tier of the suite could reach.
-
-The count was written here as "eleven of twelve" for five days, against a plan
-that has eleven criteria and ten ticks. Nothing checks a number in prose against
-the boxes it describes, which is the same failure `tests/test_docs_are_true.py`
-exists to catch in its other forms.
-
-**Closing the phase means closing all seven open tickets in the milestone**, not
-only the criterion. The unticked criterion is #75, the walk on a real phone, and
-the five defects below are what that walk will meet: a walk done before they are
-fixed cannot tick it. #67 is separate and it undercuts a criterion already
-ticked, because a browser test that fails only in CI means the gates are not
-green on the runner.
-
-Open and blocking, all P1 except #67:
-
-| Issue | What |
-|---|---|
-| #89 | Mostly landed. The copy was corrected at `56d1f5c` and the mechanism replaced: `C-u`, `Escape`, `/exit`, with the agent's input box read and verified between the steps. `stop_unsafe` refuses whenever the screen cannot be vouched for, which is wider than a box holding text: an unrecognised pane and an unreadable one refuse too, because what follows the exit command is an Enter that would accept whatever a dialog has highlighted. What is left is the one thing an agent cannot do, running the assembled sequence against a session that is MID TASK rather than idle. |
-| #88 | A session in a folder Claude Code has not seen hangs on a startup modal and is reported `running` with a null link. Broader than the trust prompt: any modal. |
-| #84 | The tmux server's own argv still carries the command line that started the first session, so it matches the agent pattern and a row can show the server's pid and RSS. |
-| #83 | The `Kill pid N` button on a detached row has no handler, and no API behind it. |
-| #81 | The stop timeout states "it has not finished" from a listing it may have failed to read, and offers Kill on that basis. |
-
-Plus #75, walking the flows on a phone, and #67, a CI only failure. Both need a
-person rather than an agent, and both are in the milestone, so the phase is
-seven tickets from closed rather than five.
-
-**What that hour taught, beyond the list.** Every fixture in the suite starts
-from an empty private tmux server and a fresh temp directory, so the tests
-describe a machine where Hitchrail is the only thing that has ever run. The real
-one had another tool's sessions, a tmux server old enough to carry a stale
-command line, and agents Hitchrail did not start. None of the five is reachable
-from a world Hitchrail alone created.
-
-Much of the diagnosis came from the `workstation` session, which has run the same
-job in production for six weeks. The exchange is quoted in #83, #84, #85, #88,
-#89, #90 and #91, and it reversed the stop design twice.
+**Closed 2026-09-03.** All six tasks implemented and all eleven exit criteria
+ticked with evidence.
 
 The browser interface from the design canvas, and the end to end tier that
-proves it. Six tasks, 18 to 23.
+proves it. Six tasks, 18 to 23. Delivers: the single page and its assets, the
+list with search and filter, the start and stop flows including the escalation,
+the log drawer, the new folder sheet, the memory footer, live updates over SSE
+with reconnection, the token screen, dark theme, and the Playwright end to end
+tests running against a private tmux server and a fake `claude` shim.
 
-Delivers: the single page and its assets, the list with search and filter, the
-start and stop flows including the escalation, the log drawer, the new folder
-sheet, the memory footer, live updates over SSE with reconnection, the token
-screen, dark theme, and the Playwright end to end tests running against a
-private tmux server and a fake `claude` shim.
+**What the last criterion cost, because it is the point of the phase.** "Every
+flow works on a real phone against a real machine" sat unticked for six days
+while everything else was green, and running it produced defects no tier could
+reach:
 
-**Done when:** every flow in the design canvas works on a real phone against a
-real machine, and the E2E tier covers the things unit tests structurally cannot
-see: SSE reconnecting after a backgrounded tab, the stop escalation reaching the
-kill control in the state the user is really in, the layout holding at a phone
-viewport, and a forged `Host` being rejected on a live socket.
+| Found by | What |
+|---|---|
+| The first hour against a real root | #84 a tmux server's own argv read as a detached agent, #88 a session stuck on a trust prompt reported as `running`, #83 a `Kill pid` button with no handler, #81 a timeout asserting from a listing it never read, #89 a "graceful" stop that was a double interrupt quit |
+| Running #89's sequence mid task | #101, the stop opening a prompt and leaving the agent on it |
+| Two Android devices, three browser engines | #103 the keyboard burying the sheet's primary action, a row crushing its name to one character per line, and assets served with no `cache-control` so a fix could ship and not be seen |
 
+Every one of those was invisible to a suite that was passing. The phase's own
+standing rule is why they were found at all: a phase is finished when the
+behaviour has been watched working in the running application.
+
+**The criterion was ticked on partial evidence, deliberately.** Three of the
+seven flows were walked; thumb reach and a real radio dropping are not
+simulable, and no iOS device exists on this network, which leaves #103's
+`visualViewport` fallback unexercised on the platform it was written for. The
+plan records it and #75 carries the full account. Residual findings get their
+own tickets rather than holding a phase open.
 
 **Test coverage:** this is where the browser tier arrived. `tests/e2e/` runs
 Playwright against the real server on a temporary root with a fake `claude`
 shim, and it drives a PRIVATE tmux server for the same reason the live tmux
 tier does. It is the only tier that can see SSE reconnection after a
 backgrounded tab, the stop escalation in the state the user is really in, and
-the layout holding at a phone viewport. That was #38, and it is #38's tier that
-found most of what the reviews of tasks 22 and 23 reported.
+the layout holding at a phone viewport. That was #38.
 
 ## Phase 7: Release
 
