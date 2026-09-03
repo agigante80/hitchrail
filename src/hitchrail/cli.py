@@ -14,7 +14,12 @@ import uvicorn
 from starlette.applications import Starlette
 
 from hitchrail import __version__
-from hitchrail.config import Config, ConfigError, is_loopback_host, is_wildcard_host
+from hitchrail.config import (
+    Config,
+    ConfigError,
+    is_wildcard_host,
+    remote_reach,
+)
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
 from hitchrail.server import create_app
@@ -81,10 +86,18 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def build_config(args: argparse.Namespace) -> Config:
     token = args.token
-    # is_loopback_host is imported rather than reimplemented. Two copies of
-    # this rule would drift, and the one that drifts is the one deciding
-    # whether a token is demanded at all.
-    if not is_loopback_host(args.host) and not token:
+    # `remote_reach` is imported rather than reimplemented. Two copies of this
+    # rule would drift, and the one that drifts is the one deciding whether a
+    # token is demanded at all.
+    #
+    # It asks about reach and not about the bind (#108): behind a proxy a
+    # loopback bind is still reachable from a network, and the operator says so
+    # with --allow-host or --allow-origin. Generating here under the same
+    # predicate that refuses in Config is what stops the CLI producing a config
+    # its own constructor then rejects.
+    if not token and remote_reach(
+        args.host, tuple(args.allow_hosts), tuple(args.allow_origins)
+    ):
         token = secrets.token_urlsafe(24)
     return Config(
         root=args.root,

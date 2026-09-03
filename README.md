@@ -76,8 +76,11 @@ uv run hitchrail --root ~/projects --host 192.168.1.10
     http://192.168.1.10:8787/grant#token=<generated>
 ```
 
-A token is generated and REQUIRED as soon as you bind off loopback; the server
-refuses to start without one. Everything after the `#` stays in the browser and
+A token is generated and REQUIRED as soon as anything outside this machine can
+reach Hitchrail. Binding off loopback is one way to say so; passing
+`--allow-host` or `--allow-origin` for a name that is not loopback is the other,
+because that is what you do to put Hitchrail behind a proxy such as
+`tailscale serve`. In both cases the server refuses to start without one. Everything after the `#` stays in the browser and
 reaches no server log. Over plain HTTP the cookie it becomes still crosses your
 network in clear, so put TLS in front of it if that matters to you.
 

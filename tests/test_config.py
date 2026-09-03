@@ -150,7 +150,11 @@ def test_wildcard_allowed_host_is_refused(tmp_path: Path, bad: str) -> None:
 
 
 def test_allowed_hosts_are_deduplicated_and_ordered(tmp_path: Path) -> None:
-    cfg = Config(root=tmp_path, host="localhost", extra_hosts=("localhost", "box.lan"))
+    # A token because box.lan is not loopback, and #108 now demands one for
+    # any declared remote reach. The subject here is ordering, not auth.
+    cfg = Config(
+        root=tmp_path, host="localhost", token="t", extra_hosts=("localhost", "box.lan")
+    )
     hosts = cfg.allowed_hosts
     assert len(hosts) == len(set(hosts))
     assert hosts[0] == "localhost"
@@ -655,7 +659,7 @@ def test_a_configured_origin_covers_both_default_port_spellings(
 
     Both paths go through `origin_forms` now, so they cannot drift apart again.
     """
-    cfg = Config(root=tmp_path, extra_origins=(configured,))
+    cfg = Config(root=tmp_path, token="t", extra_origins=(configured,))
     assert expected <= cfg.allowed_origins
 
 
@@ -684,7 +688,10 @@ def test_an_ipv6_origin_ending_in_a_double_colon_is_not_an_empty_port(
     never wrote. The check belongs on the netloc, where `[2001:db8::]` ends
     with `]` and `box.lan:` ends with `:`.
     """
-    cfg = Config(root=tmp_path, extra_origins=(origin,))
+    # token="t" for the two non loopback literals: #108 demands one once an
+    # origin names something outside this machine. `http://[::1]` would not
+    # need it, and passing one changes nothing about what is asserted.
+    cfg = Config(root=tmp_path, token="t", extra_origins=(origin,))
     assert any("2001:db8" in o or "::1" in o or "fe80" in o for o in cfg.allowed_origins)
 
 
@@ -930,7 +937,12 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # its code on purpose: a filesystem read in a config constructor looks
         # wrong, and the reason it is not belongs next to it. Split only if a
         # NEW responsibility arrives, never to reclaim these lines.
-        "config.py": 418,
+        #
+        # Raised from 418 for #108's `remote_reach`, which adds behaviour: the
+        # token refusal now follows what can reach this server rather than what
+        # it binds. Most of the addition is the argument for why a proxied
+        # loopback bind is not local, which is the thing that was wrong.
+        "config.py": 468,
         # 537, and the number is the current one: an entry that accumulated
         # a stack of superseded figures would be the same drift this test
         # exists to catch, in the file that catches it.
@@ -1123,3 +1135,74 @@ def test_projectnames_does_not_import_config() -> None:
     assert "import config" not in source
     assert "from hitchrail.config" not in source
     assert "from .config" not in source
+
+
+# -- #108: the token demand follows reach, not the bind ----------------------
+#
+# The refusal used to ask `is_loopback`, which reads the BIND address. Behind a
+# reverse proxy the bind stops being the truth: `tailscale serve` or an nginx
+# forwards to 127.0.0.1, so Hitchrail saw a loopback socket, concluded it was
+# local only, and demanded no token, while the whole tailnet could reach it.
+#
+# The operator declares that reach in the only place they can: `--allow-host`
+# and `--allow-origin` exist for no other purpose than making a non local name
+# work, so nobody passes one by accident. That is a better statement of intent
+# than the bind, which anything can forward to.
+
+
+def test_a_remote_allow_host_demands_a_token(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError) as excinfo:
+        Config(root=tmp_path, host="127.0.0.1", token=None, extra_hosts=("box.tailnet.ts.net",))
+    assert "box.tailnet.ts.net" in str(excinfo.value)
+    assert "--allow-host" in str(excinfo.value)
+
+
+def test_a_remote_allow_origin_demands_a_token(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError) as excinfo:
+        Config(
+            root=tmp_path,
+            host="127.0.0.1",
+            token=None,
+            extra_origins=("https://box.tailnet.ts.net",),
+        )
+    assert "box.tailnet.ts.net" in str(excinfo.value)
+    assert "--allow-origin" in str(excinfo.value)
+
+
+def test_a_remote_allow_host_with_a_token_is_accepted(tmp_path: Path) -> None:
+    """The proxied deployment this refusal is meant to make safe, not refuse."""
+    config = Config(
+        root=tmp_path, host="127.0.0.1", token="t", extra_hosts=("box.tailnet.ts.net",)
+    )
+    assert "box.tailnet.ts.net" in config.allowed_hosts
+
+
+@pytest.mark.parametrize("entry", ["localhost", "127.0.0.1", "::1", "[::1]", "127.0.0.2"])
+def test_a_loopback_allow_host_still_needs_no_token(tmp_path: Path, entry: str) -> None:
+    """A loopback name in the allowlist declares no reach, so refusing it would
+    punish the harmless case and teach operators to pass --token reflexively."""
+    assert (
+        Config(root=tmp_path, host="127.0.0.1", token=None, extra_hosts=(entry,)).token is None
+    )
+
+
+@pytest.mark.parametrize(
+    "entry", ["http://127.0.0.1:9000", "https://localhost", "http://[::1]:80"]
+)
+def test_a_loopback_allow_origin_still_needs_no_token(tmp_path: Path, entry: str) -> None:
+    assert (
+        Config(root=tmp_path, host="127.0.0.1", token=None, extra_origins=(entry,)).token
+        is None
+    )
+
+
+def test_a_bare_loopback_bind_still_needs_no_token(tmp_path: Path) -> None:
+    """How nearly everybody runs it. The change must not break this."""
+    assert Config(root=tmp_path, host="127.0.0.1", token=None).token is None
+
+
+@pytest.mark.parametrize("host", ["0.0.0.0", "::", "192.168.1.10"])
+def test_a_non_loopback_bind_still_demands_a_token(tmp_path: Path, host: str) -> None:
+    """Regression guard: the new predicate must not weaken the old rule."""
+    with pytest.raises(ConfigError, match="token"):
+        Config(root=tmp_path, host=host, token=None)

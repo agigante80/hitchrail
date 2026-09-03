@@ -53,6 +53,55 @@ class ConfigError(ValueError):
     """The configuration is not one Hitchrail is willing to run with."""
 
 
+def remote_reach(
+    host: str,
+    extra_hosts: tuple[str, ...] = (),
+    extra_origins: tuple[str, ...] = (),
+) -> str | None:
+    """Can anything outside this machine reach a server configured like this?
+
+    Returns the reason, phrased for an error message, or None.
+
+    **The bind address is not the whole answer, which is what #108 fixed.** It
+    used to be: the token refusal asked `is_loopback` and nothing else. Behind a
+    reverse proxy that is false. `tailscale serve`, an nginx or an SSH forward
+    all hand a request to 127.0.0.1, so Hitchrail saw a loopback socket,
+    concluded it was local only and demanded no token while a whole network
+    could reach it. `--allow-origin`'s own help text names that deployment, so
+    the project already knew proxies exist.
+
+    An allowlist entry is a declaration, not a hint. `--allow-host` and
+    `--allow-origin` exist for no purpose except making a non local name work,
+    so a non loopback entry in either is the operator saying that something
+    beyond this machine will arrive. That is a better source of truth than the
+    bind, which anything in front of it can forward to.
+
+    Module level, and the CLI calls it rather than restating the rule, for the
+    reason `is_loopback_host` gives: two copies of this would drift, and the one
+    that drifts is the one deciding whether a token is demanded at all. The CLI
+    also has to ask before a Config exists, so this cannot be a property.
+    """
+    if not is_loopback_host(host):
+        return "binding to anything but loopback"
+    for entry in extra_hosts:
+        if not is_loopback_host(entry):
+            return f"--allow-host {entry} says something outside this machine can reach it"
+    for entry in extra_origins:
+        # Parsed rather than pattern matched, and failures are ignored here:
+        # `_check_extra_origins` owns rejecting a malformed origin and runs
+        # first, so anything unparseable has already raised by the time this
+        # is consulted from `__post_init__`. The CLI calls this BEFORE
+        # constructing a Config, though, so a bad entry must not crash here on
+        # its way to that refusal.
+        try:
+            hostname = urlsplit(entry.strip().rstrip("/")).hostname
+        except ValueError:
+            continue
+        if hostname and not is_loopback_host(hostname):
+            return f"--allow-origin {entry} says something outside this machine can reach it"
+    return None
+
+
 @dataclass(frozen=True)
 class Config:
     """Validated at construction, so an unsafe configuration cannot exist.
@@ -123,10 +172,11 @@ class Config:
         self._check_extra_origins()
         self._check_self_project()
 
-        if not self.is_loopback and not self.token:
+        reach = remote_reach(self.host, self.extra_hosts, self.extra_origins)
+        if reach and not self.token:
             raise ConfigError(
-                "a token is required when binding to anything but loopback: "
-                "anyone who can reach this API can run code as you"
+                f"a token is required when {reach}: anyone who can reach this "
+                "API can run code as you"
             )
 
         object.__setattr__(self, "_allowed_hosts", self._resolve_allowed_hosts())

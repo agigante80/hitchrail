@@ -326,11 +326,25 @@ exception, so the token path is the main path.
 2. **Origin check on every mutating request.** `fetch` and `EventSource` send
    `Origin` and a rebound attacker cannot forge it. This is the CSRF control for
    a same origin JSON API.
-3. **Token required for any non loopback bind.** Refuse to start, do not warn.
-   Generated on first run, printed to the terminal, compared in constant time
-   with `secrets.compare_digest` on bytes, never on `str`, which raises
-   `TypeError` on any non ASCII character and turns a wrong token into an
-   unauthenticated 500.
+3. **Token required whenever anything outside this machine can reach it.**
+   Refuse to start, do not warn. Generated on first run, printed to the
+   terminal, compared in constant time with `secrets.compare_digest` on bytes,
+   never on `str`, which raises `TypeError` on any non ASCII character and
+   turns a wrong token into an unauthenticated 500.
+
+   **Amended by #108: this said "any non loopback bind", and the bind is not
+   the question.** A reverse proxy makes a loopback socket reachable from a
+   whole network: `tailscale serve`, an nginx and an SSH forward all hand the
+   request to 127.0.0.1. Hitchrail saw loopback, concluded local only, and
+   served with no authentication at all, which is the configuration this
+   project's own `--allow-origin` help text describes as supported.
+
+   The trigger is therefore what the operator declared, not what was bound. A
+   non loopback `--allow-host` or `--allow-origin` exists for no purpose except
+   making a remote name work, so either one is a statement that something
+   beyond this machine will arrive, and it demands a token exactly as a non
+   loopback bind does. `config.remote_reach` is the one place that decides, and
+   the CLI asks it rather than keeping a second copy.
 
    **Amended in Phase 2: the token needs three carriers, not one.** This
    section originally said "token" and left the carrier implicit, which hid a

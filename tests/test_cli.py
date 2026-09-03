@@ -370,3 +370,42 @@ def test_main_serves_the_real_app_on_the_configured_address(
     assert "/api/projects" in paths
     assert "/api/events" in paths
     assert "/api/sessions/{name}/kill" in paths, "the app served is not the real one"
+
+
+# -- #108: the CLI and Config ask the same question --------------------------
+
+
+def test_a_remote_allow_host_generates_a_token(tmp_path: Path) -> None:
+    """The convenience path and the refusal have to agree.
+
+    `build_config` used to generate only for a non loopback bind, so a loopback
+    bind with a remote allowed host produced no token and `Config` would now
+    refuse the CLI's own output: an operator would see a startup failure for a
+    flag combination the CLI itself assembled.
+    """
+    cfg = build_config(
+        parse_args(["--root", str(tmp_path), "--allow-host", "box.tailnet.ts.net"])
+    )
+    assert cfg.token, "no token was generated for a declared remote reach"
+
+
+def test_a_remote_allow_origin_generates_a_token(tmp_path: Path) -> None:
+    cfg = build_config(
+        parse_args(["--root", str(tmp_path), "--allow-origin", "https://box.tailnet.ts.net"])
+    )
+    assert cfg.token
+
+
+def test_a_loopback_allow_host_generates_nothing(tmp_path: Path) -> None:
+    """The default stays what it was: no token, no banner, nothing to copy."""
+    cfg = build_config(parse_args(["--root", str(tmp_path), "--allow-host", "localhost"]))
+    assert cfg.token is None
+
+
+def test_an_explicit_token_still_wins_over_a_generated_one(tmp_path: Path) -> None:
+    cfg = build_config(
+        parse_args(
+            ["--root", str(tmp_path), "--allow-host", "box.tailnet.ts.net", "--token", "mine"]
+        )
+    )
+    assert cfg.token == "mine"
