@@ -415,9 +415,26 @@ function buildActions(project, actions) {
   if (!project.protected && project.state === "stale") {
     add("Clear", "danger").addEventListener("click", () => confirmClear(project));
   }
-  if (project.state === "detached" && !project.protected) {
-    add(`Kill pid ${project.pid}`, "danger");
-  }
+  // NO control on a detached row, and the absence is the decision (#83).
+  //
+  // It carried `Kill pid N`, styled `danger`, with no handler and no route
+  // behind it: the most consequential tap in the interface, and it did
+  // nothing. A browser test asserted the button was VISIBLE and so passed
+  // against that forever.
+  //
+  // Wiring it was the other option and was declined. Every destructive path
+  // here is scoped by construction rather than by a check: `kill_session` can
+  // only address `hr-<name>`, which is why `Tmux.__init__` refuses an empty
+  // prefix. A bare pid has no such scope, and this pid is DERIVED, matched out
+  // of `ps` by an argv tail that has been wrong twice this month (#84, and #96
+  // still open). Adding the first unscoped destructive path on top of that
+  // needs a security argument in the design's section 5, which is #107.
+  //
+  // The design already chose this shape: `detached` is surfaced with its pid
+  // and an explanation, and never silently reconciled, "because the safe
+  // action depends on what that agent is doing, which Hitchrail cannot know".
+  // The row says what is true and leaves the choice with the person, who has
+  // the pid in front of them.
 }
 
 function renderList() {

@@ -28,20 +28,42 @@ async def test_every_derived_state_renders_as_itself(page: Page, server: Harness
     )
 
 
-async def test_a_detached_row_names_its_pid_and_offers_to_kill_it(
+async def test_a_detached_row_names_its_pid_and_offers_nothing_that_cannot_act(
     page: Page, server: Harness
 ) -> None:
-    """The state the design surfaces loudly on purpose. `States.dc.html`:
-    "pid 24188 - no tmux session", with the pid IN the button, because the
-    thing being killed is a pid rather than a session."""
+    """The state the design surfaces loudly and deliberately does not act on.
+
+    Section 4.1: "`detached` is surfaced in the UI with its pid and an
+    explanation. Hitchrail never silently reconciles it, because the safe
+    action depends on what that agent is doing, which Hitchrail cannot know."
+
+    **This test used to assert a `Kill pid N` button was VISIBLE**, and that is
+    how #83 shipped: the control had no handler and no route behind it, and a
+    test asserting appearance passed against a dead button forever. Visibility
+    is not behaviour, and a test that only checks the first will pin the second
+    at whatever it happens to be.
+
+    The button is gone rather than wired. Every destructive path in this tool
+    is scoped by construction, `kill_session` can only address `hr-<name>`, and
+    a bare pid has no such scope. Adding the first unscoped one is a decision
+    with a security argument attached, and it is #107 rather than a handler.
+    """
     server.seed(detached=["forge-kit"])
     assert server.engine is not None
     await page.goto(server.base)
     row = page.locator('[data-project="hrx-forge-kit"]')
     await expect(row).to_have_attribute("data-state", "detached")
-    await expect(row).to_contain_text("no tmux session")
+
+    # The pid and the reason, which is the whole of what the design promises.
     pid = server.engine.get(server.project("forge-kit")).pid
-    await expect(row.get_by_role("button", name=f"Kill pid {pid}")).to_be_visible()
+    await expect(row).to_contain_text("no tmux session")
+    await expect(row).to_contain_text(f"pid {pid}")
+
+    # And no control at all, because every one this row could offer either does
+    # nothing or needs a power the tool does not have.
+    assert await row.get_by_role("button").count() == 0, (
+        "a detached row is offering a control; if it cannot act, it is #83 again"
+    )
 
 
 async def test_a_running_row_is_taller_than_a_stopped_one(page: Page, server: Harness) -> None:
