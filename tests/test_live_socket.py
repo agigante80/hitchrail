@@ -28,8 +28,12 @@ from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
+from conftest import FakeTmux, procs_from
 from hitchrail.config import Config
+from hitchrail.engine import Engine
+from hitchrail.events import EventBus
 from hitchrail.security import TOKEN_COOKIE, middleware_stack
+from hitchrail.server import create_app
 
 TOKEN = "live-socket-token"
 TIMEOUT = 5.0
@@ -351,3 +355,99 @@ def test_no_carrier_path_writes_the_token_to_the_access_log(
     logged = "\n".join(records)
     assert TOKEN not in logged, f"{label}: the token reached the access log: {logged}"
     assert "keep=1" in logged, "the fix must not be to throw the query away"
+
+
+def test_the_fragment_grant_puts_the_token_in_no_access_line(tmp_path: Path) -> None:
+    """#79. The server side half of the fragment claim.
+
+    `tests/e2e/test_token.py::test_the_fragment_never_reaches_the_server`
+    asserts against the URLs Playwright records, and the browser has already
+    stripped the fragment before that recording happens, so it cannot fail on
+    account of the fragment. What it does constrain is that the page never
+    BUILDS a URL carrying the key, which is worth having and is not this.
+
+    **What this guards, precisely.** `_scrub_grant_param` removes exactly one
+    parameter name, `GRANT_PARAM`, which is "token". That is correct for the
+    legacy carrier it was written for and it is not a general secret filter: a
+    token arriving in the URL under ANY other name reaches uvicorn's access log
+    verbatim. So the thing worth asserting is not "the scrub works", which
+    `test_the_grant_keeps_the_token_out_of_the_access_log` already covers, but
+    that the fragment flow puts the token in no URL at all and therefore never
+    depends on that one spelling.
+
+    Verified by mutation: sending the same POST as `?k=<token>` fails this
+    test, while the scrubbed `?token=<token>` spelling does not, which is the
+    whole asymmetry.
+
+    It has to run here because uvicorn builds its access line after the app
+    returns, from the live scope, so no unit test can see it.
+
+    The flow is driven to COMPLETION and the completion is asserted. A grant
+    that silently failed would log no token either, and would pass.
+    """
+    port = free_port()
+    config = Config(root=tmp_path, host="127.0.0.1", port=port, token=TOKEN)
+    app = create_app(
+        engine=Engine(
+            config=config,
+            tmux=FakeTmux(sessions={}),
+            procs_fn=procs_from(""),
+            meminfo_fn=lambda: "MemAvailable: 25198592 kB\n",
+            sleep=lambda _s: None,
+        ),
+        config=config,
+        bus=EventBus(),
+    )
+    server = LiveServer(app, port, log_level="info")
+
+    records: list[str] = []
+
+    class Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record.getMessage())
+
+    handler = Capture()
+    access = logging.getLogger("uvicorn.access")
+    server.start()
+    access.addHandler(handler)
+    try:
+        host = {"Host": f"127.0.0.1:{port}"}
+        # httpx drops the fragment before sending, which is what a browser
+        # does. Writing it here is the point: this is the URL a person opens,
+        # and the server must never see the part after the `#`.
+        page = httpx.get(f"{server.base}/grant#token={TOKEN}", headers=host, timeout=TIMEOUT)
+        assert page.status_code == 200, page.text
+
+        traded = httpx.post(
+            f"{server.base}/api/grant",
+            json={"token": TOKEN},
+            headers={**host, "Origin": f"http://127.0.0.1:{port}"},
+            timeout=TIMEOUT,
+        )
+        assert traded.status_code == 200, traded.text
+        cookie = traded.cookies.get(TOKEN_COOKIE)
+        assert cookie == TOKEN, "the grant set no usable cookie, so the flow did not complete"
+
+        # The cookie now authenticates a real route. Without this the test
+        # would pass against a grant that returned 200 and granted nothing.
+        listing = httpx.get(
+            f"{server.base}/api/projects",
+            headers=host,
+            cookies={TOKEN_COOKIE: cookie},
+            timeout=TIMEOUT,
+        )
+        assert listing.status_code == 200, listing.text
+
+        deadline = time.monotonic() + TIMEOUT
+        while time.monotonic() < deadline and len(records) < 3:
+            time.sleep(0.05)
+    finally:
+        access.removeHandler(handler)
+        server.stop()
+
+    logged = "\n".join(records)
+    assert records, "uvicorn wrote no access line, so this test proves nothing"
+    # All three requests are present, so the absence below is about the token
+    # and not about the capture having missed the interesting line.
+    assert "/grant" in logged and "/api/grant" in logged and "/api/projects" in logged, logged
+    assert TOKEN not in logged, f"the token reached the access log: {logged}"
