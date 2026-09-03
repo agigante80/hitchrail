@@ -52,16 +52,12 @@ body {
      against the LARGEST height the viewport ever has. So a page centred in
      `100vh` is centred in a box taller than what is actually visible, and its
      content sits low, under the address bar, until you scroll. `dvh` is the
-     height the viewport has right now.
+     height the viewport has right now. #75 walks it on a real device.
 
-     Reported from real Android devices as the second of the things a headless
-     run structurally cannot see: a fixed viewport can never reproduce a
-     toolbar that changes size mid gesture. #75 walks it.
-
-     No names in here, deliberately. This page is served WITHOUT a token, so
-     every byte of it is public, and folder names are among the things the
-     token protects. `test_the_grant_page_names_nothing_on_the_machine` caught
-     an attribution in this very comment. */
+     This page is served WITHOUT a token, so every byte of it is public. Keep
+     it free of anything local: no names, no paths, no hostnames.
+     `test_the_grant_page_names_nothing_on_the_machine` compares it byte for
+     byte against the file on disk and refuses any of them. */
   min-height: 100vh;
   min-height: 100dvh;
   display: flex;
