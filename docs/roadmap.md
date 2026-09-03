@@ -295,9 +295,8 @@ every response carries the headers with a test per refusal, and section 5 names
 keystroke injection and pid signalling as capabilities rather than leaving them
 to be discovered.
 
-**All three exit criteria above are met as of 2026-09-03**, and the phase is
-not closed, because closing it is a decision about #80 rather than about the
-criteria.
+**Closed 2026-09-03.** All three exit criteria ticked with evidence, and every
+ticket resolved.
 
 | Done | |
 |---|---|
@@ -311,23 +310,40 @@ criteria.
 | #111 | the documented middleware order was the reverse of the real one |
 | #112 | token before origin was a promise nothing checked |
 
-Open: **#80**, which cannot reach its own "done when": the movable unit is 107
-lines and `security.py` is 542, so the file stays over the guideline either way,
-and moving `_maybe_grant` creates an import cycle. Four options are written on
-the ticket. It asserts nothing and changes no behaviour, so it is also the one
-ticket here that does not belong to this phase's objective.
+**#80 was closed by doing something else, and the reason is worth carrying.**
+It asked where to move the `?token=` carrier so `security.py` would come back
+under its cap. Measured, that was unreachable: the movable unit is 101 lines
+against a 542 line file, landing near 435 with the exception intact. The query
+grant was never what made the file long.
+
+Reviewing it turned up the better question. The carrier existed so "an already
+saved link does not break", and **nothing had shipped**: no tags, no release,
+and nothing had generated a query link since the banner moved to
+`/grant#token=`. It protected compatibility with a version that was never
+published, and the window in which deleting it was free closed at Phase 8, the
+next phase. #115 deleted it: 135 lines, `security.py` at 409, exception gone.
+
+What left with it mattered more than the lines. `_scrub_grant_param` existed
+only to keep that carrier's token out of uvicorn's access line, and rested on
+where uvicorn emits that line rather than on anything ASGI guarantees. A
+control whose correctness depends on another project's call ordering is one
+worth not needing.
 
 Three tickets came out of the work rather than into it: #113 (a spawned agent
 inherits `HITCHRAIL_TOKEN`, Phase 9), #114 (two tests that failed in CI and
 passed on rerun, Phase 10), and #107, which moved to Phase 9 because it depended
 on two tickets that live there.
 
-**What the phase was for, in one example.** #35 found that
+**What the phase was for, in two examples.** #35 found that
 `_safe_redirect_path` could be turned into an open redirect by changing
 `path[1:2]` to `path[2:2]`, while the test written for exactly that case could
 not fail: httpx resolves `//evil.example` as a netloc, so the application never
 saw it. A test that had been green since Phase 2 was asserting nothing about
 the thing it was named for.
+
+And #80 was a ticket about where to put code, which turned into deleting it,
+because reviewing the argument found that its premise had expired. **Both
+findings came from checking a claim rather than reading one.**
 
 #107 moved to Phase 9 on 2026-09-03. It depends on #96 and #85, which live
 there, and a phase cannot depend on a later one. Its documentation half, the
