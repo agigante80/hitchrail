@@ -295,7 +295,12 @@ every response carries the headers with a test per refusal, and section 5 names
 keystroke injection and pid signalling as capabilities rather than leaving them
 to be discovered.
 
-Tickets: #35, #77, #79, #80, #91, #4, #107.
+Tickets: #4, #35, #77, #79, #80, #91, #108, #109, #111, #112.
+
+#107 moved to Phase 9 on 2026-09-03. It depends on #96 and #85, which live
+there, and a phase cannot depend on a later one. Its documentation half, the
+section 5 paragraph naming pid signalling, stayed in #91 so the exit criterion
+below keeps an owner.
 
 ## Phase 8: Release
 
