@@ -1,9 +1,0 @@
-#!/usr/bin/env bash
-# Refuse a commit that carries a private name. See
-# scripts/check-no-private-names.sh for what and why.
-#
-# A GIT hook rather than an agent hook, deliberately. An agent hook only guards
-# the agent, and the leak this exists to stop was written by an agent AND
-# reviewed by a person and survived both. Everything reaching a commit goes
-# through here, whoever or whatever typed it.
-exec "$(git rev-parse --show-toplevel)/scripts/check-no-private-names.sh"

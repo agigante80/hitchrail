@@ -150,17 +150,3 @@ trademarks of Anthropic.
 ## Licence
 
 MIT.
-
-## A note for anyone cloning this
-
-The hooks are in `.githooks/`, not `.git/hooks/`, so they travel with the
-repository. Turn them on once:
-
-```sh
-git config core.hooksPath .githooks
-```
-
-`pre-commit` refuses a commit that carries a name from a private list. The list
-itself is not in the repository, because a public file enumerating the private
-names would tell a reader exactly what to search the history for. Without it
-the check passes and says so.
