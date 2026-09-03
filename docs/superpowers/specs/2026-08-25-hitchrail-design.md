@@ -399,6 +399,43 @@ exception, so the token path is the main path.
 5. **No shell.** Every subprocess call passes an argument list. No
    `shell=True`, ever.
 
+**4. Response headers, added by #77.** Every response carries
+`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` and a Content
+Security Policy, applied by a middleware that sits OUTSIDE the three controls
+above so that refusals carry them too.
+
+This is the only one of the four that refuses nothing. It instructs the
+browser, and it lives in `headers.py` rather than `security.py` for that
+reason: that module answers one question, "may this request proceed", and
+mixing a header setter into it would blur what its asserted ordering is about.
+
+**The concrete exposure was the key, not the data.** `GET /grant` is reachable
+without a token by design, and since #21 it is a page containing a password
+field. Framing is a GET, so any page that knew an allowlisted hostname could
+have iframed it and drawn its own chrome around that field. The app shell was
+never at risk: `SameSite=Lax` withholds the cookie from a cross site framed
+subresource, so a framed `/` shows a token screen rather than somebody's
+projects.
+
+The policy is per route and exact, the way `route_path` is. `/` gets
+`default-src 'self'`, which #76 made possible by serving the typefaces from
+here instead of fetching them from Google. `/grant` gets `default-src 'none'`
+plus a `sha256` hash for each of its inline blocks, computed from the file at
+import so it cannot drift, because that page is served straight off disk and a
+nonce would mean rewriting the document per request. Everything else gets
+`default-src 'none'`.
+
+`'unsafe-inline'` appears nowhere. On the one unauthenticated page holding a
+password field it would give away most of what the policy is for.
+
+**What this cost to get right is worth recording.** The first version omitted
+`connect-src` from the grant policy. `connect-src` does not usefully fall back,
+so with `default-src 'none'` the page's one `fetch` was blocked, the token was
+never traded, and the only symptom was the page reporting that the key was not
+accepted. Every header assertion passed, because the header was exactly what we
+said it would be. The browser tier found it, which is the argument for that
+tier existing.
+
 ### 5.2 Precedent
 
 This is not hypothetical. CVE-2026-32632 (GHSA-hhcg-r27j-fhv9) hit Glances, a

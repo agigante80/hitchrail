@@ -18,6 +18,7 @@ from typing import TypeVar
 from sse_starlette.sse import EventSourceResponse
 from starlette.applications import Starlette
 from starlette.exceptions import HTTPException
+from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
@@ -27,6 +28,7 @@ from hitchrail import engine as eng
 from hitchrail import security as sec
 from hitchrail.config import Config
 from hitchrail.events import EventBus
+from hitchrail.headers import SecurityHeadersMiddleware
 from hitchrail.security import middleware_stack
 
 T = TypeVar("T")
@@ -498,7 +500,13 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
             Route("/", pages.page, methods=["GET"]),
             *[Route(p, pages.asset_route(p), methods=["GET"]) for p in pages.ASSETS],
         ],
-        middleware=middleware_stack(config),
+        # OUTSIDE the three access controls, so a refusal carries the
+        # headers too. A 400 host_rejected rendered without `nosniff` is the
+        # same hole as a 200 without one, and refusals are the responses most
+        # likely to be shown somewhere unexpected. It is separate from
+        # `middleware_stack` rather than a fourth entry in it, because that
+        # list answers "may this proceed" and this one refuses nothing (#77).
+        middleware=[Middleware(SecurityHeadersMiddleware), *middleware_stack(config)],
         exception_handlers={HTTPException: _routing_error},
         max_body_size=MAX_BODY_BYTES,
         lifespan=lifespan,

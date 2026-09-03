@@ -518,6 +518,11 @@ def set_token_cookie(response: Response, token: str) -> None:
         path="/",
         max_age=COOKIE_MAX_AGE,
     )
+    # `no-store` on the one response that carries the credential (#77).
+    # Hardening rather than a fix: a POST response is effectively never cached,
+    # and the query grant's 303 is not either. It costs nothing and it means a
+    # future carrier that IS cacheable does not have to remember this.
+    response.headers["cache-control"] = "no-store"
 
 
 def middleware_stack(config: Config) -> list[Middleware]:

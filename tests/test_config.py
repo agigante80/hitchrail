@@ -966,7 +966,17 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # so moving it out makes that removal a deletion rather than surgery in
         # the middle of a security module. Until then this entry is the record
         # that the size is known and argued.
-        "security.py": 537,
+        # Raised from 537 for #77's `no-store` on the one response that carries
+        # the credential. Behaviour, which is the only reason the note above
+        # permits. The response HEADERS middleware went to `headers.py` rather
+        # than here, because this module answers "may this request proceed" and
+        # nothing in that one refuses anything.
+        "security.py": 542,
+        # Raised from 500 for #77, which adds behaviour: the security headers
+        # middleware is wired outermost so refusals carry the headers too, and
+        # the reason it sits outside `middleware_stack` rather than inside it
+        # is written where the list is built.
+        #
         # 500, current. The HTTP layer: routes, the error envelope, the SSE
         # stream and the lifespan sweeper, which is one job described four
         # ways. Most of the length above the guideline is the comments
@@ -983,7 +993,7 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 492 since #89 and 500 since #98, for two `except` arms and the
         # reasons they answer 409 rather than 503, and why they are two codes
         # rather than one. A refusal handler is the shape this file is made of.
-        "server.py": 505,
+        "server.py": 513,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"
@@ -1057,7 +1067,7 @@ def test_the_import_contract_covers_every_engine_layer_module() -> None:
     The web layer is the exception list below, and it is spelled out rather
     than inferred, so adding a module to it is a deliberate act.
     """
-    web = {"server.py", "pages.py", "cli.py", "security.py", "__init__.py"}
+    web = {"server.py", "pages.py", "cli.py", "security.py", "headers.py", "__init__.py"}
     src = Path(__file__).resolve().parents[1] / "src" / "hitchrail"
     engine_layer = {f"hitchrail.{p.stem}" for p in src.glob("*.py") if p.name not in web}
     contract = tomllib.loads(
