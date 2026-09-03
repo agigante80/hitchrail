@@ -206,3 +206,47 @@ def test_the_readme_does_not_claim_a_phase_is_unbuilt_that_the_roadmap_closed() 
         assert absent not in readme.lower(), (
             f"README still says {absent!r}, and the server runs"
         )
+
+
+# The order below is not cosmetic and the wrong version was in CLAUDE.md for
+# long enough to be quoted. Host is outermost so a rebound request never
+# reaches anything that could leak whether a token is even correct, and Token
+# sits before Origin so an unauthenticated caller cannot learn which origins
+# this server accepts by watching 403 turn into 401. An agent that "fixed" the
+# stack to match the documentation would have removed the second property and
+# believed it was correcting drift, which is why this reads the code and never
+# a second copy of the expected order. See #111.
+_CONTROL_CLASSES = {
+    "host allowlist": "HostAllowlistMiddleware",
+    "token": "TokenMiddleware",
+    "origin check": "OriginCheckMiddleware",
+}
+
+
+@_NO_CLAUDE_MD
+def test_claude_md_states_the_middleware_order_the_code_uses(tmp_path: Path) -> None:
+    from hitchrail.config import Config
+    from hitchrail.security import middleware_stack
+
+    line = re.search(r"^\s{2}security\.py\s+(.+)$", CLAUDE_MD.read_text(), re.M)
+    assert line, "CLAUDE.md's architecture block no longer describes security.py"
+
+    described = [
+        _CONTROL_CLASSES[part]
+        for part in (p.strip() for p in line.group(1).split(","))
+        if part in _CONTROL_CLASSES
+    ]
+    # Starlette types `Middleware.cls` as a callable protocol rather than a
+    # class, so mypy refuses `__name__` on it even though every entry here is a
+    # class at runtime. `getattr` silences mypy and trips ruff's B009, so the
+    # ignore is narrowed to the one attribute instead.
+    actual = [
+        m.cls.__name__  # type: ignore[attr-defined]
+        for m in middleware_stack(Config(root=tmp_path))
+    ]
+
+    assert described == actual, (
+        f"CLAUDE.md says {described}, middleware_stack returns {actual}. "
+        "Fix the document: the stack order is deliberate and documented in its "
+        "own docstring."
+    )
