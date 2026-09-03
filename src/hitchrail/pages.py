@@ -31,6 +31,25 @@ ASSETS = {
 }
 
 
+# Revalidate every time, and keep the ETag useful.
+#
+# `FileResponse` sets `etag` and `last-modified` and no `cache-control`, and
+# with no directive a browser may apply HEURISTIC freshness: it guesses a
+# lifetime from `last-modified` and serves from cache without asking. Chrome on
+# Android does, and it cost a real debugging session: a layout fix was
+# committed, served and confirmed present in the response body, while the phone
+# went on rendering the old one from cache.
+#
+# That is the ordinary way this tool updates. `uvx hitchrail` pulls a new
+# version and every browser already holding the page keeps its old assets.
+# There is no build step here by design, so there are no hashed filenames to
+# break a cache with, and revalidation is the whole mechanism.
+#
+# `no-cache` rather than `no-store`: the browser must ask, and an unchanged
+# asset still comes back 304 with no body, which is what matters on a phone.
+_REVALIDATE = {"cache-control": "no-cache"}
+
+
 async def page(request: Request) -> Response:
     """The single page. Behind the token like every other route.
 
@@ -38,7 +57,7 @@ async def page(request: Request) -> Response:
     URL to paste, and an exemption every future addition to the shell would
     inherit. `grant_page` is the door instead.
     """
-    return FileResponse(WEB / "index.html", media_type=HTML)
+    return FileResponse(WEB / "index.html", media_type=HTML, headers=_REVALIDATE)
 
 
 async def grant_page(request: Request) -> Response:
@@ -51,7 +70,7 @@ async def grant_page(request: Request) -> Response:
     memory figure and no root path reaches it, and a test asserts a seeded
     project's name is absent from its body.
     """
-    return FileResponse(WEB / "grant.html", media_type=HTML)
+    return FileResponse(WEB / "grant.html", media_type=HTML, headers=_REVALIDATE)
 
 
 def asset_route(path: str) -> Callable[[Request], Awaitable[Response]]:
@@ -59,6 +78,6 @@ def asset_route(path: str) -> Callable[[Request], Awaitable[Response]]:
     filename, media_type = ASSETS[path]
 
     async def handler(request: Request) -> Response:
-        return FileResponse(WEB / filename, media_type=media_type)
+        return FileResponse(WEB / filename, media_type=media_type, headers=_REVALIDATE)
 
     return handler

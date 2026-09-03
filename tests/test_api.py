@@ -1297,3 +1297,31 @@ def test_every_file_the_server_serves_exists() -> None:
     assert served, "no served filenames were found in pages.py"
     missing = sorted(name for name in served if not (web / name).is_file())
     assert not missing, missing
+
+
+async def test_every_page_and_asset_is_revalidated_rather_than_heuristically_cached(
+    client: httpx.AsyncClient,
+) -> None:
+    """Found on a phone: the fix was deployed, served, and not seen.
+
+    `FileResponse` sets `etag` and `last-modified` and NO `cache-control`. With
+    no directive a browser is free to apply heuristic freshness, which Chrome
+    on Android does, so it reused a cached `app.js` without ever asking. The
+    server had the new file, the phone ran the old one, and a screenshot showed
+    a layout bug that had already been fixed.
+
+    That is the ordinary way this tool is updated: `uvx hitchrail` pulls a new
+    version and every browser already holding the page keeps the old one. There
+    is no build step here and therefore no hashed filename to break the cache,
+    so revalidation is the whole mechanism.
+
+    `no-cache` rather than `no-store`: the ETag stays useful and an unchanged
+    asset still costs a 304, which matters on a phone.
+    """
+    for path in ("/", "/grant", "/app.js", "/app.css"):
+        r = await client.get(path, headers=HEADERS)
+        assert r.status_code == 200, path
+        assert "no-cache" in r.headers.get("cache-control", ""), (
+            f"{path} carries {r.headers.get('cache-control')!r}, so a browser "
+            "may serve it from cache without asking"
+        )
