@@ -174,6 +174,17 @@ class Session:
     # answer, so a row that says nothing but `running` is telling the truth and
     # misleading anyway.
     awaiting_trust: bool = False
+    # The second overlay of the same kind (#101): a person is needed at a
+    # terminal before this agent moves. Set when a graceful stop ran out of
+    # patience AND the pane was showing something that had to be answered, not
+    # an ordinary input box.
+    #
+    # Kept apart from `awaiting_trust` rather than merged into one flag,
+    # because they are found differently and cost differently: trust is a file
+    # read that answers every project at once, this is one `capture-pane` on a
+    # path that is rare by construction. The interface says a different thing
+    # for each, which is the point of knowing which it was.
+    awaiting_input: bool = False
 
     def as_dict(self) -> dict[str, object]:
         """Serialising a session is not HTTP knowledge.
@@ -192,4 +203,5 @@ class Session:
             "stopping": self.stopping,
             "protected": self.protected,
             "awaiting_trust": self.awaiting_trust,
+            "awaiting_input": self.awaiting_input,
         }

@@ -85,6 +85,12 @@ class Engine:
         # The one piece of state that is not derived. Memory only, and lost on
         # restart on purpose: see the module docstring.
         self._stopping: dict[str, float] = {}
+        # Names whose LAST stop ran out of patience with the agent showing
+        # something that needs a person (#101). In memory and not persisted,
+        # for the same reason the stop marker is not: it describes one attempt,
+        # and a marker that outlived the process would be a claim about a
+        # screen nobody has looked at since.
+        self._awaiting_input: set[str] = set()
         # Guarded for the same reason `_starting` is: stop, kill and the
         # expiry ticker all run on worker threads. Without it, iterating in
         # `expire_stops` while `stop` adds raises "dictionary changed size
@@ -119,7 +125,9 @@ class Engine:
     def _derive(self, name: str, machine: Machine) -> Session:
         # `self._stopping` is passed unguarded on purpose: see the note on
         # `_stopping_guard`. `derive` only asks `name in stopping`.
-        session = derive.derive(name, machine, self.config, self.tmux, self._stopping)
+        session = derive.derive(
+            name, machine, self.config, self.tmux, self._stopping, self._awaiting_input
+        )
         if session.state is State.STOPPED:
             # Reconciled on read, which is the only place the transition is
             # visible: nothing calls us when an agent exits. Without this the
@@ -469,6 +477,11 @@ class Engine:
     def stop(self, name: str) -> Session:
         """Ask the agent to finish. Nothing is killed."""
         session = self._require_live(name)
+        # A fresh attempt starts from nothing (#101). The flag describes ONE
+        # stop, and a prompt the person has since answered would otherwise go
+        # on being reported at them.
+        with self._stopping_guard:
+            self._awaiting_input.discard(name)
         # Refused from the STATE, before any subprocess and before any key
         # (#98). `_require_live` admits `stale` and `detached`, and neither has
         # an agent to ask:
@@ -607,6 +620,26 @@ class Engine:
     # which shadows the builtin for every annotation after it, and mypy reads
     # the bare form as "returns Engine.list". The design names that method
     # `list`, so the qualified builtin is the smaller compromise.
+    def _pane_needs_a_person(self, name: str) -> bool:
+        """Whether this agent's screen is showing something only a human can
+        answer. False whenever that cannot be told.
+
+        Never raises. It runs inside the ticker that expires stops, and an
+        exception there kills the ticker for the life of the process, which is
+        the failure `expire_stops` exists to guard against.
+
+        What "clear" means is Claude Code knowledge and stays in `claude_ipc`;
+        this asks and does not interpret.
+        """
+        try:
+            pane = self.tmux.capture_pane(name, escapes=True)
+        except TmuxUnavailable:
+            return False
+        # `is False` and not `is not True`: `None` means the row could not be
+        # read at all, which is not evidence of a prompt. Only a box we can see
+        # and that holds something counts.
+        return claude_ipc.input_is_clear(pane) is False
+
     def expire_stops(self) -> builtins.list[str]:
         """Drop stop markers older than the timeout, and say so.
 
@@ -653,6 +686,27 @@ class Engine:
         # failure this method's own docstring says it guards against. Losing
         # one announcement is a stale timer on a page; losing the ticker is
         # every timer, forever.
+        # ONE look at each expired pane, before announcing (#101).
+        #
+        # This is the only place the interface can learn that a stop ended
+        # because the agent is waiting on something a person has to answer.
+        # The sequence itself produces that state: asked to exit with
+        # background work running, Claude Code opens a confirmation and sits on
+        # it, and the row goes on saying `running` while the screen says
+        # "it has not finished" and offers a kill.
+        #
+        # Affordable HERE and nowhere else. A `capture-pane` per running row on
+        # every listing is the cost the design refused for the session link; a
+        # stop that runs out of patience is rare by construction, and this is
+        # the one moment where the answer is worth a subprocess.
+        #
+        # It only ever ADDS. Nothing here answers the prompt: the options in
+        # that dialog decide what happens to work the operator did not ask to
+        # end, and choosing for them is the power #88 declined to take.
+        for name in expired:
+            if self._pane_needs_a_person(name):
+                with self._stopping_guard:
+                    self._awaiting_input.add(name)
         for name in expired:
             try:
                 self._announce(self.get(name))

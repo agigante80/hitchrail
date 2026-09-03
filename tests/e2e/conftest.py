@@ -168,6 +168,30 @@ while True:
     time.sleep(0.2)
 """
 
+# Answers a stop request with a PROMPT rather than exiting, then sits on it.
+#
+# What a real agent does when asked to quit with background work running: it
+# opens a confirmation whose entries decide what happens to that work, and
+# waits for somebody at the terminal. #101, seen against a real mid task
+# session, and the stop sequence produces it by its own doing.
+#
+# The bright row is the modal's selected entry: prompt ornament, no NBSP, a
+# colour rather than the dim placeholder, which is exactly what makes it read
+# as "somebody typed here" to `input_is_clear`.
+PROMPTS_AFTER_STOP_BODY = """
+print("\\x1b[39m\\u276f\\u00a0                     ", flush=True)
+while True:
+    line = sys.stdin.readline()
+    if line == "":
+        time.sleep(0.2)
+        continue
+    # Anything sent at it turns into a question rather than an exit.
+    print("Background work is running", flush=True)
+    print("\\x1b[39m\\u276f\\x1b[38;5;153m1. Exit and stop tasks", flush=True)
+    while True:
+        time.sleep(0.2)
+"""
+
 # Exits at once, for the dead start flow.
 DYING_BODY = """
 print("hitchrail-shim: nothing to do, exiting", flush=True)
@@ -239,6 +263,7 @@ class Harness:
         stop_timeout: float = 30.0,
         ignores_graceful_stop: bool = False,
         box_will_not_clear: bool = False,
+        prompts_after_stop: bool = False,
         agent_exits_immediately: bool = False,
         token: str | None = None,
     ) -> None:
@@ -248,6 +273,8 @@ class Harness:
             body = STUBBORN_BODY
         if box_will_not_clear:
             body = UNCLEARABLE_BOX_BODY
+        if prompts_after_stop:
+            body = PROMPTS_AFTER_STOP_BODY
         if agent_exits_immediately:
             body = DYING_BODY
         self._write_shim(_SHIM_HEAD.format(python=sys.executable) + body)

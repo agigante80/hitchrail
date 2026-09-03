@@ -80,7 +80,12 @@ def look(
 
 
 def derive(
-    name: str, machine: Machine, config: Config, tmux: Tmux, stopping: Container[str]
+    name: str,
+    machine: Machine,
+    config: Config,
+    tmux: Tmux,
+    stopping: Container[str],
+    awaiting_input: Container[str] = (),
 ) -> Session:
     protected = config.self_project is not None and name == config.self_project
     # The SANITIZED name, because that is what tmux stored. Looking up the
@@ -104,6 +109,9 @@ def derive(
                 # started it, and warning before the fact is a different
                 # feature from describing what is on screen now.
                 awaiting_trust=_awaiting_trust(name, machine, config),
+                # Not derived here: the engine records it when a stop's wait
+                # ends, because that is the one moment worth a `capture-pane`.
+                awaiting_input=name in awaiting_input,
             )
         # A session with no agent in it. Not stopped: the shell is there.
         return Session(
@@ -232,6 +240,7 @@ def live(
     config: Config,
     stopping: Container[str],
     awaiting_trust: bool = False,
+    awaiting_input: bool = False,
 ) -> Session:
     proc = machine.table.by_pid.get(pid)
     return Session(
@@ -248,4 +257,5 @@ def live(
         stopping=name in stopping,
         protected=protected,
         awaiting_trust=awaiting_trust,
+        awaiting_input=awaiting_input,
     )

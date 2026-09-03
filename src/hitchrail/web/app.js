@@ -217,6 +217,10 @@ function metaFor(project) {
   // folder for them, silently, which needs its own argument and does not have
   // one (#88).
   if (project.awaiting_trust) return "waiting to be trusted  ·  open it once in a terminal";
+  // #101. Set when a stop's wait ended with the agent on a prompt. The row has
+  // to carry it too: the dialog can be dismissed, and the session is still
+  // sitting there waiting for somebody.
+  if (project.awaiting_input) return "waiting for an answer  ·  open it in a terminal";
   if (project.pid === null) return "";
   return `${formatMb(project.ram_mb)}  ·  up ${formatUptime(project.uptime_s)}`;
 }
@@ -671,8 +675,24 @@ function awaitStopped(project) {
   let lastReadOk = true;
   const tick = async () => {
     const current = state.projects.find((p) => p.name === project.name);
-    if (!current || !current.stopping) {
+    if (!current) {
+      // Gone from the listing entirely: the folder was removed under us.
       closeDialog(project.name);
+      return;
+    }
+    if (!current.stopping) {
+      // The marker cleared. That is EITHER the agent having gone, which is the
+      // success this dialog is waiting for, OR the engine's own patience
+      // running out first and dropping it.
+      //
+      // This used to close the dialog for both, so a stop that timed out
+      // server side vanished from the screen and left the row still running:
+      // the page concluding "finished" from the absence of a marker, which is
+      // the mistake #81 fixed one branch over. The two timers are independent
+      // and either can be the shorter, so this cannot assume its own fires
+      // first.
+      if (current.state === "stopped") closeDialog(project.name);
+      else showTimedOut(project);
       return;
     }
     if (Date.now() >= deadline) {
@@ -705,6 +725,36 @@ function showLostTrack(project) {
 }
 
 function showTimedOut(project) {
+  // #101. The wait can end two ways and they need different words.
+  //
+  // The engine looks at the pane ONCE when the wait expires, and says whether
+  // the agent is sitting on something only a person can answer. It often is,
+  // and by our own doing: asked to exit with background work running, Claude
+  // Code opens a confirmation and waits on it. Telling somebody "it has not
+  // finished" then is true and useless, and it offers a kill for a session
+  // that is asking them a question.
+  //
+  // The current row rather than the one captured when the wait began: the flag
+  // arrives on the stream after the expiry, so the object this was called with
+  // predates it.
+  const current = state.projects.find((p) => p.name === project.name) ?? project;
+  if (current.awaiting_input) {
+    showDialog({
+      title: `${project.name} is waiting for you`,
+      body:
+        "It was asked to exit and answered with a prompt. Only somebody at "
+        + "that terminal can reply to it, so Hitchrail has stopped waiting.",
+      forProject: project.name,
+      // Kill is still here, and still second. The person may well want it, and
+      // the warning is the same one: the difference is that they now know what
+      // they would be interrupting rather than being told nothing happened.
+      actions: [
+        ["Leave it", "ghost", () => closeDialog()],
+        ["Kill it", "danger", () => killNow(project)],
+      ],
+    });
+    return;
+  }
   showDialog({
     title: `No answer from ${project.name}`,
     // The risk BEFORE the kill is offered. This is the moment a person is

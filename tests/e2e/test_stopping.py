@@ -366,7 +366,9 @@ async def test_clearing_a_stale_session_removes_it(page: Page, server: Harness) 
 # -- #81: the wait must not claim what it could not read -------------------
 
 
-async def _stop_and_hold(page: Page, server: Harness, patience_ms: int = 1500) -> None:
+async def _stop_and_hold(
+    page: Page, server: Harness, patience_ms: int = 1500, name: str = "vessel"
+) -> None:
     """Load the page, shorten the wait, tap through the confirm, and hold.
 
     The patience is set AFTER the navigation and not before, which is the whole
@@ -431,3 +433,31 @@ async def test_a_wait_whose_listings_are_refused_does_not_claim_it_did_not_finis
     dialog = page.locator("[data-dialog]")
     await expect(dialog).to_contain_text("Lost track of", timeout=20_000)
     assert await dialog.get_by_role("button", name="Kill it").count() == 0
+
+
+async def test_a_timeout_on_a_prompt_says_so_rather_than_it_has_not_finished(
+    page: Page, server: Harness
+) -> None:
+    """#101, through the whole stack.
+
+    The stop sequence can create this state itself: asked to exit with
+    background work running, Claude Code opens a confirmation and sits on it.
+    The row went on reading `running`, the wait expired, and the person was
+    told "It has not finished" and offered a kill, when the truth is that the
+    agent is asking them a question they cannot see.
+
+    The shim paints a bright modal row after the stop reaches it, which is what
+    the real one does, and the engine's one capture at expiry is what turns
+    that into words on a screen.
+    """
+    server.seed(running=["vessel"], prompts_after_stop=True, stop_timeout=2.0)
+    await _stop_and_hold(page, server, patience_ms=6000)
+
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text("is waiting for you", timeout=20_000)
+    assert "It has not finished" not in (await dialog.inner_text()), (
+        "the screen is still claiming the agent simply did not finish"
+    )
+    # Kill stays available: the person may want it, and now they know what
+    # they would be interrupting.
+    await expect(dialog.get_by_role("button", name="Kill it")).to_be_visible()

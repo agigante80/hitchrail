@@ -262,6 +262,22 @@ Hitchrail does not answer that prompt. Agreeing to trust a folder on the
 operator's behalf, silently, is a different power from anything else here and
 would need its own argument in section 5.
 
+**A third overlay, `awaiting_input`, added at #101, and it is the same
+argument reached from the other end.** A graceful stop can leave the agent on a
+prompt of its own: asked to exit with background work running, Claude Code opens
+a confirmation whose entries decide what happens to that work, and waits. The
+row then reads `running` while the interface says the session "has not finished"
+and offers a kill, which is true and useless.
+
+Found by looking at the pane ONCE, when a stop's wait expires. That is the only
+moment it is affordable: a `capture-pane` per running row on every listing is the
+cost 4.4 refuses for the session link, while a stop that runs out of patience is
+rare by construction. It is an overlay on one attempt rather than a property of
+the session, so a fresh stop clears it.
+
+Hitchrail does not answer that prompt either, for the same reason and with more
+force: those entries decide the fate of work the operator did not ask to end.
+
 ### 4.4 Claude Code internals are quarantined
 
 The session link comes from `~/.claude/sessions/<pid>.json`, key

@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from conftest import (
+    CLEAR_INPUT_BOX,
     DIRTY_INPUT_BOX,
     FakeClock,
     FakeTmux,
@@ -1531,6 +1532,103 @@ def test_a_process_table_that_never_answers_is_not_an_empty_machine(root: Path) 
     table = snapshot(wedged)
     assert table.ok is False
     assert table.procs == []
+
+
+# -- #101: a stop that ends with the agent on a prompt ---------------------
+
+# A pane whose input row is a bright modal entry rather than an empty box. This
+# is what Claude Code shows when `/exit` cannot proceed, and it is the shape the
+# stop sequence itself can produce: asked to quit with background work running,
+# it opens a confirmation nobody outside that terminal can answer.
+MODAL_PANE = "Background work is running\n\x1b[39m\u276f\x1b[38;5;153m1. Exit and stop tasks\n"
+
+
+def test_a_stop_that_times_out_on_a_prompt_says_so(root: Path) -> None:
+    """#101, found by running #89's sequence against a MID TASK agent.
+
+    `C-u` cleared the box and `Escape` genuinely interrupted, then `/exit`
+    opened a modal and the agent sat on it. The row went on reading `running`,
+    the wait expired, and the person was told "it has not finished" and offered
+    a kill, when the truth is that it is asking them a question they cannot
+    see.
+
+    Captured ONCE, here, when the wait ends. Reading the pane on every listing
+    is the cost the design refused for the session link, and a stop that times
+    out is rare: this is the one moment where the answer is worth a subprocess.
+    """
+    tmux = FakeTmux(sessions={"vessel": PANE})
+    # Clear WHEN THE STOP RUNS, which is why the sequence proceeds at all: it
+    # verifies the box before it types. The modal appears afterwards, opened by
+    # the exit command itself, which is the whole shape of this defect.
+    tmux.pane_text["vessel"] = CLEAR_INPUT_BOX
+    clock = FakeClock()
+    sessions_dir = root / ".sessions"
+    sessions_dir.mkdir(exist_ok=True)
+    engine = Engine(
+        Config(root=root, sessions_dir=sessions_dir, agent_config_path=root / "none.json"),
+        tmux=tmux,
+        procs_fn=procs_from(RUNNING_MACHINE[1]),
+        meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
+        clock=clock,
+    )
+    engine.stop("vessel")
+    assert engine.get("vessel").awaiting_input is False, "nothing has timed out yet"
+
+    tmux.pane_text["vessel"] = MODAL_PANE
+    clock.advance(engine.config.stop_timeout + 1)
+    assert engine.expire_stops() == ["vessel"]
+    assert engine.get("vessel").awaiting_input is True
+
+
+def test_a_stop_that_times_out_on_an_ordinary_box_claims_nothing(root: Path) -> None:
+    """The agent is simply slow or ignoring us, which is the ordinary timeout.
+
+    Without this, flagging every expiry would pass and the screen would blame a
+    prompt that is not there.
+    """
+    tmux = FakeTmux(sessions={"vessel": PANE})
+    clock = FakeClock()
+    sessions_dir = root / ".sessions"
+    sessions_dir.mkdir(exist_ok=True)
+    engine = Engine(
+        Config(root=root, sessions_dir=sessions_dir, agent_config_path=root / "none.json"),
+        tmux=tmux,
+        procs_fn=procs_from(RUNNING_MACHINE[1]),
+        meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
+        clock=clock,
+    )
+    engine.stop("vessel")
+    clock.advance(engine.config.stop_timeout + 1)
+    engine.expire_stops()
+    assert engine.get("vessel").awaiting_input is False
+
+
+def test_asking_again_clears_what_the_last_timeout_found(root: Path) -> None:
+    """The flag describes ONE stop, not the session. A second attempt starts
+    from nothing, or a prompt the person has since answered would still be
+    reported at them."""
+    tmux = FakeTmux(sessions={"vessel": PANE})
+    tmux.pane_text["vessel"] = CLEAR_INPUT_BOX
+    clock = FakeClock()
+    sessions_dir = root / ".sessions"
+    sessions_dir.mkdir(exist_ok=True)
+    engine = Engine(
+        Config(root=root, sessions_dir=sessions_dir, agent_config_path=root / "none.json"),
+        tmux=tmux,
+        procs_fn=procs_from(RUNNING_MACHINE[1]),
+        meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
+        clock=clock,
+    )
+    engine.stop("vessel")
+    tmux.pane_text["vessel"] = MODAL_PANE
+    clock.advance(engine.config.stop_timeout + 1)
+    engine.expire_stops()
+    assert engine.get("vessel").awaiting_input is True
+
+    # The person answered it, so a second attempt starts from nothing.
+    tmux.pane_text["vessel"] = CLEAR_INPUT_BOX
+    engine.stop("vessel")
+    assert engine.get("vessel").awaiting_input is False
 
 
 def test_a_failed_kill_keeps_the_stop_indicator(root: Path) -> None:
