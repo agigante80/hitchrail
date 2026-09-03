@@ -3,18 +3,16 @@
 A web UI for starting and stopping headless Claude Code sessions across a
 folder of projects. Open it on your phone, tap a folder, get a session link.
 
-**Status: early. Phases 1 to 3 of 7 are built; there is no runnable server yet.**
+**Status: it runs.** Phases 0 to 6 are built and closed: the configuration and
+its refusals, the folder discovery that makes the root a hard boundary, the
+three security controls between a web page and a shell, the adapters, the
+engine, the HTTP API and the browser interface. It has been driven from a real
+phone against a real machine.
 
-What exists today is the package skeleton with five blocking gates on Python
-3.11, 3.12 and 3.13, the configuration and its refusals, the folder discovery
-that makes the root a hard boundary, the three security controls that stand
-between a web page and a shell, and the adapters: tmux, the process table, the
-Claude Code quarantine and the memory guard. What does not exist yet is everything you would
-actually use: the HTTP API, the browser interface, and the engine that starts
-and stops sessions. `hitchrail` is not on PyPI, and the install commands below
-will not work until it is.
+**It is not on PyPI yet**, so the `uvx` commands below do not work. Until they
+do, run it from a clone: see [Run it](#run-it).
 
-See [`docs/roadmap.md`](docs/roadmap.md) for the order of work,
+See [`docs/roadmap.md`](docs/roadmap.md) for what is left,
 [`docs/superpowers/specs/2026-08-25-hitchrail-design.md`](docs/superpowers/specs/2026-08-25-hitchrail-design.md)
 for the design, and [`docs/tech-guidelines.md`](docs/tech-guidelines.md) for the
 engineering rules that govern the code.
@@ -46,10 +44,47 @@ Installing Hitchrail with `uvx` will succeed on a machine with no tmux and no
 Claude Code, because neither is a Python dependency. It will then fail at the
 first attempt to start a session. Check the two commands above first.
 
+## Run it
+
+Nothing is published yet, so this is the way in. It needs `uv`, `tmux` and
+Claude Code on `PATH`, per the table above.
+
+```sh
+git clone https://github.com/agigante80/hitchrail
+cd hitchrail
+uv run hitchrail --root ~/projects
+```
+
+`--root` is the folder holding your projects. Every directory directly inside it
+becomes a row. **Point it at a scratch folder the first time**: Hitchrail only
+recognises the tmux sessions it started itself, so starting a project that
+already has a session from another tool gives you a second agent in the same
+directory.
+
+On loopback that is all. To open it from your phone, bind to the machine's LAN
+address and it prints a link to tap:
+
+```sh
+uv run hitchrail --root ~/projects --host 192.168.1.10
+```
+
+```
+  token: <generated>
+  Anyone with this token can run code on this machine as you.
+
+  Open one of these on your phone:
+    http://192.168.1.10:8787/grant#token=<generated>
+```
+
+A token is generated and REQUIRED as soon as you bind off loopback; the server
+refuses to start without one. Everything after the `#` stays in the browser and
+reaches no server log. Over plain HTTP the cookie it becomes still crosses your
+network in clear, so put TLS in front of it if that matters to you.
+
 ## Install
 
-**Not yet.** Nothing is published, so none of these work today. They are here
-so the intended shape is on the record, and they become true at Phase 7.
+**Not yet.** `hitchrail` is not on PyPI, so none of these work today. They are
+here so the intended shape is on the record, and they become true at Phase 8.
 
 Hitchrail is a Python package, so the equivalent of `npx` here is `uvx`:
 

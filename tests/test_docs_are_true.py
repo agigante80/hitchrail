@@ -41,6 +41,7 @@ _NO_CLAUDE_MD = pytest.mark.skipif(
     reason=".claude/ is unpublished, so this runs only where the file is",
 )
 ROADMAP = ROOT / "docs" / "roadmap.md"
+README = ROOT / "README.md"
 
 # Anything under this is a stub. Every real module here is far larger, and the
 # four that were wrongly described as placeholders are 150 lines and up.
@@ -75,7 +76,7 @@ def test_no_document_calls_an_implemented_module_a_placeholder(doc: Path) -> Non
 
 
 @_NO_CLAUDE_MD
-@pytest.mark.parametrize("doc", [CLAUDE_MD, ROADMAP], ids=lambda p: p.name)
+@pytest.mark.parametrize("doc", [CLAUDE_MD, ROADMAP, README], ids=lambda p: p.name)
 def test_no_document_hardcodes_a_test_count(doc: Path) -> None:
     """ "519 tests" was true once. A number that decays silently is worse than
     no number, because it reads as precision."""
@@ -167,3 +168,41 @@ def test_the_spec_documents_no_code_the_server_cannot_return() -> None:
         f"the design documents codes the server cannot return: {sorted(stale)}. "
         "Remove them, or the client writes branches that never run."
     )
+
+
+# -- the README, which is the only one a stranger reads ---------------------
+
+
+def test_the_readme_does_not_claim_a_phase_is_unbuilt_that_the_roadmap_closed() -> None:
+    """The file a stranger meets first was the only one with no guard.
+
+    It said "Phases 1 to 3 of 7 are built; there is no runnable server yet" and
+    that "what does not exist yet is everything you would actually use: the HTTP
+    API, the browser interface, and the engine" long after all three were built,
+    tested and driven from a phone. Anybody arriving would have read that and
+    left.
+
+    This is the same failure `.claude/CLAUDE.md` records about ITSELF, in the
+    docstring at the top of this file, repeated in the one document that guard
+    did not cover. Two copies of a claim, one checked.
+
+    Checked against the ROADMAP rather than against a number written here, so
+    closing a phase updates the expectation instead of breaking the test.
+    """
+    readme = README.read_text()
+    closed = re.findall(r"^## (Phase \d+)[^\n]*\((?:done|closed)\)", ROADMAP.read_text(), re.M)
+    assert closed, "the roadmap marks no phase done, so this cannot check anything"
+    highest = max(int(p.split()[1]) for p in closed)
+
+    for match in re.finditer(r"[Pp]hases? (\d+) to (\d+) of \d+ are built", readme):
+        claimed = int(match.group(2))
+        assert claimed >= highest, (
+            f"README says phases up to {claimed} are built; the roadmap closed "
+            f"Phase {highest}. The README is the only document a stranger reads."
+        )
+
+    # The specific sentence that was wrong, in the shape it was wrong in.
+    for absent in ("there is no runnable server", "no runnable server yet"):
+        assert absent not in readme.lower(), (
+            f"README still says {absent!r}, and the server runs"
+        )
