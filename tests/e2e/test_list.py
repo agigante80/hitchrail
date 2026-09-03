@@ -81,7 +81,12 @@ async def test_search_filters_and_says_so_when_nothing_matches(
 ) -> None:
     server.seed(stopped=["vessel", "koala", "media-sync"])
     await page.goto(server.base)
-    await page.get_by_role("searchbox").fill("mus")
+    # A fragment of one seeded name and of no other. The previous term matched
+    # a fixture name that has since been renamed, and became meaningless
+    # without failing anything the non-browser suite runs: a search term that
+    # matches nothing is a passing unit test and an empty list here. Any rename
+    # of the seeds above has to come back to this line.
+    await page.get_by_role("searchbox").fill("med")
     await expect(page.locator("[data-project]")).to_have_count(1)
     await page.get_by_role("searchbox").fill("zzz")
     await expect(page.get_by_text("Nothing matches")).to_be_visible()

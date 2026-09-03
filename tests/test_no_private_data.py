@@ -55,11 +55,27 @@ _ALLOWED_EMAIL = re.compile(
 _SKIP_SUFFIX = {".png", ".jpg", ".jpeg", ".gif", ".ico", ".woff", ".woff2", ".lock"}
 
 
+# This file, which is the one place a home path and an email address SHOULD
+# appear: the samples below prove the patterns can fire, and a guard that
+# cannot fire reports safety it is not providing.
+#
+# It became self flagging the moment it was committed, because the scan reads
+# `git ls-files` and an untracked file is invisible to it. That is worth
+# knowing on its own: **a new file is unguarded until it is tracked**, so the
+# first commit of a file is the one this cannot check. The pre-commit hook is
+# what covers that gap, since it reads the staged content instead.
+_SELF = Path(__file__).resolve()
+
+
 def _tracked() -> list[Path]:
     out = subprocess.run(
         ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True
     ).stdout.split()
-    return [ROOT / f for f in out if Path(f).suffix not in _SKIP_SUFFIX]
+    return [
+        ROOT / f
+        for f in out
+        if Path(f).suffix not in _SKIP_SUFFIX and (ROOT / f).resolve() != _SELF
+    ]
 
 
 def _offences(pattern: re.Pattern[str], allow: re.Pattern[str] | None = None) -> list[str]:

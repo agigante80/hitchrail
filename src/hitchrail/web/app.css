@@ -294,6 +294,25 @@ dialog[data-dialog] {
   padding: 20px;
   width: min(92vw, 420px);
   box-shadow: 0 18px 40px rgba(46, 37, 28, 0.28);
+
+  /* #103. A soft keyboard buried this sheet's primary action: partly on one
+     device, entirely on another whose browser toolbar is also at the bottom.
+
+     The platform cause is not a mistake in this file. Chrome 108 stopped
+     resizing the LAYOUT viewport when the keyboard opens, to match iOS, and
+     Firefox on Android followed. A `<dialog>` is centred by the user agent
+     against the layout viewport, so it does not move while the visible area
+     shrinks underneath it.
+
+     `interactive-widget=resizes-content` in the viewport meta is the real fix
+     and makes both numbers below zero on Android. These two are the fallback
+     for Safari on iOS, which has no such key.
+
+     `margin-bottom` works because the centring is `margin: auto`: reserving
+     the occluded height at the bottom re-centres the sheet in what is left. */
+  max-height: var(--visible-height, 100dvh);
+  overflow-y: auto;
+  margin-bottom: var(--keyboard-inset, 0px);
 }
 dialog[data-dialog]::backdrop { background: rgba(46, 37, 28, 0.55); }
 .dialog-title { font-family: 'Zilla Slab', Georgia, serif; font-size: 20px; margin: 0 0 8px; }
