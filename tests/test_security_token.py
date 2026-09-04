@@ -29,6 +29,7 @@ from hitchrail.security import (
     route_path,
     token_matches,
 )
+from support import make_config
 
 TOKEN = "s3cret-token-value"
 HOST = {"host": "localhost"}
@@ -53,7 +54,7 @@ def build(config: Config) -> Starlette:
 
 
 def guarded(tmp_path: Path) -> Starlette:
-    return build(Config(root=tmp_path, host="0.0.0.0", token=TOKEN))
+    return build(make_config(tmp_path, host="0.0.0.0", token=TOKEN))
 
 
 async def call(
@@ -77,7 +78,7 @@ async def call(
 
 @pytest.mark.integration
 async def test_no_token_configured_means_no_token_demanded(tmp_path: Path) -> None:
-    app = build(Config(root=tmp_path))
+    app = build(make_config(tmp_path))
     assert (await call(app, headers=HOST)).status_code == 200
 
 
@@ -319,7 +320,6 @@ async def test_a_websocket_handshake_is_not_waved_through(tmp_path: Path) -> Non
     the scope type, and the other two did not, which is exactly the kind of
     gap that is invisible until the day somebody adds the route.
     """
-    from hitchrail.config import Config
     from hitchrail.security import TokenMiddleware
 
     reached: list[int] = []
@@ -342,7 +342,7 @@ async def test_a_websocket_handshake_is_not_waved_through(tmp_path: Path) -> Non
         send,
     )
     assert reached == [], "an unauthenticated websocket handshake reached the app"
-    assert Config(root=tmp_path).token is None
+    assert make_config(tmp_path).token is None
 
 
 # -- #20: the token must not reach the access log on ANY path ---------------
@@ -391,7 +391,7 @@ async def test_the_grant_paths_are_the_only_ones_exempt(tmp_path: Path) -> None:
     would inherit the exemption.
     """
     app = build(
-        Config(root=tmp_path, host="0.0.0.0", token=TOKEN),
+        make_config(tmp_path, host="0.0.0.0", token=TOKEN),
     )
     for path in ("/x", "/deep/path", "/api/events"):
         assert (await call(app, path=path, headers=HOST)).status_code == 401, path
@@ -410,7 +410,7 @@ async def test_an_exempt_path_reaches_the_application(tmp_path: Path, path: str)
             Route("/grant", _ok, methods=["GET"]),
             Route("/api/grant", _ok, methods=["POST"]),
         ],
-        middleware=middleware_stack(Config(root=tmp_path, host="0.0.0.0", token=TOKEN)),
+        middleware=middleware_stack(make_config(tmp_path, host="0.0.0.0", token=TOKEN)),
     )
     method = "POST" if path.startswith("/api/") else "GET"
     response = await call(app, method, path=path, headers=ORIGIN)
@@ -431,7 +431,7 @@ async def test_an_exempt_path_is_matched_exactly(tmp_path: Path) -> None:
             Route("/grant/x", _ok, methods=["GET"]),
             Route("/x/grant", _ok, methods=["GET"]),
         ],
-        middleware=middleware_stack(Config(root=tmp_path, host="0.0.0.0", token=TOKEN)),
+        middleware=middleware_stack(make_config(tmp_path, host="0.0.0.0", token=TOKEN)),
     )
     for path in ("/grantstuff", "/grant/x", "/x/grant"):
         assert (await call(app, path=path, headers=HOST)).status_code == 401, path
@@ -443,7 +443,7 @@ async def test_an_exempt_path_still_answers_to_the_host_allowlist(tmp_path: Path
     must not reach the one page that is served without a token either."""
     app = Starlette(
         routes=[Route("/grant", _ok, methods=["GET"])],
-        middleware=middleware_stack(Config(root=tmp_path, host="0.0.0.0", token=TOKEN)),
+        middleware=middleware_stack(make_config(tmp_path, host="0.0.0.0", token=TOKEN)),
     )
     response = await call(app, path="/grant", headers={"host": "evil.example"})
     assert response.status_code == 400
@@ -456,7 +456,7 @@ async def test_the_grant_api_still_answers_to_the_origin_check(tmp_path: Path) -
     the whole reason it is a POST rather than a GET."""
     app = Starlette(
         routes=[Route("/api/grant", _ok, methods=["POST"])],
-        middleware=middleware_stack(Config(root=tmp_path, host="0.0.0.0", token=TOKEN)),
+        middleware=middleware_stack(make_config(tmp_path, host="0.0.0.0", token=TOKEN)),
     )
     response = await call(
         app, "POST", path="/api/grant", headers={**HOST, "origin": "http://evil.example"}
@@ -477,7 +477,7 @@ async def test_head_on_the_grant_page_is_exempt_like_get(tmp_path: Path) -> None
     """
     app = Starlette(
         routes=[Route("/grant", _ok, methods=["GET"])],
-        middleware=middleware_stack(Config(root=tmp_path, host="0.0.0.0", token=TOKEN)),
+        middleware=middleware_stack(make_config(tmp_path, host="0.0.0.0", token=TOKEN)),
     )
     assert (await call(app, "HEAD", path="/grant", headers=HOST)).status_code == 200
 
@@ -529,7 +529,7 @@ async def test_the_exemption_is_scoped_to_one_method_each(
             Route("/grant", _ok, methods=["GET", "POST", "DELETE"]),
             Route("/api/grant", _ok, methods=["GET", "POST"]),
         ],
-        middleware=middleware_stack(Config(root=tmp_path, host="0.0.0.0", token=TOKEN)),
+        middleware=middleware_stack(make_config(tmp_path, host="0.0.0.0", token=TOKEN)),
     )
     response = await call(app, method, path=path, headers=ORIGIN)
     assert response.status_code == 401, f"{method} {path} arrived unauthenticated"
@@ -607,7 +607,7 @@ async def test_the_guard_and_the_router_agree_behind_a_sub_path_proxy(
     unreachable: `GET /hitchrail/grant` was not exempt, so it answered 401."""
     app = Starlette(
         routes=[Route("/grant", _ok, methods=["GET"])],
-        middleware=middleware_stack(Config(root=tmp_path, host="0.0.0.0", token=TOKEN)),
+        middleware=middleware_stack(make_config(tmp_path, host="0.0.0.0", token=TOKEN)),
     )
     transport = httpx.ASGITransport(app, root_path="/hitchrail")
     async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as c:
@@ -725,7 +725,7 @@ async def test_the_query_string_is_no_longer_rewritten(tmp_path: Path) -> None:
     server accepts, and scrubbing it would be the misleading half of the old
     behaviour kept without the useful half.
     """
-    config = Config(root=tmp_path, token=TOKEN)
+    config = make_config(tmp_path, token=TOKEN)
     app, seen = _recording_app(config)
     response = await call(
         app,

@@ -22,11 +22,12 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from hitchrail.claude_ipc import URL_BASE, _valid_bridge_id
-from hitchrail.config import Config, ConfigError
+from hitchrail.config import ConfigError
 from hitchrail.hostnames import is_valid_host, normalise_host, normalise_origin
 from hitchrail.procs import ProcTable, parse_ps
 from hitchrail.security import parse_host
 from hitchrail.tmux import sanitize
+from support import make_config
 
 settings.register_profile("hitchrail", derandomize=True, max_examples=400)
 settings.load_profile("hitchrail")
@@ -228,8 +229,8 @@ def test_every_accepted_host_is_stored_matchable(extra: list[str]) -> None:
     # version called mkdtemp inside the body with no cleanup and leaked 400
     # empty directories into /tmp per invocation.
     try:
-        cfg = Config(
-            root=_SHARED_ROOT,
+        cfg = make_config(
+            _SHARED_ROOT,
             host="0.0.0.0",
             token="t",
             extra_hosts=tuple(extra),

@@ -28,7 +28,6 @@ from conftest import (
 )
 from hitchrail import discovery
 from hitchrail.claude_ipc import GRACEFUL_STOP_KEYS, launch_argv
-from hitchrail.config import Config
 from hitchrail.engine import (
     AlreadyRunning,
     Engine,
@@ -46,6 +45,7 @@ from hitchrail.engine import (
 )
 from hitchrail.procs import ProcTable, snapshot
 from hitchrail.tmux import Tmux, TmuxUnavailable
+from support import make_config
 
 PANE = 500
 AGENT = 501
@@ -91,8 +91,8 @@ def engine_for(
     # collisions with real sessions.
     sessions_dir = root / ".sessions"
     sessions_dir.mkdir(exist_ok=True)
-    config = Config(
-        root=root,
+    config = make_config(
+        root,
         self_project=self_project,
         sessions_dir=sessions_dir,
         # Defaults to a path that does not exist, so no test reads the
@@ -460,7 +460,7 @@ def test_the_binary_does_not_influence_the_match(root: Path) -> None:
     sessions_dir = root / ".sessions"
     sessions_dir.mkdir(exist_ok=True)
     # Configured with one binary; the running agent was started with another.
-    config = Config(root=root, agent_binary="/opt/new-claude", sessions_dir=sessions_dir)
+    config = make_config(root, agent_binary="/opt/new-claude", sessions_dir=sessions_dir)
     argv = launch_argv("/usr/bin/old-claude", "vessel")
     engine = Engine(
         config,
@@ -776,7 +776,7 @@ def test_the_url_comes_from_the_bridge_file(root: Path, tmp_path: Path) -> None:
     (sessions_dir / f"{AGENT}.json").write_text(json.dumps({"bridgeSessionId": "session_abc"}))
     tmux = FakeTmux(sessions={"vessel": PANE})
     engine = Engine(
-        Config(root=root, sessions_dir=sessions_dir),
+        make_config(root, sessions_dir=sessions_dir),
         tmux=tmux,
         procs_fn=procs_from(ps_row(PANE, 1) + ps_row(AGENT, PANE, project="vessel")),
         meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
@@ -823,7 +823,7 @@ def test_a_tmux_that_cannot_be_run_is_an_unreadable_machine(root: Path) -> None:
     sessions_dir = root / ".sessions"
     sessions_dir.mkdir(exist_ok=True)
     engine = Engine(
-        Config(root=root, sessions_dir=sessions_dir),
+        make_config(root, sessions_dir=sessions_dir),
         tmux=Tmux(prefix="hr-", run=missing),
         procs_fn=procs_from(ps_row(PANE, 1) + ps_row(AGENT, PANE, project="vessel")),
         meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
@@ -865,7 +865,7 @@ def start_engine(
     sessions_dir = root / ".sessions"
     sessions_dir.mkdir(exist_ok=True)
     engine = Engine(
-        Config(root=root, sessions_dir=sessions_dir, self_project=self_project),
+        make_config(root, sessions_dir=sessions_dir, self_project=self_project),
         tmux=tmux,
         procs_fn=table or procs_from(""),  # type: ignore[arg-type]
         meminfo_fn=lambda: f"MemAvailable: {mem_mb * 1024} kB\n",
@@ -1261,7 +1261,7 @@ def test_a_live_session_stays_actionable_when_its_name_is_not_listed(
     rows = ps_row(600, 1) + ps_row(601, 600, project="alpha")
     tmux = FakeTmux(sessions={"alpha": 600})
     engine = Engine(
-        Config(root=tmp_path, sessions_dir=sessions_dir),
+        make_config(tmp_path, sessions_dir=sessions_dir),
         tmux=tmux,
         procs_fn=procs_from(rows),
         meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
@@ -1352,7 +1352,7 @@ def vanishing_engine(root: Path, *, fail_after: int = 0, live: bool = True) -> E
     table = ps_row(PANE, 1) + ps_row(AGENT, PANE, project="vessel") if live else ps_row(PANE, 1)
     clock = FakeClock()
     return Engine(
-        Config(root=root, sessions_dir=sessions_dir),
+        make_config(root, sessions_dir=sessions_dir),
         tmux=VanishingTmux(fail_after=fail_after, sessions={"vessel": PANE}),
         procs_fn=procs_from(table),
         meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
@@ -1565,7 +1565,7 @@ def test_a_stop_that_times_out_on_a_prompt_says_so(root: Path) -> None:
     sessions_dir = root / ".sessions"
     sessions_dir.mkdir(exist_ok=True)
     engine = Engine(
-        Config(root=root, sessions_dir=sessions_dir, agent_config_path=root / "none.json"),
+        make_config(root, sessions_dir=sessions_dir, agent_config_path=root / "none.json"),
         tmux=tmux,
         procs_fn=procs_from(RUNNING_MACHINE[1]),
         meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
@@ -1591,7 +1591,7 @@ def test_a_stop_that_times_out_on_an_ordinary_box_claims_nothing(root: Path) -> 
     sessions_dir = root / ".sessions"
     sessions_dir.mkdir(exist_ok=True)
     engine = Engine(
-        Config(root=root, sessions_dir=sessions_dir, agent_config_path=root / "none.json"),
+        make_config(root, sessions_dir=sessions_dir, agent_config_path=root / "none.json"),
         tmux=tmux,
         procs_fn=procs_from(RUNNING_MACHINE[1]),
         meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
@@ -1613,7 +1613,7 @@ def test_asking_again_clears_what_the_last_timeout_found(root: Path) -> None:
     sessions_dir = root / ".sessions"
     sessions_dir.mkdir(exist_ok=True)
     engine = Engine(
-        Config(root=root, sessions_dir=sessions_dir, agent_config_path=root / "none.json"),
+        make_config(root, sessions_dir=sessions_dir, agent_config_path=root / "none.json"),
         tmux=tmux,
         procs_fn=procs_from(RUNNING_MACHINE[1]),
         meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
@@ -1703,7 +1703,7 @@ def test_a_failed_start_reports_why_even_when_the_pane_cannot_be_read(
 
     clock = FakeClock()
     engine = Engine(
-        Config(root=root, sessions_dir=sessions_dir),
+        make_config(root, sessions_dir=sessions_dir),
         tmux=CaptureFails(),
         procs_fn=procs_from(ps_row(1001, 1)),
         meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
@@ -1730,7 +1730,7 @@ def test_an_unreadable_machine_does_not_kill_the_expiry_ticker(tmp_path: Path) -
     now = [0.0]
     tmux = FakeTmux(sessions={"alpha": 600})
     engine = Engine(
-        Config(root=tmp_path, sessions_dir=sessions_dir, stop_timeout=1.0),
+        make_config(tmp_path, sessions_dir=sessions_dir, stop_timeout=1.0),
         tmux=tmux,
         procs_fn=procs_from(ps_row(600, 1) + ps_row(601, 600, project="alpha")),
         meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
@@ -1770,7 +1770,7 @@ def test_a_project_that_vanishes_between_the_listing_and_the_path_is_unknown(
     sessions_dir = tmp_path / ".sessions"
     sessions_dir.mkdir()
     engine = Engine(
-        Config(root=tmp_path, sessions_dir=sessions_dir),
+        make_config(tmp_path, sessions_dir=sessions_dir),
         tmux=FakeTmux(sessions={}),
         procs_fn=procs_from(""),
         meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
@@ -1802,7 +1802,7 @@ def test_a_stop_that_worked_is_not_reported_as_a_timeout(tmp_path: Path) -> None
     table = [ps_row(600, 1) + ps_row(601, 600, project="alpha")]
     tmux = FakeTmux(sessions={"alpha": 600})
     engine = Engine(
-        Config(root=tmp_path, sessions_dir=sessions_dir, stop_timeout=30.0),
+        make_config(tmp_path, sessions_dir=sessions_dir, stop_timeout=30.0),
         tmux=tmux,
         procs_fn=lambda: procs_from(table[0])(),
         meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
@@ -1867,7 +1867,7 @@ def _killing_engine(tmp_path: Path, polls_until_reaped: int) -> tuple[Engine, li
         return procs_from(table[0])()
 
     engine = Engine(
-        Config(root=tmp_path, sessions_dir=sessions_dir),
+        make_config(tmp_path, sessions_dir=sessions_dir),
         tmux=tmux,
         procs_fn=procs,
         meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",

@@ -37,6 +37,7 @@ from hitchrail.config import Config
 from hitchrail.procs import snapshot
 from hitchrail.sessions import State
 from hitchrail.tmux import Tmux, sanitize
+from support import make_config
 
 pytestmark = [
     pytest.mark.live_tmux,
@@ -446,8 +447,8 @@ def _foreign_server(server: PrivateTmux, agent: Path, project: str) -> None:
 
 
 def _config(root: Path, sessions: Path, agent: Path) -> Config:
-    return Config(
-        root=root, agent_binary=str(agent), session_prefix=PREFIX, sessions_dir=sessions
+    return make_config(
+        root, agent_binary=str(agent), session_prefix=PREFIX, sessions_dir=sessions
     )
 
 

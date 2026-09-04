@@ -27,6 +27,7 @@ from pathlib import Path
 import pytest
 
 from hitchrail.cli import parse_args
+from support import make_config
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src" / "hitchrail"
@@ -282,7 +283,6 @@ _CONTROL_CLASSES = {
 
 
 def test_agents_md_states_the_middleware_order_the_code_uses(tmp_path: Path) -> None:
-    from hitchrail.config import Config
     from hitchrail.security import middleware_stack
 
     line = re.search(r"^\s{2}security\.py\s+(.+)$", AGENTS_MD.read_text(), re.M)
@@ -299,7 +299,7 @@ def test_agents_md_states_the_middleware_order_the_code_uses(tmp_path: Path) -> 
     # ignore is narrowed to the one attribute instead.
     actual = [
         m.cls.__name__  # type: ignore[attr-defined]
-        for m in middleware_stack(Config(root=tmp_path))
+        for m in middleware_stack(make_config(tmp_path))
     ]
 
     assert described == actual, (

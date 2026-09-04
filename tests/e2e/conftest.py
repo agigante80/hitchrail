@@ -63,6 +63,7 @@ from hitchrail.engine import Engine
 from hitchrail.events import EventBus
 from hitchrail.server import create_app
 from hitchrail.tmux import Tmux, is_tmux_argv
+from support import make_config
 
 pytestmark = pytest.mark.e2e
 
@@ -327,8 +328,8 @@ class Harness:
         )
 
         def build(protect: str | None) -> Config:
-            return Config(
-                root=self.root,
+            return make_config(
+                self.root,
                 sessions_dir=sessions,
                 # OURS, never the developer's `~/.claude.json` (#88). That file
                 # decides whether a row says "waiting to be trusted", and every
@@ -394,7 +395,7 @@ class Harness:
         #
         # `check=True`, likewise. A `new-session` that fails silently produces
         # the same opaque failure one step later.
-        namer = Tmux(prefix=Config(root=self.root).session_prefix, socket=self._sock)
+        namer = Tmux(prefix=make_config(self.root).session_prefix, socket=self._sock)
         for name in stale or []:
             subprocess.run(
                 [

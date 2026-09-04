@@ -26,10 +26,10 @@ import uvicorn
 from starlette.applications import Starlette
 
 from conftest import FakeTmux, procs_from
-from hitchrail.config import Config
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
 from hitchrail.server import create_app
+from support import make_config
 
 pytestmark = pytest.mark.live
 
@@ -84,7 +84,7 @@ class Fixture:
 def live(tmp_path: Path) -> Iterator[Fixture]:
     for name in ("vessel", "network"):
         (tmp_path / name).mkdir()
-    config = Config(root=tmp_path, sessions_dir=tmp_path / ".sessions")
+    config = make_config(tmp_path, sessions_dir=tmp_path / ".sessions")
     bus = EventBus()
     engine = Engine(
         config=config,

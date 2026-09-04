@@ -19,13 +19,14 @@ from pathlib import Path
 import pytest
 
 from hitchrail import discovery, projectnames
-from hitchrail.config import Config, ConfigError, remote_reach
+from hitchrail.config import ConfigError, remote_reach
 from hitchrail.hostnames import (
     MAX_HOSTNAME_LENGTH,
     is_valid_host,
     is_wildcard_host,
 )
 from hitchrail.security import parse_host
+from support import make_config
 
 # -- the one that was an open redirect ---------------------------------------
 
@@ -204,7 +205,7 @@ def test_the_reach_refusal_names_the_flag_it_came_from(tmp_path: Path) -> None:
     127.0.0.1 bind reads as a bug unless it says which flag asked for it.
     """
     with pytest.raises(ConfigError) as excinfo:
-        Config(root=tmp_path, host="127.0.0.1", token=None, extra_hosts=("box.lan",))
+        make_config(tmp_path, host="127.0.0.1", token=None, extra_hosts=("box.lan",))
     message = str(excinfo.value)
     assert "--allow-host" in message and "box.lan" in message
     assert message == message.lower() or "--allow-host" in message

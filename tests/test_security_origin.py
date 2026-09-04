@@ -17,6 +17,7 @@ from starlette.routing import Route
 
 from hitchrail.config import Config
 from hitchrail.security import middleware_stack
+from support import make_config
 
 HOST = {"host": "localhost"}
 
@@ -47,7 +48,7 @@ async def call(
 
 @pytest.mark.integration
 async def test_a_get_needs_no_origin(tmp_path: Path) -> None:
-    app = build(Config(root=tmp_path))
+    app = build(make_config(tmp_path))
     assert (await call(app, headers=HOST)).status_code == 200
 
 
@@ -59,7 +60,7 @@ async def test_the_event_stream_needs_no_origin(tmp_path: Path) -> None:
     Origin requirement. Without this test somebody notices the gap, "fixes" it,
     and silently breaks every live update in the product.
     """
-    app = build(Config(root=tmp_path))
+    app = build(make_config(tmp_path))
     response = await call(app, path="/api/events", headers=HOST)
     assert response.status_code == 200
 
@@ -67,7 +68,7 @@ async def test_the_event_stream_needs_no_origin(tmp_path: Path) -> None:
 @pytest.mark.integration
 @pytest.mark.parametrize("method", ["GET", "HEAD", "OPTIONS"])
 async def test_safe_methods_are_exempt(tmp_path: Path, method: str) -> None:
-    app = build(Config(root=tmp_path))
+    app = build(make_config(tmp_path))
     assert (await call(app, method, headers=HOST)).status_code in (200, 405)
 
 
@@ -81,7 +82,7 @@ async def test_a_mutating_request_without_an_origin_is_rejected(
 ) -> None:
     # Refused rather than treated as same origin. A control whose premise is
     # that browsers always send it has no business assuming when they do not.
-    app = build(Config(root=tmp_path))
+    app = build(make_config(tmp_path))
     response = await call(app, method, headers=HOST)
     assert response.status_code == 403
     assert response.json()["code"] == "origin_missing"
@@ -114,7 +115,7 @@ async def test_a_mutating_request_without_an_origin_is_rejected(
 async def test_a_mutating_request_with_a_foreign_origin_is_rejected(
     tmp_path: Path, origin: str
 ) -> None:
-    app = build(Config(root=tmp_path, port=8787))
+    app = build(make_config(tmp_path, port=8787))
     response = await call(app, "POST", headers={**HOST, "origin": origin})
     assert response.status_code == 403
     assert response.json()["code"] in {"origin_rejected", "origin_missing"}
@@ -127,7 +128,7 @@ async def test_another_local_application_is_not_same_origin(tmp_path: Path) -> N
     Matching on hostname alone would make every other development server on
     the machine same origin with an API equivalent to a shell.
     """
-    app = build(Config(root=tmp_path, port=8787))
+    app = build(make_config(tmp_path, port=8787))
     served = await call(app, "POST", headers={**HOST, "origin": "http://localhost:8787"})
     refused = await call(app, "POST", headers={**HOST, "origin": "http://localhost:3000"})
     assert served.status_code == 200
@@ -141,7 +142,7 @@ async def test_another_local_application_is_not_same_origin(tmp_path: Path) -> N
 async def test_a_mutating_request_with_the_matching_origin_is_served(
     tmp_path: Path,
 ) -> None:
-    app = build(Config(root=tmp_path, port=8787))
+    app = build(make_config(tmp_path, port=8787))
     response = await call(app, "POST", headers={**HOST, "origin": "http://localhost:8787"})
     assert response.status_code == 200
 
@@ -150,8 +151,8 @@ async def test_a_mutating_request_with_the_matching_origin_is_served(
 async def test_a_configured_proxy_origin_is_served(tmp_path: Path) -> None:
     # The TLS terminating proxy case. Configured, never derived: the scheme and
     # the port are the proxy's, and only the operator knows either.
-    cfg = Config(
-        root=tmp_path,
+    cfg = make_config(
+        tmp_path,
         host="0.0.0.0",
         token="t",
         extra_hosts=("box.lan",),
@@ -177,7 +178,7 @@ async def test_a_configured_proxy_origin_is_served(tmp_path: Path) -> None:
 async def test_an_ipv6_origin_is_bracketed_the_way_a_browser_sends_it(
     tmp_path: Path,
 ) -> None:
-    cfg = Config(root=tmp_path, port=8787)
+    cfg = make_config(tmp_path, port=8787)
     app = build(cfg)
     response = await call(app, "POST", headers={"host": "[::1]", "origin": "http://[::1]:8787"})
     assert response.status_code == 200
@@ -190,7 +191,7 @@ async def test_a_trailing_slash_on_the_origin_does_not_change_the_answer(
 ) -> None:
     # Some clients append one. It is not part of an origin, so it is trimmed
     # rather than turned into a refusal nobody can explain.
-    app = build(Config(root=tmp_path, port=8787))
+    app = build(make_config(tmp_path, port=8787))
     response = await call(
         app, "POST", headers={**HOST, "origin": f"http://localhost:8787{suffix}"}
     )
@@ -202,7 +203,7 @@ async def test_origin_matching_is_case_insensitive_on_scheme_and_host(
     tmp_path: Path,
 ) -> None:
     # Scheme and host are case insensitive per RFC 3986; the port is digits.
-    app = build(Config(root=tmp_path, port=8787))
+    app = build(make_config(tmp_path, port=8787))
     response = await call(app, "POST", headers={**HOST, "origin": "HTTP://LOCALHOST:8787"})
     assert response.status_code == 200
 
@@ -213,7 +214,7 @@ async def test_origin_matching_is_case_insensitive_on_scheme_and_host(
 @pytest.mark.integration
 async def test_the_host_check_runs_before_the_origin_check(tmp_path: Path) -> None:
     # A rebound request must not learn which origins this server accepts.
-    app = build(Config(root=tmp_path))
+    app = build(make_config(tmp_path))
     response = await call(
         app, "POST", headers={"host": "evil.example", "origin": "http://localhost:8787"}
     )
@@ -236,8 +237,8 @@ async def test_a_dotted_origin_matches_an_undotted_entry(
     mutating request from it, which is a worse failure than refusing outright
     because it looks like the app is broken rather than misconfigured.
     """
-    cfg = Config(
-        root=tmp_path,
+    cfg = make_config(
+        tmp_path,
         host="0.0.0.0",
         token="t",
         extra_hosts=(configured,),

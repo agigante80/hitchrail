@@ -30,6 +30,7 @@ from hitchrail.headers import (
     policy_for,
 )
 from hitchrail.security import middleware_stack
+from support import make_config
 
 pytestmark = pytest.mark.integration
 
@@ -72,7 +73,7 @@ async def test_a_refusal_still_carries_the_headers(
     """A refusal is the response most likely to be rendered somewhere
     unexpected, and it is returned before the app exists. If the middleware sat
     inside the access controls these would carry nothing."""
-    app = build(Config(root=tmp_path, host="0.0.0.0", token=TOKEN))
+    app = build(make_config(tmp_path, host="0.0.0.0", token=TOKEN))
     response = await call(app, headers=headers)
     assert response.status_code == expect, label
     assert response.headers["x-content-type-options"] == "nosniff", label
@@ -85,7 +86,7 @@ async def test_a_body_limit_refusal_carries_them_too(tmp_path: Path) -> None:
     one refusal this middleware could plausibly miss."""
     from hitchrail.server import MAX_BODY_BYTES
 
-    app = build(Config(root=tmp_path))
+    app = build(make_config(tmp_path))
     response = await call(app, "POST", content=b"x" * (MAX_BODY_BYTES + 1), headers=HOST)
     assert response.headers.get("x-content-type-options") == "nosniff"
 
@@ -102,7 +103,7 @@ async def test_the_grant_page_refuses_to_be_framed(tmp_path: Path) -> None:
     from hitchrail.headers import policy_for
 
     assert "frame-ancestors 'none'" in policy_for("/grant")
-    app = build(Config(root=tmp_path, host="0.0.0.0", token=TOKEN))
+    app = build(make_config(tmp_path, host="0.0.0.0", token=TOKEN))
     response = await call(app, path="/", headers={**HOST, "authorization": f"Bearer {TOKEN}"})
     assert response.headers["x-frame-options"] == "DENY"
 

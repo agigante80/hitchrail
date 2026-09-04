@@ -7,7 +7,8 @@ import pytest
 
 from hitchrail import cli
 from hitchrail.cli import JOURNAL_ENV, banner, build_config, main, parse_args, preflight
-from hitchrail.config import Config, ConfigError, is_loopback_host
+from hitchrail.config import ConfigError, is_loopback_host
+from support import make_config
 
 
 @pytest.fixture(autouse=True)
@@ -177,12 +178,8 @@ def test_main_returns_two_rather_than_raising_on_a_bad_bind(
 # prove a lookup fails can break a neighbouring test, and the plan says so.
 
 
-def _cfg(tmp_path: Path, **kw: object) -> Config:
-    return Config(root=tmp_path, **kw)  # type: ignore[arg-type]
-
-
 def test_a_machine_with_everything_present_has_nothing_to_say(tmp_path: Path) -> None:
-    found = preflight(_cfg(tmp_path), which=lambda _n: "/usr/bin/x", meminfo=tmp_path)
+    found = preflight(make_config(tmp_path), which=lambda _n: "/usr/bin/x", meminfo=tmp_path)
     assert found == []
 
 
@@ -190,7 +187,7 @@ def test_missing_tmux_is_named_and_says_what_to_install(tmp_path: Path) -> None:
     """The failure this replaces arrived as a FileNotFoundError from inside a
     subprocess call, surfaced in a web interface, on a phone."""
     found = preflight(
-        _cfg(tmp_path),
+        make_config(tmp_path),
         which=lambda n: None if n == "tmux" else "/usr/bin/x",
         meminfo=tmp_path,
     )
@@ -205,7 +202,7 @@ def test_a_missing_agent_binary_names_the_binary_that_was_looked_for(
     """`--agent-binary`, never `--claude-binary`: no vendor name in the
     operator contract. An operator who set it needs to see what was tried."""
     found = preflight(
-        _cfg(tmp_path, agent_binary="my-agent"),
+        make_config(tmp_path, agent_binary="my-agent"),
         which=lambda n: None if n == "my-agent" else "/usr/bin/x",
         meminfo=tmp_path,
     )
@@ -219,7 +216,9 @@ def test_an_unreadable_meminfo_refuses_rather_than_running_unguarded(
 ) -> None:
     """The Linux assumption, made explicit. Running without the memory guard
     is how a machine ends up full of agents."""
-    found = preflight(_cfg(tmp_path), which=lambda _n: "/usr/bin/x", meminfo=tmp_path / "nope")
+    found = preflight(
+        make_config(tmp_path), which=lambda _n: "/usr/bin/x", meminfo=tmp_path / "nope"
+    )
     assert len(found) == 1
     assert "memory guard" in found[0]
 
@@ -227,7 +226,7 @@ def test_an_unreadable_meminfo_refuses_rather_than_running_unguarded(
 def test_every_missing_prerequisite_is_reported_at_once(tmp_path: Path) -> None:
     """Not one at a time. An operator on a fresh machine should learn
     everything they have to install from a single run."""
-    found = preflight(_cfg(tmp_path), which=lambda _n: None, meminfo=tmp_path / "nope")
+    found = preflight(make_config(tmp_path), which=lambda _n: None, meminfo=tmp_path / "nope")
     assert len(found) == 3
 
 

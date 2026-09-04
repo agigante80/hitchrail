@@ -27,6 +27,7 @@ from hitchrail.events import EventBus
 from hitchrail.procs import ProcTable
 from hitchrail.server import create_app
 from hitchrail.tmux import TmuxUnavailable
+from support import make_config
 
 # The whole module drives a real Starlette app through `ASGITransport`, so it
 # is one tier and says so once. #37, and `tests/test_tiers.py` enforces it.
@@ -56,7 +57,7 @@ def root(tmp_path: pathlib.Path) -> pathlib.Path:
 
 @pytest.fixture
 def config(root: pathlib.Path) -> Config:
-    return Config(root=root, sessions_dir=root / ".sessions", agent_config_path=NO_AGENT_CONFIG)
+    return make_config(root, sessions_dir=root / ".sessions", agent_config_path=NO_AGENT_CONFIG)
 
 
 RUNNING_PS = """\
@@ -432,10 +433,9 @@ async def test_the_kill_route_is_origin_checked_like_every_mutating_route(
 
 
 async def test_the_protected_project_is_423(root: pathlib.Path, config: Config) -> None:
-    from hitchrail.config import Config
 
-    cfg = Config(
-        root=root,
+    cfg = make_config(
+        root,
         sessions_dir=root / ".s",
         agent_config_path=NO_AGENT_CONFIG,
         self_project="vessel",
@@ -634,8 +634,8 @@ async def test_a_root_that_has_gone_away_is_503_not_an_empty_list(
 async def test_starting_the_self_project_is_423_not_500(root: pathlib.Path) -> None:
     """The route where the protection matters most: it is the one that would
     put a SECOND agent in the folder Hitchrail is running in."""
-    config = Config(
-        root=root,
+    config = make_config(
+        root,
         sessions_dir=root / ".sessions",
         agent_config_path=NO_AGENT_CONFIG,
         self_project="vessel",
@@ -651,8 +651,8 @@ async def test_starting_the_self_project_is_423_not_500(root: pathlib.Path) -> N
 async def test_the_self_project_cannot_be_stopped_or_killed(
     root: pathlib.Path, path: str
 ) -> None:
-    config = Config(
-        root=root,
+    config = make_config(
+        root,
         sessions_dir=root / ".sessions",
         agent_config_path=NO_AGENT_CONFIG,
         self_project="vessel",
@@ -1024,8 +1024,8 @@ async def test_the_page_is_behind_the_token(tmp_path: pathlib.Path) -> None:
     """#21 argued it and kept it behind the token: `/grant` is the door, and
     the shell stays shut so no future addition to it inherits an exemption."""
     (tmp_path / "vessel").mkdir()
-    config = Config(
-        root=tmp_path,
+    config = make_config(
+        tmp_path,
         sessions_dir=tmp_path / ".s",
         agent_config_path=NO_AGENT_CONFIG,
         token="s3cret",
@@ -1041,8 +1041,8 @@ async def test_the_page_is_behind_the_token(tmp_path: pathlib.Path) -> None:
 
 def _token_app(tmp_path: pathlib.Path) -> tuple[Engine, Config]:
     (tmp_path / "vessel").mkdir()
-    config = Config(
-        root=tmp_path,
+    config = make_config(
+        tmp_path,
         sessions_dir=tmp_path / ".s",
         agent_config_path=NO_AGENT_CONFIG,
         token="s3cret",

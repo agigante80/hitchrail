@@ -19,6 +19,7 @@ from starlette.routing import Route
 
 from hitchrail.config import Config
 from hitchrail.security import HostAllowlistMiddleware, middleware_stack, parse_host
+from support import make_config
 
 
 def build(config: Config) -> Starlette:
@@ -78,7 +79,7 @@ def test_an_unparseable_host_can_never_match(tmp_path: Path) -> None:
     # parse_host returns "" for anything malformed, and Config filters empty
     # entries out of the allowlist, so "" matches nothing. Asserted rather than
     # assumed, because it is the whole fail closed argument.
-    cfg = Config(root=tmp_path)
+    cfg = make_config(tmp_path)
     assert "" not in cfg.allowed_hosts
     assert parse_host("[unclosed") == ""
 
@@ -88,13 +89,13 @@ def test_an_unparseable_host_can_never_match(tmp_path: Path) -> None:
 
 @pytest.mark.integration
 async def test_a_known_host_is_served(tmp_path: Path) -> None:
-    app = build(Config(root=tmp_path))
+    app = build(make_config(tmp_path))
     assert (await call(app, headers={"host": "localhost"})).status_code == 200
 
 
 @pytest.mark.integration
 async def test_a_host_with_a_port_still_matches(tmp_path: Path) -> None:
-    app = build(Config(root=tmp_path))
+    app = build(make_config(tmp_path))
     assert (await call(app, headers={"host": "localhost:8787"})).status_code == 200
 
 
@@ -129,7 +130,7 @@ async def test_a_forged_host_is_rejected(tmp_path: Path, host: str) -> None:
     CVE-2026-32632 in Glances, verbatim, and Hitchrail has the worse blast
     radius because it starts processes rather than reporting on them.
     """
-    app = build(Config(root=tmp_path))
+    app = build(make_config(tmp_path))
     response = await call(app, headers={"host": host})
     assert response.status_code == 400
     assert response.json()["code"] == "host_rejected"
@@ -139,7 +140,7 @@ async def test_a_forged_host_is_rejected(tmp_path: Path, host: str) -> None:
 async def test_the_event_stream_is_behind_the_allowlist_too(tmp_path: Path) -> None:
     # The route people forget, and the one an attacker most wants: a long lived
     # stream of everything happening on the machine.
-    app = build(Config(root=tmp_path))
+    app = build(make_config(tmp_path))
     response = await call(app, path="/api/events", headers={"host": "evil.example"})
     assert response.status_code == 400
 
@@ -155,15 +156,15 @@ async def test_an_ipv6_loopback_browser_is_served(tmp_path: Path) -> None:
     `http://[::1]:8787/` is refused whatever the allowlist holds. That is why
     this project writes its own ten lines.
     """
-    app = build(Config(root=tmp_path))
+    app = build(make_config(tmp_path))
     for host in ("[::1]", "[::1]:8787"):
         assert (await call(app, headers={"host": host})).status_code == 200
 
 
 @pytest.mark.integration
 async def test_an_ipv6_lan_address_is_served_when_allowed(tmp_path: Path) -> None:
-    cfg = Config(
-        root=tmp_path,
+    cfg = make_config(
+        tmp_path,
         host="0.0.0.0",
         token="t",
         resolver=fixed_resolver("2001:db8::5"),
@@ -179,8 +180,8 @@ async def test_an_ipv6_lan_address_is_served_when_allowed(tmp_path: Path) -> Non
 
 @pytest.mark.integration
 async def test_stripping_brackets_did_not_become_any_ipv6_is_fine(tmp_path: Path) -> None:
-    cfg = Config(
-        root=tmp_path,
+    cfg = make_config(
+        tmp_path,
         host="0.0.0.0",
         token="t",
         resolver=fixed_resolver("2001:db8::5"),
@@ -203,7 +204,7 @@ async def test_an_unrecognised_host_is_refused_never_redirected(tmp_path: Path) 
     with `Location: http://www.box.lan/x`, a redirect built from the same
     untrusted header, in the middleware whose whole job is not trusting it.
     """
-    cfg = Config(root=tmp_path, host="0.0.0.0", token="t", extra_hosts=("www.box.lan",))
+    cfg = make_config(tmp_path, host="0.0.0.0", token="t", extra_hosts=("www.box.lan",))
     app = build(cfg)
     response = await call(app, headers={"host": "box.lan"})
     assert response.status_code == 400
@@ -214,7 +215,7 @@ async def test_an_unrecognised_host_is_refused_never_redirected(tmp_path: Path) 
 async def test_the_refusal_uses_the_api_error_envelope(tmp_path: Path) -> None:
     # One shape for every refusal, so a client parses one thing. Starlette's
     # version answers with a plain text body instead.
-    app = build(Config(root=tmp_path))
+    app = build(make_config(tmp_path))
     response = await call(app, headers={"host": "evil.example"})
     assert set(response.json()) == {"code", "message"}
     assert response.headers["content-type"].startswith("application/json")
@@ -303,8 +304,8 @@ async def test_dotted_and_undotted_hosts_all_match(
     Testing one direction passes while the other is broken, which is exactly
     how the first attempt shipped.
     """
-    cfg = Config(
-        root=tmp_path,
+    cfg = make_config(
+        tmp_path,
         host="0.0.0.0",
         token="t",
         extra_hosts=(configured,),

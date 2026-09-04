@@ -34,6 +34,7 @@ from hitchrail.engine import Engine
 from hitchrail.events import EventBus
 from hitchrail.security import TOKEN_COOKIE, middleware_stack
 from hitchrail.server import create_app
+from support import make_config
 
 TOKEN = "live-socket-token"
 TIMEOUT = 5.0
@@ -88,7 +89,7 @@ def make_app(config: Config) -> Starlette:
 @pytest.fixture
 def live(tmp_path: Path) -> Iterator[LiveServer]:
     port = free_port()
-    config = Config(root=tmp_path, host="127.0.0.1", port=port, token=TOKEN)
+    config = make_config(tmp_path, host="127.0.0.1", port=port, token=TOKEN)
     server = LiveServer(make_app(config), port)
     server.start()
     try:
@@ -205,7 +206,7 @@ def test_the_server_is_shut_down_afterwards(tmp_path: Path) -> None:
     previous server has actually released it.
     """
     port = free_port()
-    config = Config(root=tmp_path, host="127.0.0.1", port=port, token=TOKEN)
+    config = make_config(tmp_path, host="127.0.0.1", port=port, token=TOKEN)
     server = LiveServer(make_app(config), port)
     server.start()
     assert httpx.get(f"{server.base}/x", headers=auth(), timeout=TIMEOUT).status_code == 200
@@ -251,7 +252,7 @@ def test_the_fragment_grant_puts_the_token_in_no_access_line(tmp_path: Path) -> 
     that silently failed would log no token either, and would pass.
     """
     port = free_port()
-    config = Config(root=tmp_path, host="127.0.0.1", port=port, token=TOKEN)
+    config = make_config(tmp_path, host="127.0.0.1", port=port, token=TOKEN)
     app = create_app(
         engine=Engine(
             config=config,
@@ -337,7 +338,7 @@ def test_a_query_token_now_reaches_the_access_log_and_that_is_correct(tmp_path: 
     `test_the_fragment_grant_puts_the_token_in_no_access_line` is that test.
     """
     port = free_port()
-    config = Config(root=tmp_path, host="127.0.0.1", port=port, token=TOKEN)
+    config = make_config(tmp_path, host="127.0.0.1", port=port, token=TOKEN)
     server = LiveServer(make_app(config), port, log_level="info")
 
     records: list[str] = []
