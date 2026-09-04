@@ -158,12 +158,23 @@ forbidden_modules = [
   "sse_starlette",
 ]
 
-# `web/` is package DATA, not code, and hatchling ships only what it is told to.
-# Without this `uvx hitchrail` installs a distribution whose page is missing,
-# and the failure is a 404 on the one route a person opens first.
-[tool.hatch.build.targets.wheel]
-packages = ["src/hitchrail"]
-artifacts = ["src/hitchrail/web/*"]
+# **There is deliberately no build target configuration here, and `web/` still
+# ships.** #125. This held a `[tool.hatch.build.targets.wheel]` section whose
+# comment said hatchling would otherwise leave the page out of the wheel. The
+# backend is `uv_build`, so nothing read that section: it credited a mechanism
+# that was not running for an outcome that happens for a different reason.
+#
+# The real reason: `uv_build` packages the whole `src/hitchrail/` tree, data
+# files included, so `web/` is in the wheel because it lives inside the package
+# rather than beside it. `pages.py` says the same thing from the other end, and
+# that placement is the mechanism.
+#
+# What makes this safe to get wrong is in another file, which is why it is
+# named here. `publish.yml` opens the built wheel and fails the release unless
+# it carries `index.html`, `grant.html`, `app.js`, `app.css` and at least one
+# font face. The failure it prevents is invisible until somebody installs the
+# distribution and unfixable afterwards, because a version number on PyPI
+# cannot be reused, only yanked.
 
 # #35. Mutation testing over the five modules between a web page and a shell,
 # and only those. Coverage says whether a line RAN; this says whether any
