@@ -531,3 +531,48 @@ have caught earlier, including a start path that would have reported failure on
 every successful start. The file is deleted rather than kept alongside its
 replacement, because two plans for the same work is the drift this project
 exists to avoid. Git has it.
+
+## Phase 12: More than one root
+
+**Objective: a project is still one thing when there is more than one place to
+keep projects.**
+
+`--root` takes one folder and every directory inside it is a project, so
+somebody with a client tree and a personal tree cannot see both in one
+Hitchrail. Running two instances is the obvious workaround and it is unsafe:
+the session name is derived from the project name and nothing else, so two
+roots containing a folder of the same name collide.
+
+```
+~/work/vessel      -> hr-vessel
+~/personal/vessel  -> hr-vessel
+```
+
+**The failure is silent and destructive.** The second project reads as
+`running` on the first one's session, and tapping Stop there stops the other
+one's agent.
+
+Delivers: several roots in one instance, a project identity that stays unique
+across them, and an interface that shows which root a row is in.
+
+**Done when:** two roots each containing a folder of the same name are two rows
+that can be started and stopped independently, proven against a real tmux
+rather than a fake, and a single root deployment is unchanged.
+
+**This has to land before 1.0.** `docs/versioning.md` cuts 1.0 when the HTTP
+interface is one you are willing to keep, and this phase decides what
+identifies a project on the wire. After 1.0 that is a MAJOR break with saved
+links and any client to migrate; before it, it is a MINOR under the `0.y.z`
+rule.
+
+**#119 gates the rest of the phase and is a decision rather than work.** Four
+options are written up with what each costs. Everything else here is written
+against a question and will need rewriting against the answer, which is said on
+each ticket rather than left to be discovered.
+
+Tickets: #119, #120, #121, #122.
+
+The interim workaround is in Backlog rather than here: `session_prefix` is a
+config field with validation and no CLI flag, so the two instance arrangement
+cannot even be made safe today. That is small and worth doing before this phase
+starts.

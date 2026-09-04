@@ -58,6 +58,13 @@ the **operator contract**: what somebody upgrading has to do.
 While the version is `0.y.z`, a breaking change may ship as MINOR. That ends at `1.0.0`, and
 `1.0.0` should be cut when the HTTP interface is one you are willing to keep.
 
+**One known change to that interface is outstanding, and it decides when 1.0 can be cut.**
+Phase 12 asks what identifies a project when there is more than one root. Today it is the
+folder name, which stops being unique the moment a second root exists, and that name is the
+path segment, the tmux session suffix and the interface's row key at once. Deciding it before
+1.0 makes it a MINOR; deciding it after makes it a MAJOR with saved links and any client to
+migrate. See #119.
+
 ## Deciding the level
 
 Conventional Commit prefixes are a **hint, never the authority**. A mistyped prefix mis-bumps
