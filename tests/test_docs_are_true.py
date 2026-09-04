@@ -485,3 +485,53 @@ def test_the_capture_never_photographs_a_real_root() -> None:
     assert "hitchrail-demo" in CAPTURE.read_text(), (
         "the capture must seed a neutrally named root, since the interface displays it"
     )
+
+
+# -- #117: the order of the README, which is a phase exit criterion ---------
+
+# Positional, not textual, so renaming the heading does not break the guard and
+# moving it does. The heading has already been renamed once, from "Read this
+# before running it" to something a person reads rather than obeys.
+_RISK_HEADING = re.compile(r"^## .*costs you to run", re.M | re.I)
+_INSTRUCTION_HEADINGS = ("## Run it", "## Install")
+
+# One distinctive phrase per limitation. Whole sentences would break on an
+# ordinary edit; a phrase goes missing only when the claim does.
+_LIMITATIONS = {
+    "the agent is unsandboxed": "dangerously-skip-permissions",
+    "the token buys keystrokes": "typed into",
+    "a detached agent cannot be ended": "cannot end",
+    "cleartext on plain HTTP": "cleartext",
+}
+
+
+def test_the_readme_states_the_risk_before_the_instructions() -> None:
+    """Phase 8's objective puts the security section first, after learning what
+    the tool does. It sat below Run it, Install and Working on it, so a reader
+    met three sets of instructions before being told the tool spawns agents
+    with permissions skipped.
+
+    Somebody who reads "Run it" and stops has not been told what it costs them.
+    Somebody who reads this and stops has lost nothing.
+    """
+    readme = README.read_text()
+    risk = _RISK_HEADING.search(readme)
+    assert risk, "the README has no section about what running this costs"
+    for heading in _INSTRUCTION_HEADINGS:
+        assert heading in readme, f"the README lost {heading!r}"
+        assert risk.start() < readme.index(heading), (
+            f"{heading!r} comes before the risk section. A reader who stops "
+            "early has been told how, and not what it costs."
+        )
+
+
+def test_the_readme_still_states_every_limitation() -> None:
+    """A section promoted to the top is one somebody will later want to soften,
+    because it is the first thing a visitor sees. This is what stops that being
+    invisible: the wording is free, the claims are not."""
+    readme = README.read_text().lower()
+    missing = [label for label, needle in _LIMITATIONS.items() if needle not in readme]
+    assert not missing, (
+        "the README no longer states: " + ", ".join(missing) + ". These are the "
+        "limitations SECURITY.md repeats, so dropping one here makes two files wrong."
+    )

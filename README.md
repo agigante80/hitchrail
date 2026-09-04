@@ -45,6 +45,86 @@ Four derived states in one listing: `running` with its memory and uptime,
 These are captured from the running application against a scratch root, not
 taken by hand: `uv run pytest -m screenshots` regenerates every one of them.
 
+## What it costs you to run this
+
+Hitchrail starts `claude --dangerously-skip-permissions`. **Anyone who can reach
+its API can run arbitrary code on that machine as you.**
+
+Every control below is built and tested, including on a real socket rather than
+only in theory, and the API is now behind them. None of it is optional, and
+none of it is a reason to run this on a network you do not trust.
+
+The browser interface is built. The list, search and filtering, starting, the
+stop sequence with its escalation, the log tail, creating a folder, the memory
+footer, live updates over SSE with reconnection, the token screen and the dark
+theme all work in a browser, and the end to end tier drives them. The warning
+above applies to all of it exactly as written.
+
+It binds to loopback with no authentication by default. Binding it to any other
+interface requires a token, and the server refuses to start without one. It
+validates the `Host` header on every request, because a localhost service
+without that check can be driven by any website you visit, through DNS
+rebinding. Over plain HTTP on a LAN the token crosses the network in cleartext;
+put a TLS terminating reverse proxy in front of it if that matters to you.
+
+Behind such a proxy, tell Hitchrail the origin the browser will actually send,
+because it cannot be derived: the scheme and the port are the proxy's, not
+ours.
+
+```sh
+hitchrail --root ~/dev --host 0.0.0.0 --allow-host box.lan \
+          --allow-origin https://box.lan
+```
+
+A trailing root dot makes no difference here: `box.lan` and `box.lan.` name the
+same machine, so either spelling is accepted and either is matched. Browsers do
+send the dotted form, because typing `http://box.lan./` is a way to force
+absolute resolution on a split horizon network.
+
+Getting the token onto a phone is a link rather than 32 characters of typing.
+Open `http://<address>:8787/grant#token=<token>` once. The token is everything
+after the `#`, and a fragment is never sent to a server: not to Hitchrail, not
+to a reverse proxy, and not in a `Referer` header. The page reads it in the
+browser, trades it for a cookie, and clears the address bar.
+
+`hitchrail` prints that link for every address it can be reached on, so it is
+copied rather than typed.
+
+Treat the link as a secret anyway, because it is one, and the phone it lands on
+is where it now lives. What changed is the set of machines that write it down.
+Every server side one is gone: this server's access log, any proxy in front,
+and the `Referer` header on anything the page fetches.
+
+The browser is narrowed rather than cleared, and the difference is worth
+stating rather than rounding off. The page rewrites its own history entry, so
+the entry does not keep the key. Pasting the link into the address bar is
+another matter: that can leave a typed URL in autocomplete, and autocomplete
+syncs. Open the link by tapping it rather than by pasting it, and the
+distinction does not arise.
+
+The older `?token=<token>` form is gone. It is a query parameter now, not a
+credential: a request carrying one is refused like any other request with no
+token, and it appears in the server's log like any other query string.
+
+Hitchrail does not sandbox the sessions it starts. It is a launcher. The agent it
+launches has whatever access you have.
+
+**Whoever holds the token can cause characters to be typed into any agent
+session under your root.** Stopping an agent works by sending it keystrokes
+through its terminal, and an agent reading its own input cannot tell those from
+you typing. That is what makes a gentle stop possible at all, and it is worth
+reading rather than discovering. Hitchrail only ever sends the stop sequence,
+and one test enforces that only the module owning it may send anything.
+
+Hitchrail cannot end a `detached` agent, the state where a process outlived its
+terminal. It shows the pid and stops there, because everything it can destroy
+is addressed by the session name it created, and signalling a bare pid would be
+the first thing outside that.
+
+**Found a hole?** [`SECURITY.md`](SECURITY.md) says what is in scope, what is
+this design rather than a bug, and where to report privately. Please do not
+open a public issue for a vulnerability.
+
 ## Prerequisites
 
 Hitchrail is a launcher, so the things it launches have to already be there. It
@@ -151,82 +231,6 @@ unusual one: it enforces that the engine layer never imports Starlette,
 uvicorn, `sse_starlette`, the server or the CLI, so the engine stays testable
 without HTTP. Import boundaries defended only by good intentions do not
 survive.
-
-## Read this before running it
-
-Hitchrail starts `claude --dangerously-skip-permissions`. **Anyone who can reach
-its API can run arbitrary code on that machine as you.**
-
-Every control below is built and tested, including on a real socket rather than
-only in theory, and the API is now behind them. None of it is optional, and
-none of it is a reason to run this on a network you do not trust.
-
-The browser interface is built. The list, search and filtering, starting, the
-stop sequence with its escalation, the log tail, creating a folder, the memory
-footer, live updates over SSE with reconnection, the token screen and the dark
-theme all work in a browser, and the end to end tier drives them. The warning
-above applies to all of it exactly as written.
-
-It binds to loopback with no authentication by default. Binding it to any other
-interface requires a token, and the server refuses to start without one. It
-validates the `Host` header on every request, because a localhost service
-without that check can be driven by any website you visit, through DNS
-rebinding. Over plain HTTP on a LAN the token crosses the network in cleartext;
-put a TLS terminating reverse proxy in front of it if that matters to you.
-
-Behind such a proxy, tell Hitchrail the origin the browser will actually send,
-because it cannot be derived: the scheme and the port are the proxy's, not
-ours.
-
-```sh
-hitchrail --root ~/dev --host 0.0.0.0 --allow-host box.lan \
-          --allow-origin https://box.lan
-```
-
-A trailing root dot makes no difference here: `box.lan` and `box.lan.` name the
-same machine, so either spelling is accepted and either is matched. Browsers do
-send the dotted form, because typing `http://box.lan./` is a way to force
-absolute resolution on a split horizon network.
-
-Getting the token onto a phone is a link rather than 32 characters of typing.
-Open `http://<address>:8787/grant#token=<token>` once. The token is everything
-after the `#`, and a fragment is never sent to a server: not to Hitchrail, not
-to a reverse proxy, and not in a `Referer` header. The page reads it in the
-browser, trades it for a cookie, and clears the address bar.
-
-`hitchrail` prints that link for every address it can be reached on, so it is
-copied rather than typed.
-
-Treat the link as a secret anyway, because it is one, and the phone it lands on
-is where it now lives. What changed is the set of machines that write it down.
-Every server side one is gone: this server's access log, any proxy in front,
-and the `Referer` header on anything the page fetches.
-
-The browser is narrowed rather than cleared, and the difference is worth
-stating rather than rounding off. The page rewrites its own history entry, so
-the entry does not keep the key. Pasting the link into the address bar is
-another matter: that can leave a typed URL in autocomplete, and autocomplete
-syncs. Open the link by tapping it rather than by pasting it, and the
-distinction does not arise.
-
-The older `?token=<token>` form is gone. It is a query parameter now, not a
-credential: a request carrying one is refused like any other request with no
-token, and it appears in the server's log like any other query string.
-
-Hitchrail does not sandbox the sessions it starts. It is a launcher. The agent it
-launches has whatever access you have.
-
-**Whoever holds the token can cause characters to be typed into any agent
-session under your root.** Stopping an agent works by sending it keystrokes
-through its terminal, and an agent reading its own input cannot tell those from
-you typing. That is what makes a gentle stop possible at all, and it is worth
-reading rather than discovering. Hitchrail only ever sends the stop sequence,
-and one test enforces that only the module owning it may send anything.
-
-Hitchrail cannot end a `detached` agent, the state where a process outlived its
-terminal. It shows the pid and stops there, because everything it can destroy
-is addressed by the session name it created, and signalling a bare pid would be
-the first thing outside that.
 
 ## Documents
 
