@@ -141,6 +141,7 @@ source_modules = [
   "hitchrail.hostnames",
   "hitchrail.discovery",
   "hitchrail.projectnames",
+  "hitchrail.roots",
   "hitchrail.tmux",
   "hitchrail.procs",
   "hitchrail.claude_ipc",
