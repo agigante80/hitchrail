@@ -58,12 +58,23 @@ the **operator contract**: what somebody upgrading has to do.
 While the version is `0.y.z`, a breaking change may ship as MINOR. That ends at `1.0.0`, and
 `1.0.0` should be cut when the HTTP interface is one you are willing to keep.
 
-**One known change to that interface is outstanding, and it decides when 1.0 can be cut.**
-Phase 12 asks what identifies a project when there is more than one root. Today it is the
+**That outstanding interface change is now decided, and it still has to LAND before 1.0.**
+Phase 12 asked what identifies a project when there is more than one root. Today it is the
 folder name, which stops being unique the moment a second root exists, and that name is the
-path segment, the tmux session suffix and the interface's row key at once. Deciding it before
-1.0 makes it a MINOR; deciding it after makes it a MAJOR with saved links and any client to
-migrate. See #119.
+path segment, the tmux session suffix and the interface's row key at once.
+
+#119 decided it on 2026-09-04: **a project is `<root-label>~<folder>`, always, including with
+one root.** The reasoning is in the design, section 6.0. What matters here is the level.
+
+**Shipping it is a breaking change to the operator contract, and it ships as MINOR because the
+version is `0.y.z`.** Every existing identifier gains a prefix, so every saved `/grant` link
+and every `POST /api/sessions/{name}` written against 0.1.0 changes. That is a MAJOR after
+1.0 and a MINOR before it, which is the whole reason this was pulled forward: 0.1.0 was
+published on 2026-09-04 with no installed base, and the cost of the break rises from that day
+onward and never falls.
+
+**1.0 cannot be cut until this has landed**, not merely until it has been decided. A decision
+recorded and not implemented leaves the interface exactly as unwilling to keep as it was.
 
 ## Deciding the level
 

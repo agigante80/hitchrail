@@ -21,6 +21,21 @@ Two ordering rules decide what goes where:
    in the first draft of this plan, which put security at task 12 of 15 and did
    not notice until review that `EventSource` cannot send an `Authorization`
    header.
+3. **Cost-of-delay order, which was added on 2026-09-04 and has exactly one
+   member so far.** A phase whose cost rises with every day it is not done
+   comes forward, even past phases that are more valuable in themselves.
+
+**Phase 12 runs next, ahead of 9, 10 and 11.** It changes what a project is
+called on the wire, so every saved link and every API caller written against
+0.1.0 changes with it. That is a MINOR while the version is `0.y.z` and a MAJOR
+after 1.0, and 0.1.0 was published on 2026-09-04 with no installed base. The
+break is free today, and every subsequent day it is not. Phases 9, 10 and 11
+make Hitchrail better and do not get more expensive by waiting, so they wait.
+
+The renumbering that would follow from moving it is deliberately not done. The
+milestones are the queryable record and renaming five of them to reorder one is
+churn that breaks every link into them. The order is what this section says,
+not what the numbers imply.
 
 <!--
 Every closed phase carries a `**Status: done**` line directly under its
@@ -566,6 +581,14 @@ replacement, because two plans for the same work is the drift this project
 exists to avoid. Git has it.
 
 ## Phase 12: More than one root
+
+**Runs next, out of numeric order.** See "How the phases are cut" above for
+why: this is the one phase whose cost rises every day it is not done.
+
+**#119 is decided as of 2026-09-04.** A project is `<root-label>~<folder>`,
+always, including with one root. The reasoning, the three options that lost and
+the questions that followed from the answer are in the design, section 6.0.
+The three implementation tickets are no longer blocked.
 
 **Objective: a project is still one thing when there is more than one place to
 keep projects.**

@@ -517,6 +517,72 @@ Documented in the README rather than hidden:
 
 ## 6. HTTP interface
 
+### 6.0 What `{name}` is, decided by #119
+
+**A project is identified by `<root-label>~<folder>`, always, including when
+there is only one root.** Every `{name}` in the table below is that qualified
+identifier.
+
+```
+hitchrail --root work=~/work --root personal=~/personal
+
+  POST /api/sessions/work~vessel
+  POST /api/sessions/personal~vessel
+  tmux hr-work~vessel, hr-personal~vessel
+```
+
+**Injective by construction, not by convention.** `projectnames.NAME_PATTERN`
+is `[A-Za-z0-9][A-Za-z0-9._-]*`, so a folder name cannot contain `~`. A root
+label is validated against the same pattern, so it cannot either. The qualified
+form therefore has exactly one split point and two distinct project directories
+can never produce one identifier. This is the same standard that rejected the
+digest suffix in `tmux.sanitize`: injective by construction beat injective by
+hash, and it beats injective by careful parsing here.
+
+**`~` rather than `/`, and this is forced rather than chosen.** A slash in the
+segment does not work: `work%2Fvessel` returns 404 against the route table
+below, verified, and widening the converter to `{name:path}` would swallow the
+`/kill`, `/logs` and `/url` sub-routes. `~` is unreserved in RFC 3986, so it
+needs no encoding, and tmux reserves only `.` and `:`, which `sanitize` already
+escapes.
+
+**Qualified even for one root, and that resolves a conflict #119 left open.**
+The ticket asked both that an identifier be stable, never changing because
+another root was added, and whether a single root should stay unqualified.
+Those cannot both hold: if one root gives `vessel` and adding a second makes it
+`work~vessel`, the identifier changed for the reason stability forbids.
+Stability wins, because the alternative breaks every saved link on a
+configuration edit, which is the failure a phone first tool can least afford.
+The cost is a one time migration, and it is taken at 0.1.0, published on
+2026-09-04 with no installed base, which is the cheapest this will ever be.
+
+**The three options that lost.**
+
+- **A root segment in the path**, `/api/roots/{root}/sessions/{name}`. Explicit
+  and needs no separator, and rejected because it changes the shape of every
+  route, the SSE payloads and the client at once, for a distinction the
+  qualified name already carries in one segment.
+- **Bare names with duplicates refused at startup.** Cheapest, changes nothing
+  on the wire, and rejected because `~/work/api` alongside `~/personal/api` is
+  an ordinary arrangement rather than a corner case, and the refusal arrives at
+  a restart rather than when the colliding folder was created. A feature that
+  refuses the common shape of the problem it solves is not the feature.
+- **A hash or shortened qualified name.** Rejected in #119 before it was
+  proposed, on the `sanitize` precedent.
+
+**What follows from the answer, decided here so it is not re-litigated.**
+
+- **Overlapping roots are refused at startup, naming both.** `--root a=~/dev`
+  with `--root b=~/dev/client` makes one directory reachable under two
+  identifiers, which breaks injectivity from the filesystem side rather than
+  the naming side.
+- **`--self-project` takes a qualified identifier.** It names one folder in one
+  root, and a bare name would be ambiguous exactly where being wrong is worst.
+- **The interface shows the root**, or two identically named rows are
+  indistinguishable to the person tapping Stop. The folder is the row's name
+  and the label is a badge beside it, so the qualified form is not spelled out
+  in the interface even though it is what the API uses.
+
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/` | the single page |
