@@ -367,29 +367,38 @@ find them.
 repository, and the security section is the first thing a reader meets after
 learning what the tool does.
 
-**#106 blocks this phase and nothing else can start it.** The pre scrub commits
-are still served by the GitHub API until its garbage collection runs, so
-publishing reopens a leak that is currently closed by the repository being
-quiet.
-
 **Plan: [`superpowers/plans/2026-09-04-hitchrail-phase-8-release.md`](superpowers/plans/2026-09-04-hitchrail-phase-8-release.md)**
 Started 2026-09-04. Six tasks, 24 to 29.
 
-Tickets: #17, #58, #59, #60, #61, #62, #105, #106, #110, #116.
+Tickets: #58, #59, #60, #61, #62, #105, #110, #116, #117.
 
-**#116 was missing and the phase could have closed without it.** The objective
-delivers a PyPI publication and a tagged release, and no ticket owned either:
-the eight it listed were documentation, screenshots, a sponsor link and the
-blocker. Every ticket could have been closed with nothing shipped.
+**#106 was the gate and is closed**, by decision rather than by the objects
+being purged. What it described remains true: the pre-rewrite objects are served
+by SHA until GitHub collects them, nothing references the commit, and the remedy
+is a Support request, which has been sent. The owner accepted the residual
+exposure rather than hold the phase for it, and the reasoning is on the ticket.
+The plan records it as a risk accepted rather than a problem solved. One part of
+it survives as a live requirement: a screenshot or fixture carrying a real
+project name would be the same failure through a door this phase opens itself.
 
-**#106 is still open and the repository is public.** Re-verified 2026-09-04: the
-pre-rewrite blob is served by SHA and 40 of 45 private names are readable in it.
-Nothing references that commit, so what is left is GitHub's retention of an
-unreferenced object and the remedy is a Support request the owner files. The
-owner has decided to leave the repository public meanwhile, recorded on the
-ticket. It gates task 29 alone, because publishing copies content to an index
-that never forgets; the documentation tasks change files in a repository that is
-already public.
+**Two deliverables had no ticket, and both were found the same way**, by reading
+the exit criteria against the ticket list rather than the list against itself.
+
+#116: the objective delivers a PyPI publication and a tagged release, and the
+eight tickets on the milestone were documentation, screenshots, a funding link
+and the blocker. Every one could have closed with nothing shipped.
+
+#117: "the security section is the first thing a reader meets" was owned by
+nobody, and the plan's task 27 read "README assembly", a task line standing in
+for a ticket that did not exist.
+
+**Twice in one phase is a pattern rather than an oversight.** A ticket based
+check cannot see a criterion nobody ticketed, which is an argument for reading
+the two lists against each other whenever a phase starts.
+
+Also on review: #110 and #116 swapped, because #110's own dependencies name the
+publish and it had been scheduled first, and #17 moved to Backlog, because a
+funding link serves none of install, understand or report.
 
 ## Phase 9: The truth on a shared machine
 

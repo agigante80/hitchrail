@@ -51,22 +51,29 @@ The `src/` layout and `web/` living inside the package, both chosen in design
 section 9.2 for exactly this, hold up. **The packaging problem for this phase is
 publishing, not building.**
 
-## The blocker, and exactly what it blocks
+## The exposure this phase was gated on, and why it no longer gates it
 
-**#106 is not resolved and the repository is public.** Re-verified 2026-09-04:
-the pre-rewrite blob is still served by SHA and 40 of 45 private names are
-readable in it. Nothing references that commit, so what remains is GitHub's
-retention of an unreferenced object, and the documented remedy is a Support
-request the owner must file.
+**#106 is closed, by decision, and nothing in this phase waits on it.** Written
+here rather than deleted, because the plan was drafted around it and a reader
+who finds the closed ticket deserves to know the gate was lifted deliberately.
 
-**The owner has decided to leave the repository public while Support is asked**,
-and that decision is recorded on #106 rather than left implicit.
+What it described is still true. The pre-rewrite objects are served by SHA until
+the host collects them, and 40 of 45 private names were readable in one of them
+on 2026-09-04. Nothing references that commit, so the remedy is a support
+request rather than garbage collection, and one has been sent.
 
-It blocks **task 29 only**, the PyPI publish and the tagged release, because
-those copy content to an index that mirrors and never forgets. Every other task
-edits files in a repository that is already public and neither spreads the
-unreferenced objects nor makes them easier to find. **Do not reorder task 29
-earlier to "get the phase moving".**
+The owner decided not to wait. **That is a risk accepted, not a problem solved**,
+and the reasoning is on the ticket. Publishing does not copy git history to an
+index, so the publish does not spread those objects; it raises the project's
+profile, which raises the chance somebody looks.
+
+The plan's original exit criterion, that the API call return 404 before anything
+is published, is therefore **withdrawn rather than left unsatisfiable**. A plan
+that cannot be finished is worse than one that states its risk.
+
+**What this does not change:** screenshots and fixtures still must not carry a
+real project name. That is #106's failure through a different door and it is a
+requirement of task 26, not of this section.
 
 ## Phase 8 tickets, in dependency order
 
@@ -75,11 +82,26 @@ earlier to "get the phase moving".**
 | 24 | #59, #61, #60 | the "report a hole" half of the objective, and nothing depends on it |
 | 25 | #58, #62 | two documents that are wrong about the code today |
 | 26 | #105 | screenshots, which the README then uses |
-| 27 | #17, README assembly | needs 24 to 26 to link to |
-| 28 | #110 | the unit and the phone access document; needs the README shape from 27 |
-| 29 | #116 | the publish. **Gated on #106.** |
+| 27 | #117 | the README's order, which is an exit criterion. Needs 24 to 26 to link to |
+| 28 | #116 | the publish |
+| 29 | #110 | the unit and the phone access document, which needs the publish to be real |
 
-#106 itself is owner action and appears in no task.
+**Two corrections on 2026-09-04, both found by reading the exit criteria against
+the ticket list rather than the list against itself.**
+
+#117 was filed because "the security section is the first thing a reader meets"
+was owned by no ticket. Task 27 previously read "README assembly", which is a
+task line standing in for a ticket that did not exist. That is the same gap that
+produced #116, twice in one phase, and it is worth naming as a pattern: an exit
+criterion nobody ticketed is invisible to every ticket based check.
+
+**#110 and #116 are swapped.** #110's own Depends On names "the PyPI publish,
+for `uv tool install` to be a real instruction", which was scheduled after it.
+It is the only ticket here that depends on another in the same phase.
+
+#17, the funding link, moved to Backlog. The objective is install, understand,
+report; a sponsor button is none of them, and it was in the phase because it
+touches the README rather than because it serves the goal.
 
 ---
 
@@ -153,22 +175,46 @@ and check that every command in it runs. A rule nobody can execute is prose.
 
 ---
 
-### Task 27: The README a stranger can follow
+### Task 27: The README tells you the cost before the instructions
 
-**Ticket:** #17, plus assembly
+**Ticket:** #117
 
-- [ ] The objective says the security section comes **first, after learning what
-      the tool does**. Reorder to match: what it is, what it costs you to run
-      it, then how to run it.
-- [ ] Fold in the screenshots from task 26 and link the documents from task 24.
-- [ ] #17, the Sponsors link, last, because it is the least load bearing thing
-      in the file and it is where it will read as least important.
-- [ ] The Install section currently says "Not yet". It stays wrong until task 29
-      and must be corrected in the same change that makes it true, never before.
+- [ ] Move the security material above `## Run it`, directly after `## What it
+      will do`. The objective says the security section comes first, after
+      learning what the tool does, and the file currently puts install, run and
+      contribution notes ahead of it.
+- [ ] **Do not soften it while moving it.** Four claims are stated plainly
+      today: no sandboxing, the token buys keystrokes into agents, a detached
+      agent cannot be ended, cleartext on plain HTTP. A section promoted to the
+      top is one somebody will later want to make friendlier.
+- [ ] Link `SECURITY.md` from it, once task 24 has written it.
+- [ ] Fold in the screenshots from task 26 where they help, which is
+      `## What it will do` rather than here.
+- [ ] Two guards in `tests/test_docs_are_true.py`: the security heading precedes
+      `## Run it` positionally, and each of the four claims is still present.
+      Verify both by mutation, per #35.
+- [ ] The Install section says "Not yet". It stays wrong until task 28 and is
+      corrected in the same change that makes it true.
 
----
+### Task 28: The publish
 
-### Task 28: It dies when you close the terminal
+**Ticket:** #116
+
+- [ ] Trusted publishing via OIDC, no stored credential. `id-token: write` and
+      nothing else.
+- [ ] Triggered by a published GitHub release, never by a tag push.
+- [ ] A `release` environment with the owner as a required reviewer.
+- [ ] **TestPyPI first**, installed from that index into a clean container. A
+      version number on PyPI cannot be reused, so the first real upload must not
+      be the first install from an index.
+- [ ] `test_no_workflow_holds_a_publish_password`, because the argument above is
+      worth a guard.
+- [ ] **No longer gated on #106**, which was closed by decision. The section
+      above says what that accepts. What still holds is narrower and belongs in
+      the release notes: this is a first publication, and the two breaking
+      changes from Phase 7, #108 and #115, are what an operator needs told.
+
+### Task 29: It dies when you close the terminal
 
 **Ticket:** #110
 
@@ -183,26 +229,11 @@ and check that every command in it runs. A rule nobody can execute is prose.
       therefore a stable secret in a persistent log. Decide it with the unit in
       hand and write the answer down.
 - [ ] `uv tool install`, not `uvx`, and say why: `uvx` is deliberately
-      ephemeral and a unit needs a stable path. That instruction is only true
-      after task 29.
+      ephemeral and a unit needs a stable path. **This is why the task moved
+      after the publish**: the instruction is not true until task 28 lands, and
+      the earlier ordering had this written before the thing it names existed.
 
 ---
-
-### Task 29: The publish. Gated on #106
-
-**Ticket:** #116
-
-- [ ] Trusted publishing via OIDC, no stored credential. `id-token: write` and
-      nothing else.
-- [ ] Triggered by a published GitHub release, never by a tag push.
-- [ ] A `release` environment with the owner as a required reviewer.
-- [ ] **TestPyPI first**, installed from that index into a clean container. A
-      version number on PyPI cannot be reused, so the first real upload must not
-      be the first install from an index.
-- [ ] `test_no_workflow_holds_a_publish_password`, because the argument above is
-      worth a guard.
-- [ ] **Confirm #106 first**, by the API call in that ticket returning 404. Not
-      by the ticket being closed: check the thing itself.
 
 ---
 
@@ -225,7 +256,13 @@ Ticked only with evidence, per the roadmap's own rule.
 - [ ] Hitchrail survives closing the terminal, and the link on a phone survives
       a restart.
 - [ ] No workflow holds a publish credential, asserted.
-- [ ] **#106 returns 404 before anything is published.**
+- [ ] The first release notes name #108 and #115 as breaking, and the level.
+
+**Withdrawn: "#106 returns 404 before anything is published."** It was closed by
+decision rather than by the objects being purged, so this criterion could never
+have been met and the phase could never have finished. The exposure it named is
+recorded above as accepted. Screenshots and fixtures still must not carry a real
+project name, and that is task 26's requirement rather than this one's.
 
 ## What would make this phase a failure
 
@@ -234,8 +271,9 @@ Phases 1 to 7 could be wrong in private. This one is the first that is wrong in
 public, and two of its steps cannot be taken back: a published version and a
 name on an index.
 
-- Publishing before #106 returns 404.
 - A README that reads as marketing. The tool spawns agents with permissions
   skipped; the honest description of that IS the pitch.
 - A `SECURITY.md` that promises a response time nobody will meet.
-- Screenshots containing a real project name.
+- Screenshots containing a real project name. This is the one part of #106 that
+  survives its closure, because a screenshot is content this phase creates
+  rather than history it inherits.
