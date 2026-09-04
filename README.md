@@ -240,6 +240,7 @@ survive.
 | [`SECURITY.md`](SECURITY.md) | what is in scope, and where to report it privately |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | how a change is expected to arrive |
 | [`CHANGELOG.md`](CHANGELOG.md) | what upgrading costs you |
+| [`docs/releasing.md`](docs/releasing.md) | how a release is cut and published |
 | [`AGENTS.md`](AGENTS.md) | the architecture and the non negotiables |
 
 ## Not affiliated with Anthropic

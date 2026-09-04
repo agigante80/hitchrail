@@ -107,6 +107,11 @@ finished outcome for a finding, not a failure to fix it.
 Work on `main`. Conventional commit subjects. Say what changed and why it was
 not the obvious alternative; the diff already says what.
 
+## Releasing
+
+[`docs/releasing.md`](docs/releasing.md) is the process, including the two
+steps only the project owner can do.
+
 ## Security
 
 Do not open a public issue for a vulnerability. [`SECURITY.md`](SECURITY.md)

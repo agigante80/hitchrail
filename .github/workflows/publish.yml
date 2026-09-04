@@ -1,0 +1,109 @@
+# Publish to PyPI, with no credential stored anywhere.
+#
+# **Third party actions are pinned to a commit SHA, and the trailing `# vX.Y.Z`
+# is documentation.** A tag is a mutable pointer: whoever controls the action
+# repository can move it, and the code it lands on runs here. The SHA is the
+# contract, the comment is only there so a human can read what version it is,
+# and the two can disagree if somebody edits one. Resolve a new one with
+# `gh api repos/<owner>/<repo>/commits/<tag> --jq .sha`. See #4.
+#
+# **Trusted publishing, never an API token.** A token is long lived, so whoever
+# steals it can publish until somebody notices and revokes it. This exchanges a
+# GitHub OIDC identity for one that expires within fifteen minutes, and PyPI
+# signs Sigstore attestations for the artefacts as a side effect. #4 pinned
+# every action in anticipation of a workflow holding a publish credential, and
+# this one holds none. See #116.
+#
+# **Before the first run**, the trusted publisher has to be configured on PyPI
+# by the project owner, naming this repository, this workflow FILENAME and the
+# environment below. That is a web form and cannot be done from here.
+name: publish
+
+on:
+  release:
+    types: [published]
+  # The rehearsal. A version number on PyPI cannot be reused, so the first real
+  # upload must not be the first time the artefact has been installed from an
+  # index. Run this against TestPyPI by hand first.
+  workflow_dispatch:
+    inputs:
+      index:
+        description: which index to publish to
+        type: choice
+        options: [testpypi, pypi]
+        default: testpypi
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+
+      # The five gates are not re-run. They ran on the commit being released,
+      # and a release cut from a red commit is a process failure rather than
+      # something to catch here. What IS checked is that the artefact builds
+      # from a clean checkout, which is the thing a developer's machine hides.
+      - run: uv build
+
+      # The wheel must carry web/, or the installed package serves no
+      # interface. Invisible until somebody installs it, and unfixable
+      # afterwards: a version number on PyPI cannot be reused, only yanked.
+      - name: the wheel carries its interface
+        run: |
+          python3 - <<'PY'
+          import glob, zipfile, sys
+          names = zipfile.ZipFile(glob.glob("dist/*.whl")[0]).namelist()
+          needed = [
+              "hitchrail/web/index.html",
+              "hitchrail/web/grant.html",
+              "hitchrail/web/app.js",
+              "hitchrail/web/app.css",
+          ]
+          missing = [n for n in needed if n not in names]
+          fonts = [n for n in names if n.startswith("hitchrail/web/fonts/")]
+          if missing:
+              sys.exit(f"the wheel is missing {missing}")
+          if not fonts:
+              sys.exit("the wheel carries no font faces, so the page falls back")
+          print(f"ok: {len(names)} files, {len(fonts)} font faces")
+          PY
+
+      # It has to RUN, not merely build. A clean interpreter with only the
+      # three runtime dependencies is the closest this can get to the machine
+      # that has never seen this repository.
+      - name: the wheel installs and runs
+        run: |
+          python3 -m venv /tmp/probe
+          /tmp/probe/bin/pip install --quiet dist/*.whl
+          /tmp/probe/bin/hitchrail --version
+          /tmp/probe/bin/python -c "from hitchrail import pages; assert pages.WEB.is_dir()"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v7.0.1
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    # A human clicks. The environment is where a required reviewer is
+    # configured, so a compromised workflow cannot publish on its own.
+    environment: release
+    permissions:
+      # The only elevated permission in this file, and the reason there is no
+      # secret in it. Nothing here needs contents: write.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v8.0.1
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2
+        with:
+          # No username and no password: their absence is what selects trusted
+          # publishing. Adding either would turn this into a token workflow.
+          repository-url: ${{ (github.event_name == 'release' || inputs.index == 'pypi') && 'https://upload.pypi.org/legacy/' || 'https://test.pypi.org/legacy/' }}

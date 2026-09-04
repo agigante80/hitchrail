@@ -29,6 +29,30 @@ _USES = re.compile(r"^\s*-?\s*uses:\s*(?P<action>[^\s#]+)", re.M)
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
+def _without_comments(workflow: Path) -> str:
+    """The configuration, with the prose stripped out.
+
+    **Both checks below failed on their own explanations first.** The workflow
+    comments say "No username and no password: their absence is what selects
+    trusted publishing" and "Nothing here needs contents: write", so a plain
+    substring search found the very strings the comments exist to forbid.
+
+    That is the second time in this repository: the screenshot guard failed on
+    a docstring naming the fixture it forbids. The lesson is worth writing
+    down rather than fixing twice more. A guard that reads prose as
+    configuration cannot tell a use from a warning about that use, and the
+    warning is exactly what a careful author writes.
+    """
+    kept = []
+    for line in workflow.read_text().splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        # A trailing comment, which is where the version pins live.
+        head, sep, _ = line.partition("  #")
+        kept.append(head if sep else line)
+    return "\n".join(kept)
+
+
 def test_there_are_workflows_to_check() -> None:
     """Guard the guard. A renamed directory would make every test below vacuous
     by iterating an empty list, which is the failure this project has already
@@ -67,4 +91,44 @@ def test_every_pinned_action_says_which_version_it_is(workflow: Path) -> None:
     ]
     assert not undocumented, (
         f"{workflow.name} pins an action with no `# vX.Y.Z` comment: {undocumented}"
+    )
+
+
+def test_no_workflow_holds_a_publish_credential() -> None:
+    """#116's whole argument, asserted where somebody would undo it.
+
+    Trusted publishing works by the ABSENCE of a username and password: the
+    action falls back to OIDC when neither is given. That makes the safe
+    configuration invisible, and the unsafe one a two line addition that looks
+    like a fix when a publish fails.
+
+    A long lived PyPI token in a repository secret would be the largest thing
+    in this project's threat model, in a repository whose CI is deliberately
+    `contents: read` so a stolen workflow token buys nothing.
+    """
+    offences = []
+    for workflow in WORKFLOWS:
+        text = _without_comments(workflow)
+        for marker in ("password:", "PYPI_API_TOKEN", "TWINE_PASSWORD"):
+            if marker in text:
+                offences.append(f"{workflow.name} contains {marker!r}")
+    assert not offences, (
+        "\n  ".join(["a workflow holds a publish credential:", *offences])
+        + "\n  Trusted publishing needs no secret. See #116."
+    )
+
+
+def test_the_publishing_job_asks_for_no_more_than_it_needs() -> None:
+    """`id-token: write` is the one elevated permission, and `contents: write`
+    would let a compromised action rewrite the repository it publishes from."""
+    publish = next((w for w in WORKFLOWS if w.name == "publish.yml"), None)
+    if publish is None:
+        pytest.skip("no publish workflow yet")
+    text = _without_comments(publish)
+    assert "id-token: write" in text, "trusted publishing needs id-token: write"
+    assert "contents: write" not in text, (
+        "the publish workflow asks for contents: write, which it does not need"
+    )
+    assert "environment:" in text, (
+        "the publish job has no environment, so nothing gates it on a human"
     )
