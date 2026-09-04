@@ -90,8 +90,12 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
-    # A human clicks. The environment is where a required reviewer is
-    # configured, so a compromised workflow cannot publish on its own.
+    # **Required, and not for the reason it looks like.** PyPI's trusted
+    # publisher names this environment, so the OIDC claim must carry it and a
+    # publish fails without it. It is not currently a gate: the required
+    # reviewer was removed deliberately, because on a single maintainer
+    # repository it asked the same person who just published the release to
+    # approve it again. See docs/releasing.md, which says when to put it back.
     environment: release
     permissions:
       # The only elevated permission in this file, and the reason there is no

@@ -56,10 +56,32 @@ which is an argument for doing the rehearsal sooner rather than tidily.
 
 Do the same on TestPyPI, for the rehearsal below.
 
-**2. Create the `release` environment** in the repository settings, with
-yourself as a required reviewer. That is what makes a publish need a human
-click rather than only a workflow run. Without it the workflow still works and
-nothing gates it.
+**2. Create the `release` environment** in the repository settings.
+
+**It must exist, and it must be named `release`.** PyPI's trusted publisher
+above names it, so the OIDC claim has to carry it. Deleting the environment
+does not merely remove a gate: it makes every publish fail.
+
+**It carries no required reviewer, and that is a decision rather than an
+oversight.** It had one briefly. The reasoning for removing it: `publish.yml`
+runs only on a published GitHub release or a manual dispatch, both of which
+already need repository permissions, so on a single maintainer repository the
+reviewer asks the same person who just clicked "publish release" to click again
+one screen later. Anyone able to trigger a publish here can also approve it, so
+the gate stopped a threat that does not exist while adding a step to every
+release.
+
+**Put it back the moment a second person gets write access.** Then the control
+becomes real: a collaborator with write but not admin, or an Action that can
+trigger a workflow but not approve a deployment, is exactly what a required
+reviewer stops. What survives without it is the part that was always doing the
+work: trusted publishing with no stored credential, and every third party action
+pinned to a SHA.
+
+**Do not remove a reviewer while a deployment is waiting on it.** GitHub fails
+the pending deployment rather than releasing it, and the run reports a failed
+`publish` job with zero steps and no log, which reads like a broken pipeline and
+is not one. Re-run the workflow.
 
 **Why no API token.** A token is long lived, so whoever steals it can publish
 until somebody notices and revokes it. Trusted publishing exchanges a GitHub
@@ -78,14 +100,25 @@ index.
 2. Install from TestPyPI into a clean machine or container and run it:
 
    ```sh
-   uv venv /tmp/probe && /tmp/probe/bin/pip install \
+   uv venv /tmp/probe
+   uv pip install --python /tmp/probe/bin/python \
      --index-url https://test.pypi.org/simple/ \
      --extra-index-url https://pypi.org/simple/ hitchrail
    /tmp/probe/bin/hitchrail --version
+   /tmp/probe/bin/python -c "from hitchrail import pages; print(sorted(p.name for p in pages.WEB.iterdir()))"
    ```
 
    The extra index is needed because the three runtime dependencies live on
    real PyPI, not on TestPyPI.
+
+   **`uv pip install --python`, not `/tmp/probe/bin/pip`.** `uv venv` creates an
+   environment with no `pip` in it, so the obvious form of this command fails
+   with "No such file or directory" on the one step whose whole job is proving
+   an install works. Found by running it: this document had the broken form
+   through the first rehearsal.
+
+   The last line is the check worth keeping. `--version` passes on a wheel whose
+   `web/` is missing, and the interface 404s only once somebody opens the page.
 
 3. Record the transcript on #116.
 
