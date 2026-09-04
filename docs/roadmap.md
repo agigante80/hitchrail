@@ -372,7 +372,24 @@ are still served by the GitHub API until its garbage collection runs, so
 publishing reopens a leak that is currently closed by the repository being
 quiet.
 
-Tickets: #106, #59, #60, #61, #62, #58, #105, #17.
+**Plan: [`superpowers/plans/2026-09-04-hitchrail-phase-8-release.md`](superpowers/plans/2026-09-04-hitchrail-phase-8-release.md)**
+Started 2026-09-04. Six tasks, 24 to 29.
+
+Tickets: #17, #58, #59, #60, #61, #62, #105, #106, #110, #116.
+
+**#116 was missing and the phase could have closed without it.** The objective
+delivers a PyPI publication and a tagged release, and no ticket owned either:
+the eight it listed were documentation, screenshots, a sponsor link and the
+blocker. Every ticket could have been closed with nothing shipped.
+
+**#106 is still open and the repository is public.** Re-verified 2026-09-04: the
+pre-rewrite blob is served by SHA and 40 of 45 private names are readable in it.
+Nothing references that commit, so what is left is GitHub's retention of an
+unreferenced object and the remedy is a Support request the owner files. The
+owner has decided to leave the repository public meanwhile, recorded on the
+ticket. It gates task 29 alone, because publishing copies content to an index
+that never forgets; the documentation tasks change files in a repository that is
+already public.
 
 ## Phase 9: The truth on a shared machine
 
