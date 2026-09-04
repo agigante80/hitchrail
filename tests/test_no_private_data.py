@@ -88,6 +88,16 @@ _ALLOWED_ROOT = frozenset(
         "code",
         "src",
         "work",
+        # Added when Phase 12's roadmap entry needed a contrasting pair and
+        # `~/work` plus `~/personal` is the natural one. Recorded rather than
+        # slipped in, because an allowlist erodes one convenient word at a
+        # time and the guard's whole value is that adding to it is a decision.
+        #
+        # It does NOT re-admit the scheme that prompted this test. Matching is
+        # whole segment, so a compound directory name containing this word is
+        # still refused; only the bare word passes, and the bare word names
+        # nobody.
+        "personal",
         "<root>",
     }
 )
