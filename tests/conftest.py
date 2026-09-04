@@ -47,6 +47,23 @@ def no_real_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPa
     )
 
 
+@pytest.fixture(autouse=True)
+def no_ambient_journal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The suite must not care whether the developer runs it under systemd.
+
+    #110 made `banner()` degrade when `JOURNAL_STREAM` is set, which systemd
+    puts in the environment of any service whose stdout it connected to the
+    journal. That variable is inherited, so a shell started from a user unit
+    has it, and three banner tests written years before #110 went red on a
+    machine where nothing about them had changed.
+
+    This is the same rule as `no_real_network` above and the same rule the
+    tiers already follow: the fixtures describe an EMPTY machine, and a test
+    that wants the journal case sets the variable itself.
+    """
+    monkeypatch.delenv("JOURNAL_STREAM", raising=False)
+
+
 # -- Phase 4 fakes ---------------------------------------------------------
 #
 # Every external surface the engine touches, faked behind the seams the

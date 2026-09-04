@@ -20,9 +20,13 @@ in a document.**
 from __future__ import annotations
 
 import re
+import shlex
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+
+from hitchrail.cli import parse_args
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src" / "hitchrail"
@@ -535,3 +539,120 @@ def test_the_readme_still_states_every_limitation() -> None:
         "the README no longer states: " + ", ".join(missing) + ". These are the "
         "limitations SECURITY.md repeats, so dropping one here makes two files wrong."
     )
+
+
+# -- #110: the unit template and the phone access document ------------------
+#
+# Both deliverables are text that instructs an operator, and text that
+# instructs an operator rots exactly like the prose above it. A unit naming a
+# flag the CLI removed is a broken install, and the wildcard sentence is the
+# one that must never drift back in.
+
+UNIT = ROOT / "packaging" / "hitchrail.service"
+PHONE_DOC = ROOT / "docs" / "guides" / "phone-access.md"
+
+# The three route headings, best first. Matched as headings rather than as
+# prose so a rewording of the body cannot silently reorder the argument.
+_OVERLAY_HEADING = "## 1. An overlay network"
+_NAMED_HEADING = "## 2. A named LAN address"
+_NEVER_HEADING = "## 3. Never the wildcard"
+
+
+def _lines_with_offsets(text: str) -> Iterator[tuple[int, str]]:
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        yield offset, line
+        offset += len(line)
+
+
+def _exec_start_argv() -> list[str]:
+    """The ExecStart line, as the argument list systemd will run.
+
+    `%h` and friends are systemd specifiers it expands at start. They survive
+    `shlex.split` as ordinary characters, and `--root` takes any path, so the
+    parser sees a value it accepts without this test needing to know what the
+    operator's home is.
+    """
+    line = next(
+        raw.split("=", 1)[1]
+        for raw in UNIT.read_text().splitlines()
+        if raw.startswith("ExecStart=")
+    )
+    return shlex.split(line)
+
+
+def test_the_unit_template_names_flags_the_cli_accepts() -> None:
+    """A unit documenting a flag the CLI removed is a broken install, and it
+    fails at boot on a machine nobody is watching, which is the whole posture
+    this ticket introduces.
+
+    The argv is fed to the real parser rather than compared against a list of
+    flag names. A name check passes when a flag stops taking a value.
+    """
+    argv = _exec_start_argv()
+    assert argv, "the unit template has no ExecStart"
+    assert Path(argv[0]).name == "hitchrail", (
+        f"ExecStart runs {argv[0]!r}, which is not hitchrail"
+    )
+    parse_args(argv[1:])  # SystemExit here is the failure
+
+
+def test_the_unit_never_restarts_a_refusal_forever() -> None:
+    """`Restart=always` would turn every Phase 7 config refusal into a boot
+    loop that buries its own message in the journal. The refusals are
+    deliberate stops and must stay stopped."""
+    # Read the DIRECTIVES, not the file. A substring check here matches the
+    # comment above the directive that explains why `always` is wrong, so the
+    # guard fails on its own explanation and the only way to make it pass is
+    # to delete the reasoning. Same trap as the private name hook.
+    directives = [
+        line.strip()
+        for line in UNIT.read_text().splitlines()
+        if line.strip().startswith("Restart=")
+    ]
+    assert directives == ["Restart=on-failure"], directives
+
+
+def test_the_phone_doc_does_not_recommend_a_wildcard_bind() -> None:
+    """The one sentence that must never drift back in.
+
+    A wildcard is allowed to APPEAR: the document's third section is about why
+    not to use it, and a prohibition that cannot name the thing it forbids is
+    useless. What is checked is that every mention sits under the heading that
+    forbids it, which is the same structural read the private name hook needed
+    for the same reason.
+    """
+    text = PHONE_DOC.read_text()
+    forbidding = text.index(_NEVER_HEADING)
+    stray = [
+        line
+        for offset, line in _lines_with_offsets(text)
+        if "0.0.0.0" in line and offset < forbidding
+    ]
+    assert not stray, (
+        "the phone access document mentions a wildcard bind before the section "
+        f"that forbids it: {stray}"
+    )
+
+
+def test_the_phone_doc_leads_with_the_overlay_route() -> None:
+    """Ordered best first, and the order is the argument. A LAN bind stays
+    correct only while the operator stays on a network they trust, and nothing
+    warns them when that stops being true."""
+    text = PHONE_DOC.read_text()
+    overlay = text.index(_OVERLAY_HEADING)
+    named = text.index(_NAMED_HEADING)
+    never = text.index(_NEVER_HEADING)
+    assert overlay < named < never, (
+        "the routes are out of order. Best first is the whole point: a reader "
+        "who stops after the first heading must have stopped on the safe one."
+    )
+
+
+def test_the_phone_doc_requires_both_allowlist_flags_for_a_proxy() -> None:
+    """`--allow-origin`'s help text already names the proxied case, and it is
+    unobvious that both flags are needed. A doc that shows one of them sends
+    the operator to a refusal they will read as a bug."""
+    overlay = PHONE_DOC.read_text().split(_NAMED_HEADING)[0]
+    for flag in ("--allow-host", "--allow-origin"):
+        assert flag in overlay, f"the overlay route does not mention {flag}"

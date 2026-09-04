@@ -71,6 +71,34 @@ will carry rather than a change from something you are running.
 - **`SECURITY.md`**, with private vulnerability reporting enabled, so a hole has
   somewhere to go that is not a public issue.
 
+- **A systemd user unit template**, `packaging/hitchrail.service`, so Hitchrail
+  no longer dies with the terminal. Copy it, edit the paths, and
+  `loginctl enable-linger` to survive logout and reboot.
+
+  **What you must do:** put `HITCHRAIL_TOKEN` in the unit's `EnvironmentFile`
+  and `chmod 600` it. A generated token changes on every restart, so the link
+  saved on your phone dies with each one, and anyone who can read that file can
+  run code as you.
+
+  **Read this before enabling it.** An always on service is a standing exposure
+  rather than a session shaped one. Until now the window in which the API was
+  reachable was the window in which you were sitting at the machine watching
+  it. `docs/guides/phone-access.md` is the new document about who else is in
+  that window, ordered best first: an overlay network such as `tailscale
+  serve`, then a named LAN address, and never the wildcard.
+
+- **The startup banner withholds the token when it is writing to the journal.**
+  Under a systemd unit, standard output is journald: persistent, and readable
+  by root and by members of the `systemd-journal` group. A token printed to a
+  terminal scrolls past while you watch it; the same token in the journal is
+  kept.
+
+  **What changes for you:** running under a unit, the banner now prints the
+  address without the `#token=` fragment and names `HITCHRAIL_TOKEN` as the
+  half you append yourself. Nothing changes in a terminal. If you are running
+  as a service with a generated token, it says so, because that is wrong twice
+  over: a secret in a permanent log, and a link that dies on every restart.
+
 ### Fixed
 
 - A `detached` agent is no longer offered a control that did nothing. The row

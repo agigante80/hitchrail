@@ -22,6 +22,19 @@ Two ordering rules decide what goes where:
    not notice until review that `EventSource` cannot send an `Authorization`
    header.
 
+<!--
+Every closed phase carries a `**Status: done**` line directly under its
+heading, with the closing date and the issues. Three phases had their milestone
+closed and every issue closed while saying nothing here at all, because the
+file was using three conventions at once: a status line on 0 and 1, a `(done)`
+suffix on 4, 5 and 6, and nothing on 2, 3 and 7.
+
+The suffix is kept where it is rather than churned, because
+`test_the_roadmap_marks_a_phase_done_only_when_its_plan_is_finished` reads it.
+A new phase gets the status line. AGENTS.md says this file is the one place
+that says what is built, and for three phases it was not saying.
+-->
+
 ## Phase 0: Design
 
 **Status: done.**
@@ -81,6 +94,8 @@ per entry point validation, which is the shape all three rounds kept
 rediscovering.
 
 ## Phase 2: The security boundary
+
+**Status: done**, closed 2026-08-25. Issues #6, #8, #9, #13, #14, #15 and #16.
 
 **Plan: [`superpowers/plans/2026-08-25-hitchrail-phase-2-security.md`](superpowers/plans/2026-08-25-hitchrail-phase-2-security.md)**
 
@@ -156,6 +171,9 @@ for the root dot done on both sides, #20 for the access log leak on the paths
 the grant fix does not reach. A ticket is a finished outcome for a finding.
 
 ## Phase 3: The adapters
+
+**Status: done**, closed 2026-08-26. Issues #11, #18, #19, #22, #23, #24,
+#25, #26, #27, #29 and #31.
 
 **Plan: [`superpowers/plans/2026-08-25-hitchrail-phase-3-adapters.md`](superpowers/plans/2026-08-25-hitchrail-phase-3-adapters.md)**
 
@@ -276,6 +294,9 @@ the layout holding at a phone viewport. That was #38.
 
 ## Phase 7: The security argument holds
 
+**Status: done**, closed 2026-09-03. Issues #4, #35, #77, #79, #80, #91,
+#108, #109, #111, #112 and #115.
+
 **Objective: everything the design promises about safety is true and asserted,
 before anything is published.**
 
@@ -366,6 +387,18 @@ find them.
 **Done when:** `uvx hitchrail` works on a machine that has never seen this
 repository, and the security section is the first thing a reader meets after
 learning what the tool does.
+
+**And two more, added by #110** rather than left implicit in "install and
+understand". A tool whose point is reaching agents from a phone is not
+installable in any useful sense while the only documented way to run it is a
+foreground shell:
+
+- `packaging/hitchrail.service` exists as a user unit template, its flags are
+  asserted against the real CLI parser, and it is documented as a file to edit
+  rather than to install blindly.
+- `docs/guides/phone-access.md` exists, ordered overlay first, named address
+  second, wildcard never, each with its exposure stated rather than only its
+  instruction.
 
 **Plan: [`superpowers/plans/2026-09-04-hitchrail-phase-8-release.md`](superpowers/plans/2026-09-04-hitchrail-phase-8-release.md)**
 Started 2026-09-04. Six tasks, 24 to 29.

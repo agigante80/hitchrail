@@ -158,8 +158,17 @@ recognises the tmux sessions it started itself, so starting a project that
 already has a session from another tool gives you a second agent in the same
 directory.
 
-On loopback that is all. To open it from your phone, bind to the machine's LAN
-address and it prints a link to tap:
+On loopback that is all.
+
+To open it from your phone you have to decide how the phone reaches it, and
+there are three answers with an order to them. **[`docs/guides/phone-access.md`](docs/guides/phone-access.md)
+is that decision**, best first: an overlay network such as `tailscale serve`,
+which needs no inbound port and survives the machine changing networks; a named
+LAN address; and never the wildcard. The default is loopback, so the safe thing
+is what happens when you pass nothing.
+
+The middle route is the one with no prerequisites, and it is the one shown
+here. Bind to the machine's LAN address and it prints a link to tap:
 
 ```sh
 uv run hitchrail --root ~/projects --host 192.168.1.10
@@ -200,6 +209,31 @@ It is also what makes a long running Hitchrail usable: a generated token
 changes on every start, so a service that restarts invalidates the link saved
 on your phone. A token from the environment survives.
 
+### Keeping it running
+
+Hitchrail dies when you close the terminal, and a phone is useful precisely
+when you are not at the machine. `packaging/hitchrail.service` is a systemd
+**user** unit template: copy it, edit the paths, and it survives logout and
+reboot.
+
+```sh
+cp packaging/hitchrail.service ~/.config/systemd/user/
+systemctl --user enable --now hitchrail
+loginctl enable-linger "$USER"
+```
+
+A user unit rather than a system one, because Hitchrail spawns agents as you
+and a `User=` invites running a shell as root. `Restart=on-failure` rather than
+`always`, because a configuration Hitchrail refuses is a deliberate stop and a
+boot loop would bury the reason. The token must come from the unit's
+`EnvironmentFile` at mode 600: a generated one changes every restart and kills
+the link on your phone, and the banner withholds it from the journal anyway.
+
+**An always on service is a standing exposure rather than a session shaped
+one.** Until now the window in which this was reachable was the window in which
+you were watching it. Read [`docs/guides/phone-access.md`](docs/guides/phone-access.md)
+before enabling it.
+
 ## Install
 
 **Not yet.** `hitchrail` is not on PyPI, so none of these work today. They are
@@ -214,6 +248,12 @@ pipx install hitchrail         # if you already live in pipx
 ```
 
 One word, no hyphen.
+
+**The service route is `uv tool install`, not `uvx`.** `uvx` resolves and runs
+out of a cache it is free to evict, which is what makes it good for trying
+something and wrong for a unit: the systemd unit needs an executable path that
+is still there next month. That is why the template's `ExecStart` names
+`~/.local/bin/hitchrail`.
 
 ## Working on it
 

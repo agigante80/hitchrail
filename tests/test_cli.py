@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from hitchrail import cli
-from hitchrail.cli import banner, build_config, main, parse_args, preflight
+from hitchrail.cli import JOURNAL_ENV, banner, build_config, main, parse_args, preflight
 from hitchrail.config import Config, ConfigError, is_loopback_host
 
 
@@ -497,3 +497,83 @@ def test_the_banner_still_prints_a_generated_token(
     monkeypatch.delenv(ENV_VAR, raising=False)
     text = banner(build_config(parse_args(["--root", str(tmp_path), "--host", "0.0.0.0"])))
     assert any(line.strip().startswith("token:") for line in text.splitlines())
+
+
+# -- #110: the journal question, decided ------------------------------------
+#
+# `banner()` writes the grant link, token and all, to stdout. Under a systemd
+# unit stdout IS journald, so the link lands in a persistent system log
+# readable by root and by every member of `systemd-journal`. That is a
+# different exposure from a line scrolling past in a terminal the operator is
+# sitting at, and it is the one #110 was told to settle rather than leave.
+#
+# **The decision: the banner degrades under a service.** The alternative was to
+# document the exposure and print anyway. It was rejected because the operator
+# running a unit already supplied `HITCHRAIL_TOKEN` themselves, so suppressing
+# the link's fragment costs them nothing they do not already have, while
+# printing it writes a stable secret somewhere new and permanent.
+#
+# systemd sets `JOURNAL_STREAM` in the service environment when it has
+# connected stdout to the journal. That is a documented interface, systemd.exec
+# section "Environment Variables in Spawned Processes", not a guess at a parent
+# process name, and it is false in a terminal.
+
+
+def test_the_banner_keeps_the_token_out_of_the_journal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The whole point. Under a unit, no token value reaches stdout, in the
+    token line or in a link fragment."""
+    monkeypatch.setenv(ENV_VAR, "abc123")
+    monkeypatch.setenv(JOURNAL_ENV, "8:12345")
+    text = banner(build_config(parse_args(["--root", str(tmp_path), "--host", "0.0.0.0"])))
+    assert "abc123" not in text
+    # `/grant#` rather than `#token=`: the claim is that no LINK carries a
+    # fragment. Banning the string outright would also stop the banner naming
+    # the format the operator has to append by hand, which is the next test.
+    assert "/grant#" not in text
+
+
+def test_the_banner_still_names_the_address_under_a_service(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Degrading is not going silent. The operator still needs to know which
+    address to open and that a fragment has to be appended by hand, or the
+    suppression reads as the server having failed to print anything."""
+    monkeypatch.setenv(ENV_VAR, "abc123")
+    monkeypatch.setenv(JOURNAL_ENV, "8:12345")
+    text = banner(
+        build_config(
+            parse_args(
+                ["--root", str(tmp_path), "--host", "0.0.0.0", "--allow-host", "box.lan"]
+            )
+        )
+    )
+    assert "http://box.lan:8787/grant" in text
+    assert ENV_VAR in text, "the operator is not told where to get the missing half"
+
+
+def test_the_banner_tells_a_service_to_supply_a_stable_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A generated token under a unit is doubly wrong: it is a secret in a
+    permanent log, and it changes on every restart, so the link saved on the
+    phone dies with each one. Suppressing it and saying nothing would look like
+    a bug, so the banner names the fix."""
+    monkeypatch.delenv(ENV_VAR, raising=False)
+    monkeypatch.setenv(JOURNAL_ENV, "8:12345")
+    text = banner(build_config(parse_args(["--root", str(tmp_path), "--host", "0.0.0.0"])))
+    assert not any(line.strip().startswith("token:") for line in text.splitlines())
+    assert ENV_VAR in text
+    assert "restart" in text.lower()
+
+
+def test_the_banner_is_unchanged_in_a_terminal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The degradation is keyed on the journal, not on a token being present.
+    Without `JOURNAL_STREAM` nothing about the existing behaviour moves."""
+    monkeypatch.setenv(ENV_VAR, "abc123")
+    monkeypatch.delenv(JOURNAL_ENV, raising=False)
+    text = banner(build_config(parse_args(["--root", str(tmp_path), "--host", "0.0.0.0"])))
+    assert "/grant#token=abc123" in text

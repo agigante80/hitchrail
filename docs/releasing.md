@@ -1,23 +1,58 @@
 # Releasing
 
-Two of these steps can only be done by the project owner in a browser, and they
-are marked. Everything else is automatic.
+The steps under "Once, before the first release" can only be done by the project
+owner in a browser. Everything after that is automatic: the build, the wheel
+checks and the upload all run in CI with no credential stored anywhere.
+
+**No count here.** This line said "two of these steps" and a third was added
+below it in the same edit, which is how a number in prose goes wrong. The
+browser only steps are the ones in that section, and the section is the list.
 
 ## Once, before the first release
 
+**0. A PyPI account, with 2FA and a verified email.** Everything below lives
+inside an account, so there is nothing to configure before one exists. PyPI
+requires two factor authentication on every account and a verified email
+address before you may register a project or upload a file. **TestPyPI is a
+separate site with its own registration and its own 2FA**, so the rehearsal
+below needs a second account rather than the same one.
+
+The PyPI username does not appear anywhere in the configuration. Trusted
+publishing authenticates the GitHub identity, so the account you log in with
+and the `Owner` field below are unrelated and do not have to match.
+
 **1. Configure the trusted publisher on PyPI.** Owner only, and there is no API
-for it. On PyPI, under the project's publishing settings, add a GitHub
-publisher:
+for it.
+
+**It is a PENDING publisher, and it is not where you would look for it.**
+`hitchrail` has never been published, so there is no project on PyPI and
+therefore no project settings page. The form for a name that does not exist yet
+is in the ACCOUNT sidebar, under `Publishing`. It asks for the project name as
+well, which the project scoped form does not. After the first publish the same
+settings move under the project, which is why every walkthrough written by
+somebody who has already shipped describes the other page.
 
 | Field | Value |
 |---|---|
-| Owner | `agigante80` |
+| Project name | `hitchrail` (pending publisher form only) |
+| Owner | `agigante80` (the GitHub owner, not the PyPI username) |
 | Repository | `hitchrail` |
 | Workflow | `publish.yml` |
 | Environment | `release` |
 
 The workflow filename and the environment name are part of the trust, so
 renaming either breaks publishing until PyPI is updated to match.
+
+**Fill in the environment.** PyPI treats it as optional. It is not optional
+here: leaving it blank produces a trust that does not require the `release`
+environment, and the required reviewer on that environment is the only thing
+making a publish need a human click.
+
+**A pending publisher does not reserve the name.** It takes effect when it is
+first used to publish, and until then `hitchrail` remains claimable by anybody.
+The name was free on PyPI on 2026-08-25 and again on 2026-09-04, under
+`hitchrail`, `hitch-rail` and `hitch_rail`. That is a fact with an expiry date,
+which is an argument for doing the rehearsal sooner rather than tidily.
 
 Do the same on TestPyPI, for the rehearsal below.
 

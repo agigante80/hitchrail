@@ -1,0 +1,58 @@
+# Hitchrail as a systemd USER unit. A template to copy and edit, not a file to
+# install blindly: the paths below are almost certainly not yours.
+#
+#   mkdir -p ~/.config/systemd/user ~/.config/hitchrail
+#   cp packaging/hitchrail.service ~/.config/systemd/user/
+#   $EDITOR ~/.config/systemd/user/hitchrail.service     # fix ExecStart
+#   printf 'HITCHRAIL_TOKEN=%s\n' "$(python3 -c 'import secrets;print(secrets.token_urlsafe(24))')" \
+#       > ~/.config/hitchrail/env
+#   chmod 600 ~/.config/hitchrail/env
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now hitchrail
+#   loginctl enable-linger "$USER"
+#
+# `loginctl enable-linger` is what makes this start at boot and survive logout.
+# The unit does not do it, and cannot: it is a change to the machine's login
+# behaviour and belongs to the operator, not to a file they copied.
+#
+# **A USER unit, not a system one.** Hitchrail spawns agents as you, reading
+# your ~/.claude state and your projects. A system unit would want a `User=`
+# and would invite running this as root, and Hitchrail is functionally a shell.
+# A user unit inherits the right identity by construction rather than by a
+# setting somebody can get wrong.
+#
+# Read docs/guides/phone-access.md before changing --host. The default is
+# loopback and that is the safe answer; reaching this from a phone is a
+# question about your network, not about this file.
+
+[Unit]
+Description=Hitchrail
+Documentation=https://github.com/agigante80/hitchrail
+After=network.target
+
+[Service]
+# `uv tool install hitchrail`, not `uvx`. uvx resolves and runs out of a cache
+# it is free to evict, so it is deliberately ephemeral and the path is not
+# stable. A unit needs an executable that is still there next month.
+ExecStart=%h/.local/bin/hitchrail --root %h/projects
+
+# Mode 600, and this is not a style note. This file holds HITCHRAIL_TOKEN, and
+# anyone who can read it can run code on this machine as you. A token in a
+# mode 644 file under ~/.config is the failure the whole arrangement exists to
+# avoid.
+#
+# It must hold a token. A generated one changes on every restart, so the link
+# saved on your phone dies with each one, and the banner says so when it
+# notices it is talking to the journal.
+EnvironmentFile=%h/.config/hitchrail/env
+
+# **on-failure, never always.** Hitchrail refuses to start on a configuration
+# it judges unsafe: no token where one is required, an unreachable root, a
+# host it will not bind. Those refusals are deliberate stops and must stay
+# stopped. `Restart=always` would turn each one into a boot loop that buries
+# its own explanation under a thousand repetitions of itself in the journal.
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

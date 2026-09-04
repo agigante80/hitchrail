@@ -719,6 +719,42 @@ Ruff, mypy and pytest all read `pyproject.toml` natively. Import Linter also
 supports it, via a `[tool.importlinter]` section, which is what keeps a fifth
 dotfile out of the root.
 
+### 9.3 Running unattended, and what that changes
+
+**Added by #110. This is a deliberate departure from an assumption this
+document was written under, recorded here rather than left to drift.**
+
+Everything above describes a session shaped tool: a person starts it, watches
+it, and closes the terminal. That assumption is load bearing in a place it does
+not announce itself. The window in which the API was reachable was the window in
+which somebody was sitting at the machine, and several of the judgements in
+section 5 are more comfortable than they look because of it.
+
+A systemd user unit removes that coupling permanently. `packaging/hitchrail.service`
+is shipped as a template, and the design accepts the change on these terms:
+
+- **A user unit, never a system unit, and never a `--daemon` flag.** Restart,
+  logging, and "is it running" belong to the init system, and reimplementing
+  them inside a three dependency budget would be the worst trade available. A
+  system unit would want a `User=` and would invite running a tool that is
+  functionally a shell as root; a user unit inherits the right identity by
+  construction.
+- **`Restart=on-failure`, never `always`.** Section 5's refusals are deliberate
+  stops. Restarting one forever converts a clear message into a boot loop that
+  buries it.
+- **The banner degrades when it detects the journal.** Under a unit, stdout is
+  journald: persistent, and readable beyond the operator. Section 5.2b's
+  reasoning about the grant fragment assumed a terminal a person is watching,
+  which is exactly the assumption a service breaks. Detection is systemd's
+  documented `JOURNAL_STREAM`, and `cli.py` carries the decision.
+- **The exposure is stated as the first thing an operator reads**, in
+  `docs/guides/phone-access.md`, not as a footnote under an instruction.
+
+What is NOT accepted: this does not reopen the wildcard bind, and it does not
+soften any control in section 5. It changes when the tool is reachable, and
+therefore what the documentation has to say first. It does not change what the
+tool refuses.
+
 ## 10. Testing
 
 Every change ships with the test coverage appropriate to it. Code that
@@ -802,6 +838,7 @@ rewards the wrong behaviour. The gate is review, and the standard is the list in
 |---|---|
 | `bridgeSessionId` changes or disappears | quarantined in `claude_ipc.py`, degrades to `pending` |
 | A user exposes Hitchrail to a hostile network | token forced on non loopback bind, host allowlist always on |
+| An unattended service is reachable on a network the operator did not choose | overlay route documented first in `docs/guides/phone-access.md`; the token withheld from the journal; see 9.3 |
 | Two starts race on the same folder | start lock, and the API is idempotent per folder |
 | A started session dies immediately | reported as `start_died` with the captured output, never as running |
 | Memory exhaustion from one tap per session | RAM guard with a hard floor and a soft confirmation gate |

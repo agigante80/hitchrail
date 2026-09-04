@@ -96,6 +96,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # account on the machine, and `ps` does it for them.
 TOKEN_ENV = "HITCHRAIL_TOKEN"  # noqa: S105  the NAME of a variable, not a secret
 
+# systemd sets this in a spawned service's environment when it has connected
+# that stream to the journal, and it is absent in a terminal. Documented in
+# systemd.exec(5) under "Environment Variables in Spawned Processes", so this
+# is an interface rather than a guess at a parent process name.
+JOURNAL_ENV = "JOURNAL_STREAM"
+
 
 def token_from_env() -> str | None:
     """The token the environment supplies, or None if it supplies none.
@@ -164,17 +170,23 @@ def banner(config: Config) -> str:
         return ""
 
     reachable = [h for h in config.allowed_hosts if not is_wildcard_host(h)]
-    lines = ["", "  Anyone with this token can run code on this machine as you."]
+    # #110, decided with the unit in hand. Under a service stdout IS journald,
+    # so every line here lands in a persistent log readable by root and by the
+    # `systemd-journal` group. A token printed to a terminal scrolls away with
+    # the operator sitting in front of it; one printed here is kept.
+    #
+    # So the banner degrades rather than documenting the exposure and printing
+    # anyway. The cost of degrading is nearly nil: an operator running a unit
+    # supplied `HITCHRAIL_TOKEN` themselves, so withholding it tells them
+    # nothing they do not already know. The cost of printing is a stable secret
+    # written somewhere permanent.
+    in_journal = JOURNAL_ENV in os.environ
     # Only a token the operator does not already have. A generated one is
     # unknowable any other way, so not printing it would make the server
     # unusable; one they put in the environment they can already read.
-    #
-    # This matters under a service, where stdout is journald and the token is
-    # now stable rather than per start: a persistent secret in the system log.
-    # **It is not a fix for that**, and saying so is the point. The links below
-    # still carry the token, so the journal still holds it. What the banner
-    # should do under a unit is #110's decision, taken with the unit in hand.
-    if config.token != token_from_env():
+    generated = config.token != token_from_env()
+    lines = ["", "  Anyone with this token can run code on this machine as you."]
+    if generated and not in_journal:
         lines.insert(1, f"  token: {config.token}")
     lines += ["", "  Open one of these on your phone:"]
     # Percent encoded, because `--token` takes anything non blank while the
@@ -189,11 +201,28 @@ def banner(config: Config) -> str:
     # reverse proxy log, and no `Referer` header. That is why the link is
     # generated here rather than typed: `/grant#token=` is longer to paste and
     # costs nobody anything, which is the argument #21 settled the design on.
+    fragment = "" if in_journal else f"#token={quote(config.token, safe='')}"
     lines += [
-        f"    http://{h}:{config.port}/grant#token={quote(config.token, safe='')}"
+        f"    http://{h}:{config.port}/grant{fragment}"
         for h in reachable
         if h not in {"::1", "[::1]"}
     ]
+    if in_journal:
+        lines += [
+            "",
+            "  The link is incomplete on purpose. Append the fragment carrying",
+            f"  your {TOKEN_ENV} value to open it. It is withheld here because",
+            "  this output is the journal: persistent, and readable by root and",
+            "  by the systemd-journal group.",
+        ]
+        if generated:
+            lines += [
+                "",
+                "  This token was GENERATED, which is the wrong shape for a",
+                "  service: it changes on every restart, so the link saved on",
+                f"  your phone dies with each one. Set {TOKEN_ENV} in the unit's",
+                "  EnvironmentFile, at mode 600.",
+            ]
     lines += [
         "",
         "  The token stays in the browser: everything after the # is never sent",
