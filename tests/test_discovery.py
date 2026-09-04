@@ -27,7 +27,7 @@ from hitchrail.discovery import (
     project_path,
     scan,
 )
-from hitchrail.projectnames import _UNSAFE_TO_DISPLAY, InvalidName
+from hitchrail.projectnames import _UNSAFE_TO_DISPLAY
 
 
 def test_lists_only_directories_case_insensitively(tmp_path: Path) -> None:

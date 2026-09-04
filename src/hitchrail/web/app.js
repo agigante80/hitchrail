@@ -1295,16 +1295,23 @@ async function refresh() {
   if (document.documentElement.getAttribute("data-stream") === "blind") {
     setStreamState(stream && stream.readyState === EventSource.OPEN ? "open" : "down");
   }
-  const root = $("[data-root]");
-  if (root) {
-    root.textContent = result.body.root;
+  // #120: the payload carries a LIST of labelled roots, one root included.
+  // One root still reads as its bare path, because a label the operator never
+  // sees does not earn a line on a phone; several read as their labels, which
+  // is what the badge on each row matches.
+  const roots = result.body.roots ?? [];
+  const rootEl = $("[data-root]");
+  if (rootEl) {
+    rootEl.textContent =
+      roots.length === 1 ? roots[0].path : roots.map((r) => r.label).join(", ");
   }
   // `owed` holds only what arrived after this listing was asked for, so those
   // are newer than it whatever order the two landed in.
   state.projects = result.body.projects.map((p) => owed.get(p.name) ?? p);
   state.unsupported = result.body.unsupported;
   state.unsupportedTotal = result.body.unsupported_total;
-  state.root = result.body.root;
+  state.roots = roots;
+  state.root = roots.length === 1 ? roots[0].path : "";
   state.memory = result.body.memory;
   render();
   return result;

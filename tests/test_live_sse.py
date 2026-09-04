@@ -29,7 +29,13 @@ from conftest import FakeTmux, procs_from
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
 from hitchrail.server import create_app
-from support import make_config
+from support import DEFAULT_LABEL, make_config
+
+
+def proj(folder: str) -> str:
+    """The identifier for a folder in this file's single test root. #119."""
+    return f"{DEFAULT_LABEL}~{folder}"
+
 
 pytestmark = pytest.mark.live
 
@@ -88,7 +94,7 @@ def live(tmp_path: Path) -> Iterator[Fixture]:
     bus = EventBus()
     engine = Engine(
         config=config,
-        tmux=FakeTmux(sessions={"vessel": 500}),
+        tmux=FakeTmux(sessions={proj("vessel"): 500}),
         procs_fn=procs_from(RUNNING_PS),
         meminfo_fn=lambda: PLENTY,
         sleep=lambda _s: None,
@@ -150,9 +156,9 @@ async def test_a_change_arrives_on_the_stream(live: Fixture) -> None:
                 assert r.status_code == 200
                 reader = asyncio.create_task(_events(r, 1))
                 await _await_subscriber(live.bus)
-                live.engine.stop("vessel")
+                live.engine.stop(proj("vessel"))
                 (event,) = await reader
-    assert event["name"] == "vessel"
+    assert event["name"] == proj("vessel")
     assert event["stopping"] is True
     assert event["state"] == "running", "the marker must not change the derived state"
 
@@ -166,9 +172,9 @@ async def test_two_readers_both_receive_the_same_change(live: Fixture) -> None:
                     readers = asyncio.gather(_events(first, 1), _events(second, 1))
                     while live.bus.subscriber_count < 2:
                         await asyncio.sleep(0.01)
-                    live.engine.stop("vessel")
+                    live.engine.stop(proj("vessel"))
                     (a,), (b,) = await readers
-    assert a["name"] == b["name"] == "vessel"
+    assert a["name"] == b["name"] == proj("vessel")
 
 
 async def test_the_subscriber_slot_is_released_when_a_reader_goes_away(
@@ -198,7 +204,7 @@ async def test_the_stream_carries_the_whole_session_shape(live: Fixture) -> None
             async with c.stream("GET", "/api/events", headers=live.headers) as r:
                 reader = asyncio.create_task(_events(r, 1))
                 await _await_subscriber(live.bus)
-                live.engine.stop("vessel")
+                live.engine.stop(proj("vessel"))
                 (event,) = await reader
     assert set(event) == {
         "name",
@@ -235,6 +241,6 @@ async def test_an_idle_stream_survives_its_own_poll_timeout(live: Fixture) -> No
                 # gone round at least once with nothing to send.
                 await asyncio.sleep(1.4)
                 assert live.bus.subscriber_count == 1, "the idle stream dropped"
-                live.engine.stop("vessel")
+                live.engine.stop(proj("vessel"))
                 (event,) = await reader
-    assert event["name"] == "vessel"
+    assert event["name"] == proj("vessel")

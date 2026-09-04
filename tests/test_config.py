@@ -931,7 +931,13 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.
-        "engine.py": 785,
+        # 785 to 792 for #120. The name guard splits a qualified identifier
+        # before validating its folder half, and the comment says why: `~` is
+        # exactly the character the folder allowlist forbids, so validating the
+        # whole identifier read the separator as the thing it protects against
+        # and rejected every real name. That was a live defect, so its reason
+        # stays in the code.
+        "engine.py": 792,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon

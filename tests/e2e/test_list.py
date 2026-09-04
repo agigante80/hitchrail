@@ -20,10 +20,10 @@ async def test_every_derived_state_renders_as_itself(page: Page, server: Harness
     wrong, so it is drawn with its pid and never silently reconciled."""
     server.seed(running=["vessel"], stopped=["koala"])
     await page.goto(server.base)
-    await expect(page.locator('[data-project="hrx-vessel"]')).to_have_attribute(
+    await expect(page.locator('[data-project="main~hrx-vessel"]')).to_have_attribute(
         "data-state", "running"
     )
-    await expect(page.locator('[data-project="hrx-koala"]')).to_have_attribute(
+    await expect(page.locator('[data-project="main~hrx-koala"]')).to_have_attribute(
         "data-state", "stopped"
     )
 
@@ -51,7 +51,7 @@ async def test_a_detached_row_names_its_pid_and_offers_nothing_that_cannot_act(
     server.seed(detached=["forge-kit"])
     assert server.engine is not None
     await page.goto(server.base)
-    row = page.locator('[data-project="hrx-forge-kit"]')
+    row = page.locator('[data-project="main~hrx-forge-kit"]')
     await expect(row).to_have_attribute("data-state", "detached")
 
     # The pid and the reason, which is the whole of what the design promises.
@@ -72,8 +72,8 @@ async def test_a_running_row_is_taller_than_a_stopped_one(page: Page, server: Ha
     server.seed(running=["vessel"], stopped=["long-hyphenated-name"])
     await page.set_viewport_size({"width": 390, "height": 844})
     await page.goto(server.base)
-    tall = await page.locator('[data-project="hrx-vessel"]').bounding_box()
-    short = await page.locator('[data-project="hrx-long-hyphenated-name"]').bounding_box()
+    tall = await page.locator('[data-project="main~hrx-vessel"]').bounding_box()
+    short = await page.locator('[data-project="main~hrx-long-hyphenated-name"]').bounding_box()
     assert tall is not None and short is not None, "a row was not laid out"
     assert tall["height"] > short["height"], (
         f"running {tall['height']} is not taller than stopped {short['height']}"
@@ -87,7 +87,7 @@ async def test_the_controller_row_is_badged_and_has_no_stop(
     is specific about the label: `controller`, not a lock glyph."""
     server.seed(running=["hitchrail"], self_project="hitchrail")
     await page.goto(server.base)
-    row = page.locator('[data-project="hrx-hitchrail"]')
+    row = page.locator('[data-project="main~hrx-hitchrail"]')
     await expect(row).to_have_attribute("data-protected", "true")
     await expect(row.locator("[data-badge]")).to_have_attribute("data-badge", "controller")
     assert await row.get_by_role("button", name="Stop").count() == 0
@@ -136,8 +136,8 @@ async def test_stopped_means_not_running_rather_than_the_stopped_state(
     server.seed(running=["vessel"], detached=["forge-kit"])
     await page.goto(server.base)
     await page.get_by_role("tab", name="Stopped").click()
-    await expect(page.locator('[data-project="hrx-forge-kit"]')).to_be_visible()
-    await expect(page.locator('[data-project="hrx-vessel"]')).to_have_count(0)
+    await expect(page.locator('[data-project="main~hrx-forge-kit"]')).to_be_visible()
+    await expect(page.locator('[data-project="main~hrx-vessel"]')).to_have_count(0)
 
 
 async def test_a_folder_that_cannot_be_a_project_is_accounted_for(
@@ -163,7 +163,7 @@ async def test_a_project_name_is_rendered_as_text_and_never_as_markup(
     # Wait for the initial fetch to have rendered before injecting. `boot`
     # kicks off `refresh` without awaiting it, so a state written before that
     # resolves is overwritten by the real listing and the test flakes.
-    await expect(page.locator('[data-project="hrx-vessel"]')).to_be_visible()
+    await expect(page.locator('[data-project="main~hrx-vessel"]')).to_be_visible()
     hostile = "<img src=x onerror=alert(1)>"
     await page.evaluate(
         """(name) => {

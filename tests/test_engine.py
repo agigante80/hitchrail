@@ -45,7 +45,23 @@ from hitchrail.engine import (
 )
 from hitchrail.procs import ProcTable, snapshot
 from hitchrail.tmux import Tmux, TmuxUnavailable
-from support import make_config
+from support import DEFAULT_LABEL, make_config
+
+
+def proj(folder: str) -> str:
+    """The identifier for a folder in this file's single test root.
+
+    #119 made a project `<root-label>~<folder>`, and `engine_for` labels its
+    root `main` through `support.make_config`. A FOLDER is still created by its
+    bare name; what gains the prefix is every place an IDENTIFIER is passed:
+    the fake tmux server's keys, the agent argv `_find_detached` matches on,
+    and every engine method.
+
+    A function rather than an f-string at each site, so applying it twice is a
+    visible `proj(proj(...))` rather than a silently wrong `main~main~vessel`.
+    """
+    return f"{DEFAULT_LABEL}~{folder}"
+
 
 PANE = 500
 AGENT = 501
@@ -58,11 +74,11 @@ ORPHAN = 900
 Machine = tuple[dict[str, int], str]
 
 RUNNING_MACHINE: Machine = (
-    {"vessel": PANE},
-    ps_row(PANE, 1) + ps_row(AGENT, PANE, project="vessel"),
+    {proj("vessel"): PANE},
+    ps_row(PANE, 1) + ps_row(AGENT, PANE, project=proj("vessel")),
 )
-STALE_MACHINE: Machine = ({"vessel": PANE}, ps_row(PANE, 1))
-DETACHED_MACHINE: Machine = ({}, ps_row(ORPHAN, 1, project="vessel"))
+STALE_MACHINE: Machine = ({proj("vessel"): PANE}, ps_row(PANE, 1))
+DETACHED_MACHINE: Machine = ({}, ps_row(ORPHAN, 1, project=proj("vessel")))
 STOPPED_MACHINE: Machine = ({}, "")
 
 
@@ -120,17 +136,17 @@ def state_of(engine: Engine, name: str) -> State:
 
 
 def test_running_when_the_pane_owns_an_agent(root: Path) -> None:
-    table = ps_row(PANE, 1) + ps_row(AGENT, PANE, project="vessel")
-    engine, _ = engine_for(root, sessions={"vessel": PANE}, table=table)
-    session = engine.get("vessel")
+    table = ps_row(PANE, 1) + ps_row(AGENT, PANE, project=proj("vessel"))
+    engine, _ = engine_for(root, sessions={proj("vessel"): PANE}, table=table)
+    session = engine.get(proj("vessel"))
     assert session.state is State.RUNNING
     assert session.pid == AGENT
 
 
 def test_stale_when_the_pane_holds_nothing(root: Path) -> None:
     """A tmux session outlived its agent. Not stopped: the shell is still there."""
-    engine, _ = engine_for(root, sessions={"vessel": PANE}, table=ps_row(PANE, 1))
-    assert state_of(engine, "vessel") is State.STALE
+    engine, _ = engine_for(root, sessions={proj("vessel"): PANE}, table=ps_row(PANE, 1))
+    assert state_of(engine, proj("vessel")) is State.STALE
 
 
 def test_stale_when_the_only_agent_belongs_to_another_pane(root: Path) -> None:
@@ -139,10 +155,12 @@ def test_stale_when_the_only_agent_belongs_to_another_pane(root: Path) -> None:
     An agent exists, but in somebody else's pane. Reporting `running` here
     would attribute a live agent to a project that has none.
     """
-    table = ps_row(PANE, 1) + ps_row(600, 1) + ps_row(AGENT, 600, project="vessel-social")
-    engine, _ = engine_for(root, sessions={"vessel": PANE, "vessel-social": 600}, table=table)
-    assert state_of(engine, "vessel") is State.STALE
-    assert state_of(engine, "vessel-social") is State.RUNNING
+    table = ps_row(PANE, 1) + ps_row(600, 1) + ps_row(AGENT, 600, project=proj("vessel-social"))
+    engine, _ = engine_for(
+        root, sessions={proj("vessel"): PANE, proj("vessel-social"): 600}, table=table
+    )
+    assert state_of(engine, proj("vessel")) is State.STALE
+    assert state_of(engine, proj("vessel-social")) is State.RUNNING
 
 
 # -- #88: a running agent that is actually waiting for a person -----------
@@ -181,11 +199,11 @@ def test_a_running_agent_in_an_untrusted_folder_says_it_is_waiting(root: Path) -
     """
     engine, _ = engine_for(
         root,
-        sessions={"vessel": PANE},
+        sessions={proj("vessel"): PANE},
         table=RUNNING_MACHINE[1],
         agent_config=agent_config(root, trusted=[]),
     )
-    session = engine.get("vessel")
+    session = engine.get(proj("vessel"))
     assert session.state is State.RUNNING, "it IS running; that is what makes it a trap"
     assert session.awaiting_trust is True
 
@@ -194,11 +212,11 @@ def test_a_running_agent_in_a_trusted_folder_is_not_waiting(root: Path) -> None:
     """The positive case, without which flagging everything would pass."""
     engine, _ = engine_for(
         root,
-        sessions={"vessel": PANE},
+        sessions={proj("vessel"): PANE},
         table=RUNNING_MACHINE[1],
         agent_config=agent_config(root, trusted=[str(discovery.project_path(root, "vessel"))]),
     )
-    assert engine.get("vessel").awaiting_trust is False
+    assert engine.get(proj("vessel")).awaiting_trust is False
 
 
 def test_trust_is_matched_on_the_path_the_agent_was_actually_started_in(
@@ -223,11 +241,11 @@ def test_trust_is_matched_on_the_path_the_agent_was_actually_started_in(
 
     engine, _ = engine_for(
         link,
-        sessions={"vessel": PANE},
+        sessions={proj("vessel"): PANE},
         table=RUNNING_MACHINE[1],
         agent_config=agent_config(root, trusted=[str(discovery.project_path(link, "vessel"))]),
     )
-    assert engine.get("vessel").awaiting_trust is False, (
+    assert engine.get(proj("vessel")).awaiting_trust is False, (
         "the trust map is keyed on the resolved path the agent was started in"
     )
 
@@ -237,11 +255,11 @@ def test_a_config_we_cannot_read_claims_nothing(root: Path) -> None:
     not put a warning on every running row at once."""
     engine, _ = engine_for(
         root,
-        sessions={"vessel": PANE},
+        sessions={proj("vessel"): PANE},
         table=RUNNING_MACHINE[1],
         agent_config=agent_config(root, trusted=None),
     )
-    assert engine.get("vessel").awaiting_trust is False
+    assert engine.get(proj("vessel")).awaiting_trust is False
 
 
 def test_only_a_running_session_can_be_awaiting_trust(root: Path) -> None:
@@ -249,8 +267,8 @@ def test_only_a_running_session_can_be_awaiting_trust(root: Path) -> None:
     It would be if somebody started it, and warning before the fact is a
     different feature from describing what is on screen now."""
     engine, _ = engine_for(root, agent_config=agent_config(root, trusted=[]))
-    assert engine.get("vessel").state is State.STOPPED
-    assert engine.get("vessel").awaiting_trust is False
+    assert engine.get(proj("vessel")).state is State.STOPPED
+    assert engine.get(proj("vessel")).awaiting_trust is False
 
 
 def test_detached_is_not_stopped(root: Path) -> None:
@@ -260,20 +278,20 @@ def test_detached_is_not_stopped(root: Path) -> None:
     A tool that only asks tmux reports an agent that outlived its terminal as
     stopped, and then invites you to start a second one in the same folder.
     """
-    engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, project="vessel"))
-    session = engine.get("vessel")
+    engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, project=proj("vessel")))
+    session = engine.get(proj("vessel"))
     assert session.state is State.DETACHED
     assert session.pid == ORPHAN, "detached must be surfaced WITH its pid"
 
 
 def test_another_projects_orphan_does_not_make_us_detached(root: Path) -> None:
-    engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, project="vessel-social"))
-    assert state_of(engine, "vessel") is State.STOPPED
+    engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, project=proj("vessel-social")))
+    assert state_of(engine, proj("vessel")) is State.STOPPED
 
 
 def test_stopped_when_there_is_neither(root: Path) -> None:
     engine, _ = engine_for(root)
-    assert state_of(engine, "vessel") is State.STOPPED
+    assert state_of(engine, proj("vessel")) is State.STOPPED
 
 
 # -- 2. attribution: the failure that looks like success -------------------
@@ -286,30 +304,30 @@ def test_an_orphan_for_a_is_not_attributed_to_ab(root: Path) -> None:
     shows a healthy project as detached and offers to kill somebody else's
     agent.
     """
-    engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, project="ab"))
-    assert state_of(engine, "a") is State.STOPPED
-    assert state_of(engine, "ab") is State.DETACHED
+    engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, project=proj("ab")))
+    assert state_of(engine, proj("a")) is State.STOPPED
+    assert state_of(engine, proj("ab")) is State.DETACHED
 
 
 def test_an_orphan_for_ab_is_not_attributed_to_a(root: Path) -> None:
     """The mirror, because asymmetric matching passes one way and fails the
     other, which is exactly how the FQDN root dot shipped."""
-    engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, project="a"))
-    assert state_of(engine, "ab") is State.STOPPED
-    assert state_of(engine, "a") is State.DETACHED
+    engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, project=proj("a")))
+    assert state_of(engine, proj("ab")) is State.STOPPED
+    assert state_of(engine, proj("a")) is State.DETACHED
 
 
 def test_two_orphans_go_to_their_own_projects(root: Path) -> None:
-    table = ps_row(900, 1, project="a") + ps_row(901, 1, project="ab")
+    table = ps_row(900, 1, project=proj("a")) + ps_row(901, 1, project=proj("ab"))
     engine, _ = engine_for(root, table=table)
-    assert engine.get("a").pid == 900
-    assert engine.get("ab").pid == 901
+    assert engine.get(proj("a")).pid == 900
+    assert engine.get(proj("ab")).pid == 901
 
 
 def test_an_orphan_whose_project_no_longer_exists_is_ignored(root: Path) -> None:
     """The folder was deleted while an agent ran. It appears in no listing and
     nothing crashes."""
-    engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, project="deleted-folder"))
+    engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, project=proj("deleted-folder")))
     assert all(s.state is State.STOPPED for s in engine.list())
 
 
@@ -323,10 +341,14 @@ def test_attribution_matches_what_launch_argv_actually_produces(root: Path) -> N
     silently, with no other test failing. This builds the row from
     `launch_argv` itself so a reorder breaks the test instead of the feature.
     """
-    argv = launch_argv("claude", "vessel")
-    assert argv[-1] == "vessel", "attribution depends on the project name being last"
+    # The IDENTIFIER, not the folder. #120 made this the qualified form, and
+    # that is a fix rather than a consequence: it is the agent's
+    # `--remote-control` name and the argv tail `_find_detached` matches on, so
+    # before it two roots' `vessel` were indistinguishable here too.
+    argv = launch_argv("claude", proj("vessel"))
+    assert argv[-1] == proj("vessel"), "attribution depends on the project name being last"
     engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, args=" ".join(argv)))
-    assert state_of(engine, "vessel") is State.DETACHED
+    assert state_of(engine, proj("vessel")) is State.DETACHED
 
 
 @pytest.mark.parametrize(
@@ -350,13 +372,13 @@ def test_an_unrelated_process_is_not_a_detached_agent(root: Path, args: str) -> 
     the flags inside the quarantine rather than spelling them here.
     """
     engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, args=args))
-    assert state_of(engine, "vessel") is State.STOPPED
+    assert state_of(engine, proj("vessel")) is State.STOPPED
 
 
 def test_a_real_agent_is_still_detached_after_that_tightening(root: Path) -> None:
     """The positive case, without which refusing everything would pass."""
-    engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, project="vessel"))
-    assert state_of(engine, "vessel") is State.DETACHED
+    engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, project=proj("vessel")))
+    assert state_of(engine, proj("vessel")) is State.DETACHED
 
 
 # #84: the wrapper we spawn through carries the whole agent argv as its own.
@@ -402,7 +424,7 @@ def test_the_tmux_server_is_not_a_detached_agent(root: Path) -> None:
     were the agent's, and `ram_mb` feeds the start guard's memory decision.
     """
     engine, _ = engine_for(root, table=ps_row(TMUX_SERVER, 1, args=_server_args("vessel")))
-    assert state_of(engine, "vessel") is State.STOPPED
+    assert state_of(engine, proj("vessel")) is State.STOPPED
 
 
 def test_the_agent_is_reported_rather_than_the_server_that_spawned_it(root: Path) -> None:
@@ -412,10 +434,10 @@ def test_the_agent_is_reported_rather_than_the_server_that_spawned_it(root: Path
     refused everything, and this is the half that says which pid a row shows.
     """
     table = ps_row(TMUX_SERVER, 1, args=_server_args("vessel")) + ps_row(
-        ORPHAN, TMUX_SERVER, project="vessel"
+        ORPHAN, TMUX_SERVER, project=proj("vessel")
     )
     engine, _ = engine_for(root, table=table)
-    session = engine.get("vessel")
+    session = engine.get(proj("vessel"))
     assert session.state is State.DETACHED
     assert session.pid == ORPHAN, "the row must show the agent, not the server above it"
 
@@ -428,7 +450,7 @@ def test_a_tmux_server_on_a_private_socket_is_refused_too(root: Path) -> None:
         root,
         table=ps_row(TMUX_SERVER, 1, args=_server_args("vessel", socket="/run/user/1000/hr/s")),
     )
-    assert state_of(engine, "vessel") is State.STOPPED
+    assert state_of(engine, proj("vessel")) is State.STOPPED
 
 
 def test_the_server_is_refused_even_with_no_agent_left_under_it(root: Path) -> None:
@@ -440,7 +462,7 @@ def test_the_server_is_refused_even_with_no_agent_left_under_it(root: Path) -> N
     server spends most of its life in.
     """
     engine, _ = engine_for(root, table=ps_row(TMUX_SERVER, 1, args=_server_args("vessel")))
-    assert engine.get("vessel").pid is None
+    assert engine.get(proj("vessel")).pid is None
 
 
 def test_the_binary_does_not_influence_the_match(root: Path) -> None:
@@ -461,14 +483,14 @@ def test_the_binary_does_not_influence_the_match(root: Path) -> None:
     sessions_dir.mkdir(exist_ok=True)
     # Configured with one binary; the running agent was started with another.
     config = make_config(root, agent_binary="/opt/new-claude", sessions_dir=sessions_dir)
-    argv = launch_argv("/usr/bin/old-claude", "vessel")
+    argv = launch_argv("/usr/bin/old-claude", proj("vessel"))
     engine = Engine(
         config,
         tmux=tmux,
         procs_fn=procs_from(ps_row(ORPHAN, 1, args=" ".join(argv))),
         meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
     )
-    assert engine.get("vessel").state is State.DETACHED
+    assert engine.get(proj("vessel")).state is State.DETACHED
 
 
 # -- 4. tree walking, not child walking ------------------------------------
@@ -482,10 +504,10 @@ def test_a_grandchild_agent_is_found(root: Path) -> None:
     table = (
         ps_row(PANE, 1)
         + ps_row(HELPER, PANE, args="bash")
-        + ps_row(AGENT, HELPER, project="vessel")
+        + ps_row(AGENT, HELPER, project=proj("vessel"))
     )
-    engine, _ = engine_for(root, sessions={"vessel": PANE}, table=table)
-    assert state_of(engine, "vessel") is State.RUNNING
+    engine, _ = engine_for(root, sessions={proj("vessel"): PANE}, table=table)
+    assert state_of(engine, proj("vessel")) is State.RUNNING
 
 
 def test_an_agent_inside_someone_elses_pane_is_not_detached(root: Path) -> None:
@@ -504,10 +526,10 @@ def test_an_agent_inside_someone_elses_pane_is_not_detached(root: Path) -> None:
     table = (
         ps_row(PANE, 1)
         + ps_row(HELPER, PANE, args="bash")
-        + ps_row(AGENT, HELPER, project="vessel")
+        + ps_row(AGENT, HELPER, project=proj("vessel"))
     )
-    engine, _ = engine_for(root, sessions={"ab": PANE}, table=table)
-    assert state_of(engine, "vessel") is State.STOPPED
+    engine, _ = engine_for(root, sessions={proj("ab"): PANE}, table=table)
+    assert state_of(engine, proj("vessel")) is State.STOPPED
     assert not any(s.state is State.DETACHED for s in engine.list())
 
 
@@ -516,17 +538,17 @@ def test_an_agent_in_our_own_pane_is_never_also_detached(root: Path) -> None:
     table = (
         ps_row(PANE, 1)
         + ps_row(HELPER, PANE, args="bash")
-        + ps_row(AGENT, HELPER, project="vessel")
+        + ps_row(AGENT, HELPER, project=proj("vessel"))
     )
-    engine, _ = engine_for(root, sessions={"vessel": PANE}, table=table)
-    assert state_of(engine, "vessel") is State.RUNNING
+    engine, _ = engine_for(root, sessions={proj("vessel"): PANE}, table=table)
+    assert state_of(engine, proj("vessel")) is State.RUNNING
     assert not any(s.state is State.DETACHED for s in engine.list())
 
 
 def test_a_cyclic_process_table_does_not_hang_derivation(root: Path) -> None:
     table = "2 3 10 10 a\n3 2 10 10 b\n" + ps_row(PANE, 1)
-    engine, _ = engine_for(root, sessions={"vessel": PANE}, table=table)
-    assert state_of(engine, "vessel") is State.STALE
+    engine, _ = engine_for(root, sessions={proj("vessel"): PANE}, table=table)
+    assert state_of(engine, proj("vessel")) is State.STALE
 
 
 # -- 5. names that are not what tmux stored --------------------------------
@@ -535,9 +557,9 @@ def test_a_cyclic_process_table_does_not_hang_derivation(root: Path) -> None:
 def test_a_project_needing_sanitizing_is_still_derived(root: Path) -> None:
     """A derivation that looks up the RAW name finds nothing and reports
     stopped while the agent runs."""
-    table = ps_row(PANE, 1) + ps_row(AGENT, PANE, project="dotted.site")
-    engine, _ = engine_for(root, sessions={"dotted.site": PANE}, table=table)
-    assert state_of(engine, "dotted.site") is State.RUNNING
+    table = ps_row(PANE, 1) + ps_row(AGENT, PANE, project=proj("dotted.site"))
+    engine, _ = engine_for(root, sessions={proj("dotted.site"): PANE}, table=table)
+    assert state_of(engine, proj("dotted.site")) is State.RUNNING
 
 
 # -- 6. the two empty results, which are not the same ----------------------
@@ -557,7 +579,7 @@ def test_a_failed_ps_raises_rather_than_reporting_everything_stopped(root: Path)
     with pytest.raises(MachineUnreadable):
         engine.list()
     with pytest.raises(MachineUnreadable):
-        engine.get("vessel")
+        engine.get(proj("vessel"))
 
 
 def test_no_tmux_server_is_not_an_error(root: Path) -> None:
@@ -575,7 +597,7 @@ def test_a_failed_ps_raises_even_when_tmux_has_sessions(root: Path) -> None:
     """The combination that would otherwise look most convincingly like stale."""
     from conftest import failing_procs
 
-    engine, _ = engine_for(root, sessions={"vessel": PANE}, procs_fn=failing_procs)
+    engine, _ = engine_for(root, sessions={proj("vessel"): PANE}, procs_fn=failing_procs)
     with pytest.raises(MachineUnreadable):
         engine.list()
 
@@ -604,15 +626,15 @@ def test_list_issues_one_tmux_call_and_one_ps_call(tmp_path: Path, count: int) -
 
 def test_list_captures_no_pane(root: Path) -> None:
     """Capturing is the expensive lookup and belongs in `session_url`."""
-    table = ps_row(PANE, 1) + ps_row(AGENT, PANE, project="vessel")
-    engine, tmux = engine_for(root, sessions={"vessel": PANE}, table=table)
+    table = ps_row(PANE, 1) + ps_row(AGENT, PANE, project=proj("vessel"))
+    engine, tmux = engine_for(root, sessions={proj("vessel"): PANE}, table=table)
     engine.list()
     assert tmux.capture_calls == 0
 
 
 def test_get_derives_the_same_state_as_list(root: Path) -> None:
     """Or a detail view disagrees with the row that opened it."""
-    table = ps_row(ORPHAN, 1, project="vessel")
+    table = ps_row(ORPHAN, 1, project=proj("vessel"))
     engine, _ = engine_for(root, table=table)
     from_list = {s.name: s.state for s in engine.list()}
     for name in from_list:
@@ -628,10 +650,12 @@ def test_list_is_ordered_and_stable(root: Path) -> None:
 
 
 def test_list_covers_every_project_exactly_once(root: Path) -> None:
-    engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, project="vessel"))
+    engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, project=proj("vessel")))
     names = [s.name for s in engine.list()]
     assert sorted(names) == sorted(set(names))
-    assert set(names) == {"vessel", "vessel-social", "a", "ab", "dotted.site"}
+    assert set(names) == {
+        proj(n) for n in ("vessel", "vessel-social", "a", "ab", "dotted.site")
+    }
 
 
 # -- 9. the overlay applies to every state ---------------------------------
@@ -641,9 +665,9 @@ def test_a_fresh_engine_reports_nothing_as_stopping(root: Path) -> None:
     """The in flight stop is memory only. If Hitchrail restarts mid stop that
     knowledge is lost and the session reads as running again, which is the
     truth; a marker that outlived the process would be a lie."""
-    engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, project="vessel"))
+    engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, project=proj("vessel")))
     assert all(not s.stopping for s in engine.list())
-    assert engine.stopping_since("vessel") is None
+    assert engine.stopping_since(proj("vessel")) is None
 
 
 # -- 10. the fields, not just the state ------------------------------------
@@ -654,31 +678,31 @@ def test_ram_is_the_whole_subtree(root: Path) -> None:
     stopping it would release."""
     table = (
         ps_row(PANE, 1, rss_kb=1024)
-        + ps_row(AGENT, PANE, project="vessel", rss_kb=2048)
+        + ps_row(AGENT, PANE, project=proj("vessel"), rss_kb=2048)
         + ps_row(HELPER, AGENT, args="node", rss_kb=1024)
     )
-    engine, _ = engine_for(root, sessions={"vessel": PANE}, table=table)
-    assert engine.get("vessel").ram_mb == (2048 + 1024) // 1024
+    engine, _ = engine_for(root, sessions={proj("vessel"): PANE}, table=table)
+    assert engine.get(proj("vessel")).ram_mb == (2048 + 1024) // 1024
 
 
 def test_uptime_comes_from_the_process(root: Path) -> None:
-    table = ps_row(PANE, 1) + ps_row(AGENT, PANE, project="vessel", etime_s=4242)
-    engine, _ = engine_for(root, sessions={"vessel": PANE}, table=table)
-    assert engine.get("vessel").uptime_s == 4242
+    table = ps_row(PANE, 1) + ps_row(AGENT, PANE, project=proj("vessel"), etime_s=4242)
+    engine, _ = engine_for(root, sessions={proj("vessel"): PANE}, table=table)
+    assert engine.get(proj("vessel")).uptime_s == 4242
 
 
 def test_pid_is_present_only_where_a_process_exists(root: Path) -> None:
-    table = ps_row(PANE, 1) + ps_row(AGENT, PANE, project="vessel")
-    engine, _ = engine_for(root, sessions={"vessel": PANE, "ab": 700}, table=table)
-    assert engine.get("vessel").pid == AGENT  # running
-    assert engine.get("ab").pid is None  # stale
-    assert engine.get("a").pid is None  # stopped
+    table = ps_row(PANE, 1) + ps_row(AGENT, PANE, project=proj("vessel"))
+    engine, _ = engine_for(root, sessions={proj("vessel"): PANE, "ab": 700}, table=table)
+    assert engine.get(proj("vessel")).pid == AGENT  # running
+    assert engine.get(proj("ab")).pid is None  # stale
+    assert engine.get(proj("a")).pid is None  # stopped
 
 
 def test_protected_is_true_only_for_the_self_project(root: Path) -> None:
-    engine, _ = engine_for(root, self_project="vessel")
-    assert engine.get("vessel").protected is True
-    assert engine.get("ab").protected is False
+    engine, _ = engine_for(root, self_project=proj("vessel"))
+    assert engine.get(proj("vessel")).protected is True
+    assert engine.get(proj("ab")).protected is False
 
 
 @pytest.mark.parametrize(
@@ -706,8 +730,8 @@ def test_protected_survives_in_every_state(
     actually tap stop.
     """
     sessions, table = machine
-    engine, _ = engine_for(root, sessions=sessions, table=table, self_project="vessel")
-    session = engine.get("vessel")
+    engine, _ = engine_for(root, sessions=sessions, table=table, self_project=proj("vessel"))
+    session = engine.get(proj("vessel"))
     assert session.state is expected
     assert session.protected is True
 
@@ -733,14 +757,14 @@ def test_the_stopping_overlay_applies_to_every_live_state(
     """
     sessions, table = machine
     engine, _ = engine_for(root, sessions=sessions, table=table)
-    engine._stopping["vessel"] = 1234.0
+    engine._stopping[proj("vessel")] = 1234.0
 
-    session = engine.get("vessel")
+    session = engine.get(proj("vessel"))
     assert session.stopping is True
     assert session.state is expected, "the marker must not change the derived state"
-    assert engine.stopping_since("vessel") == 1234.0
+    assert engine.stopping_since(proj("vessel")) == 1234.0
     # And it is per session, not global.
-    assert engine.get("ab").stopping is False
+    assert engine.get(proj("ab")).stopping is False
 
 
 def test_the_overlay_does_not_apply_to_a_stopped_session(root: Path) -> None:
@@ -760,12 +784,12 @@ def test_the_overlay_does_not_apply_to_a_stopped_session(root: Path) -> None:
     """
     sessions, table = STOPPED_MACHINE
     engine, _ = engine_for(root, sessions=sessions, table=table)
-    engine._stopping["vessel"] = 1234.0
+    engine._stopping[proj("vessel")] = 1234.0
 
-    session = engine.get("vessel")
+    session = engine.get(proj("vessel"))
     assert session.state is State.STOPPED
     assert session.stopping is False, "an overlay on a session that is not there"
-    assert engine.stopping_since("vessel") is None, "the marker outlived the session"
+    assert engine.stopping_since(proj("vessel")) is None, "the marker outlived the session"
 
 
 def test_the_url_comes_from_the_bridge_file(root: Path, tmp_path: Path) -> None:
@@ -774,26 +798,26 @@ def test_the_url_comes_from_the_bridge_file(root: Path, tmp_path: Path) -> None:
     sessions_dir = tmp_path / "sessions"
     sessions_dir.mkdir()
     (sessions_dir / f"{AGENT}.json").write_text(json.dumps({"bridgeSessionId": "session_abc"}))
-    tmux = FakeTmux(sessions={"vessel": PANE})
+    tmux = FakeTmux(sessions={proj("vessel"): PANE})
     engine = Engine(
         make_config(root, sessions_dir=sessions_dir),
         tmux=tmux,
-        procs_fn=procs_from(ps_row(PANE, 1) + ps_row(AGENT, PANE, project="vessel")),
+        procs_fn=procs_from(ps_row(PANE, 1) + ps_row(AGENT, PANE, project=proj("vessel"))),
         meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
     )
-    assert engine.get("vessel").url == "https://claude.ai/code/session_abc"
+    assert engine.get(proj("vessel")).url == "https://claude.ai/code/session_abc"
     assert tmux.capture_calls == 0
 
 
 def test_as_dict_is_json_serialisable(root: Path) -> None:
     """It becomes an HTTP response in Phase 5. A StrEnum or a Path surviving
     into it fails there instead of here."""
-    table = ps_row(PANE, 1) + ps_row(AGENT, PANE, project="vessel")
-    engine, _ = engine_for(root, sessions={"vessel": PANE}, table=table)
+    table = ps_row(PANE, 1) + ps_row(AGENT, PANE, project=proj("vessel"))
+    engine, _ = engine_for(root, sessions={proj("vessel"): PANE}, table=table)
     for session in engine.list():
         payload = json.dumps(session.as_dict())
         assert json.loads(payload)["name"] == session.name
-    assert json.loads(json.dumps(engine.get("vessel").as_dict()))["state"] == "running"
+    assert json.loads(json.dumps(engine.get(proj("vessel")).as_dict()))["state"] == "running"
 
 
 def test_available_mb_reads_through_the_injected_seam(root: Path) -> None:
@@ -806,7 +830,7 @@ def test_a_session_is_frozen(root: Path) -> None:
     holding a Session and mutating it."""
     engine, _ = engine_for(root)
     with pytest.raises(AttributeError):
-        engine.get("vessel").state = State.RUNNING  # type: ignore[misc]
+        engine.get(proj("vessel")).state = State.RUNNING  # type: ignore[misc]
 
 
 def test_a_tmux_that_cannot_be_run_is_an_unreadable_machine(root: Path) -> None:
@@ -825,7 +849,7 @@ def test_a_tmux_that_cannot_be_run_is_an_unreadable_machine(root: Path) -> None:
     engine = Engine(
         make_config(root, sessions_dir=sessions_dir),
         tmux=Tmux(prefix="hr-", run=missing),
-        procs_fn=procs_from(ps_row(PANE, 1) + ps_row(AGENT, PANE, project="vessel")),
+        procs_fn=procs_from(ps_row(PANE, 1) + ps_row(AGENT, PANE, project=proj("vessel"))),
         meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
     )
     with pytest.raises(MachineUnreadable):
@@ -835,7 +859,7 @@ def test_a_tmux_that_cannot_be_run_is_an_unreadable_machine(root: Path) -> None:
 # -- #41: starting ---------------------------------------------------------
 
 
-def running_after(name: str = "vessel", blank_reads: int = 2) -> ScriptedProcs:
+def running_after(name: str = proj("vessel"), blank_reads: int = 2) -> ScriptedProcs:
     """A table where the agent appears only after a few reads.
 
     The real one behaves this way: a freshly spawned agent is not in the
@@ -877,18 +901,18 @@ def start_engine(
 
 def test_starting_spawns_the_agent_in_the_projects_directory(root: Path) -> None:
     engine, tmux, _ = start_engine(root, table=running_after())
-    session = engine.start("vessel")
+    session = engine.start(proj("vessel"))
     assert session.state is State.RUNNING
     name, cwd, argv = tmux.started[-1]
-    assert name == "vessel"
+    assert name == proj("vessel")
     assert cwd == str((root / "vessel").resolve())
-    assert argv == launch_argv("claude", "vessel"), "the argv must stay a list"
+    assert argv == launch_argv("claude", proj("vessel")), "the argv must stay a list"
 
 
 def test_a_start_survives_a_process_table_that_is_empty_at_first(root: Path) -> None:
     """The grace window, and the reason it exists."""
     engine, _, clock = start_engine(root, table=running_after())
-    assert engine.start("vessel").state is State.RUNNING
+    assert engine.start(proj("vessel")).state is State.RUNNING
     assert clock.slept, "it should have waited at least once"
 
 
@@ -896,16 +920,16 @@ def test_the_grace_window_is_bounded(root: Path) -> None:
     """A regression to an unbounded wait fails here rather than hanging CI."""
     engine, _, clock = start_engine(root, table=procs_from(ps_row(1001, 1)))
     with pytest.raises(StartFailed):
-        engine.start("vessel")
+        engine.start(proj("vessel"))
     assert sum(clock.slept) <= engine.start_grace + engine.poll_interval
 
 
 def test_a_failed_start_carries_the_pane_output(root: Path) -> None:
     """ "It did not start" without the reason is a support request."""
     engine, tmux, _ = start_engine(root, table=procs_from(ps_row(1001, 1)))
-    tmux.pane_text["vessel"] = "claude: command not found"
+    tmux.pane_text[proj("vessel")] = "claude: command not found"
     with pytest.raises(StartFailed) as caught:
-        engine.start("vessel")
+        engine.start(proj("vessel"))
     assert "command not found" in caught.value.output
 
 
@@ -917,7 +941,7 @@ def test_a_second_start_of_the_same_folder_is_refused_immediately(root: Path) ->
     # one folder and starting both is the outcome the design exists to prevent.
     engine._starting.add(str((root / "vessel").resolve()))
     with pytest.raises(Locked):
-        engine.start("vessel")
+        engine.start(proj("vessel"))
     assert tmux.started == [], "nothing may be spawned while one is in flight"
 
 
@@ -925,7 +949,7 @@ def test_a_start_of_a_different_folder_is_not_blocked(root: Path) -> None:
     """The lock is per FOLDER, not global."""
     engine, _, _ = start_engine(root, table=running_after("ab"))
     engine._starting.add(str((root / "vessel").resolve()))
-    assert engine.start("ab").state is State.RUNNING
+    assert engine.start(proj("ab")).state is State.RUNNING
 
 
 def test_the_lock_is_released_when_the_start_fails(root: Path) -> None:
@@ -933,14 +957,14 @@ def test_the_lock_is_released_when_the_start_fails(root: Path) -> None:
     unstartable until Hitchrail restarts."""
     engine, _, _ = start_engine(root, table=procs_from(ps_row(1001, 1)))
     with pytest.raises(StartFailed):
-        engine.start("vessel")
+        engine.start(proj("vessel"))
     assert engine._starting == set()
 
 
 def test_the_lock_is_released_when_the_start_is_refused(root: Path) -> None:
     engine, _, _ = start_engine(root, mem_mb=100)
     with pytest.raises(MemoryRefused):
-        engine.start("vessel")
+        engine.start(proj("vessel"))
     assert engine._starting == set()
 
 
@@ -949,7 +973,7 @@ def test_memory_below_the_hard_floor_refuses_and_spawns_nothing(root: Path) -> N
     started something."""
     engine, tmux, _ = start_engine(root, mem_mb=100)
     with pytest.raises(MemoryRefused) as caught:
-        engine.start("vessel")
+        engine.start(proj("vessel"))
     assert tmux.started == []
     assert caught.value.available_mb == 100
     assert caught.value.needed_mb == 1536
@@ -960,7 +984,7 @@ def test_memory_between_the_floors_asks_first(root: Path) -> None:
     confirmation step the design asks for."""
     engine, tmux, _ = start_engine(root, table=running_after(), mem_mb=1536 + 2000)
     with pytest.raises(MemoryNeedsAck) as caught:
-        engine.start("vessel")
+        engine.start(proj("vessel"))
     assert tmux.started == [], "nothing may be spawned while asking"
     assert caught.value.available_mb == 1536 + 2000
 
@@ -970,34 +994,36 @@ def test_an_acknowledged_soft_refusal_proceeds(root: Path) -> None:
     its scripted table's read counter forward, and the pre check would then see
     an agent that was never started."""
     engine, _, _ = start_engine(root, table=running_after(), mem_mb=1536 + 2000)
-    assert engine.start("vessel", acknowledged=True).state is State.RUNNING
+    assert engine.start(proj("vessel"), acknowledged=True).state is State.RUNNING
 
 
 def test_starting_a_running_project_is_refused(root: Path) -> None:
-    table = ps_row(PANE, 1) + ps_row(AGENT, PANE, project="vessel")
-    engine, _, _ = start_engine(root, table=procs_from(table), sessions={"vessel": PANE})
+    table = ps_row(PANE, 1) + ps_row(AGENT, PANE, project=proj("vessel"))
+    engine, _, _ = start_engine(root, table=procs_from(table), sessions={proj("vessel"): PANE})
     with pytest.raises(AlreadyRunning):
-        engine.start("vessel")
+        engine.start(proj("vessel"))
 
 
 def test_starting_a_detached_project_is_refused(root: Path) -> None:
     """Two agents in one folder is the outcome the whole design prevents."""
-    engine, _, _ = start_engine(root, table=procs_from(ps_row(ORPHAN, 1, project="vessel")))
+    engine, _, _ = start_engine(
+        root, table=procs_from(ps_row(ORPHAN, 1, project=proj("vessel")))
+    )
     with pytest.raises(AlreadyRunning):
-        engine.start("vessel")
+        engine.start(proj("vessel"))
 
 
 def test_a_stale_session_is_replaced_not_reused(root: Path) -> None:
     """Reusing it would start in a pane already holding somebody's scrollback."""
-    engine, tmux, _ = start_engine(root, table=running_after(), sessions={"vessel": 1001})
-    engine.start("vessel")
-    assert "vessel" in tmux.killed
+    engine, tmux, _ = start_engine(root, table=running_after(), sessions={proj("vessel"): 1001})
+    engine.start(proj("vessel"))
+    assert proj("vessel") in tmux.killed
 
 
 def test_starting_the_self_project_is_refused(root: Path) -> None:
-    engine, tmux, _ = start_engine(root, self_project="vessel")
+    engine, tmux, _ = start_engine(root, self_project=proj("vessel"))
     with pytest.raises(Protected):
-        engine.start("vessel")
+        engine.start(proj("vessel"))
     assert tmux.started == []
 
 
@@ -1016,11 +1042,11 @@ def live_engine(
     root: Path, *, self_project: str | None = None
 ) -> tuple[Engine, FakeTmux, FakeClock]:
     """An engine with `vessel` genuinely running."""
-    table = ps_row(PANE, 1) + ps_row(AGENT, PANE, project="vessel")
+    table = ps_row(PANE, 1) + ps_row(AGENT, PANE, project=proj("vessel"))
     engine, tmux, clock = start_engine(
         root,
         table=procs_from(table),
-        sessions={"vessel": PANE},
+        sessions={proj("vessel"): PANE},
         self_project=self_project,
     )
     return engine, tmux, clock
@@ -1028,7 +1054,7 @@ def live_engine(
 
 def test_stopping_asks_and_kills_nothing(root: Path) -> None:
     engine, tmux, _ = live_engine(root)
-    session = engine.stop("vessel")
+    session = engine.stop(proj("vessel"))
     assert session.stopping is True
     assert session.state is State.RUNNING, "asking does not change what it is"
     assert tmux.killed == [], "a graceful stop kills nothing"
@@ -1039,7 +1065,7 @@ def test_the_stop_sequence_comes_from_the_quarantine(root: Path) -> None:
     """The engine must not know what a stop physically is."""
 
     engine, tmux, _ = live_engine(root)
-    engine.stop("vessel")
+    engine.stop(proj("vessel"))
     assert [keys for _project, keys in tmux.sent] == list(GRACEFUL_STOP_KEYS)
 
 
@@ -1053,10 +1079,10 @@ def test_the_engine_source_never_names_the_stop_sequence() -> None:
 def test_kill_is_reachable_during_a_stop(root: Path) -> None:
     """The kill control stays within reach for the whole wait."""
     engine, tmux, _ = live_engine(root)
-    engine.stop("vessel")
-    engine.kill("vessel")
-    assert tmux.killed == ["vessel"]
-    assert engine.stopping_since("vessel") is None, "killing ends the wait"
+    engine.stop(proj("vessel"))
+    engine.kill(proj("vessel"))
+    assert tmux.killed == [proj("vessel")]
+    assert engine.stopping_since(proj("vessel")) is None, "killing ends the wait"
 
 
 def test_expiry_drops_the_marker_and_does_not_escalate(root: Path) -> None:
@@ -1070,21 +1096,21 @@ def test_expiry_drops_the_marker_and_does_not_escalate(root: Path) -> None:
     quietly, so this asserts the fake recorded no kill.
     """
     engine, tmux, clock = live_engine(root)
-    engine.stop("vessel")
+    engine.stop(proj("vessel"))
     clock.advance(engine.config.stop_timeout + 1)
 
-    assert engine.expire_stops() == ["vessel"]
+    assert engine.expire_stops() == [proj("vessel")]
     assert tmux.killed == [], "expiry must never escalate"
-    assert engine.stopping_since("vessel") is None
-    assert engine.get("vessel").state is State.RUNNING, "still alive, still theirs"
+    assert engine.stopping_since(proj("vessel")) is None
+    assert engine.get(proj("vessel")).state is State.RUNNING, "still alive, still theirs"
 
 
 def test_expiry_leaves_a_stop_that_is_still_within_its_timeout(root: Path) -> None:
     engine, _, clock = live_engine(root)
-    engine.stop("vessel")
+    engine.stop(proj("vessel"))
     clock.advance(engine.config.stop_timeout - 1)
     assert engine.expire_stops() == []
-    assert engine.stopping_since("vessel") is not None
+    assert engine.stopping_since(proj("vessel")) is not None
 
 
 def test_expiry_announces_so_the_interface_can_report_it(root: Path) -> None:
@@ -1098,41 +1124,41 @@ def test_expiry_announces_so_the_interface_can_report_it(root: Path) -> None:
             published.append(event)
 
     engine.attach_bus(Recorder())  # type: ignore[arg-type]
-    engine.stop("vessel")
+    engine.stop(proj("vessel"))
     clock.advance(engine.config.stop_timeout + 1)
     engine.expire_stops()
-    assert any(e["name"] == "vessel" for e in published)
+    assert any(e["name"] == proj("vessel") for e in published)
 
 
 def test_stopping_something_that_is_not_running_is_refused(root: Path) -> None:
     engine, tmux, _ = start_engine(root)
     with pytest.raises(NotRunning):
-        engine.stop("vessel")
+        engine.stop(proj("vessel"))
     assert tmux.sent == []
 
 
 @pytest.mark.parametrize("action", ["stop", "kill"])
 def test_the_self_project_cannot_be_stopped_or_killed(root: Path, action: str) -> None:
     """Taking the interface down has no undo."""
-    engine, tmux, _ = live_engine(root, self_project="vessel")
+    engine, tmux, _ = live_engine(root, self_project=proj("vessel"))
     with pytest.raises(Protected):
-        getattr(engine, action)("vessel")
+        getattr(engine, action)(proj("vessel"))
     assert tmux.killed == []
     assert tmux.sent == []
 
 
 def test_logs_return_the_pane_tail(root: Path) -> None:
     engine, tmux, _ = live_engine(root)
-    tmux.pane_text["vessel"] = "hello from the agent"
-    assert engine.logs("vessel") == "hello from the agent"
+    tmux.pane_text[proj("vessel")] = "hello from the agent"
+    assert engine.logs(proj("vessel")) == "hello from the agent"
 
 
 def test_session_url_pays_for_the_scrape_and_says_so(root: Path) -> None:
     """The expensive lookup listing skips, and the only place a scraped source
     can appear."""
     engine, tmux, _ = live_engine(root)
-    tmux.pane_text["vessel"] = "open https://claude.ai/code/session_scraped"
-    found = engine.session_url("vessel")
+    tmux.pane_text[proj("vessel")] = "open https://claude.ai/code/session_scraped"
+    found = engine.session_url(proj("vessel"))
     assert found is not None
     assert found.source == "scraped"
 
@@ -1154,9 +1180,9 @@ def test_session_url_tells_three_answers_apart(root: Path) -> None:
     """
     engine, _, _ = start_engine(root)
     with pytest.raises(NotRunning):
-        engine.session_url("vessel")
+        engine.session_url(proj("vessel"))
     with pytest.raises(UnknownProject):
-        engine.session_url("no-such-project")
+        engine.session_url(proj("no-such-project"))
 
 
 def test_session_url_is_none_only_while_a_running_session_has_no_link(
@@ -1164,8 +1190,8 @@ def test_session_url_is_none_only_while_a_running_session_has_no_link(
 ) -> None:
     """The `url_pending` case, which must stay `None` rather than raising."""
     engine, _, _ = live_engine(root)
-    assert engine.get("vessel").state is State.RUNNING
-    assert engine.session_url("vessel") is None
+    assert engine.get(proj("vessel")).state is State.RUNNING
+    assert engine.session_url(proj("vessel")) is None
 
 
 def test_sessions_does_not_import_engine() -> None:
@@ -1198,9 +1224,9 @@ def test_an_alias_cannot_start_a_second_agent_in_the_same_folder(
     (tmp_path / "alpha").symlink_to(tmp_path / "zebra", target_is_directory=True)
     engine, tmux, _ = start_engine(tmp_path, table=running_after("zebra"))
 
-    assert engine.start("zebra").state is State.RUNNING
+    assert engine.start(proj("zebra")).state is State.RUNNING
     with pytest.raises(UnknownProject):
-        engine.start("alpha")
+        engine.start(proj("alpha"))
     assert len(tmux.started) == 1
     assert len({cwd for _n, cwd, _a in tmux.started}) == 1
 
@@ -1211,7 +1237,7 @@ def test_the_start_lock_is_keyed_on_the_folder_not_the_name(tmp_path: Path) -> N
     engine, _, _ = start_engine(tmp_path, table=running_after("zebra"))
     engine._starting.add(str((tmp_path / "zebra").resolve()))
     with pytest.raises(Locked):
-        engine.start("zebra")
+        engine.start(proj("zebra"))
 
 
 @pytest.mark.parametrize("action", ["start", "stop", "kill", "logs", "session_url"])
@@ -1236,7 +1262,7 @@ def test_a_well_formed_name_with_nothing_behind_it_is_not_running(
     thing from a name that could never be a project."""
     engine, _, _ = live_engine(root)
     with pytest.raises(NotRunning):
-        getattr(engine, action)("ab")
+        getattr(engine, action)(proj("ab"))
 
 
 @pytest.mark.parametrize("action", ["stop", "kill", "logs"])
@@ -1258,8 +1284,8 @@ def test_a_live_session_stays_actionable_when_its_name_is_not_listed(
     (tmp_path / "alpha").symlink_to(tmp_path / "zebra", target_is_directory=True)
     sessions_dir = tmp_path / ".sessions"
     sessions_dir.mkdir()
-    rows = ps_row(600, 1) + ps_row(601, 600, project="alpha")
-    tmux = FakeTmux(sessions={"alpha": 600})
+    rows = ps_row(600, 1) + ps_row(601, 600, project=proj("alpha"))
+    tmux = FakeTmux(sessions={proj("alpha"): 600})
     engine = Engine(
         make_config(tmp_path, sessions_dir=sessions_dir),
         tmux=tmux,
@@ -1269,8 +1295,8 @@ def test_a_live_session_stays_actionable_when_its_name_is_not_listed(
     # `scan` deduplicates the alias away, so the name is not listed...
     assert "alpha" not in [s.name for s in engine.list()]
     # ...and the engine can still see the agent, so it must remain actionable.
-    assert engine.get("alpha").state is State.RUNNING
-    getattr(engine, action)("alpha")
+    assert engine.get(proj("alpha")).state is State.RUNNING
+    getattr(engine, action)(proj("alpha"))
 
 
 def test_an_unlisted_name_still_cannot_start_a_second_agent(tmp_path: Path) -> None:
@@ -1279,7 +1305,7 @@ def test_an_unlisted_name_still_cannot_start_a_second_agent(tmp_path: Path) -> N
     (tmp_path / "alpha").symlink_to(tmp_path / "zebra", target_is_directory=True)
     engine, _, _ = start_engine(tmp_path, table=running_after("zebra"))
     with pytest.raises(UnknownProject):
-        engine.start("alpha")
+        engine.start(proj("alpha"))
 
 
 def test_a_symlink_loop_is_an_engine_error_not_a_runtime_error(tmp_path: Path) -> None:
@@ -1293,7 +1319,7 @@ def test_a_symlink_loop_is_an_engine_error_not_a_runtime_error(tmp_path: Path) -
     (tmp_path / "b").symlink_to(tmp_path / "a", target_is_directory=True)
     engine, _, _ = start_engine(tmp_path)
     with pytest.raises(UnknownProject):
-        engine.start("a")
+        engine.start(proj("a"))
 
 
 # -- tmux vanishing mid run ------------------------------------------------
@@ -1349,11 +1375,15 @@ class VanishingTmux(FakeTmux):
 def vanishing_engine(root: Path, *, fail_after: int = 0, live: bool = True) -> Engine:
     sessions_dir = root / ".sessions"
     sessions_dir.mkdir(exist_ok=True)
-    table = ps_row(PANE, 1) + ps_row(AGENT, PANE, project="vessel") if live else ps_row(PANE, 1)
+    table = (
+        ps_row(PANE, 1) + ps_row(AGENT, PANE, project=proj("vessel"))
+        if live
+        else ps_row(PANE, 1)
+    )
     clock = FakeClock()
     return Engine(
         make_config(root, sessions_dir=sessions_dir),
-        tmux=VanishingTmux(fail_after=fail_after, sessions={"vessel": PANE}),
+        tmux=VanishingTmux(fail_after=fail_after, sessions={proj("vessel"): PANE}),
         procs_fn=procs_from(table),
         meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
         clock=clock,
@@ -1373,21 +1403,21 @@ def test_a_tmux_that_vanishes_is_an_honest_refusal_not_a_500(root: Path, action:
     """
     engine = vanishing_engine(root)
     with pytest.raises(MachineUnreadable):
-        getattr(engine, action)("vessel")
+        getattr(engine, action)(proj("vessel"))
 
 
 def test_a_tmux_that_vanishes_during_a_start_is_an_honest_refusal(root: Path) -> None:
     engine = vanishing_engine(root, live=False)
     with pytest.raises(MachineUnreadable):
-        engine.start("vessel")
+        engine.start(proj("vessel"))
 
 
 def test_a_failed_stop_does_not_leave_a_phantom_marker(root: Path) -> None:
     """The wait must not outlive the request that could not be sent."""
     engine = vanishing_engine(root)
     with pytest.raises(MachineUnreadable):
-        engine.stop("vessel")
-    assert engine.stopping_since("vessel") is None
+        engine.stop(proj("vessel"))
+    assert engine.stopping_since(proj("vessel")) is None
 
 
 def test_a_stop_the_adapter_will_not_send_is_an_honest_refusal(root: Path) -> None:
@@ -1399,23 +1429,23 @@ def test_a_stop_the_adapter_will_not_send_is_an_honest_refusal(root: Path) -> No
     never sent, which is the same rule `test_a_failed_stop_does_not_leave_a_
     phantom_marker` states for a tmux that vanished.
     """
-    engine, tmux = engine_for(root, sessions={"vessel": PANE}, table=RUNNING_MACHINE[1])
-    tmux.pane_text["vessel"] = DIRTY_INPUT_BOX
+    engine, tmux = engine_for(root, sessions={proj("vessel"): PANE}, table=RUNNING_MACHINE[1])
+    tmux.pane_text[proj("vessel")] = DIRTY_INPUT_BOX
 
     with pytest.raises(StopRefused):
-        engine.stop("vessel")
-    assert engine.stopping_since("vessel") is None
+        engine.stop(proj("vessel"))
+    assert engine.stopping_since(proj("vessel")) is None
 
 
 def test_a_refused_stop_types_nothing(root: Path) -> None:
     """The half that matters. A refusal that had already sent `/exit` would be
     a refusal in name only, and the thing being refused is submitting text into
     somebody else's session with their authority (#91)."""
-    engine, tmux = engine_for(root, sessions={"vessel": PANE}, table=RUNNING_MACHINE[1])
-    tmux.pane_text["vessel"] = DIRTY_INPUT_BOX
+    engine, tmux = engine_for(root, sessions={proj("vessel"): PANE}, table=RUNNING_MACHINE[1])
+    tmux.pane_text[proj("vessel")] = DIRTY_INPUT_BOX
 
     with pytest.raises(StopRefused):
-        engine.stop("vessel")
+        engine.stop(proj("vessel"))
     assert not any("/exit" in keys for _, keys in tmux.sent), (
         "typed into a box it could not read"
     )
@@ -1438,21 +1468,21 @@ def test_stopping_a_stale_session_is_refused_by_state_not_by_screen(
     that shell with the operator's authority buys nothing and is the #91
     hazard for free.
     """
-    tmux = FakeTmux(sessions={"vessel": PANE})
+    tmux = FakeTmux(sessions={proj("vessel"): PANE})
     # A shell, which is what is actually in a stale pane. The fake paints a
     # Claude Code box for anything with a session, so a test about a pane that
     # is NOT an agent has to say so.
-    tmux.pane_text["vessel"] = "user@host:/tmp$ "
-    engine, _ = engine_for(root, sessions={"vessel": PANE}, table=ps_row(PANE, 1))
+    tmux.pane_text[proj("vessel")] = "user@host:/tmp$ "
+    engine, _ = engine_for(root, sessions={proj("vessel"): PANE}, table=ps_row(PANE, 1))
     engine.tmux = tmux
-    assert state_of(engine, "vessel") is State.STALE
+    assert state_of(engine, proj("vessel")) is State.STALE
 
     with pytest.raises(NoAgent) as refusal:
-        engine.stop("vessel")
+        engine.stop(proj("vessel"))
 
     assert "no agent" in str(refusal.value).lower()
     assert tmux.sent == [], "typed at a shell with the operator's authority"
-    assert engine.stopping_since("vessel") is None
+    assert engine.stopping_since(proj("vessel")) is None
     assert tmux.killed == [], "a refused stop escalated"
 
 
@@ -1467,15 +1497,15 @@ def test_stopping_a_detached_agent_is_refused_by_state_too(root: Path) -> None:
     Refused from the state rather than from an empty capture, because an empty
     capture has other causes and this one is knowable without guessing.
     """
-    engine, tmux = engine_for(root, table=ps_row(ORPHAN, 1, project="vessel"))
-    assert state_of(engine, "vessel") is State.DETACHED
+    engine, tmux = engine_for(root, table=ps_row(ORPHAN, 1, project=proj("vessel")))
+    assert state_of(engine, proj("vessel")) is State.DETACHED
 
     with pytest.raises(NoAgent) as refusal:
-        engine.stop("vessel")
+        engine.stop(proj("vessel"))
 
     assert "no tmux session" in str(refusal.value).lower()
     assert tmux.sent == []
-    assert engine.stopping_since("vessel") is None
+    assert engine.stopping_since(proj("vessel")) is None
 
 
 def test_killing_a_detached_agent_does_not_report_a_success_it_did_not_have(
@@ -1495,15 +1525,15 @@ def test_killing_a_detached_agent_does_not_report_a_success_it_did_not_have(
     Hitchrail should gain the power to signal a bare pid is a separate question
     and stays open on the ticket.
     """
-    engine, tmux = engine_for(root, table=ps_row(ORPHAN, 1, project="vessel"))
-    assert state_of(engine, "vessel") is State.DETACHED
+    engine, tmux = engine_for(root, table=ps_row(ORPHAN, 1, project=proj("vessel")))
+    assert state_of(engine, proj("vessel")) is State.DETACHED
 
     with pytest.raises(NoAgent) as refusal:
-        engine.kill("vessel")
+        engine.kill(proj("vessel"))
 
     assert "no tmux session" in str(refusal.value).lower()
     assert tmux.killed == [], "targeted a session that does not exist"
-    assert state_of(engine, "vessel") is State.DETACHED, "the agent should be untouched"
+    assert state_of(engine, proj("vessel")) is State.DETACHED, "the agent should be untouched"
 
 
 def test_killing_a_stale_session_still_works(root: Path) -> None:
@@ -1513,11 +1543,11 @@ def test_killing_a_stale_session_still_works(root: Path) -> None:
     exactly what `Clear` on the row does, and it must keep working, or the one
     control a stale row offers stops doing anything.
     """
-    engine, tmux = engine_for(root, sessions={"vessel": PANE}, table=ps_row(PANE, 1))
-    assert state_of(engine, "vessel") is State.STALE
+    engine, tmux = engine_for(root, sessions={proj("vessel"): PANE}, table=ps_row(PANE, 1))
+    assert state_of(engine, proj("vessel")) is State.STALE
 
-    engine.kill("vessel")
-    assert tmux.killed == ["vessel"]
+    engine.kill(proj("vessel"))
+    assert tmux.killed == [proj("vessel")]
 
 
 def test_a_process_table_that_never_answers_is_not_an_empty_machine(root: Path) -> None:
@@ -1556,11 +1586,11 @@ def test_a_stop_that_times_out_on_a_prompt_says_so(root: Path) -> None:
     is the cost the design refused for the session link, and a stop that times
     out is rare: this is the one moment where the answer is worth a subprocess.
     """
-    tmux = FakeTmux(sessions={"vessel": PANE})
+    tmux = FakeTmux(sessions={proj("vessel"): PANE})
     # Clear WHEN THE STOP RUNS, which is why the sequence proceeds at all: it
     # verifies the box before it types. The modal appears afterwards, opened by
     # the exit command itself, which is the whole shape of this defect.
-    tmux.pane_text["vessel"] = CLEAR_INPUT_BOX
+    tmux.pane_text[proj("vessel")] = CLEAR_INPUT_BOX
     clock = FakeClock()
     sessions_dir = root / ".sessions"
     sessions_dir.mkdir(exist_ok=True)
@@ -1571,13 +1601,13 @@ def test_a_stop_that_times_out_on_a_prompt_says_so(root: Path) -> None:
         meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
         clock=clock,
     )
-    engine.stop("vessel")
-    assert engine.get("vessel").awaiting_input is False, "nothing has timed out yet"
+    engine.stop(proj("vessel"))
+    assert engine.get(proj("vessel")).awaiting_input is False, "nothing has timed out yet"
 
-    tmux.pane_text["vessel"] = MODAL_PANE
+    tmux.pane_text[proj("vessel")] = MODAL_PANE
     clock.advance(engine.config.stop_timeout + 1)
-    assert engine.expire_stops() == ["vessel"]
-    assert engine.get("vessel").awaiting_input is True
+    assert engine.expire_stops() == [proj("vessel")]
+    assert engine.get(proj("vessel")).awaiting_input is True
 
 
 def test_a_stop_that_times_out_on_an_ordinary_box_claims_nothing(root: Path) -> None:
@@ -1586,7 +1616,7 @@ def test_a_stop_that_times_out_on_an_ordinary_box_claims_nothing(root: Path) -> 
     Without this, flagging every expiry would pass and the screen would blame a
     prompt that is not there.
     """
-    tmux = FakeTmux(sessions={"vessel": PANE})
+    tmux = FakeTmux(sessions={proj("vessel"): PANE})
     clock = FakeClock()
     sessions_dir = root / ".sessions"
     sessions_dir.mkdir(exist_ok=True)
@@ -1597,18 +1627,18 @@ def test_a_stop_that_times_out_on_an_ordinary_box_claims_nothing(root: Path) -> 
         meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
         clock=clock,
     )
-    engine.stop("vessel")
+    engine.stop(proj("vessel"))
     clock.advance(engine.config.stop_timeout + 1)
     engine.expire_stops()
-    assert engine.get("vessel").awaiting_input is False
+    assert engine.get(proj("vessel")).awaiting_input is False
 
 
 def test_asking_again_clears_what_the_last_timeout_found(root: Path) -> None:
     """The flag describes ONE stop, not the session. A second attempt starts
     from nothing, or a prompt the person has since answered would still be
     reported at them."""
-    tmux = FakeTmux(sessions={"vessel": PANE})
-    tmux.pane_text["vessel"] = CLEAR_INPUT_BOX
+    tmux = FakeTmux(sessions={proj("vessel"): PANE})
+    tmux.pane_text[proj("vessel")] = CLEAR_INPUT_BOX
     clock = FakeClock()
     sessions_dir = root / ".sessions"
     sessions_dir.mkdir(exist_ok=True)
@@ -1619,16 +1649,16 @@ def test_asking_again_clears_what_the_last_timeout_found(root: Path) -> None:
         meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
         clock=clock,
     )
-    engine.stop("vessel")
-    tmux.pane_text["vessel"] = MODAL_PANE
+    engine.stop(proj("vessel"))
+    tmux.pane_text[proj("vessel")] = MODAL_PANE
     clock.advance(engine.config.stop_timeout + 1)
     engine.expire_stops()
-    assert engine.get("vessel").awaiting_input is True
+    assert engine.get(proj("vessel")).awaiting_input is True
 
     # The person answered it, so a second attempt starts from nothing.
-    tmux.pane_text["vessel"] = CLEAR_INPUT_BOX
-    engine.stop("vessel")
-    assert engine.get("vessel").awaiting_input is False
+    tmux.pane_text[proj("vessel")] = CLEAR_INPUT_BOX
+    engine.stop(proj("vessel"))
+    assert engine.get(proj("vessel")).awaiting_input is False
 
 
 def test_a_failed_kill_keeps_the_stop_indicator(root: Path) -> None:
@@ -1639,16 +1669,16 @@ def test_a_failed_kill_keeps_the_stop_indicator(root: Path) -> None:
     # counted in advance, so this test says what it means: the KILL is the call
     # that fails.
     engine = vanishing_engine(root, fail_after=99)
-    engine.stop("vessel")
-    assert engine.stopping_since("vessel") is not None
+    engine.stop(proj("vessel"))
+    assert engine.stopping_since(proj("vessel")) is not None
 
     tmux = engine.tmux
     assert isinstance(tmux, VanishingTmux)
     tmux.vanish_next()
 
     with pytest.raises(MachineUnreadable):
-        engine.kill("vessel")
-    assert engine.stopping_since("vessel") is not None
+        engine.kill(proj("vessel"))
+    assert engine.stopping_since(proj("vessel")) is not None
 
 
 def test_a_start_that_fails_still_reports_why_when_tmux_is_gone(root: Path) -> None:
@@ -1660,7 +1690,7 @@ def test_a_start_that_fails_still_reports_why_when_tmux_is_gone(root: Path) -> N
     engine = vanishing_engine(root, fail_after=1, live=False)
     engine.start_grace = 0.0
     with pytest.raises((StartFailed, MachineUnreadable)):
-        engine.start("vessel")
+        engine.start(proj("vessel"))
 
 
 def test_a_bus_that_raises_does_not_fail_the_stop(root: Path, caplog: object) -> None:
@@ -1680,7 +1710,7 @@ def test_a_bus_that_raises_does_not_fail_the_stop(root: Path, caplog: object) ->
 
     engine.attach_bus(Exploding())  # type: ignore[arg-type]
     with caplog.at_level(logging.ERROR, logger="hitchrail.engine"):  # type: ignore[attr-defined]
-        session = engine.stop("vessel")
+        session = engine.stop(proj("vessel"))
 
     assert session.stopping is True, "the stop succeeded and must be reported so"
     assert any("could not announce" in r.message for r in caplog.records)  # type: ignore[attr-defined]
@@ -1712,7 +1742,7 @@ def test_a_failed_start_reports_why_even_when_the_pane_cannot_be_read(
     )
     engine.start_grace = 0.0
     with pytest.raises(StartFailed) as caught:
-        engine.start("vessel")
+        engine.start(proj("vessel"))
     assert caught.value.output == "", "an unreadable pane is empty output, not a crash"
 
 
@@ -1728,16 +1758,16 @@ def test_an_unreadable_machine_does_not_kill_the_expiry_ticker(tmp_path: Path) -
     sessions_dir = tmp_path / ".sessions"
     sessions_dir.mkdir()
     now = [0.0]
-    tmux = FakeTmux(sessions={"alpha": 600})
+    tmux = FakeTmux(sessions={proj("alpha"): 600})
     engine = Engine(
         make_config(tmp_path, sessions_dir=sessions_dir, stop_timeout=1.0),
         tmux=tmux,
-        procs_fn=procs_from(ps_row(600, 1) + ps_row(601, 600, project="alpha")),
+        procs_fn=procs_from(ps_row(600, 1) + ps_row(601, 600, project=proj("alpha"))),
         meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
         clock=lambda: now[0],
         sleep=lambda _s: None,
     )
-    engine.stop("alpha")
+    engine.stop(proj("alpha"))
     now[0] = 99.0
 
     def gone() -> dict[str, int]:
@@ -1745,9 +1775,9 @@ def test_an_unreadable_machine_does_not_kill_the_expiry_ticker(tmp_path: Path) -
 
     tmux.pane_pids = gone  # type: ignore[method-assign]
     # Reports the expiry rather than raising it...
-    assert engine.expire_stops() == ["alpha"]
+    assert engine.expire_stops() == [proj("alpha")]
     # ...and the marker is gone, so the next tick does not re-expire it.
-    assert engine.stopping_since("alpha") is None
+    assert engine.stopping_since(proj("alpha")) is None
     # The ticker is still usable, which is the whole point.
     assert engine.expire_stops() == []
 
@@ -1784,7 +1814,7 @@ def test_a_project_that_vanishes_between_the_listing_and_the_path_is_unknown(
 
     monkeypatch.setattr(discovery, "project_path", vanishing)
     with pytest.raises(UnknownProject):
-        engine.start("alpha")
+        engine.start(proj("alpha"))
 
 
 def test_a_stop_that_worked_is_not_reported_as_a_timeout(tmp_path: Path) -> None:
@@ -1799,8 +1829,8 @@ def test_a_stop_that_worked_is_not_reported_as_a_timeout(tmp_path: Path) -> None
     sessions_dir = tmp_path / ".sessions"
     sessions_dir.mkdir()
     now = [0.0]
-    table = [ps_row(600, 1) + ps_row(601, 600, project="alpha")]
-    tmux = FakeTmux(sessions={"alpha": 600})
+    table = [ps_row(600, 1) + ps_row(601, 600, project=proj("alpha"))]
+    tmux = FakeTmux(sessions={proj("alpha"): 600})
     engine = Engine(
         make_config(tmp_path, sessions_dir=sessions_dir, stop_timeout=30.0),
         tmux=tmux,
@@ -1809,18 +1839,18 @@ def test_a_stop_that_worked_is_not_reported_as_a_timeout(tmp_path: Path) -> None
         clock=lambda: now[0],
         sleep=lambda _s: None,
     )
-    engine.stop("alpha")
-    assert engine.get("alpha").stopping, "the overlay should show while it is alive"
+    engine.stop(proj("alpha"))
+    assert engine.get(proj("alpha")).stopping, "the overlay should show while it is alive"
 
     # The agent obeys and exits.
     now[0] = 1.0
     table[0] = ""
     tmux.sessions = {}
 
-    session = engine.get("alpha")
+    session = engine.get(proj("alpha"))
     assert session.state is State.STOPPED
     assert not session.stopping, "an overlay on a session that is not there"
-    assert engine.stopping_since("alpha") is None, "the marker outlived the stop"
+    assert engine.stopping_since(proj("alpha")) is None, "the marker outlived the stop"
 
     # ...so the expiry has nothing to report thirty seconds later.
     now[0] = 31.0
@@ -1835,10 +1865,10 @@ def test_the_overlay_survives_while_the_agent_is_still_running(root: Path) -> No
     could easily have introduced.
     """
     engine, _, _ = live_engine(root)
-    engine.stop("vessel")
+    engine.stop(proj("vessel"))
     for _ in range(3):
-        assert engine.get("vessel").stopping, "a stop in flight was reconciled away"
-    assert engine.stopping_since("vessel") is not None
+        assert engine.get(proj("vessel")).stopping, "a stop in flight was reconciled away"
+    assert engine.stopping_since(proj("vessel")) is not None
 
 
 def _killing_engine(tmp_path: Path, polls_until_reaped: int) -> tuple[Engine, list[float]]:
@@ -1848,14 +1878,14 @@ def _killing_engine(tmp_path: Path, polls_until_reaped: int) -> tuple[Engine, li
     (tmp_path / "alpha").mkdir()
     sessions_dir = tmp_path / ".sessions"
     sessions_dir.mkdir()
-    table = [ps_row(600, 1) + ps_row(601, 600, project="alpha")]
+    table = [ps_row(600, 1) + ps_row(601, 600, project=proj("alpha"))]
     remaining = [polls_until_reaped]
-    tmux = FakeTmux(sessions={"alpha": 600})
+    tmux = FakeTmux(sessions={proj("alpha"): 600})
 
     def killed(project: str) -> None:
         tmux.sessions.pop(project, None)
         # Orphaned but alive: no pane owns it, so derivation sees `detached`.
-        table[0] = ps_row(601, 1, project="alpha")
+        table[0] = ps_row(601, 1, project=proj("alpha"))
 
     tmux.kill_session = killed  # type: ignore[method-assign]
     now = [0.0]
@@ -1889,7 +1919,7 @@ def test_kill_does_not_report_a_dying_agent_as_detached(tmp_path: Path) -> None:
     Raised against the stop sequence on #49 and decided here.
     """
     engine, now = _killing_engine(tmp_path, polls_until_reaped=2)
-    session = engine.kill("alpha")
+    session = engine.kill(proj("alpha"))
     assert session.state is State.STOPPED, "a dying agent was reported detached"
     assert session.pid is None
     assert now[0] <= 2.0, "the wait must stay inside the grace window"
@@ -1906,7 +1936,7 @@ def test_kill_still_surfaces_an_agent_that_genuinely_will_not_die(
     derivation exists to avoid.
     """
     engine, now = _killing_engine(tmp_path, polls_until_reaped=10_000)
-    session = engine.kill("alpha")
+    session = engine.kill(proj("alpha"))
     assert session.state is State.DETACHED
     assert session.pid == 601
     assert now[0] == pytest.approx(engine.kill_grace), "the wait must be bounded"
@@ -1936,11 +1966,14 @@ def test_list_accepts_a_listing_and_does_not_scan_the_root_again(
 
     monkeypatch.setattr(discovery, "scan", counting)
 
-    listing = discovery.scan(tmp_path)
+    # `scan_roots` is what the engine calls now, and it qualifies every name.
+    # Building the handed-in listing any other way would hand the engine
+    # identifiers it cannot match, which is a different test from this one.
+    listing = discovery.scan_roots(engine.config.roots)
     scans.clear()
     sessions = engine.list(listing=listing)
     assert scans == [], "the root was walked again despite being handed a listing"
-    assert sorted(s.name for s in sessions) == ["alpha", "beta"]
+    assert sorted(s.name for s in sessions) == [proj("alpha"), proj("beta")]
 
 
 def test_list_without_a_listing_still_scans_for_itself(tmp_path: Path) -> None:
@@ -1948,7 +1981,7 @@ def test_list_without_a_listing_still_scans_for_itself(tmp_path: Path) -> None:
     (tmp_path / "alpha").mkdir()
     (tmp_path / ".sessions").mkdir()
     engine, _, _ = start_engine(tmp_path, table=procs_from(""))
-    assert [s.name for s in engine.list()] == ["alpha"]
+    assert [s.name for s in engine.list()] == [proj("alpha")]
 
 
 def test_a_listing_decides_the_names_so_one_answer_cannot_contradict_itself(
@@ -1963,15 +1996,15 @@ def test_a_listing_decides_the_names_so_one_answer_cannot_contradict_itself(
     (tmp_path / "alpha").mkdir()
     (tmp_path / ".sessions").mkdir()
     engine, _, _ = start_engine(tmp_path, table=procs_from(""))
-    listing = discovery.scan(tmp_path)
+    listing = discovery.scan_roots(engine.config.roots)
 
     # The root changes after the listing was taken.
     (tmp_path / "beta").mkdir()
 
-    assert [s.name for s in engine.list(listing=listing)] == ["alpha"], (
+    assert [s.name for s in engine.list(listing=listing)] == [proj("alpha")], (
         "the engine used the live root instead of the listing it was given"
     )
-    assert sorted(s.name for s in engine.list()) == ["alpha", "beta"]
+    assert sorted(s.name for s in engine.list()) == [proj("alpha"), proj("beta")]
 
 
 def test_session_url_is_none_for_a_stale_session(root: Path) -> None:
@@ -1981,9 +2014,9 @@ def test_session_url_is_none_for_a_stale_session(root: Path) -> None:
     attached to. Not an error either: there is simply no link, which is the
     `url_pending` case the route reports.
     """
-    engine, _ = engine_for(root, sessions={"vessel": PANE}, table=ps_row(PANE, 1))
-    assert engine.get("vessel").state is State.STALE
-    assert engine.session_url("vessel") is None
+    engine, _ = engine_for(root, sessions={proj("vessel"): PANE}, table=ps_row(PANE, 1))
+    assert engine.get(proj("vessel")).state is State.STALE
+    assert engine.session_url(proj("vessel")) is None
 
 
 # -- #66: a start that dies keeps what it printed ---------------------------
@@ -1997,15 +2030,15 @@ def test_a_dead_start_carries_the_output_and_leaves_no_session(root: Path) -> No
     failure "Started, then exited after 3 seconds" was written to avoid.
     """
     engine, tmux, _ = start_engine(root, table=procs_from(""))
-    tmux.pane_text["vessel"] = "agent: missing credential\nPane is dead (status 3)"
-    tmux.dead_panes.add("vessel")
+    tmux.pane_text[proj("vessel")] = "agent: missing credential\nPane is dead (status 3)"
+    tmux.dead_panes.add(proj("vessel"))
 
     with pytest.raises(StartFailed) as raised:
-        engine.start("vessel")
+        engine.start(proj("vessel"))
 
     assert "missing credential" in raised.value.output
     assert "status 3" in raised.value.output, "the exit status is the diagnostic"
-    assert tmux.killed == ["vessel"], "the kept pane was not cleaned up"
+    assert tmux.killed == [proj("vessel")], "the kept pane was not cleaned up"
 
 
 def test_a_start_that_is_merely_slow_is_not_killed(root: Path) -> None:
@@ -2018,11 +2051,11 @@ def test_a_start_that_is_merely_slow_is_not_killed(root: Path) -> None:
     observably dead only when it really is.
     """
     engine, tmux, _ = start_engine(root, table=procs_from(""))
-    tmux.pane_text["vessel"] = "agent: still waking up"
+    tmux.pane_text[proj("vessel")] = "agent: still waking up"
     # The pane is NOT marked dead, so the agent may still be coming.
 
     with pytest.raises(StartFailed):
-        engine.start("vessel")
+        engine.start(proj("vessel"))
 
     assert tmux.killed == [], "a slow start was killed as though it had died"
 
@@ -2038,7 +2071,7 @@ def test_an_undeterminable_pane_counts_as_alive(root: Path) -> None:
     tmux.pane_is_dead = cannot_tell  # type: ignore[method-assign]
 
     with pytest.raises(StartFailed):
-        engine.start("vessel")
+        engine.start(proj("vessel"))
 
     assert tmux.killed == []
 
@@ -2048,10 +2081,10 @@ def test_a_dead_start_reads_the_whole_scrollback(root: Path) -> None:
     bounded read can return that and nothing else while what the agent printed
     has scrolled above it."""
     engine, tmux, _ = start_engine(root, table=procs_from(""))
-    tmux.pane_text["vessel"] = "anything"
+    tmux.pane_text[proj("vessel")] = "anything"
 
     with pytest.raises(StartFailed):
-        engine.start("vessel")
+        engine.start(proj("vessel"))
 
     assert tmux.capture_lines == [0], (
         f"the dead start read {tmux.capture_lines}, not the whole scrollback"
@@ -2064,9 +2097,9 @@ def test_a_successful_start_stops_keeping_the_pane(root: Path) -> None:
     silently change the outcome of the stop flow."""
     engine, tmux, _ = start_engine(root, table=running_after())
 
-    engine.start("vessel")
+    engine.start(proj("vessel"))
 
-    assert ("vessel", False) in tmux.pane_kept, "remain-on-exit was left on"
+    assert (proj("vessel"), False) in tmux.pane_kept, "remain-on-exit was left on"
 
 
 def test_a_start_is_not_failed_by_a_tmux_that_dies_while_tidying_up(
@@ -2081,15 +2114,15 @@ def test_a_start_is_not_failed_by_a_tmux_that_dies_while_tidying_up(
 
     tmux.keep_pane_on_exit = gone  # type: ignore[method-assign]
 
-    assert engine.start("vessel").state is State.RUNNING
+    assert engine.start(proj("vessel")).state is State.RUNNING
 
 
 def test_a_dead_start_still_reports_when_the_cleanup_fails(root: Path) -> None:
     """The message matters more than the tidying. A machine that has lost tmux
     will not be told about it by this path."""
     engine, tmux, _ = start_engine(root, table=procs_from(""))
-    tmux.pane_text["vessel"] = "agent: exploded"
-    tmux.dead_panes.add("vessel")
+    tmux.pane_text[proj("vessel")] = "agent: exploded"
+    tmux.dead_panes.add(proj("vessel"))
 
     def gone(project: str) -> None:
         raise TmuxUnavailable("tmux went away")
@@ -2097,5 +2130,5 @@ def test_a_dead_start_still_reports_when_the_cleanup_fails(root: Path) -> None:
     tmux.kill_session = gone  # type: ignore[method-assign]
 
     with pytest.raises(StartFailed) as raised:
-        engine.start("vessel")
+        engine.start(proj("vessel"))
     assert "exploded" in raised.value.output

@@ -27,7 +27,19 @@ from hitchrail.events import EventBus
 from hitchrail.procs import ProcTable
 from hitchrail.server import create_app
 from hitchrail.tmux import TmuxUnavailable
-from support import make_config
+from support import DEFAULT_LABEL, make_config
+
+
+def proj(folder: str) -> str:
+    """The identifier for a folder in this file's single test root.
+
+    #119: a project is `<root-label>~<folder>`, and `support.make_config`
+    labels the test root `main`. A FOLDER keeps its bare name; an IDENTIFIER
+    gains the prefix, and in this file that means every `/api/sessions/...`
+    path and every `--self-project`.
+    """
+    return f"{DEFAULT_LABEL}~{folder}"
+
 
 # The whole module drives a real Starlette app through `ASGITransport`, so it
 # is one tier and says so once. #37, and `tests/test_tiers.py` enforces it.
@@ -61,8 +73,8 @@ def config(root: pathlib.Path) -> Config:
 
 
 RUNNING_PS = """\
- 500     1   4096   600 tmux new-session -d -s hr-vessel
- 501   500 512000   600 claude --dangerously-skip-permissions --remote-control vessel
+ 500     1   4096   600 tmux new-session -d -s hr-main~vessel
+ 501   500 512000   600 claude --dangerously-skip-permissions --remote-control main~vessel
 """
 
 # The tmux session is alive and nothing of ours is in it: `stale`. The
@@ -76,11 +88,11 @@ STALE_PS = """\
 # An agent with no tmux session owning it: `detached`. There is no tmux server
 # row here at all, which is what makes the pane map empty for this project.
 DETACHED_PS = """\
- 900     1 512000   600 claude --dangerously-skip-permissions --remote-control vessel
+ 900     1 512000   600 claude --dangerously-skip-permissions --remote-control main~vessel
 """
 
 STARTED_PS = """\
- 1001     1   4096      5 tmux new-session -d -s hr-network
+ 1001     1   4096      5 tmux new-session -d -s hr-main~network
  1002  1001 300000      5 claude --dangerously-skip-permissions --remote-control network
 """
 
@@ -130,7 +142,7 @@ def tmux() -> FakeTmux:
     through it is an attribute error under mypy. Every other test module in
     this project keeps the fake beside the engine for the same reason.
     """
-    return FakeTmux(sessions={"vessel": 500})
+    return FakeTmux(sessions={proj("vessel"): 500})
 
 
 @pytest.fixture
@@ -150,13 +162,18 @@ async def test_projects_lists_every_folder_with_its_state(client: httpx.AsyncCli
     # Sorted, which is the listing's contract. Spelled out rather than
     # computed, so a change to the ORDER fails here rather than passing
     # against a sort of whatever came back.
-    assert names == ["dotted.site", "network", "vessel", "vessel-social"]
+    assert names == [
+        proj("dotted.site"),
+        proj("network"),
+        proj("vessel"),
+        proj("vessel-social"),
+    ]
     # By NAME, not by index. These were index 0 and index 2, which quietly
     # meant "whichever rows those happen to be" and broke when the fixture
     # names changed and the alphabetical order moved under them.
     state = {p["name"]: p["state"] for p in body["projects"]}
-    assert state["vessel"] == "running"
-    assert state["network"] == "stopped"
+    assert state[proj("vessel")] == "running"
+    assert state[proj("network")] == "stopped"
 
 
 async def test_projects_reports_available_memory(client: httpx.AsyncClient) -> None:
@@ -172,7 +189,7 @@ async def test_start_returns_the_new_session(config: Config) -> None:
     # table where the agent already existed.
     engine = make_engine(config, FakeTmux(), ScriptedProcs("", STARTED_PS))
     async with client_for(engine, config) as c:
-        r = await c.post("/api/sessions/network", headers=HEADERS)
+        r = await c.post(f"/api/sessions/{proj('network')}", headers=HEADERS)
     assert r.status_code == 201
     assert r.json()["state"] == "running"
 
@@ -182,12 +199,12 @@ async def test_start_survives_a_process_table_that_lags(config: Config) -> None:
     # the path a person actually taps.
     engine = make_engine(config, FakeTmux(), ScriptedProcs("", "", STARTED_PS))
     async with client_for(engine, config) as c:
-        r = await c.post("/api/sessions/network", headers=HEADERS)
+        r = await c.post(f"/api/sessions/{proj('network')}", headers=HEADERS)
     assert r.status_code == 201
 
 
 async def test_starting_a_running_session_is_a_conflict(client: httpx.AsyncClient) -> None:
-    r = await client.post("/api/sessions/vessel", headers=HEADERS)
+    r = await client.post(f"/api/sessions/{proj('vessel')}", headers=HEADERS)
     assert r.status_code == 409
     assert r.json()["code"] == "already_running"
 
@@ -198,15 +215,15 @@ async def test_a_second_start_in_flight_is_reported_as_locked(
     # Keyed by the resolved PATH, not the name. Identity is the folder, which
     # is what makes two names for one directory a single lock (#11), and the
     # first draft of this test seeded the name and locked nothing.
-    engine._starting.add(str((config.root / "network").resolve()))
+    engine._starting.add(str((config.roots[0].path / "network").resolve()))
     async with client_for(engine, config) as c:
-        r = await c.post("/api/sessions/network", headers=HEADERS)
+        r = await c.post(f"/api/sessions/{proj('network')}", headers=HEADERS)
     assert r.status_code == 409
     assert r.json()["code"] == "locked"
 
 
 async def test_unknown_project_is_a_404_with_a_code(client: httpx.AsyncClient) -> None:
-    r = await client.post("/api/sessions/nope", headers=HEADERS)
+    r = await client.post(f"/api/sessions/{proj('nope')}", headers=HEADERS)
     assert r.status_code == 404
     assert r.json()["code"] == "unknown_project"
 
@@ -214,10 +231,10 @@ async def test_unknown_project_is_a_404_with_a_code(client: httpx.AsyncClient) -
 @pytest.mark.parametrize(
     ("method", "path"),
     [
-        ("POST", "/api/sessions/nope"),
-        ("DELETE", "/api/sessions/nope"),
-        ("GET", "/api/sessions/nope/logs"),
-        ("GET", "/api/sessions/nope/url"),
+        ("POST", f"/api/sessions/{proj('nope')}"),
+        ("DELETE", f"/api/sessions/{proj('nope')}"),
+        ("GET", f"/api/sessions/{proj('nope')}/logs"),
+        ("GET", f"/api/sessions/{proj('nope')}/url"),
     ],
 )
 async def test_every_route_agrees_that_an_unknown_project_is_a_404(
@@ -241,7 +258,7 @@ async def test_a_traversing_name_is_a_404_and_spawns_nothing(
 async def test_hard_memory_refusal_is_507_with_the_numbers(config: Config) -> None:
     engine = make_engine(config, FakeTmux(), procs_from(""), "MemAvailable: 1048576 kB\n")
     async with client_for(engine, config) as c:
-        r = await c.post("/api/sessions/network", headers=HEADERS)
+        r = await c.post(f"/api/sessions/{proj('network')}", headers=HEADERS)
     assert r.status_code == 507
     assert r.json()["code"] == "ram_hard"
     assert r.json()["available_mb"] == 1024
@@ -253,11 +270,13 @@ async def test_soft_memory_needs_an_acknowledgement(config: Config) -> None:
         config, FakeTmux(), ScriptedProcs("", "", STARTED_PS), "MemAvailable: 4194304 kB\n"
     )
     async with client_for(engine, config) as c:
-        first = await c.post("/api/sessions/network", headers=HEADERS)
+        first = await c.post(f"/api/sessions/{proj('network')}", headers=HEADERS)
         assert first.status_code == 409
         assert first.json()["code"] == "ram_soft"
         assert first.json()["available_mb"] == 4096
-        second = await c.post("/api/sessions/network?acknowledged=1", headers=HEADERS)
+        second = await c.post(
+            f"/api/sessions/{proj('network')}?acknowledged=1", headers=HEADERS
+        )
     assert second.status_code == 201
     assert second.json()["state"] == "running"
 
@@ -267,16 +286,16 @@ async def test_a_soft_refusal_spawns_nothing_on_its_own(config: Config, tmux: Fa
     tmux = FakeTmux()
     engine = make_engine(config, tmux, procs_from(""), "MemAvailable: 4194304 kB\n")
     async with client_for(engine, config) as c:
-        await c.post("/api/sessions/network", headers=HEADERS)
+        await c.post(f"/api/sessions/{proj('network')}", headers=HEADERS)
     assert tmux.started == []
 
 
 async def test_a_session_that_never_comes_up_is_502(config: Config, tmux: FakeTmux) -> None:
     tmux = FakeTmux()
-    tmux.pane_text["network"] = "Error: claude not found\n"
+    tmux.pane_text[proj("network")] = "Error: claude not found\n"
     engine = make_engine(config, tmux, procs_from(""))
     async with client_for(engine, config) as c:
-        r = await c.post("/api/sessions/network", headers=HEADERS)
+        r = await c.post(f"/api/sessions/{proj('network')}", headers=HEADERS)
     assert r.status_code == 502
     assert r.json()["code"] == "start_died"
     assert "claude not found" in r.json()["output"]
@@ -285,7 +304,7 @@ async def test_a_session_that_never_comes_up_is_502(config: Config, tmux: FakeTm
 async def test_delete_begins_a_graceful_stop_and_kills_nothing(
     client: httpx.AsyncClient, engine: Engine, tmux: FakeTmux
 ) -> None:
-    r = await client.delete("/api/sessions/vessel", headers=HEADERS)
+    r = await client.delete(f"/api/sessions/{proj('vessel')}", headers=HEADERS)
     assert r.status_code == 202
     assert r.json()["stopping"] is True
     assert tmux.killed == []
@@ -300,8 +319,8 @@ async def test_a_stop_the_adapter_declined_is_409_stop_unsafe(
     The session is in a state where this action is wrong, which is what every
     other 409 on this API means.
     """
-    tmux.pane_text["vessel"] = DIRTY_INPUT_BOX
-    r = await client.delete("/api/sessions/vessel", headers=HEADERS)
+    tmux.pane_text[proj("vessel")] = DIRTY_INPUT_BOX
+    r = await client.delete(f"/api/sessions/{proj('vessel')}", headers=HEADERS)
     assert r.status_code == 409
     assert r.json()["code"] == "stop_unsafe"
     assert tmux.killed == [], "a refused graceful stop must not escalate"
@@ -311,12 +330,12 @@ async def test_a_refused_stop_leaves_the_session_alone(
     client: httpx.AsyncClient, engine: Engine, tmux: FakeTmux
 ) -> None:
     """Nothing typed, and no stopping marker to show a spinner for."""
-    tmux.pane_text["vessel"] = DIRTY_INPUT_BOX
-    await client.delete("/api/sessions/vessel", headers=HEADERS)
+    tmux.pane_text[proj("vessel")] = DIRTY_INPUT_BOX
+    await client.delete(f"/api/sessions/{proj('vessel')}", headers=HEADERS)
     assert not any("/exit" in keys for _, keys in tmux.sent)
 
     listed = (await client.get("/api/projects", headers=HEADERS)).json()["projects"]
-    row = next(s for s in listed if s["name"] == "vessel")
+    row = next(s for s in listed if s["name"] == proj("vessel"))
     assert row["stopping"] is False
 
 
@@ -340,14 +359,14 @@ async def test_stopping_a_stale_session_is_409_no_agent(config: Config, tmux: Fa
     #
     # `STALE_PS` is the tmux server and no agent under it, which is what stale
     # means: a session that is alive with nothing of ours in it.
-    tmux.pane_text["vessel"] = "user@host:/tmp$ "
+    tmux.pane_text[proj("vessel")] = "user@host:/tmp$ "
     stale = make_engine(config, tmux, procs_from(STALE_PS))
     async with client_for(stale, config) as c:
         listed = (await c.get("/api/projects", headers=HEADERS)).json()["projects"]
-        row = next(p for p in listed if p["name"] == "vessel")
+        row = next(p for p in listed if p["name"] == proj("vessel"))
         assert row["state"] == "stale", "the machine under this test is not stale"
 
-        r = await c.delete("/api/sessions/vessel", headers=HEADERS)
+        r = await c.delete(f"/api/sessions/{proj('vessel')}", headers=HEADERS)
 
     assert r.status_code == 409
     assert r.json()["code"] == "no_agent"
@@ -358,9 +377,9 @@ async def test_stopping_a_stale_session_is_409_no_agent(config: Config, tmux: Fa
 async def test_the_kill_route_kills(
     client: httpx.AsyncClient, engine: Engine, tmux: FakeTmux
 ) -> None:
-    r = await client.post("/api/sessions/vessel/kill", headers=HEADERS)
+    r = await client.post(f"/api/sessions/{proj('vessel')}/kill", headers=HEADERS)
     assert r.status_code == 200
-    assert tmux.killed == ["vessel"]
+    assert tmux.killed == [proj("vessel")]
 
 
 @pytest.mark.parametrize(
@@ -378,7 +397,7 @@ async def test_delete_never_kills_whatever_the_query_string(
     and no 404. `?kill=1` is in this list on purpose, because it is the exact
     string that used to work.
     """
-    r = await client.delete(f"/api/sessions/vessel{query}", headers=HEADERS)
+    r = await client.delete(f"/api/sessions/{proj('vessel')}{query}", headers=HEADERS)
     assert r.status_code == 202
     assert tmux.killed == [], "a query parameter reached the kill path"
 
@@ -401,10 +420,10 @@ async def test_killing_a_detached_agent_is_409_and_not_a_false_200(
     detached = make_engine(config, tmux, procs_from(DETACHED_PS))
     async with client_for(detached, config) as c:
         listed = (await c.get("/api/projects", headers=HEADERS)).json()["projects"]
-        row = next(p for p in listed if p["name"] == "vessel")
+        row = next(p for p in listed if p["name"] == proj("vessel"))
         assert row["state"] == "detached", "the machine under this test is not detached"
 
-        r = await c.post("/api/sessions/vessel/kill", headers=HEADERS)
+        r = await c.post(f"/api/sessions/{proj('vessel')}/kill", headers=HEADERS)
 
     assert r.status_code == 409
     assert r.json()["code"] == "no_agent"
@@ -415,8 +434,8 @@ async def test_kill_without_a_preceding_stop_is_accepted_by_the_api(
     client: httpx.AsyncClient, engine: Engine, tmux: FakeTmux
 ) -> None:
     """Etiquette is a property of the interface, not of the API."""
-    await client.post("/api/sessions/vessel/kill", headers=HEADERS)
-    assert tmux.killed == ["vessel"]
+    await client.post(f"/api/sessions/{proj('vessel')}/kill", headers=HEADERS)
+    assert tmux.killed == [proj("vessel")]
 
 
 async def test_the_kill_route_is_origin_checked_like_every_mutating_route(
@@ -425,7 +444,7 @@ async def test_the_kill_route_is_origin_checked_like_every_mutating_route(
     """A kill route accidentally treated as a GET exemption would be strictly
     worse than the flag design it replaced."""
     r = await client.post(
-        "/api/sessions/vessel/kill",
+        f"/api/sessions/{proj('vessel')}/kill",
         headers={**HEADERS, "origin": "http://evil.example"},
     )
     assert r.status_code == 403
@@ -438,11 +457,11 @@ async def test_the_protected_project_is_423(root: pathlib.Path, config: Config) 
         root,
         sessions_dir=root / ".s",
         agent_config_path=NO_AGENT_CONFIG,
-        self_project="vessel",
+        self_project=proj("vessel"),
     )
-    engine = make_engine(cfg, FakeTmux(sessions={"vessel": 500}), procs_from(RUNNING_PS))
+    engine = make_engine(cfg, FakeTmux(sessions={proj("vessel"): 500}), procs_from(RUNNING_PS))
     async with client_for(engine, cfg) as c:
-        r = await c.delete("/api/sessions/vessel", headers=HEADERS)
+        r = await c.delete(f"/api/sessions/{proj('vessel')}", headers=HEADERS)
     assert r.status_code == 423
     assert r.json()["code"] == "self_protected"
 
@@ -450,16 +469,16 @@ async def test_the_protected_project_is_423(root: pathlib.Path, config: Config) 
 async def test_logs_returns_the_pane_tail(
     client: httpx.AsyncClient, engine: Engine, tmux: FakeTmux
 ) -> None:
-    tmux.pane_text["vessel"] = "one\ntwo\n"
-    r = await client.get("/api/sessions/vessel/logs", headers=HEADERS)
+    tmux.pane_text[proj("vessel")] = "one\ntwo\n"
+    r = await client.get(f"/api/sessions/{proj('vessel')}/logs", headers=HEADERS)
     assert r.json()["text"] == "one\ntwo\n"
 
 
 async def test_the_url_route_returns_the_link(
     client: httpx.AsyncClient, engine: Engine, tmux: FakeTmux
 ) -> None:
-    tmux.pane_text["vessel"] = "https://claude.ai/code/session_live\n"
-    r = await client.get("/api/sessions/vessel/url", headers=HEADERS)
+    tmux.pane_text[proj("vessel")] = "https://claude.ai/code/session_live\n"
+    r = await client.get(f"/api/sessions/{proj('vessel')}/url", headers=HEADERS)
     assert r.status_code == 200
     assert r.json()["url"] == "https://claude.ai/code/session_live"
 
@@ -470,7 +489,7 @@ async def test_the_url_route_reports_pending_rather_than_guessing(
     # The design's url_pending code. Listing never captures a pane, so a link
     # that Claude has not written yet is absent, and this is where a client
     # finds out that absent means "not yet" rather than "never".
-    r = await client.get("/api/sessions/vessel/url", headers=HEADERS)
+    r = await client.get(f"/api/sessions/{proj('vessel')}/url", headers=HEADERS)
     assert r.status_code == 409
     assert r.json()["code"] == "url_pending"
 
@@ -478,11 +497,11 @@ async def test_the_url_route_reports_pending_rather_than_guessing(
 async def test_creating_a_folder_makes_it_appear(
     client: httpx.AsyncClient, config: Config
 ) -> None:
-    r = await client.post("/api/projects", json={"name": "brand-new"}, headers=HEADERS)
+    r = await client.post("/api/projects", json={"name": proj("brand-new")}, headers=HEADERS)
     assert r.status_code == 201
     body = (await client.get("/api/projects", headers=HEADERS)).json()
-    assert "brand-new" in [p["name"] for p in body["projects"]]
-    assert (config.root / "brand-new").is_dir()
+    assert proj("brand-new") in [p["name"] for p in body["projects"]]
+    assert (config.roots[0].path / "brand-new").is_dir()
 
 
 async def test_every_publisher_puts_the_same_shape_on_the_bus(config: Config) -> None:
@@ -504,19 +523,19 @@ async def test_every_publisher_puts_the_same_shape_on_the_bus(config: Config) ->
     engine = make_engine(config, FakeTmux(), ScriptedProcs("", "", STARTED_PS))
     async with client_for(engine, config, bus=bus) as c:
         with bus.subscribe() as queue:
-            r = await c.post("/api/projects", json={"name": "brand-new"}, headers=HEADERS)
+            r = await c.post("/api/projects", json={"name": proj("brand-new")}, headers=HEADERS)
             assert r.status_code == 201
             # `await`, not `get_nowait`: the bus schedules delivery on the
             # subscriber's loop rather than handing it over inline, so it has
             # not necessarily arrived by the time the POST returns.
             from_create = await asyncio.wait_for(queue.get(), timeout=2)
 
-            r = await c.post("/api/sessions/network", headers=HEADERS)
+            r = await c.post(f"/api/sessions/{proj('network')}", headers=HEADERS)
             assert r.status_code == 201, r.text
             from_engine = await asyncio.wait_for(queue.get(), timeout=2)
 
     assert from_create.keys() == from_engine.keys(), (from_create, from_engine)
-    assert from_create["name"] == "brand-new"
+    assert from_create["name"] == proj("brand-new")
 
 
 async def test_creating_a_traversing_folder_is_refused(
@@ -525,11 +544,11 @@ async def test_creating_a_traversing_folder_is_refused(
     r = await client.post("/api/projects", json={"name": "../evil"}, headers=HEADERS)
     assert r.status_code == 400
     assert r.json()["code"] == "invalid_name"
-    assert not (config.root.parent / "evil").exists()
+    assert not (config.roots[0].path.parent / "evil").exists()
 
 
 async def test_creating_an_existing_folder_is_a_conflict(client: httpx.AsyncClient) -> None:
-    r = await client.post("/api/projects", json={"name": "network"}, headers=HEADERS)
+    r = await client.post("/api/projects", json={"name": proj("network")}, headers=HEADERS)
     assert r.status_code == 409
     assert r.json()["code"] == "already_exists"
 
@@ -547,10 +566,10 @@ async def test_a_body_that_is_not_json_is_a_400_not_a_500(client: httpx.AsyncCli
 @pytest.mark.parametrize(
     ("method", "path"),
     [
-        ("POST", "/api/sessions/nope"),
-        ("POST", "/api/sessions/vessel"),
-        ("GET", "/api/sessions/nope/url"),
-        ("GET", "/api/sessions/vessel/url"),
+        ("POST", f"/api/sessions/{proj('nope')}"),
+        ("POST", f"/api/sessions/{proj('vessel')}"),
+        ("GET", f"/api/sessions/{proj('nope')}/url"),
+        ("GET", f"/api/sessions/{proj('vessel')}/url"),
         ("POST", "/api/projects"),
     ],
 )
@@ -588,11 +607,11 @@ def _unreadable_tmux() -> FakeTmux:
     ("method", "path"),
     [
         ("GET", "/api/projects"),
-        ("POST", "/api/sessions/vessel"),
-        ("DELETE", "/api/sessions/vessel"),
-        ("POST", "/api/sessions/vessel/kill"),
-        ("GET", "/api/sessions/vessel/logs"),
-        ("GET", "/api/sessions/vessel/url"),
+        ("POST", f"/api/sessions/{proj('vessel')}"),
+        ("DELETE", f"/api/sessions/{proj('vessel')}"),
+        ("POST", f"/api/sessions/{proj('vessel')}/kill"),
+        ("GET", f"/api/sessions/{proj('vessel')}/logs"),
+        ("GET", f"/api/sessions/{proj('vessel')}/url"),
     ],
 )
 async def test_a_machine_that_cannot_be_read_is_503_not_500(
@@ -624,7 +643,7 @@ async def test_a_root_that_has_gone_away_is_503_not_an_empty_list(
 ) -> None:
     """Reporting an empty list would be a lie the interface cannot tell from a
     genuinely empty root, and the operator would think their projects vanished."""
-    shutil.rmtree(config.root)
+    shutil.rmtree(config.roots[0].path)
     async with client_for(engine, config) as c:
         r = await c.get("/api/projects", headers=HEADERS)
     assert r.status_code == 503
@@ -638,16 +657,18 @@ async def test_starting_the_self_project_is_423_not_500(root: pathlib.Path) -> N
         root,
         sessions_dir=root / ".sessions",
         agent_config_path=NO_AGENT_CONFIG,
-        self_project="vessel",
+        self_project=proj("vessel"),
     )
     engine = make_engine(config, FakeTmux(), procs_from(""))
     async with client_for(engine, config) as c:
-        r = await c.post("/api/sessions/vessel", headers=HEADERS)
+        r = await c.post(f"/api/sessions/{proj('vessel')}", headers=HEADERS)
     assert r.status_code == 423
     assert r.json()["code"] == "self_protected"
 
 
-@pytest.mark.parametrize("path", ["/api/sessions/vessel", "/api/sessions/vessel/kill"])
+@pytest.mark.parametrize(
+    "path", [f"/api/sessions/{proj('vessel')}", f"/api/sessions/{proj('vessel')}/kill"]
+)
 async def test_the_self_project_cannot_be_stopped_or_killed(
     root: pathlib.Path, path: str
 ) -> None:
@@ -655,9 +676,11 @@ async def test_the_self_project_cannot_be_stopped_or_killed(
         root,
         sessions_dir=root / ".sessions",
         agent_config_path=NO_AGENT_CONFIG,
-        self_project="vessel",
+        self_project=proj("vessel"),
     )
-    engine = make_engine(config, FakeTmux(sessions={"vessel": 500}), procs_from(RUNNING_PS))
+    engine = make_engine(
+        config, FakeTmux(sessions={proj("vessel"): 500}), procs_from(RUNNING_PS)
+    )
     method = "POST" if path.endswith("/kill") else "DELETE"
     async with client_for(engine, config) as c:
         r = await c.request(method, path, headers=HEADERS)
@@ -668,10 +691,10 @@ async def test_the_self_project_cannot_be_stopped_or_killed(
 @pytest.mark.parametrize(
     ("method", "path", "code"),
     [
-        ("DELETE", "/api/sessions/network", "not_running"),
-        ("POST", "/api/sessions/network/kill", "not_running"),
-        ("GET", "/api/sessions/network/logs", "not_running"),
-        ("GET", "/api/sessions/network/url", "not_running"),
+        ("DELETE", f"/api/sessions/{proj('network')}", "not_running"),
+        ("POST", f"/api/sessions/{proj('network')}/kill", "not_running"),
+        ("GET", f"/api/sessions/{proj('network')}/logs", "not_running"),
+        ("GET", f"/api/sessions/{proj('network')}/url", "not_running"),
     ],
 )
 async def test_a_real_project_that_is_not_running_is_409_not_404(
@@ -692,9 +715,9 @@ async def test_creating_a_folder_under_a_vanished_root_is_503(
     config: Config, engine: Engine
 ) -> None:
     """Not the caller's fault, and not answered by pretending it worked."""
-    shutil.rmtree(config.root)
+    shutil.rmtree(config.roots[0].path)
     async with client_for(engine, config) as c:
-        r = await c.post("/api/projects", json={"name": "new"}, headers=HEADERS)
+        r = await c.post("/api/projects", json={"name": proj("new")}, headers=HEADERS)
     assert r.status_code == 503
     assert r.json()["code"] == "root_unavailable"
 
@@ -703,7 +726,7 @@ async def test_the_kill_route_404s_an_unknown_project(
     client: httpx.AsyncClient,
 ) -> None:
     """The destructive route needs the same vocabulary as the gentle one."""
-    r = await client.post("/api/sessions/nope/kill", headers=HEADERS)
+    r = await client.post(f"/api/sessions/{proj('nope')}/kill", headers=HEADERS)
     assert r.status_code == 404
     assert r.json()["code"] == "unknown_project"
 
@@ -715,8 +738,8 @@ async def test_a_junk_lines_parameter_falls_back_rather_than_500ing(
     """A query parameter is attacker controlled. `int()` on it raises, and an
     uncaught raise here is a 500 on a route that should simply use its
     default."""
-    tmux.pane_text["vessel"] = "hello"
-    r = await client.get(f"/api/sessions/vessel/logs?lines={lines}", headers=HEADERS)
+    tmux.pane_text[proj("vessel")] = "hello"
+    r = await client.get(f"/api/sessions/{proj('vessel')}/logs?lines={lines}", headers=HEADERS)
     assert r.status_code == 200
     assert r.json()["text"] == "hello"
 
@@ -822,8 +845,8 @@ async def test_the_stream_is_a_get_because_eventsource_cannot_be_anything_else(
         # the routing 404, which is what this test is about.
         ("POST", "/api/events", 405, "method_not_allowed"),
         ("PUT", "/api/projects", 405, "method_not_allowed"),
-        ("PATCH", "/api/sessions/vessel", 405, "method_not_allowed"),
-        ("GET", "/api/sessions/vessel/kill", 405, "method_not_allowed"),
+        ("PATCH", f"/api/sessions/{proj('vessel')}", 405, "method_not_allowed"),
+        ("GET", f"/api/sessions/{proj('vessel')}/kill", 405, "method_not_allowed"),
     ],
 )
 async def test_routing_failures_use_the_error_envelope_too(
@@ -846,9 +869,9 @@ async def test_a_routing_failure_names_no_path_and_no_traceback(
     client: httpx.AsyncClient, config: Config
 ) -> None:
     """Rendering Starlette's detail must not start leaking what it knows."""
-    r = await client.get("/api/sessions/vessel/nope", headers=HEADERS)
+    r = await client.get(f"/api/sessions/{proj('vessel')}/nope", headers=HEADERS)
     assert r.status_code == 404
-    assert str(config.root) not in r.text
+    assert str(config.roots[0].path) not in r.text
     assert "Traceback" not in r.text
 
 
@@ -886,13 +909,13 @@ async def test_the_listing_accounts_for_folders_it_cannot_open(
     """A folder the root holds but Hitchrail cannot use must be ACCOUNTED for,
     not absent. Dropping them silently made a folder called `my app` look like
     one Hitchrail could not see, which is issue #7."""
-    (config.root / "my app").mkdir()
-    (config.root / ".hidden").mkdir()
+    (config.roots[0].path / "my app").mkdir()
+    (config.roots[0].path / ".hidden").mkdir()
     body = (await client.get("/api/projects", headers=HEADERS)).json()
 
     assert "unsupported" in body and "unsupported_total" in body
     names = {u["name"] for u in body["unsupported"]}
-    assert "my app" in names
+    assert proj("my app") in names
     assert all(u["reason"] for u in body["unsupported"]), "a reason is the point"
     assert body["unsupported_total"] >= len(body["unsupported"])
     assert "my app" not in {p["name"] for p in body["projects"]}
@@ -905,7 +928,7 @@ async def test_a_folder_whose_name_is_not_utf8_does_not_500_the_listing(
     a byte it cannot represent. Without that this route is a 500 that any user
     can cause by naming a directory, and the whole page goes with it."""
     try:
-        (config.root / b"caf\xe9-broken".decode("latin-1")).mkdir()
+        (config.roots[0].path / b"caf\xe9-broken".decode("latin-1")).mkdir()
     except OSError:  # pragma: no cover - filesystem refused the name
         pytest.skip("this filesystem will not create the name")
 
@@ -926,7 +949,10 @@ async def test_the_listing_carries_the_root_it_is_listing(
     """The header names the folder. Two Hitchrails open on one phone are
     otherwise indistinguishable, which is the entire point of that line."""
     body = (await client.get("/api/projects", headers=HEADERS)).json()
-    assert body["root"] == str(config.root)
+    # A LIST of labelled roots, even with one. A client that special cased
+    # "one root" would be wrong the day a second was added, which is why #119
+    # made the qualified form universal.
+    assert body["roots"] == [{"label": r.label, "path": str(r.path)} for r in config.roots]
 
 
 async def test_the_listing_carries_a_memory_total_for_the_proportion(

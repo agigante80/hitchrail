@@ -63,7 +63,7 @@ from hitchrail.engine import Engine
 from hitchrail.events import EventBus
 from hitchrail.server import create_app
 from hitchrail.tmux import Tmux, is_tmux_argv
-from support import make_config
+from support import DEFAULT_LABEL, make_config
 
 pytestmark = pytest.mark.e2e
 
@@ -206,8 +206,19 @@ E2E_PREFIX = "hrx-"
 
 
 def e2e_name(name: str) -> str:
-    """The name a test asks for, made impossible to confuse with a real one."""
+    """The FOLDER a test asks for, made impossible to confuse with a real one."""
     return name if name.startswith(E2E_PREFIX) else f"{E2E_PREFIX}{name}"
+
+
+def e2e_id(name: str) -> str:
+    """The IDENTIFIER for that folder, which is what the API and the DOM use.
+
+    #119 made a project `<root-label>~<folder>`, and this harness labels its
+    single root through `support.make_config`. The distinction matters here
+    more than anywhere else: this tier creates real directories AND drives real
+    routes, so the two names are used within lines of each other.
+    """
+    return f"{DEFAULT_LABEL}~{e2e_name(name)}"
 
 
 def free_port() -> int:
@@ -357,7 +368,7 @@ class Harness:
         plenty = "MemTotal: 33554432 kB\nMemAvailable: 25198592 kB\n"
         opener = Engine(config=build(None), meminfo_fn=lambda: plenty)
         for name in running or []:
-            opener.start(e2e_name(name))
+            opener.start(e2e_id(name))
 
         # `detached` is an agent that outlived its terminal, so it is spawned
         # OUTSIDE tmux rather than by killing a session. Killing a session
@@ -367,7 +378,7 @@ class Harness:
         for name in detached or []:
             self._orphans.append(
                 subprocess.Popen(
-                    claude_ipc.launch_argv(str(self._agent), e2e_name(name)),
+                    claude_ipc.launch_argv(str(self._agent), e2e_id(name)),
                     cwd=self.root / e2e_name(name),
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL,
@@ -408,7 +419,7 @@ class Harness:
                     "new-session",
                     "-d",
                     "-s",
-                    namer.session_name(e2e_name(name)),
+                    namer.session_name(e2e_id(name)),
                     "-c",
                     str(self.root / e2e_name(name)),
                     "sleep",
@@ -420,7 +431,7 @@ class Harness:
         if stale:
             time.sleep(0.4)
 
-        self._config = build(e2e_name(self_project) if self_project else None)
+        self._config = build(e2e_id(self_project) if self_project else None)
         # Read through the attribute rather than closed over, so `break_machine`
         # can make the reading unreadable mid test.
         self.engine = Engine(config=self._config, meminfo_fn=lambda: self._meminfo)
@@ -775,8 +786,15 @@ class Harness:
         self.engine.kill(e2e_name(name))
 
     def project(self, name: str) -> str:
-        """The prefixed name, for a test that needs to select on it."""
-        return e2e_name(name)
+        """The IDENTIFIER, for a test that needs to select on it.
+
+        #119: the DOM's `data-project` and every API path carry
+        `<root-label>~<folder>`, so this returns the qualified form. A test
+        that wants the FOLDER, to create it or to look at it on disk, calls
+        `e2e_name` instead. Keeping the distinction in one place here is what
+        stopped the migration being a per selector edit.
+        """
+        return e2e_id(name)
 
 
 @pytest.fixture

@@ -41,6 +41,7 @@ from hitchrail.config import Config
 from hitchrail.derive import Machine
 from hitchrail.events import EventBus
 from hitchrail.procs import ProcTable, snapshot
+from hitchrail.roots import RootError, split_identifier
 from hitchrail.sessions import (
     AlreadyRunning,
     EngineError,
@@ -248,9 +249,15 @@ class Engine:
         a name with nothing behind it still reaches `NotRunning`, which is the
         honest answer rather than a refusal.
         """
+        # #120: `name` is a qualified identifier now, so the folder allowlist
+        # applies to its FOLDER half. Validating the whole thing rejected every
+        # real identifier, because `~` is exactly the character the allowlist
+        # forbids: the separator was doing its job and this check was reading
+        # it as the thing it protects against.
         try:
-            discovery.validate_name(name)
-        except discovery.InvalidName as exc:
+            _, folder = split_identifier(name)
+            discovery.validate_name(folder)
+        except (discovery.InvalidName, RootError) as exc:
             raise UnknownProject(name) from exc
 
     def _require_startable(self, name: str) -> str:
