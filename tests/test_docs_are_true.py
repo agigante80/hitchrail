@@ -89,13 +89,50 @@ def test_no_document_hardcodes_a_test_count(doc: Path) -> None:
     )
 
 
+def _named_in_agents_md() -> set[str]:
+    """The modules the architecture block claims exist, by their listed name."""
+    return set(re.findall(r"^\s{2}(\w+\.py)\s", AGENTS_MD.read_text(), re.M))
+
+
+# `__init__.py` is a package marker rather than a module anybody navigates to,
+# and listing it in the architecture block would be noise. Named here, and kept
+# short on purpose: a broad pattern in this exemption is how the NEXT module
+# goes missing, which is the whole failure below.
+_NOT_ON_THE_MAP = {"__init__.py"}
+
+
 def test_every_module_named_in_agents_md_exists() -> None:
     """The architecture block lists the modules. A rename that misses it leaves
     a map pointing at a road that is not there."""
-    block = AGENTS_MD.read_text()
-    named = set(re.findall(r"^\s{2}(\w+\.py)\s", block, re.M))
-    missing = {n for n in named if not (SRC / n).exists()}
+    missing = {n for n in _named_in_agents_md() if not (SRC / n).exists()}
     assert not missing, f"AGENTS.md names modules that do not exist: {sorted(missing)}"
+
+
+def test_every_module_that_exists_is_named_in_agents_md() -> None:
+    """#126. The inverse of the guard above, and the direction that was missing.
+
+    **The asymmetry was not theoretical.** The guard above was green while the
+    block named neither `derive.py`, `pages.py` nor `projectnames.py`, and still
+    credited `engine.py` with the state derivation #50 had moved out of it. A
+    guard that only checks that named things exist cannot see a thing that was
+    never named.
+
+    Two of the three were the ones an agent most needs to find.
+    `projectnames.py` holds `display_name`, which `.claude/rules/security.md`
+    names as a security control, and `pages.py` is the only code in the project
+    that reads a file chosen by a URL. The map told a reader deciding what it
+    was safe to touch that neither existed.
+    """
+    on_disk = {p.name for p in SRC.glob("*.py")} - _NOT_ON_THE_MAP
+    unlisted = on_disk - _named_in_agents_md()
+    assert not unlisted, (
+        "AGENTS.md does not name "
+        + ", ".join(
+            f"{n} ({len((SRC / n).read_text().splitlines())} lines)" for n in sorted(unlisted)
+        )
+        + ". A module missing from the architecture block is one an agent "
+        "reading the map is told does not exist."
+    )
 
 
 def test_the_roadmap_marks_a_phase_done_only_when_its_plan_is_finished() -> None:
