@@ -144,11 +144,11 @@ Every control below is built and tested, including on a real socket rather than
 only in theory, and the API is now behind them. None of it is optional, and
 none of it is a reason to run this on a network you do not trust.
 
-The browser interface is partly built. The list, starting, the stop sequence
-with its escalation, the log tail and creating a folder all work in a browser.
-Live updates and the token screen do not exist yet, so a page does not refresh
-itself and reaching this over a network still means putting the token in the
-address yourself. The warning above applies to all of it exactly as written.
+The browser interface is built. The list, search and filtering, starting, the
+stop sequence with its escalation, the log tail, creating a folder, the memory
+footer, live updates over SSE with reconnection, the token screen and the dark
+theme all work in a browser, and the end to end tier drives them. The warning
+above applies to all of it exactly as written.
 
 It binds to loopback with no authentication by default. Binding it to any other
 interface requires a token, and the server refuses to start without one. It

@@ -4,7 +4,8 @@ Every guard this project has protects the SOURCE: five gates, an import
 contract, module size caps, a tier partition, a template lockstep. Nothing
 protected the prose, and the prose is what an outside reader meets first.
 
-The cost was not hypothetical. `.claude/CLAUDE.md` told every reader that
+The cost was not hypothetical. The conventions file, then `.claude/CLAUDE.md`
+and now `AGENTS.md`, told every reader that
 `engine.py`, `server.py`, `events.py` and `cli.py` were one line placeholders
 for three phases after all four were implemented, and that is the file an agent
 reads before it touches anything. The design's route table stayed correct while
@@ -25,21 +26,19 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src" / "hitchrail"
-CLAUDE_MD = ROOT / ".claude" / "CLAUDE.md"
+AGENTS_MD = ROOT / "AGENTS.md"
 
-# `.claude/` is not published. It holds the project rules, agents and skills,
-# and it named this machine and its projects until that was scrubbed, so a
-# public repository is the wrong home for it.
+# **These guards used to skip on a clone, and now they do not.**
 #
-# **That costs this file half its reach, and the cost is stated rather than
-# hidden.** These guards run in a developer's checkout and skip on a clone, so
-# CI checks the roadmap and not CLAUDE.md. A guard that skips silently is worse
-# than no guard, which is why the skip carries this reason and why #106 exists
-# to move the conventions somewhere tracked.
-_NO_CLAUDE_MD = pytest.mark.skipif(
-    not CLAUDE_MD.exists(),
-    reason=".claude/ is unpublished, so this runs only where the file is",
-)
+# The conventions lived in `.claude/CLAUDE.md`, which is untracked, so every
+# check below ran only in the maintainer's checkout: CI validated the roadmap
+# and not the file an agent reads first. #60 moved them to `AGENTS.md` at the
+# root, for the wider reason that exactly one tool read the old location, and
+# this is the side effect worth naming. The guard that caught a reversed
+# middleware order now runs on every push, for every contributor.
+#
+# There is no skip mark any more. A missing `AGENTS.md` is a failure, not a
+# reason to pass quietly.
 ROADMAP = ROOT / "docs" / "roadmap.md"
 README = ROOT / "README.md"
 
@@ -52,8 +51,7 @@ def _modules() -> dict[str, int]:
     return {p.name: len(p.read_text().splitlines()) for p in SRC.glob("*.py")}
 
 
-@_NO_CLAUDE_MD
-@pytest.mark.parametrize("doc", [CLAUDE_MD, ROADMAP], ids=lambda p: p.name)
+@pytest.mark.parametrize("doc", [AGENTS_MD, ROADMAP], ids=lambda p: p.name)
 def test_no_document_calls_an_implemented_module_a_placeholder(doc: Path) -> None:
     """The exact failure that prompted this file.
 
@@ -75,8 +73,7 @@ def test_no_document_calls_an_implemented_module_a_placeholder(doc: Path) -> Non
         )
 
 
-@_NO_CLAUDE_MD
-@pytest.mark.parametrize("doc", [CLAUDE_MD, ROADMAP, README], ids=lambda p: p.name)
+@pytest.mark.parametrize("doc", [AGENTS_MD, ROADMAP, README], ids=lambda p: p.name)
 def test_no_document_hardcodes_a_test_count(doc: Path) -> None:
     """ "519 tests" was true once. A number that decays silently is worse than
     no number, because it reads as precision."""
@@ -88,14 +85,13 @@ def test_no_document_hardcodes_a_test_count(doc: Path) -> None:
     )
 
 
-@_NO_CLAUDE_MD
-def test_every_module_named_in_claude_md_exists() -> None:
+def test_every_module_named_in_agents_md_exists() -> None:
     """The architecture block lists the modules. A rename that misses it leaves
     a map pointing at a road that is not there."""
-    block = CLAUDE_MD.read_text()
+    block = AGENTS_MD.read_text()
     named = set(re.findall(r"^\s{2}(\w+\.py)\s", block, re.M))
     missing = {n for n in named if not (SRC / n).exists()}
-    assert not missing, f"CLAUDE.md names modules that do not exist: {sorted(missing)}"
+    assert not missing, f"AGENTS.md names modules that do not exist: {sorted(missing)}"
 
 
 def test_the_roadmap_marks_a_phase_done_only_when_its_plan_is_finished() -> None:
@@ -223,13 +219,12 @@ _CONTROL_CLASSES = {
 }
 
 
-@_NO_CLAUDE_MD
-def test_claude_md_states_the_middleware_order_the_code_uses(tmp_path: Path) -> None:
+def test_agents_md_states_the_middleware_order_the_code_uses(tmp_path: Path) -> None:
     from hitchrail.config import Config
     from hitchrail.security import middleware_stack
 
-    line = re.search(r"^\s{2}security\.py\s+(.+)$", CLAUDE_MD.read_text(), re.M)
-    assert line, "CLAUDE.md's architecture block no longer describes security.py"
+    line = re.search(r"^\s{2}security\.py\s+(.+)$", AGENTS_MD.read_text(), re.M)
+    assert line, "AGENTS.md's architecture block no longer describes security.py"
 
     described = [
         _CONTROL_CLASSES[part]
@@ -246,7 +241,112 @@ def test_claude_md_states_the_middleware_order_the_code_uses(tmp_path: Path) -> 
     ]
 
     assert described == actual, (
-        f"CLAUDE.md says {described}, middleware_stack returns {actual}. "
+        f"AGENTS.md says {described}, middleware_stack returns {actual}. "
         "Fix the document: the stack order is deliberate and documented in its "
         "own docstring."
     )
+
+
+# A feature the README says is missing, that the code has. The phase guard
+# above cannot see this: it matches "phases N to M of X are built" and nothing
+# else, so prose denying a specific feature passed it for a whole phase.
+#
+# Found while writing SECURITY.md, which #59 says must REPEAT the README's
+# limitations rather than link them. Repeating a stale claim would have copied
+# it into a second document, which is how the `?kill=1` contradiction reached
+# seven files.
+_FEATURES = {
+    "live updates": SRC / "web" / "app.js",
+    "the token screen": SRC / "web" / "grant.html",
+    "dark theme": SRC / "web" / "app.css",
+}
+_DENIALS = ("do not exist yet", "does not exist yet", "is not built", "are not built")
+
+
+def test_the_readme_does_not_deny_a_feature_the_code_has() -> None:
+    """The README said "Live updates and the token screen do not exist yet"
+    after Phase 6 shipped both, for a whole phase.
+
+    Sentence scoped rather than document scoped, so the file can still say a
+    thing does not exist when it genuinely does not.
+    """
+    readme = README.read_text()
+    offences = []
+    for sentence in re.split(r"(?<=[.!?])\s+", readme):
+        lowered = sentence.lower()
+        if not any(d in lowered for d in _DENIALS):
+            continue
+        for feature, evidence in _FEATURES.items():
+            if feature in lowered and evidence.exists():
+                offences.append(f"{feature!r} denied by: {sentence.strip()[:90]}")
+    assert not offences, "the README denies a feature that is in the tree:\n  " + "\n  ".join(
+        offences
+    )
+
+
+# -- #59 and #61: the two files a stranger is pointed at --------------------
+
+SECURITY = ROOT / "SECURITY.md"
+CONTRIBUTING = ROOT / "CONTRIBUTING.md"
+
+# #59 is explicit that the limitations are REPEATED in the policy rather than
+# linked from it: "Somebody reading a security policy should not have to go and
+# find them." Repetition is a drift risk by construction, so it gets a guard.
+#
+# Matched on the distinctive claim rather than on whole sentences, so the prose
+# can be edited and the substance cannot quietly go missing.
+_MUST_APPEAR_IN_BOTH = {
+    "unsandboxed agent": ("dangerously-skip-permissions",),
+    "cleartext on plain HTTP": ("cleartext",),
+    "the reverse proxy remedy": ("reverse proxy", "TLS terminating"),
+}
+
+
+def test_the_security_policy_repeats_the_limitations_rather_than_linking_them() -> None:
+    """A reporter should not have to open a second file to learn that the thing
+    they are about to report is the design."""
+    policy = SECURITY.read_text().lower()
+    readme = README.read_text().lower()
+    missing = []
+    for label, needles in _MUST_APPEAR_IN_BOTH.items():
+        if not any(n.lower() in readme for n in needles):
+            missing.append(f"{label}: not in the README, so the pair cannot be checked")
+        elif not any(n.lower() in policy for n in needles):
+            missing.append(f"{label}: in the README and not in SECURITY.md")
+    assert not missing, "\n  ".join(["the policy has drifted from the README:", *missing])
+
+
+def test_the_security_policy_names_a_private_channel() -> None:
+    """#59's whole point. A policy that says "report responsibly" and gives no
+    address sends the reporter to a public issue, which is a disclosure."""
+    policy = SECURITY.read_text()
+    assert "security/advisories/new" in policy, (
+        "SECURITY.md must link the private reporting form, not describe it"
+    )
+
+
+def test_contributing_and_agents_list_the_same_gates() -> None:
+    """Both files tell somebody which checks are blocking, so both are copies of
+    one fact. The copy that drifts is the one a contributor happens to read.
+
+    Compared as sets: order differs between the two on purpose, since one is a
+    setup sequence and the other is a reference.
+    """
+    pattern = re.compile(r"^uv run ([a-z-]+)", re.M)
+    contributing = set(pattern.findall(CONTRIBUTING.read_text()))
+    agents = set(pattern.findall(AGENTS_MD.read_text()))
+    gates = {"pytest", "ruff", "mypy", "lint-imports"}
+    assert gates <= contributing, f"CONTRIBUTING.md omits gates: {sorted(gates - contributing)}"
+    assert gates <= agents, f"AGENTS.md omits gates: {sorted(gates - agents)}"
+
+
+def test_contributing_points_at_documents_that_exist() -> None:
+    """It deliberately restates almost nothing, which makes it a page of links.
+    A broken one turns "read the standard" into "there is no standard"."""
+    text = CONTRIBUTING.read_text()
+    broken = [
+        target
+        for target in re.findall(r"\]\(([^)#h][^)]*\.md)\)", text)
+        if not (ROOT / target).exists()
+    ]
+    assert not broken, f"CONTRIBUTING.md links documents that are not there: {broken}"
