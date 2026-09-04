@@ -61,6 +61,7 @@ from hitchrail import claude_ipc, discovery
 from hitchrail.config import Config
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
+from hitchrail.roots import Root
 from hitchrail.server import create_app
 from hitchrail.tmux import Tmux, is_tmux_argv
 from support import DEFAULT_LABEL, make_config
@@ -210,7 +211,7 @@ def e2e_name(name: str) -> str:
     return name if name.startswith(E2E_PREFIX) else f"{E2E_PREFIX}{name}"
 
 
-def e2e_id(name: str) -> str:
+def e2e_id(name: str, label: str = DEFAULT_LABEL) -> str:
     """The IDENTIFIER for that folder, which is what the API and the DOM use.
 
     #119 made a project `<root-label>~<folder>`, and this harness labels its
@@ -218,7 +219,7 @@ def e2e_id(name: str) -> str:
     more than anywhere else: this tier creates real directories AND drives real
     routes, so the two names are used within lines of each other.
     """
-    return f"{DEFAULT_LABEL}~{e2e_name(name)}"
+    return f"{label}~{e2e_name(name)}"
 
 
 def free_port() -> int:
@@ -232,6 +233,11 @@ class Harness:
 
     def __init__(self, root: Path, sock: str) -> None:
         self.root = root
+        # #120. The primary root is labelled `main` and every existing test
+        # uses only that one. `also_in` on `seed` adds more, which is what the
+        # two root tests need: the phase exists for the case where the same
+        # folder name appears in two of them.
+        self.extra_roots: dict[str, Path] = {}
         self._sock = sock
         self._server: uvicorn.Server | None = None
         self._thread: threading.Thread | None = None
@@ -278,8 +284,21 @@ class Harness:
         prompts_after_stop: bool = False,
         agent_exits_immediately: bool = False,
         token: str | None = None,
+        also_in: dict[str, list[str]] | None = None,
     ) -> None:
-        """Set the world up BEFORE the page loads."""
+        """Set the world up BEFORE the page loads.
+
+        `also_in` maps a root LABEL to the projects running in it, and it is
+        what the two root tests use. The folders are created under a sibling
+        directory named for the label, so the roots are genuinely disjoint and
+        the overlap refusal is not what is under test.
+        """
+        for label, names in (also_in or {}).items():
+            extra = self.root.parent / f"root-{label}"
+            extra.mkdir(exist_ok=True)
+            self.extra_roots[label] = extra
+            for name in names:
+                (extra / e2e_name(name)).mkdir(exist_ok=True)
         body = SHIM_BODY
         if ignores_graceful_stop:
             body = STUBBORN_BODY
@@ -339,6 +358,24 @@ class Harness:
         )
 
         def build(protect: str | None) -> Config:
+            if self.extra_roots:
+                return Config(
+                    roots=(
+                        Root(label=DEFAULT_LABEL, path=self.root.resolve()),
+                        *(
+                            Root(label=label, path=path.resolve())
+                            for label, path in self.extra_roots.items()
+                        ),
+                    ),
+                    sessions_dir=sessions,
+                    agent_config_path=self._agent_config,
+                    port=self.port,
+                    tmux_socket=self._sock,
+                    agent_binary=str(self._agent),
+                    stop_timeout=stop_timeout,
+                    token=token,
+                    self_project=protect,
+                )
             return make_config(
                 self.root,
                 sessions_dir=sessions,
@@ -369,6 +406,9 @@ class Harness:
         opener = Engine(config=build(None), meminfo_fn=lambda: plenty)
         for name in running or []:
             opener.start(e2e_id(name))
+        for label, names in (also_in or {}).items():
+            for name in names:
+                opener.start(e2e_id(name, label))
 
         # `detached` is an agent that outlived its terminal, so it is spawned
         # OUTSIDE tmux rather than by killing a session. Killing a session
@@ -780,15 +820,15 @@ class Harness:
     def heal_machine(self) -> None:
         self._meminfo = "MemTotal: 33554432 kB\nMemAvailable: 25198592 kB\n"
 
-    def is_running(self, name: str) -> bool:
+    def is_running(self, name: str, label: str = DEFAULT_LABEL) -> bool:
         assert self.engine is not None
-        return self.engine.get(e2e_id(name)).state.value == "running"
+        return self.engine.get(e2e_id(name, label)).state.value == "running"
 
-    def kill(self, name: str) -> None:
+    def kill(self, name: str, label: str = DEFAULT_LABEL) -> None:
         assert self.engine is not None
-        self.engine.kill(e2e_id(name))
+        self.engine.kill(e2e_id(name, label))
 
-    def project(self, name: str) -> str:
+    def project(self, name: str, label: str = DEFAULT_LABEL) -> str:
         """The IDENTIFIER, for a test that needs to select on it.
 
         #119: the DOM's `data-project` and every API path carry
@@ -797,7 +837,7 @@ class Harness:
         `e2e_name` instead. Keeping the distinction in one place here is what
         stopped the migration being a per selector edit.
         """
-        return e2e_id(name)
+        return e2e_id(name, label)
 
 
 @pytest.fixture
