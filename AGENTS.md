@@ -122,6 +122,8 @@ and the HTTP layer testable without tmux.
 src/hitchrail/
   hostnames.py     what a valid host or origin IS: one canonical form for each
   projectnames.py  what a valid project NAME is, and how one is safely shown
+  roots.py         what a root IS, and what a qualified project identifier
+                   IS: `<root-label>~<folder>`, injective by allowlist
   config.py        the dataclass, its refusals, and the derived allowlists
   discovery.py     root scanning, folder creation, path safety
   tmux.py          the tmux adapter and its footguns
