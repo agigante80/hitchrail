@@ -392,9 +392,12 @@ and the blocker. Every one could have closed with nothing shipped.
 nobody, and the plan's task 27 read "README assembly", a task line standing in
 for a ticket that did not exist.
 
-**Twice in one phase is a pattern rather than an oversight.** A ticket based
-check cannot see a criterion nobody ticketed, which is an argument for reading
-the two lists against each other whenever a phase starts.
+**Twice in one phase is a pattern rather than an oversight.** Every check this
+project has reads from the ticket list: `ticket-gate` scores a ticket that
+exists, `check-ticket-hygiene.sh` sweeps for missing milestones, and
+`test_docs_are_true.py` checks claims about code. A deliverable nobody ticketed
+is invisible to all of them, because there is nothing to inspect. #118 carries
+the guard, in Phase 10 where the gates are made to check what they claim to.
 
 Also on review: #110 and #116 swapped, because #110's own dependencies name the
 publish and it had been scheduled first, and #17 moved to Backlog, because a
