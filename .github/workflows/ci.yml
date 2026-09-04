@@ -28,7 +28,18 @@ jobs:
       matrix:
         python: ["3.11", "3.12", "3.13"]
     steps:
+      # **Tags, and the suite genuinely needs them.**
+      # `test_a_released_version_heading_matches_a_real_tag` asserts that every
+      # `## X.Y.Z` heading in the changelog names a tag somebody can install
+      # from. A shallow checkout has no tags, so `git tag` comes back empty and
+      # the guard reads that as "the changelog names a release nobody can
+      # install". It passed only while the changelog had no version heading at
+      # all, which stopped being true at 0.1.0. `release-gate.yml` fetches them
+      # for the same reason with a different question.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
       # This used to read "setup-uv stopped publishing moving major tags after
       # v7, so this is pinned exactly". That reason is spent: since #4 every
       # action here is pinned to a SHA, so no tag mutability argument applies

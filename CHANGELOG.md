@@ -20,8 +20,26 @@ the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
-Nothing has been published yet, so everything below is what the first release
-will carry rather than a change from something you are running.
+Nothing yet.
+
+## 0.1.0 - 2026-09-04
+
+**The first published release.** Everything below is what taking this version
+gives you rather than a change from something you were running, because there
+was nothing to run it from: `hitchrail` did not exist on PyPI before today.
+
+**MINOR, not MAJOR, and the reason is the version number itself.** Two of the
+entries below are breaking changes to the operator contract. While the version
+is `0.y.z` a breaking change may ship as MINOR, per `docs/versioning.md`, and
+there is nothing deployed for them to break. They are recorded as breaking
+anyway: the point of this file is what a version costs you, and a reader
+arriving at 0.2.0 needs to know these were contract changes rather than
+additions.
+
+**Install it with `uvx hitchrail --root ~/projects`**, and read
+`## What it costs you to run this` in the README before you do. Hitchrail
+spawns `claude --dangerously-skip-permissions`, so anyone who can reach its API
+can run code on your machine as you.
 
 ### Changed, and it breaks a saved link
 
