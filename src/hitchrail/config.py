@@ -27,6 +27,7 @@ from hitchrail.hostnames import (
     origin_forms,
 )
 from hitchrail.projectnames import explain_name
+from hitchrail.roots import Root, RootError, check_roots, split_identifier
 
 # Re exported for the modules and tests that already import these from here.
 # The owner is `hostnames`; this keeps one import site working rather than
@@ -117,7 +118,7 @@ class Config:
     not a property an allowlist is allowed to have.
     """
 
-    root: Path
+    roots: tuple[Root, ...]
     host: str = "127.0.0.1"
     port: int = 8787
     token: str | None = None
@@ -150,8 +151,14 @@ class Config:
     _allowed_origins: frozenset[str] = field(init=False, repr=False, default=frozenset())
 
     def __post_init__(self) -> None:
-        if not self.root.is_dir():
-            raise ConfigError(f"root is not a directory: {self.root}")
+        # #120. Every refusal a set of roots can earn lives in `roots.py`,
+        # beside what a root IS, for the same reason the host vocabulary lives
+        # in `hostnames.py` rather than here. Re-raised as ConfigError so a
+        # caller still catches one type for "this configuration will not run".
+        try:
+            check_roots(self.roots)
+        except RootError as exc:
+            raise ConfigError(str(exc)) from exc
 
         # The bind address is stored canonical, not as it was typed. It is
         # validated through is_valid_host, which normalises before matching, so
@@ -317,16 +324,29 @@ class Config:
         """
         if self.self_project is None:
             return
-        reason = explain_name(self.self_project)
+        # #119: it names a folder in a specific root, so it is a qualified
+        # identifier. A bare name would be ambiguous exactly where being wrong
+        # is worst, which is the one project that must never be stopped.
+        try:
+            label, name = split_identifier(self.self_project)
+        except RootError as exc:
+            raise ConfigError(f"--self-project {self.self_project!r}: {exc}") from exc
+        reason = explain_name(name)
         if reason is not None:
             raise ConfigError(
                 f"--self-project {self.self_project!r} is not a project name: {reason}"
             )
-        if not (self.root / self.self_project).is_dir():
+        matches = [r for r in self.roots if r.label == label]
+        if not matches:
+            raise ConfigError(
+                f"--self-project {self.self_project!r} names root {label!r}, "
+                "which is not configured"
+            )
+        if not (matches[0].path / name).is_dir():
             raise ConfigError(
                 f"--self-project {self.self_project!r} is not a folder in "
-                f"{self.root}. The protection is a name comparison, so a name "
-                "that is not there never matches and the session hosting "
+                f"{matches[0].path}. The protection is a name comparison, so a "
+                "name that is not there never matches and the session hosting "
                 "Hitchrail would be stoppable with nothing to say so"
             )
 

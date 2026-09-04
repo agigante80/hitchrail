@@ -29,7 +29,7 @@ with its own identity check. Tailscale Serve is the version of this most people
 have to hand:
 
 ```sh
-hitchrail --root ~/projects \
+hitchrail --root main=~/projects \
   --allow-host  laptop.tailnet-name.ts.net \
   --allow-origin https://laptop.tailnet-name.ts.net
 
@@ -59,7 +59,7 @@ different network**, because none of it depended on which network it was on.
 Bind to one specific address on your local network:
 
 ```sh
-hitchrail --root ~/projects --host 192.168.1.10
+hitchrail --root main=~/projects --host 192.168.1.10
 ```
 
 This works, it needs nothing installed, and it is what the README shows. State

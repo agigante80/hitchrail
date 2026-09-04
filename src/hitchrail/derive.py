@@ -225,7 +225,7 @@ def _awaiting_trust(name: str, machine: Machine, config: Config) -> bool:
     if machine.trusted is None:
         return False
     try:
-        folder = discovery.project_path(config.root, name)
+        folder = discovery.resolve_identifier(config.roots, name)
     except (discovery.NoSuchProject, ValueError):
         return False
     return str(folder) not in machine.trusted

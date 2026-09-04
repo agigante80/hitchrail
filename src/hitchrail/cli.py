@@ -23,6 +23,7 @@ from hitchrail.config import (
 )
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
+from hitchrail.roots import parse_root_argument
 from hitchrail.server import create_app
 
 
@@ -31,7 +32,21 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         prog="hitchrail",
         description="Start and stop headless Claude Code sessions across a folder of projects.",
     )
-    parser.add_argument("--root", default=".", type=Path, help="folder holding the projects")
+    # **`label=path`, repeatable, and there is no default.** #119 made a
+    # project's identifier `<root-label>~<folder>`, so a root without a label
+    # has no name to contribute and a label guessed from the directory name
+    # would change when the directory moved, renaming every project on the
+    # wire. `default=[]` rather than `default=["main=."]`: an implicit root is
+    # how somebody serves their home directory by accident.
+    parser.add_argument(
+        "--root",
+        dest="roots",
+        action="append",
+        default=[],
+        type=parse_root_argument,
+        metavar="LABEL=PATH",
+        help="a labelled folder holding projects, as label=path; repeatable",
+    )
     parser.add_argument("--host", default="127.0.0.1", help="address to bind")
     parser.add_argument("--port", default=8787, type=int)
     parser.add_argument(
@@ -147,7 +162,7 @@ def build_config(args: argparse.Namespace) -> Config:
     ):
         token = secrets.token_urlsafe(24)
     return Config(
-        root=args.root,
+        roots=tuple(args.roots),
         host=args.host,
         port=args.port,
         token=token,

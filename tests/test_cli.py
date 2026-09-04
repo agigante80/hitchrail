@@ -30,26 +30,26 @@ def _prerequisites_are_present(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_root_is_required_to_be_a_real_directory(tmp_path: Path) -> None:
-    args = parse_args(["--root", str(tmp_path)])
-    assert build_config(args).root == tmp_path
+    args = parse_args(["--root", f"main={tmp_path}"])
+    assert [r.path for r in build_config(args).roots] == [tmp_path.resolve()]
 
 
 def test_loopback_is_the_default_bind(tmp_path: Path) -> None:
-    cfg = build_config(parse_args(["--root", str(tmp_path)]))
+    cfg = build_config(parse_args(["--root", f"main={tmp_path}"]))
     assert cfg.host == "127.0.0.1"
     assert cfg.is_loopback
     assert cfg.token is None
 
 
 def test_a_network_bind_generates_a_token_when_none_is_given(tmp_path: Path) -> None:
-    cfg = build_config(parse_args(["--root", str(tmp_path), "--host", "0.0.0.0"]))
+    cfg = build_config(parse_args(["--root", f"main={tmp_path}", "--host", "0.0.0.0"]))
     assert cfg.token
     assert len(cfg.token) >= 24
 
 
 def test_an_explicit_token_is_used_verbatim(tmp_path: Path) -> None:
     cfg = build_config(
-        parse_args(["--root", str(tmp_path), "--host", "0.0.0.0", "--token", "mine"])
+        parse_args(["--root", f"main={tmp_path}", "--host", "0.0.0.0", "--token", "mine"])
     )
     assert cfg.token == "mine"
 
@@ -57,9 +57,11 @@ def test_an_explicit_token_is_used_verbatim(tmp_path: Path) -> None:
 def test_a_missing_root_exits_with_a_message(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    code = main(["--root", str(tmp_path / "nope")])
+    code = main(["--root", f"main={tmp_path / 'nope'}"])
     assert code == 2
-    assert "root is not a directory" in capsys.readouterr().err
+    # The message names WHICH root now, which is the point of labels:
+    # "root is not a directory" was unactionable with three configured.
+    assert "is not a directory" in capsys.readouterr().err
 
 
 def test_the_banner_carries_a_link_a_phone_can_open(tmp_path: Path) -> None:
@@ -69,7 +71,7 @@ def test_the_banner_carries_a_link_a_phone_can_open(tmp_path: Path) -> None:
         parse_args(
             [
                 "--root",
-                str(tmp_path),
+                f"main={tmp_path}",
                 "--host",
                 "0.0.0.0",
                 "--token",
@@ -97,7 +99,7 @@ def test_the_banner_never_offers_the_token_as_a_query_string(tmp_path: Path) -> 
         parse_args(
             [
                 "--root",
-                str(tmp_path),
+                f"main={tmp_path}",
                 "--host",
                 "0.0.0.0",
                 "--token",
@@ -111,13 +113,13 @@ def test_the_banner_never_offers_the_token_as_a_query_string(tmp_path: Path) -> 
 
 
 def test_the_banner_is_silent_on_loopback(tmp_path: Path) -> None:
-    cfg = build_config(parse_args(["--root", str(tmp_path)]))
+    cfg = build_config(parse_args(["--root", f"main={tmp_path}"]))
     assert banner(cfg) == ""
 
 
 def test_the_banner_never_offers_a_wildcard_as_a_link(tmp_path: Path) -> None:
     cfg = build_config(
-        parse_args(["--root", str(tmp_path), "--host", "0.0.0.0", "--token", "t"])
+        parse_args(["--root", f"main={tmp_path}", "--host", "0.0.0.0", "--token", "t"])
     )
     assert "0.0.0.0" not in banner(cfg)
 
@@ -126,7 +128,7 @@ def test_the_token_is_printed_once_on_a_network_bind(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("hitchrail.cli._serve", lambda app, cfg: 0)
-    main(["--root", str(tmp_path), "--host", "0.0.0.0"])
+    main(["--root", f"main={tmp_path}", "--host", "0.0.0.0"])
     out = capsys.readouterr().out
     assert "token" in out.lower()
 
@@ -135,7 +137,7 @@ def test_no_token_banner_on_loopback(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("hitchrail.cli._serve", lambda app, cfg: 0)
-    main(["--root", str(tmp_path)])
+    main(["--root", f"main={tmp_path}"])
     assert "token" not in capsys.readouterr().out.lower()
 
 
@@ -144,7 +146,7 @@ def test_extra_allowed_hosts_reach_the_config(tmp_path: Path) -> None:
         parse_args(
             [
                 "--root",
-                str(tmp_path),
+                f"main={tmp_path}",
                 "--host",
                 "0.0.0.0",
                 "--token",
@@ -167,7 +169,7 @@ def test_build_config_asks_the_shared_loopback_question(tmp_path: Path) -> None:
 def test_main_returns_two_rather_than_raising_on_a_bad_bind(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    code = main(["--root", str(tmp_path), "--host", "0.0.0.0", "--allow-host", "*"])
+    code = main(["--root", f"main={tmp_path}", "--host", "0.0.0.0", "--allow-host", "*"])
     assert code == 2
     assert "wildcard" in capsys.readouterr().err
 
@@ -256,7 +258,7 @@ def test_main_refuses_to_start_and_prints_what_is_missing(
     monkeypatch.setattr(cli, "_serve", record)
     monkeypatch.setattr("shutil.which", lambda _n: None)
 
-    code = main(["--root", str(tmp_path)])
+    code = main(["--root", f"main={tmp_path}"])
 
     assert code == 2
     assert served == [], "it bound a socket it had already decided not to use"
@@ -273,7 +275,7 @@ def test_a_refusal_prints_no_token(
     monkeypatch.setattr(cli, "_serve", lambda *a: 0)
     monkeypatch.setattr("shutil.which", lambda _n: None)
 
-    code = main(["--root", str(tmp_path), "--host", "0.0.0.0", "--token", "s3cret"])
+    code = main(["--root", f"main={tmp_path}", "--host", "0.0.0.0", "--token", "s3cret"])
 
     assert code == 2
     out = capsys.readouterr()
@@ -307,13 +309,13 @@ def test_the_cli_accepts_every_documented_flag(flag: str) -> None:
 
 
 def test_the_agent_binary_flag_reaches_the_config(tmp_path: Path) -> None:
-    cfg = build_config(parse_args(["--root", str(tmp_path), "--agent-binary", "other"]))
+    cfg = build_config(parse_args(["--root", f"main={tmp_path}", "--agent-binary", "other"]))
     assert cfg.agent_binary == "other"
 
 
 def test_the_stop_timeout_flag_reaches_the_config(tmp_path: Path) -> None:
     """A documented default that cannot be changed is a constant."""
-    cfg = build_config(parse_args(["--root", str(tmp_path), "--stop-timeout", "90"]))
+    cfg = build_config(parse_args(["--root", f"main={tmp_path}", "--stop-timeout", "90"]))
     assert cfg.stop_timeout == 90
 
 
@@ -359,7 +361,7 @@ def test_main_serves_the_real_app_on_the_configured_address(
     monkeypatch.setattr("uvicorn.run", fake_run)
     monkeypatch.setattr("shutil.which", lambda _n: "/usr/bin/x")
 
-    code = main(["--root", str(tmp_path), "--port", "9123"])
+    code = main(["--root", f"main={tmp_path}", "--port", "9123"])
 
     assert code == 0
     assert captured["host"] == "127.0.0.1"
@@ -383,28 +385,37 @@ def test_a_remote_allow_host_generates_a_token(tmp_path: Path) -> None:
     flag combination the CLI itself assembled.
     """
     cfg = build_config(
-        parse_args(["--root", str(tmp_path), "--allow-host", "box.tailnet.ts.net"])
+        parse_args(["--root", f"main={tmp_path}", "--allow-host", "box.tailnet.ts.net"])
     )
     assert cfg.token, "no token was generated for a declared remote reach"
 
 
 def test_a_remote_allow_origin_generates_a_token(tmp_path: Path) -> None:
     cfg = build_config(
-        parse_args(["--root", str(tmp_path), "--allow-origin", "https://box.tailnet.ts.net"])
+        parse_args(
+            ["--root", f"main={tmp_path}", "--allow-origin", "https://box.tailnet.ts.net"]
+        )
     )
     assert cfg.token
 
 
 def test_a_loopback_allow_host_generates_nothing(tmp_path: Path) -> None:
     """The default stays what it was: no token, no banner, nothing to copy."""
-    cfg = build_config(parse_args(["--root", str(tmp_path), "--allow-host", "localhost"]))
+    cfg = build_config(parse_args(["--root", f"main={tmp_path}", "--allow-host", "localhost"]))
     assert cfg.token is None
 
 
 def test_an_explicit_token_still_wins_over_a_generated_one(tmp_path: Path) -> None:
     cfg = build_config(
         parse_args(
-            ["--root", str(tmp_path), "--allow-host", "box.tailnet.ts.net", "--token", "mine"]
+            [
+                "--root",
+                f"main={tmp_path}",
+                "--allow-host",
+                "box.tailnet.ts.net",
+                "--token",
+                "mine",
+            ]
         )
     )
     assert cfg.token == "mine"
@@ -428,7 +439,7 @@ ENV_VAR = "HITCHRAIL_TOKEN"
 
 def test_an_env_token_is_used(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(ENV_VAR, "abc123")
-    cfg = build_config(parse_args(["--root", str(tmp_path), "--host", "0.0.0.0"]))
+    cfg = build_config(parse_args(["--root", f"main={tmp_path}", "--host", "0.0.0.0"]))
     assert cfg.token == "abc123"
 
 
@@ -438,14 +449,14 @@ def test_the_flag_beats_the_env_token(tmp_path: Path, monkeypatch: pytest.Monkey
     stay possible."""
     monkeypatch.setenv(ENV_VAR, "abc123")
     cfg = build_config(
-        parse_args(["--root", str(tmp_path), "--host", "0.0.0.0", "--token", "xyz789"])
+        parse_args(["--root", f"main={tmp_path}", "--host", "0.0.0.0", "--token", "xyz789"])
     )
     assert cfg.token == "xyz789"
 
 
 def test_an_unset_env_still_generates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(ENV_VAR, raising=False)
-    cfg = build_config(parse_args(["--root", str(tmp_path), "--host", "0.0.0.0"]))
+    cfg = build_config(parse_args(["--root", f"main={tmp_path}", "--host", "0.0.0.0"]))
     assert cfg.token and cfg.token != "abc123"
 
 
@@ -463,7 +474,7 @@ def test_a_blank_env_token_is_refused(
     """
     monkeypatch.setenv(ENV_VAR, value)
     with pytest.raises(ConfigError) as excinfo:
-        build_config(parse_args(["--root", str(tmp_path), "--host", "0.0.0.0"]))
+        build_config(parse_args(["--root", f"main={tmp_path}", "--host", "0.0.0.0"]))
     assert ENV_VAR in str(excinfo.value), "the message must name where to look"
 
 
@@ -473,7 +484,7 @@ def test_an_env_token_switches_auth_on_at_loopback(
     """Supplying a token always switches authentication on, whatever the bind.
     This is the case a proxied deployment needs."""
     monkeypatch.setenv(ENV_VAR, "abc123")
-    assert build_config(parse_args(["--root", str(tmp_path)])).token == "abc123"
+    assert build_config(parse_args(["--root", f"main={tmp_path}"])).token == "abc123"
 
 
 def test_the_banner_does_not_reprint_an_env_token(
@@ -483,7 +494,7 @@ def test_the_banner_does_not_reprint_an_env_token(
     persistent log is worse than today's per start one. The operator supplied
     this, so they have it; printing it again only writes it somewhere new."""
     monkeypatch.setenv(ENV_VAR, "abc123")
-    text = banner(build_config(parse_args(["--root", str(tmp_path), "--host", "0.0.0.0"])))
+    text = banner(build_config(parse_args(["--root", f"main={tmp_path}", "--host", "0.0.0.0"])))
     assert "/grant#token=abc123" in text, "the tappable link is still the point"
     assert not any(line.strip().startswith("token:") for line in text.splitlines())
 
@@ -494,7 +505,7 @@ def test_the_banner_still_prints_a_generated_token(
     """The case that must not change. A generated token is unknowable any other
     way, so not printing it would make the server unusable."""
     monkeypatch.delenv(ENV_VAR, raising=False)
-    text = banner(build_config(parse_args(["--root", str(tmp_path), "--host", "0.0.0.0"])))
+    text = banner(build_config(parse_args(["--root", f"main={tmp_path}", "--host", "0.0.0.0"])))
     assert any(line.strip().startswith("token:") for line in text.splitlines())
 
 
@@ -525,7 +536,7 @@ def test_the_banner_keeps_the_token_out_of_the_journal(
     token line or in a link fragment."""
     monkeypatch.setenv(ENV_VAR, "abc123")
     monkeypatch.setenv(JOURNAL_ENV, "8:12345")
-    text = banner(build_config(parse_args(["--root", str(tmp_path), "--host", "0.0.0.0"])))
+    text = banner(build_config(parse_args(["--root", f"main={tmp_path}", "--host", "0.0.0.0"])))
     assert "abc123" not in text
     # `/grant#` rather than `#token=`: the claim is that no LINK carries a
     # fragment. Banning the string outright would also stop the banner naming
@@ -544,7 +555,7 @@ def test_the_banner_still_names_the_address_under_a_service(
     text = banner(
         build_config(
             parse_args(
-                ["--root", str(tmp_path), "--host", "0.0.0.0", "--allow-host", "box.lan"]
+                ["--root", f"main={tmp_path}", "--host", "0.0.0.0", "--allow-host", "box.lan"]
             )
         )
     )
@@ -561,7 +572,7 @@ def test_the_banner_tells_a_service_to_supply_a_stable_token(
     a bug, so the banner names the fix."""
     monkeypatch.delenv(ENV_VAR, raising=False)
     monkeypatch.setenv(JOURNAL_ENV, "8:12345")
-    text = banner(build_config(parse_args(["--root", str(tmp_path), "--host", "0.0.0.0"])))
+    text = banner(build_config(parse_args(["--root", f"main={tmp_path}", "--host", "0.0.0.0"])))
     assert not any(line.strip().startswith("token:") for line in text.splitlines())
     assert ENV_VAR in text
     assert "restart" in text.lower()
@@ -574,5 +585,5 @@ def test_the_banner_is_unchanged_in_a_terminal(
     Without `JOURNAL_STREAM` nothing about the existing behaviour moves."""
     monkeypatch.setenv(ENV_VAR, "abc123")
     monkeypatch.delenv(JOURNAL_ENV, raising=False)
-    text = banner(build_config(parse_args(["--root", str(tmp_path), "--host", "0.0.0.0"])))
+    text = banner(build_config(parse_args(["--root", f"main={tmp_path}", "--host", "0.0.0.0"])))
     assert "/grant#token=abc123" in text

@@ -19,6 +19,7 @@ from hitchrail.projectnames import (
     explain_name,
     validate_name,
 )
+from hitchrail.roots import Root, RootError, qualify, split_identifier
 
 __all__ = [
     "MAX_NAME_LENGTH",
@@ -357,3 +358,83 @@ def create_project(root: Path, name: str) -> Path:
         # OSError past here reopens the door the AlreadyExists mapping closed.
         raise RootUnavailable(f"cannot create in the root {root}: {exc}") from exc
     return target.resolve()
+
+
+# -- #120: several roots ----------------------------------------------------
+#
+# The per-root functions above are unchanged and stay the boundary check. What
+# is added here is the plural layer: which root a name belongs to, and the
+# qualified identifier that keeps two roots' same named folders apart.
+#
+# Deliberately a layer rather than a rewrite. `resolve_child` proving a path is
+# a direct child of ONE root is the property the whole security argument rests
+# on, and it is not made better by teaching it about labels.
+
+
+def scan_roots(roots: tuple[Root, ...]) -> Listing:
+    """One pass over every root, with every name qualified.
+
+    Order is the operator's, root by root and then within each root, because
+    sorting would silently reorder somebody's interface the day they add a
+    root.
+
+    **Qualified even with one root**, per #119. A single root that stayed bare
+    would mean every identifier changed the day a second was added, which is
+    the instability the decision exists to prevent.
+    """
+    projects: list[str] = []
+    unsupported: list[Unsupported] = []
+    total = 0
+    for root in roots:
+        listing = scan(root.path)
+        projects += [qualify(root.label, name) for name in listing.projects]
+        # The root is named on the rejection too. "`.hidden` is not a project"
+        # is a puzzle when two roots are configured and only one has it.
+        unsupported += [
+            Unsupported(name=qualify(root.label, u.name), reason=u.reason)
+            for u in listing.unsupported
+        ]
+        total += listing.unsupported_total
+    return Listing(
+        projects=tuple(projects),
+        unsupported=tuple(unsupported[:MAX_REPORTED_UNSUPPORTED]),
+        unsupported_total=total,
+    )
+
+
+def list_root_projects(roots: tuple[Root, ...]) -> list[str]:
+    """Every project identifier across every root."""
+    return list(scan_roots(roots).projects)
+
+
+def _root_for(roots: tuple[Root, ...], identifier: str) -> tuple[Root, str]:
+    """Split an identifier and find the root it names.
+
+    **By label, never by searching the roots in order.** A search would make
+    the answer depend on the order of `--root` flags, and an identifier whose
+    meaning depends on argv order is not the stable identifier #119 required.
+    """
+    try:
+        label, name = split_identifier(identifier)
+    except RootError as exc:
+        raise OutsideRoot(str(exc)) from exc
+    for root in roots:
+        if root.label == label:
+            return root, name
+    raise OutsideRoot(f"no root is labelled {label!r}")
+
+
+def resolve_identifier(roots: tuple[Root, ...], identifier: str) -> Path:
+    """The qualified form of `project_path`.
+
+    The label picks a root; the folder half still goes through `resolve_child`,
+    so the qualified identifier is not a second way to leave the boundary.
+    """
+    root, name = _root_for(roots, identifier)
+    return project_path(root.path, name)
+
+
+def create_in_root(roots: tuple[Root, ...], identifier: str) -> Path:
+    """The qualified form of `create_project`."""
+    root, name = _root_for(roots, identifier)
+    return create_project(root.path, name)

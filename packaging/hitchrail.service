@@ -34,7 +34,7 @@ After=network.target
 # `uv tool install hitchrail`, not `uvx`. uvx resolves and runs out of a cache
 # it is free to evict, so it is deliberately ephemeral and the path is not
 # stable. A unit needs an executable that is still there next month.
-ExecStart=%h/.local/bin/hitchrail --root %h/projects
+ExecStart=%h/.local/bin/hitchrail --root main=%h/projects
 
 # Mode 600, and this is not a style note. This file holds HITCHRAIL_TOKEN, and
 # anyone who can read it can run code on this machine as you. A token in a

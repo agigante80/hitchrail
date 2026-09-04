@@ -143,7 +143,7 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
         # each with the rule it broke. Dropping them silently made a folder
         # called `my app` look like one Hitchrail could not see. See issue #7.
         def read() -> tuple[discovery.Listing, list[eng.Session], tuple[int, int | None]]:
-            listing = discovery.scan(config.root)
+            listing = discovery.scan_roots(config.roots)
             return listing, engine.list(listing=listing), engine.machine_memory()
 
         try:
@@ -173,7 +173,11 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
                 # proportion and the header names the folder, and neither is
                 # derivable from the rows. See #64.
                 "memory": {"available_mb": memory[0], "total_mb": memory[1]},
-                "root": str(config.root),
+                # Every configured root, labelled. One root is still a list,
+                # because #119 made the qualified form universal and a
+                # client that special cased "one root" would be wrong the
+                # day a second was added.
+                "roots": [{"label": r.label, "path": str(r.path)} for r in config.roots],
             }
         )
 
@@ -186,7 +190,7 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
             # here would put a traceback where a client expects a code.
             return _error(400, "invalid_name", "a JSON body with a 'name' is required")
         try:
-            await in_thread(discovery.create_project, config.root, name)
+            await in_thread(discovery.create_in_root, config.roots, name)
         except discovery.AlreadyExists as exc:
             return _error(409, "already_exists", str(exc))
         except discovery.RootUnavailable as exc:

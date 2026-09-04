@@ -153,7 +153,7 @@ class Engine:
         """
         machine = self._look()
         names = (
-            discovery.list_projects(self.config.root)
+            discovery.list_root_projects(self.config.roots)
             if listing is None
             else list(listing.projects)
         )
@@ -270,10 +270,10 @@ class Engine:
         `RootUnavailable` here as it does from `list()`, rather than being
         flattened into "no such project" by the existence check below.
         """
-        if name not in discovery.list_projects(self.config.root):
+        if name not in discovery.list_root_projects(self.config.roots):
             raise UnknownProject(name)
         try:
-            return str(discovery.project_path(self.config.root, name))
+            return str(discovery.resolve_identifier(self.config.roots, name))
         except (
             discovery.InvalidName,
             discovery.NoSuchProject,
@@ -319,7 +319,7 @@ class Engine:
         `not_running` if it is a real project that simply is not running, which
         is a 404 and a 409 the interface has to tell apart (#47).
         """
-        if name not in discovery.list_projects(self.config.root):
+        if name not in discovery.list_root_projects(self.config.roots):
             raise UnknownProject(name)
 
     def start(self, name: str, acknowledged: bool = False) -> Session:

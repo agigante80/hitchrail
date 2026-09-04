@@ -27,7 +27,7 @@ from hitchrail.discovery import (
     project_path,
     scan,
 )
-from hitchrail.projectnames import _UNSAFE_TO_DISPLAY
+from hitchrail.projectnames import _UNSAFE_TO_DISPLAY, InvalidName
 
 
 def test_lists_only_directories_case_insensitively(tmp_path: Path) -> None:
@@ -883,3 +883,109 @@ def test_projectnames_does_not_import_discovery() -> None:
     ).read_text()
     assert "import discovery" not in source
     assert "from hitchrail.discovery" not in source
+
+
+# -- #120: several roots, and the identifier that keeps them apart -----------
+
+from hitchrail.discovery import (  # noqa: E402  grouped with its own section
+    resolve_identifier,
+    scan_roots,
+)
+from hitchrail.roots import Root  # noqa: E402
+
+
+def _roots(*pairs: tuple[str, Path]) -> tuple[Root, ...]:
+    return tuple(Root(label=label, path=path.resolve()) for label, path in pairs)
+
+
+def test_scanning_several_roots_qualifies_every_name(tmp_path: Path) -> None:
+    work, personal = tmp_path / "work", tmp_path / "personal"
+    (work / "vessel").mkdir(parents=True)
+    (personal / "vessel").mkdir(parents=True)
+    listing = scan_roots(_roots(("work", work), ("personal", personal)))
+    assert listing.projects == ("work~vessel", "personal~vessel")
+
+
+def test_one_root_is_qualified_too(tmp_path: Path) -> None:
+    """#119 decided qualified always. A single root that stayed bare would mean
+    the identifier changed the day a second root was added, which is the
+    instability the decision exists to prevent."""
+    only = tmp_path / "projects"
+    (only / "vessel").mkdir(parents=True)
+    assert scan_roots(_roots(("main", only))).projects == ("main~vessel",)
+
+
+def test_the_operators_root_order_is_the_listing_order(tmp_path: Path) -> None:
+    """Sorting would silently reorder somebody's interface when they add a
+    root, and within a root the existing ordering is untouched."""
+    zeta, alpha = tmp_path / "zeta", tmp_path / "alpha"
+    (zeta / "b").mkdir(parents=True)
+    (alpha / "a").mkdir(parents=True)
+    listing = scan_roots(_roots(("zeta", zeta), ("alpha", alpha)))
+    assert listing.projects == ("zeta~b", "alpha~a")
+
+
+def test_two_roots_with_the_same_folder_name_are_two_projects(tmp_path: Path) -> None:
+    """The defect this phase exists for, stated as a listing property. Before
+    the qualified identifier these were one name twice."""
+    work, personal = tmp_path / "work", tmp_path / "personal"
+    (work / "vessel").mkdir(parents=True)
+    (personal / "vessel").mkdir(parents=True)
+    projects = scan_roots(_roots(("work", work), ("personal", personal))).projects
+    assert len(set(projects)) == 2
+
+
+def test_an_unsupported_folder_says_which_root_it_is_in(tmp_path: Path) -> None:
+    work, personal = tmp_path / "work", tmp_path / "personal"
+    # A name the allowlist rejects and REPORTS. A dot prefixed folder is
+    # skipped silently by design, so it is the wrong probe for this.
+    (work / "has space").mkdir(parents=True)
+    personal.mkdir()
+    listing = scan_roots(_roots(("work", work), ("personal", personal)))
+    assert any(u.name.startswith("work") for u in listing.unsupported)
+
+
+def test_the_unsupported_total_sums_across_roots(tmp_path: Path) -> None:
+    a, b = tmp_path / "a", tmp_path / "b"
+    (a / "one two").mkdir(parents=True)
+    (b / "three four").mkdir(parents=True)
+    listing = scan_roots(_roots(("a", a), ("b", b)))
+    assert listing.unsupported_total == 2
+
+
+def test_resolving_an_identifier_finds_the_right_root(tmp_path: Path) -> None:
+    work, personal = tmp_path / "work", tmp_path / "personal"
+    (work / "vessel").mkdir(parents=True)
+    (personal / "vessel").mkdir(parents=True)
+    roots = _roots(("work", work), ("personal", personal))
+    assert resolve_identifier(roots, "personal~vessel") == (personal / "vessel")
+
+
+def test_an_identifier_naming_no_configured_root_is_refused(tmp_path: Path) -> None:
+    only = tmp_path / "projects"
+    (only / "vessel").mkdir(parents=True)
+    with pytest.raises(OutsideRoot):
+        resolve_identifier(_roots(("main", only)), "ghost~vessel")
+
+
+def test_an_unqualified_identifier_is_refused(tmp_path: Path) -> None:
+    """A bare name is what 0.1.0 used. Accepting one here would mean picking a
+    root for the caller at the moment a destructive route is being served."""
+    only = tmp_path / "projects"
+    (only / "vessel").mkdir(parents=True)
+    with pytest.raises(OutsideRoot):
+        resolve_identifier(_roots(("main", only)), "vessel")
+
+
+def test_the_root_boundary_still_holds_through_the_identifier(tmp_path: Path) -> None:
+    """The qualified form must not become a second way to traverse.
+
+    `InvalidName` rather than `OutsideRoot`, and that is the stronger answer:
+    the folder half goes through the same allowlist as before, so `../escape`
+    is refused as a NAME before any path is built from it. The label picks a
+    root and buys the caller nothing else.
+    """
+    only = tmp_path / "projects"
+    only.mkdir()
+    with pytest.raises(InvalidName):
+        resolve_identifier(_roots(("main", only)), "main~../escape")

@@ -23,6 +23,18 @@ from hitchrail.config import (
     normalise_host,
     normalise_origin,
 )
+from hitchrail.roots import Root
+
+
+def _r(path: Path, label: str = "main") -> tuple[Root, ...]:
+    """One root, labelled, as `Config` now takes them.
+
+    Local to this file on purpose. Everything else goes through
+    `support.make_config`; Config is the unit under test here, so the
+    construction stays visible.
+    """
+    return (Root(label=label, path=path.resolve()),)
+
 
 Resolver = Callable[[], tuple[str, ...]]
 
@@ -45,14 +57,14 @@ def no_socket(*args: object, **kwargs: object) -> object:
 
 
 def test_loopback_bind_needs_no_token(tmp_path: Path) -> None:
-    cfg = Config(root=tmp_path)
+    cfg = Config(roots=_r(tmp_path))
     assert cfg.is_loopback
     assert cfg.token is None
 
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "::1", "127.0.0.5"])
 def test_loopback_forms_are_recognised(tmp_path: Path, host: str) -> None:
-    assert Config(root=tmp_path, host=host).is_loopback
+    assert Config(roots=_r(tmp_path), host=host).is_loopback
 
 
 @pytest.mark.parametrize("host", ["0.0.0.0", "::"])
@@ -63,28 +75,28 @@ def test_wildcard_forms_are_recognised(host: str) -> None:
 
 def test_network_bind_without_a_token_is_refused(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="token"):
-        Config(root=tmp_path, host="0.0.0.0", token=None)
+        Config(roots=_r(tmp_path), host="0.0.0.0", token=None)
 
 
 def test_network_bind_with_a_token_is_allowed(tmp_path: Path) -> None:
-    cfg = Config(root=tmp_path, host="0.0.0.0", token="s3cret")
+    cfg = Config(roots=_r(tmp_path), host="0.0.0.0", token="s3cret")
     assert not cfg.is_loopback
 
 
 def test_missing_root_is_refused(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="root"):
-        Config(root=tmp_path / "nope")
+        Config(roots=_r(tmp_path / "nope"))
 
 
 def test_a_file_as_root_is_refused(tmp_path: Path) -> None:
     target = tmp_path / "notes.txt"
     target.write_text("x")
     with pytest.raises(ConfigError, match="root"):
-        Config(root=target)
+        Config(roots=_r(target))
 
 
 def test_allowed_hosts_covers_loopback_and_a_concrete_bind(tmp_path: Path) -> None:
-    cfg = Config(root=tmp_path, host="192.168.1.10", token="t")
+    cfg = Config(roots=_r(tmp_path), host="192.168.1.10", token="t")
     assert "192.168.1.10" in cfg.allowed_hosts
     assert "localhost" in cfg.allowed_hosts
 
@@ -93,7 +105,7 @@ def test_a_wildcard_bind_allows_the_machines_own_address(tmp_path: Path) -> None
     # The regression this task exists for. Without it the phone that the whole
     # design is aimed at gets a 400 from its own machine.
     cfg = Config(
-        root=tmp_path,
+        roots=_r(tmp_path),
         host="0.0.0.0",
         token="t",
         resolver=fixed_resolver("192.168.1.10", "box.lan"),
@@ -104,7 +116,7 @@ def test_a_wildcard_bind_allows_the_machines_own_address(tmp_path: Path) -> None
 
 def test_a_wildcard_bind_never_allows_the_wildcard_itself(tmp_path: Path) -> None:
     cfg = Config(
-        root=tmp_path,
+        roots=_r(tmp_path),
         host="0.0.0.0",
         token="t",
         resolver=fixed_resolver("10.0.0.2", "0.0.0.0", "::", "*"),
@@ -123,7 +135,9 @@ def test_a_concrete_bind_does_not_ask_the_resolver(tmp_path: Path) -> None:
         calls.append(1)
         return ("10.0.0.2",)
 
-    hosts = Config(root=tmp_path, host="127.0.0.1", resolver=counting_resolver).allowed_hosts
+    hosts = Config(
+        roots=_r(tmp_path), host="127.0.0.1", resolver=counting_resolver
+    ).allowed_hosts
     assert "127.0.0.1" in hosts
     assert calls == []
 
@@ -134,26 +148,26 @@ def test_a_resolver_that_fails_does_not_break_the_config(tmp_path: Path) -> None
     def broken_resolver() -> tuple[str, ...]:
         raise OSError("no network")
 
-    cfg = Config(root=tmp_path, host="0.0.0.0", token="t", resolver=broken_resolver)
+    cfg = Config(roots=_r(tmp_path), host="0.0.0.0", token="t", resolver=broken_resolver)
     assert "localhost" in cfg.allowed_hosts
 
 
 def test_extra_allowed_hosts_are_included(tmp_path: Path) -> None:
-    cfg = Config(root=tmp_path, host="0.0.0.0", token="t", extra_hosts=("box.lan",))
+    cfg = Config(roots=_r(tmp_path), host="0.0.0.0", token="t", extra_hosts=("box.lan",))
     assert "box.lan" in cfg.allowed_hosts
 
 
 @pytest.mark.parametrize("bad", ["*", "*.example", " * "])
 def test_wildcard_allowed_host_is_refused(tmp_path: Path, bad: str) -> None:
     with pytest.raises(ConfigError, match="wildcard"):
-        Config(root=tmp_path, host="0.0.0.0", token="t", extra_hosts=(bad,))
+        Config(roots=_r(tmp_path), host="0.0.0.0", token="t", extra_hosts=(bad,))
 
 
 def test_allowed_hosts_are_deduplicated_and_ordered(tmp_path: Path) -> None:
     # A token because box.lan is not loopback, and #108 now demands one for
     # any declared remote reach. The subject here is ordering, not auth.
     cfg = Config(
-        root=tmp_path, host="localhost", token="t", extra_hosts=("localhost", "box.lan")
+        roots=_r(tmp_path), host="localhost", token="t", extra_hosts=("localhost", "box.lan")
     )
     hosts = cfg.allowed_hosts
     assert len(hosts) == len(set(hosts))
@@ -163,7 +177,7 @@ def test_allowed_hosts_are_deduplicated_and_ordered(tmp_path: Path) -> None:
 def test_allowed_origins_pin_the_port(tmp_path: Path) -> None:
     # Hostname alone is not enough: another app on localhost:3000 would
     # otherwise be same origin against an API equivalent to a shell.
-    cfg = Config(root=tmp_path, port=8787)
+    cfg = Config(roots=_r(tmp_path), port=8787)
     assert "http://localhost:8787" in cfg.allowed_origins
     assert "http://localhost:3000" not in cfg.allowed_origins
 
@@ -177,12 +191,12 @@ def test_a_proxy_origin_is_configured_rather_than_guessed(tmp_path: Path) -> Non
     terminating proxy is exactly the case that cannot be derived, because the
     scheme and the port are both the proxy's.
     """
-    guessed = Config(root=tmp_path, host="192.168.1.10", token="t", port=8787)
+    guessed = Config(roots=_r(tmp_path), host="192.168.1.10", token="t", port=8787)
     assert "https://192.168.1.10" not in guessed.allowed_origins
     assert "https://localhost" not in guessed.allowed_origins
 
     configured = Config(
-        root=tmp_path,
+        roots=_r(tmp_path),
         host="192.168.1.10",
         token="t",
         port=8787,
@@ -206,7 +220,7 @@ def test_a_proxy_origin_is_configured_rather_than_guessed(tmp_path: Path) -> Non
 )
 def test_a_configured_origin_that_is_not_an_origin_is_refused(tmp_path: Path, bad: str) -> None:
     with pytest.raises(ConfigError):
-        Config(root=tmp_path, extra_origins=(bad,))
+        Config(roots=_r(tmp_path), extra_origins=(bad,))
 
 
 def test_the_bare_http_origin_is_not_accepted(tmp_path: Path) -> None:
@@ -218,7 +232,7 @@ def test_the_bare_http_origin_is_not_accepted(tmp_path: Path) -> None:
     hole the port pinning is written to close, reopened one line below the
     docstring claiming it was closed.
     """
-    cfg = Config(root=tmp_path, host="192.168.1.10", token="t", port=8787)
+    cfg = Config(roots=_r(tmp_path), host="192.168.1.10", token="t", port=8787)
     assert "http://192.168.1.10" not in cfg.allowed_origins
     assert "http://localhost" not in cfg.allowed_origins
 
@@ -226,7 +240,7 @@ def test_the_bare_http_origin_is_not_accepted(tmp_path: Path) -> None:
 def test_a_padded_extra_host_is_usable(tmp_path: Path) -> None:
     # A stray space from a comma split was accepted and then could never match
     # a Host header, which reads as the allowlist ignoring the operator.
-    cfg = Config(root=tmp_path, host="0.0.0.0", token="t", extra_hosts=(" phone.lan ",))
+    cfg = Config(roots=_r(tmp_path), host="0.0.0.0", token="t", extra_hosts=(" phone.lan ",))
     assert "phone.lan" in cfg.allowed_hosts
     assert " phone.lan " not in cfg.allowed_hosts
 
@@ -254,7 +268,7 @@ def test_local_addresses_survives_a_machine_that_cannot_make_a_socket(
 def test_allowed_origins_bracket_an_ipv6_host(tmp_path: Path) -> None:
     # A bare ::1 in an origin is not a URL. Getting this wrong makes the check
     # reject a legitimate loopback browser rather than an attacker.
-    cfg = Config(root=tmp_path, port=8787)
+    cfg = Config(roots=_r(tmp_path), port=8787)
     assert "http://[::1]:8787" in cfg.allowed_origins
     assert "http://::1:8787" not in cfg.allowed_origins
 
@@ -262,7 +276,7 @@ def test_allowed_origins_bracket_an_ipv6_host(tmp_path: Path) -> None:
 def test_the_config_is_frozen(tmp_path: Path) -> None:
     # Validation happens once, in __post_init__. A mutable Config could be
     # edited past its own refusals after construction.
-    cfg = Config(root=tmp_path)
+    cfg = Config(roots=_r(tmp_path))
     with pytest.raises(AttributeError):
         cfg.token = "sneaked in"  # type: ignore[misc]
 
@@ -277,7 +291,7 @@ def test_a_hostname_that_is_not_an_ip_is_not_loopback(host: str) -> None:
 
 def test_a_named_bind_still_demands_a_token(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="token"):
-        Config(root=tmp_path, host="box.lan")
+        Config(roots=_r(tmp_path), host="box.lan")
 
 
 def test_local_addresses_survives_a_machine_with_no_hostname(
@@ -332,7 +346,7 @@ def test_an_extra_host_that_is_not_a_bare_hostname_is_refused(tmp_path: Path, ba
     origin of `http://[box.lan:8787]:8787`.
     """
     with pytest.raises(ConfigError, match="bare hostname"):
-        Config(root=tmp_path, host="0.0.0.0", token="t", extra_hosts=(bad,))
+        Config(roots=_r(tmp_path), host="0.0.0.0", token="t", extra_hosts=(bad,))
 
 
 def test_a_bracketed_ipv6_extra_host_is_stored_bare(tmp_path: Path) -> None:
@@ -343,7 +357,7 @@ def test_a_bracketed_ipv6_extra_host_is_stored_bare(tmp_path: Path) -> None:
     Storing both spellings was a workaround for a matcher that could not strip
     brackets, and two spellings of one host can disagree with each other.
     """
-    cfg = Config(root=tmp_path, host="0.0.0.0", token="t", extra_hosts=("[fe80::1]",))
+    cfg = Config(roots=_r(tmp_path), host="0.0.0.0", token="t", extra_hosts=("[fe80::1]",))
     assert "fe80::1" in cfg.allowed_hosts
     assert "[fe80::1]" not in cfg.allowed_hosts
     # Bracketed again on the way into an origin, because that is what a browser
@@ -363,7 +377,7 @@ def test_a_prefix_that_would_make_the_kill_guard_vacuous_is_refused(
     and pane separators.
     """
     with pytest.raises(ConfigError, match="session prefix"):
-        Config(root=tmp_path, session_prefix=prefix)
+        Config(roots=_r(tmp_path), session_prefix=prefix)
 
 
 @pytest.mark.parametrize("binary", ["", "  ", "-rf", "--dangerously-skip-permissions"])
@@ -371,18 +385,18 @@ def test_a_flag_shaped_agent_binary_is_refused(tmp_path: Path, binary: str) -> N
     # argv[0] starting with a hyphen is read as an option by whatever parses it,
     # and no shell being involved does not help.
     with pytest.raises(ConfigError, match="agent binary"):
-        Config(root=tmp_path, agent_binary=binary)
+        Config(roots=_r(tmp_path), agent_binary=binary)
 
 
 @pytest.mark.parametrize("port", [0, -1, 65536, 99999])
 def test_a_port_out_of_range_is_refused(tmp_path: Path, port: int) -> None:
     with pytest.raises(ConfigError, match="port"):
-        Config(root=tmp_path, port=port)
+        Config(roots=_r(tmp_path), port=port)
 
 
 def test_a_non_positive_stop_timeout_is_refused(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="stop timeout"):
-        Config(root=tmp_path, stop_timeout=0)
+        Config(roots=_r(tmp_path), stop_timeout=0)
 
 
 def test_an_inverted_pair_of_memory_floors_is_refused(tmp_path: Path) -> None:
@@ -390,7 +404,7 @@ def test_an_inverted_pair_of_memory_floors_is_refused(tmp_path: Path) -> None:
     # refusal. Inverted, the confirmation gate can never fire and the guard
     # loses a step without saying so.
     with pytest.raises(ConfigError, match="soft floor"):
-        Config(root=tmp_path, hard_floor_mb=3072, soft_floor_mb=1536)
+        Config(roots=_r(tmp_path), hard_floor_mb=3072, soft_floor_mb=1536)
 
 
 @pytest.mark.parametrize("host", ["[::1]", " ::1 ", "[::1] "])
@@ -400,7 +414,7 @@ def test_a_bracketed_loopback_bind_is_recognised(tmp_path: Path, host: str) -> N
     Reading it as a network bind meant refusing to serve loopback without a
     token, with a message about anyone on the network running code as you.
     """
-    cfg = Config(root=tmp_path, host=host)
+    cfg = Config(roots=_r(tmp_path), host=host)
     assert cfg.is_loopback
     assert cfg.token is None
 
@@ -418,7 +432,7 @@ def test_the_allowlist_is_resolved_once_not_on_every_read(tmp_path: Path) -> Non
         calls.append(1)
         return ("10.0.0.2",)
 
-    cfg = Config(root=tmp_path, host="0.0.0.0", token="t", resolver=counting)
+    cfg = Config(roots=_r(tmp_path), host="0.0.0.0", token="t", resolver=counting)
     for _ in range(5):
         _ = cfg.allowed_hosts
         _ = cfg.allowed_origins
@@ -469,7 +483,9 @@ def test_every_spelling_of_the_unspecified_address_is_a_wildcard(
     to prevent. `ipaddress` already knows what an unspecified address is.
     """
     assert is_wildcard_host(spelling)
-    cfg = Config(root=tmp_path, host=spelling, token="t", resolver=fixed_resolver("10.0.0.2"))
+    cfg = Config(
+        roots=_r(tmp_path), host=spelling, token="t", resolver=fixed_resolver("10.0.0.2")
+    )
     assert "10.0.0.2" in cfg.allowed_hosts
     assert spelling.strip() not in cfg.allowed_hosts
 
@@ -494,7 +510,7 @@ def test_the_bind_host_is_validated_like_everything_else(tmp_path: Path, bad: st
     origin of `http://[box.lan:8787]:8787`.
     """
     with pytest.raises(ConfigError, match="bare host"):
-        Config(root=tmp_path, host=bad, token="t")
+        Config(roots=_r(tmp_path), host=bad, token="t")
 
 
 @pytest.mark.parametrize(
@@ -538,7 +554,7 @@ def test_a_resolver_returning_junk_cannot_widen_the_allowlist(tmp_path: Path) ->
     # The resolver is an external surface. Its output is filtered on the way
     # out, not trusted because it came from the operating system.
     cfg = Config(
-        root=tmp_path,
+        roots=_r(tmp_path),
         host="0.0.0.0",
         token="t",
         resolver=fixed_resolver(
@@ -555,7 +571,7 @@ def test_on_port_80_the_portless_origin_is_accepted(tmp_path: Path) -> None:
     port, so an allowlist holding only `http://box.lan:80` matched nothing and
     every mutating request was refused while GETs kept working.
     """
-    cfg = Config(root=tmp_path, host="box.lan", port=80, token="t")
+    cfg = Config(roots=_r(tmp_path), host="box.lan", port=80, token="t")
     assert "http://box.lan" in cfg.allowed_origins
     assert "http://box.lan:80" in cfg.allowed_origins
 
@@ -563,7 +579,7 @@ def test_on_port_80_the_portless_origin_is_accepted(tmp_path: Path) -> None:
 def test_the_portless_form_appears_only_on_port_80(tmp_path: Path) -> None:
     # Not the unconditional guess that made any local HTTPS service a same
     # origin caller: emitted only when we are actually serving that port.
-    cfg = Config(root=tmp_path, host="box.lan", port=8787, token="t")
+    cfg = Config(roots=_r(tmp_path), host="box.lan", port=8787, token="t")
     assert "http://box.lan" not in cfg.allowed_origins
     assert "http://box.lan:8787" in cfg.allowed_origins
 
@@ -583,7 +599,7 @@ def test_a_resolver_raising_unicodeerror_does_not_break_startup(tmp_path: Path) 
     def bad_label() -> tuple[str, ...]:
         raise UnicodeError("label empty or too long")
 
-    cfg = Config(root=tmp_path, host="0.0.0.0", token="t", resolver=bad_label)
+    cfg = Config(roots=_r(tmp_path), host="0.0.0.0", token="t", resolver=bad_label)
     assert "localhost" in cfg.allowed_hosts
 
 
@@ -615,7 +631,7 @@ def test_an_origin_that_could_never_match_is_refused(tmp_path: Path, bad: str) -
     out of range or non numeric one was accepted too.
     """
     with pytest.raises(ConfigError):
-        Config(root=tmp_path, extra_origins=(bad,))
+        Config(roots=_r(tmp_path), extra_origins=(bad,))
 
 
 @pytest.mark.parametrize("bad", ["", "   ", "\t"])
@@ -628,13 +644,13 @@ def test_an_empty_token_is_refused(tmp_path: Path, bad: str) -> None:
     believes they configured authentication.
     """
     with pytest.raises(ConfigError, match="empty token"):
-        Config(root=tmp_path, token=bad)
+        Config(roots=_r(tmp_path), token=bad)
 
 
 def test_no_token_at_all_is_still_allowed_on_loopback(tmp_path: Path) -> None:
     # None means "no authentication", which is a legitimate loopback choice.
     # Only the empty string, which looks like a token and is not, is refused.
-    assert Config(root=tmp_path, token=None).token is None
+    assert Config(roots=_r(tmp_path), token=None).token is None
 
 
 @pytest.mark.parametrize(
@@ -659,7 +675,7 @@ def test_a_configured_origin_covers_both_default_port_spellings(
 
     Both paths go through `origin_forms` now, so they cannot drift apart again.
     """
-    cfg = Config(root=tmp_path, token="t", extra_origins=(configured,))
+    cfg = Config(roots=_r(tmp_path), token="t", extra_origins=(configured,))
     assert expected <= cfg.allowed_origins
 
 
@@ -673,7 +689,7 @@ def test_an_underscore_in_a_hostname_is_accepted(tmp_path: Path, hostname: str) 
     `http://dev_box:8787/` answered 400, and `--allow-host dev_box` was a
     startup refusal with no way around it.
     """
-    cfg = Config(root=tmp_path, host="0.0.0.0", token="t", extra_hosts=(hostname,))
+    cfg = Config(roots=_r(tmp_path), host="0.0.0.0", token="t", extra_hosts=(hostname,))
     assert hostname in cfg.allowed_hosts
 
 
@@ -691,7 +707,7 @@ def test_an_ipv6_origin_ending_in_a_double_colon_is_not_an_empty_port(
     # token="t" for the two non loopback literals: #108 demands one once an
     # origin names something outside this machine. `http://[::1]` would not
     # need it, and passing one changes nothing about what is asserted.
-    cfg = Config(root=tmp_path, token="t", extra_origins=(origin,))
+    cfg = Config(roots=_r(tmp_path), token="t", extra_origins=(origin,))
     assert any("2001:db8" in o or "::1" in o or "fe80" in o for o in cfg.allowed_origins)
 
 
@@ -704,10 +720,10 @@ def test_a_wildcard_is_not_an_address_to_bind_to(tmp_path: Path) -> None:
     than a ConfigError saying what to write instead.
     """
     with pytest.raises(ConfigError, match="not an address to bind to"):
-        Config(root=tmp_path, host="*", token="t")
+        Config(roots=_r(tmp_path), host="*", token="t")
     # The real wildcards still work, which is what makes this a narrow fix.
     for bindable in ("0.0.0.0", "::"):
-        assert Config(root=tmp_path, host=bindable, token="t").allowed_hosts
+        assert Config(roots=_r(tmp_path), host=bindable, token="t").allowed_hosts
 
 
 @pytest.mark.parametrize(
@@ -726,7 +742,7 @@ def test_the_bind_address_is_stored_in_the_form_uvicorn_can_bind(
     socket.bind raises gaierror on `[::1]`. Accepted at startup and dead at
     bind time is the worst of both.
     """
-    cfg = Config(root=tmp_path, host=given, token="tok", extra_hosts=("box.lan",))
+    cfg = Config(roots=_r(tmp_path), host=given, token="tok", extra_hosts=("box.lan",))
     assert cfg.host == stored
 
 
@@ -740,7 +756,7 @@ def test_a_root_dot_is_stripped_from_every_door(tmp_path: Path, door: str) -> No
     Every door into the allowlist goes through `normalise_host`, and this
     asserts all three rather than the one that happened to be fixed.
     """
-    kwargs: dict[str, object] = {"root": tmp_path, "token": "t"}
+    kwargs: dict[str, object] = {"roots": _r(tmp_path), "token": "t"}
     if door == "bind":
         kwargs["host"] = "box.lan."
         kwargs["resolver"] = lambda: ()
@@ -766,7 +782,11 @@ def test_a_host_with_no_valid_reading_is_a_startup_refusal(tmp_path: Path, bad: 
     """
     with pytest.raises(ConfigError):
         Config(
-            root=tmp_path, host="0.0.0.0", token="t", extra_hosts=(bad,), resolver=lambda: ()
+            roots=_r(tmp_path),
+            host="0.0.0.0",
+            token="t",
+            extra_hosts=(bad,),
+            resolver=lambda: (),
         )
 
 
@@ -788,7 +808,7 @@ def test_a_repeated_root_dot_normalises_rather_than_lingering(
     wrong, so normalising loses nothing and widens nothing.
     """
     cfg = Config(
-        root=tmp_path, host="0.0.0.0", token="t", extra_hosts=(given,), resolver=lambda: ()
+        roots=_r(tmp_path), host="0.0.0.0", token="t", extra_hosts=(given,), resolver=lambda: ()
     )
     assert "box.lan" in cfg.allowed_hosts
     assert not any(h.endswith(".") for h in cfg.allowed_hosts)
@@ -796,7 +816,7 @@ def test_a_repeated_root_dot_normalises_rather_than_lingering(
 
 def test_a_configured_origin_with_a_root_dot_normalises(tmp_path: Path) -> None:
     cfg = Config(
-        root=tmp_path,
+        roots=_r(tmp_path),
         host="0.0.0.0",
         token="t",
         extra_hosts=("box.lan",),
@@ -960,7 +980,12 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # token refusal now follows what can reach this server rather than what
         # it binds. Most of the addition is the argument for why a proxied
         # loopback bind is not local, which is the thing that was wrong.
-        "config.py": 468,
+        # 468 to 488 for #120. `roots` replaces `root`, and the growth is the
+        # qualified `--self-project` check: it now splits an identifier, finds
+        # the root that label names, and refuses if there is none. Three
+        # refusals where there was one, because with several roots there are
+        # three ways to name a folder that is not there.
+        "config.py": 488,
         # 409, nine lines over, down from 542. #115 deleted the `?token=`
         # carrier: 135 lines once the two blocks inside `TokenMiddleware`
         # that only served it are counted.
@@ -976,9 +1001,21 @@ def test_every_module_is_under_the_size_guideline() -> None:
         #
         # If it grows again the seam is `TokenMiddleware`, still the largest
         # thing here. Look there before raising this number.
+        # 359 to 440 for #120, and this one is on notice. The plural layer,
+        # "which root does this identifier name", sits on top of the per root
+        # functions rather than inside them, which is what keeps `resolve_child`
+        # unchanged: proving a path is a direct child of ONE root is the
+        # property the security argument rests on and it is not improved by
+        # teaching it about labels. The seam is therefore real and the file is
+        # two layers deep rather than two jobs wide, so it is tracked here
+        # instead of split mid migration. #127 carries the split.
+        "discovery.py": 440,
         "security.py": 409,
         # rather than one. A refusal handler is the shape this file is made of.
-        "server.py": 513,
+        # 513 to 517 for #120. The listing payload reports every configured
+        # root as a labelled list rather than one path string, and the comment
+        # says why one root is still a list.
+        "server.py": 517,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"
@@ -1008,7 +1045,7 @@ def test_a_malformed_bracketed_origin_is_a_config_error(tmp_path: Path, bad: str
     refusal has to name what it refused.
     """
     with pytest.raises(ConfigError, match="not an origin"):
-        Config(root=tmp_path, extra_origins=(bad,))
+        Config(roots=_r(tmp_path), extra_origins=(bad,))
 
 
 # -- #36: refusals nobody exercised ----------------------------------------
@@ -1024,7 +1061,7 @@ def test_a_negative_memory_figure_is_refused(tmp_path: Path, field: str) -> None
     figure went negative.
     """
     with pytest.raises(ConfigError, match=f"{field} must not be negative"):
-        Config(root=tmp_path, **{field: -1})  # type: ignore[arg-type]
+        Config(roots=_r(tmp_path), **{field: -1})  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize("origin", ["http://-bad-.example", "http://a..b", "http://x-.y"])
@@ -1037,7 +1074,7 @@ def test_an_origin_whose_host_is_not_a_host_is_refused(tmp_path: Path, origin: s
     module exists to refuse.
     """
     with pytest.raises(ConfigError, match="not a valid host in origin"):
-        Config(root=tmp_path, extra_origins=(origin,))
+        Config(roots=_r(tmp_path), extra_origins=(origin,))
 
 
 def test_the_import_contract_covers_every_engine_layer_module() -> None:
@@ -1078,11 +1115,11 @@ def test_a_self_project_that_could_never_be_a_project_is_refused(
 ) -> None:
     """Shape. Each of these is accepted by string equality and matches nothing."""
     with pytest.raises(ConfigError) as exc:
-        Config(root=tmp_path, self_project=value)
+        Config(roots=_r(tmp_path), self_project=value)
     assert "--self-project" in str(exc.value)
 
 
-@pytest.mark.parametrize("value", ["Hitchrail", "hitchrai", "hitchrail2"])
+@pytest.mark.parametrize("value", ["main~Hitchrail", "main~hitchrai", "main~hitchrail2"])
 def test_a_well_shaped_self_project_that_is_not_there_is_refused(
     tmp_path: Path, value: str
 ) -> None:
@@ -1094,32 +1131,33 @@ def test_a_well_shaped_self_project_that_is_not_there_is_refused(
     """
     (tmp_path / "hitchrail").mkdir()
     with pytest.raises(ConfigError) as exc:
-        Config(root=tmp_path, self_project=value)
+        Config(roots=_r(tmp_path), self_project=value)
     assert "is not a folder in" in str(exc.value)
 
 
 def test_a_self_project_that_is_really_there_is_accepted(tmp_path: Path) -> None:
     (tmp_path / "hitchrail").mkdir()
-    assert Config(root=tmp_path, self_project="hitchrail").self_project == "hitchrail"
+    cfg = Config(roots=_r(tmp_path), self_project="main~hitchrail")
+    assert cfg.self_project == "main~hitchrail"
 
 
 def test_no_self_project_protects_nothing_and_that_is_fine(tmp_path: Path) -> None:
     """Optional. Absence must not become a startup failure."""
-    assert Config(root=tmp_path).self_project is None
+    assert Config(roots=_r(tmp_path)).self_project is None
 
 
 def test_a_file_is_not_a_self_project(tmp_path: Path) -> None:
     """`is_dir`, not `exists`: Hitchrail cannot be running inside a file."""
     (tmp_path / "hitchrail").write_text("not a folder")
     with pytest.raises(ConfigError):
-        Config(root=tmp_path, self_project="hitchrail")
+        Config(roots=_r(tmp_path), self_project="main~hitchrail")
 
 
 def test_the_refusal_names_the_flag_and_the_root(tmp_path: Path) -> None:
     """The operator has to be able to act on it without reading the source."""
     (tmp_path / "real").mkdir()
     with pytest.raises(ConfigError) as exc:
-        Config(root=tmp_path, self_project="typo")
+        Config(roots=_r(tmp_path), self_project="main~typo")
     message = str(exc.value)
     assert "--self-project" in message and "typo" in message and str(tmp_path) in message
 
@@ -1154,7 +1192,12 @@ def test_projectnames_does_not_import_config() -> None:
 
 def test_a_remote_allow_host_demands_a_token(tmp_path: Path) -> None:
     with pytest.raises(ConfigError) as excinfo:
-        Config(root=tmp_path, host="127.0.0.1", token=None, extra_hosts=("box.tailnet.ts.net",))
+        Config(
+            roots=_r(tmp_path),
+            host="127.0.0.1",
+            token=None,
+            extra_hosts=("box.tailnet.ts.net",),
+        )
     assert "box.tailnet.ts.net" in str(excinfo.value)
     assert "--allow-host" in str(excinfo.value)
 
@@ -1162,7 +1205,7 @@ def test_a_remote_allow_host_demands_a_token(tmp_path: Path) -> None:
 def test_a_remote_allow_origin_demands_a_token(tmp_path: Path) -> None:
     with pytest.raises(ConfigError) as excinfo:
         Config(
-            root=tmp_path,
+            roots=_r(tmp_path),
             host="127.0.0.1",
             token=None,
             extra_origins=("https://box.tailnet.ts.net",),
@@ -1174,7 +1217,7 @@ def test_a_remote_allow_origin_demands_a_token(tmp_path: Path) -> None:
 def test_a_remote_allow_host_with_a_token_is_accepted(tmp_path: Path) -> None:
     """The proxied deployment this refusal is meant to make safe, not refuse."""
     config = Config(
-        root=tmp_path, host="127.0.0.1", token="t", extra_hosts=("box.tailnet.ts.net",)
+        roots=_r(tmp_path), host="127.0.0.1", token="t", extra_hosts=("box.tailnet.ts.net",)
     )
     assert "box.tailnet.ts.net" in config.allowed_hosts
 
@@ -1184,7 +1227,8 @@ def test_a_loopback_allow_host_still_needs_no_token(tmp_path: Path, entry: str) 
     """A loopback name in the allowlist declares no reach, so refusing it would
     punish the harmless case and teach operators to pass --token reflexively."""
     assert (
-        Config(root=tmp_path, host="127.0.0.1", token=None, extra_hosts=(entry,)).token is None
+        Config(roots=_r(tmp_path), host="127.0.0.1", token=None, extra_hosts=(entry,)).token
+        is None
     )
 
 
@@ -1193,18 +1237,18 @@ def test_a_loopback_allow_host_still_needs_no_token(tmp_path: Path, entry: str) 
 )
 def test_a_loopback_allow_origin_still_needs_no_token(tmp_path: Path, entry: str) -> None:
     assert (
-        Config(root=tmp_path, host="127.0.0.1", token=None, extra_origins=(entry,)).token
+        Config(roots=_r(tmp_path), host="127.0.0.1", token=None, extra_origins=(entry,)).token
         is None
     )
 
 
 def test_a_bare_loopback_bind_still_needs_no_token(tmp_path: Path) -> None:
     """How nearly everybody runs it. The change must not break this."""
-    assert Config(root=tmp_path, host="127.0.0.1", token=None).token is None
+    assert Config(roots=_r(tmp_path), host="127.0.0.1", token=None).token is None
 
 
 @pytest.mark.parametrize("host", ["0.0.0.0", "::", "192.168.1.10"])
 def test_a_non_loopback_bind_still_demands_a_token(tmp_path: Path, host: str) -> None:
     """Regression guard: the new predicate must not weaken the old rule."""
     with pytest.raises(ConfigError, match="token"):
-        Config(root=tmp_path, host=host, token=None)
+        Config(roots=_r(tmp_path), host=host, token=None)

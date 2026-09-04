@@ -16,12 +16,20 @@ from pathlib import Path
 from typing import Any
 
 from hitchrail.config import Config
+from hitchrail.roots import Root
+
+DEFAULT_LABEL = "main"
 
 
 def make_config(root: Path, **kw: Any) -> Config:
-    """A Config rooted at `root`, for tests that do not care about roots.
+    """A Config with one root labelled `main`, for tests that do not care.
 
     Everything else is passed through, so a test that DOES care about a field
-    names it and the rest stay at their defaults.
+    names it and the rest stay at their defaults. A test that cares about
+    SEVERAL roots passes `roots=` and does not use this.
+
+    This is the edit #120 was preparing for: one line, rather than 145.
     """
-    return Config(root=root, **kw)
+    if "roots" in kw:
+        raise TypeError("pass roots= to Config directly, not through make_config")
+    return Config(roots=(Root(label=DEFAULT_LABEL, path=root.resolve()),), **kw)

@@ -72,7 +72,7 @@ because it cannot be derived: the scheme and the port are the proxy's, not
 ours.
 
 ```sh
-hitchrail --root ~/dev --host 0.0.0.0 --allow-host box.lan \
+hitchrail --root main=~/dev --host 0.0.0.0 --allow-host box.lan \
           --allow-origin https://box.lan
 ```
 
@@ -149,7 +149,7 @@ Claude Code on `PATH`, per the table above.
 ```sh
 git clone https://github.com/agigante80/hitchrail
 cd hitchrail
-uv run hitchrail --root ~/projects
+uv run hitchrail --root main=~/projects
 ```
 
 `--root` is the folder holding your projects. Every directory directly inside it
@@ -171,7 +171,7 @@ The middle route is the one with no prerequisites, and it is the one shown
 here. Bind to the machine's LAN address and it prints a link to tap:
 
 ```sh
-uv run hitchrail --root ~/projects --host 192.168.1.10
+uv run hitchrail --root main=~/projects --host 192.168.1.10
 ```
 
 ```
