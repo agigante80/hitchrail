@@ -1025,9 +1025,19 @@ function showNewFolder(message) {
 }
 
 async function createProject(name) {
+  // #120: the API names a project `<root-label>~<folder>`, so a folder has to
+  // be created IN a root. The person typed a folder name, not an identifier,
+  // and asking them to type `main~thing` would leak the wire format into the
+  // one place the interface is meant to be a folder name box.
+  //
+  // With several roots this picks the first, which is a placeholder rather
+  // than an answer: #122 owns the root picker, and until it lands the sheet
+  // cannot express "which one". Deliberately not silent about that here.
+  const label = (state.roots ?? [])[0]?.label;
+  const identifier = label ? `${label}~${name}` : name;
   const result = await api("/api/projects", {
     method: "POST",
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name: identifier }),
   });
   if (!result.ok) {
     showNewFolder(result.body.message);

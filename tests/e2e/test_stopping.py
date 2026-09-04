@@ -311,7 +311,7 @@ async def test_a_stop_that_never_reached_the_server_says_so(
 
     await row.get_by_role("button", name="Stop").click()
     dialog = page.locator("[data-dialog]")
-    await expect(dialog).to_contain_text("Stop hrx-vessel")
+    await expect(dialog).to_contain_text(f"Stop {server.project('vessel')}")
     await dialog.get_by_role("button", name="Stop", exact=True).click()
 
     await expect(dialog).to_contain_text("That did not work")

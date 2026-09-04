@@ -5,6 +5,8 @@ from __future__ import annotations
 import pytest
 from playwright.async_api import Page, expect
 
+from support import DEFAULT_LABEL
+
 from .conftest import Harness
 
 pytestmark = pytest.mark.e2e
@@ -121,7 +123,13 @@ async def test_the_new_folder_sheet_creates(page: Page, server: Harness) -> None
     await page.get_by_role("button", name="New").click()
     await page.get_by_label("Folder name").fill("new-thing")
     await page.get_by_role("button", name="Create").click()
-    await expect(page.locator('[data-project="new-thing"]')).to_be_visible(timeout=15_000)
+    # `server.project` would add the `hrx-` collision prefix, and this folder
+    # was typed into the interface rather than seeded, so it is literally
+    # `new-thing`. What it gains is the ROOT LABEL, which the page supplies on
+    # the person's behalf because they typed a folder name, not an identifier.
+    await expect(page.locator(f'[data-project="{DEFAULT_LABEL}~new-thing"]')).to_be_visible(
+        timeout=15_000
+    )
 
 
 async def test_a_refused_creation_reports_it_and_leaves_nothing_on_disk(

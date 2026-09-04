@@ -706,7 +706,10 @@ class Harness:
         # `.claude/CLAUDE.md` documents for tmux target specs, reintroduced in
         # the harness against a different tool. `claude_ipc.launch_argv` puts
         # the project last, so the comparison has somewhere exact to stand.
-        wanted = e2e_name(name)
+        # The IDENTIFIER: `launch_argv` puts it last, and #120 made it the
+        # qualified form, which is what makes this exact match exact ACROSS
+        # roots as well as within one.
+        wanted = e2e_id(name)
 
         def agent_pids() -> list[int]:
             table = subprocess.run(
@@ -756,7 +759,7 @@ class Harness:
         the code it feeds.
         """
         assert self.engine is not None and self._config is not None
-        pid = self.engine.get(e2e_name(name)).pid
+        pid = self.engine.get(e2e_id(name)).pid
         assert pid is not None, f"{name} is not running, so it has no session file"
         path = self._config.sessions_dir / f"{pid}.json"
         path.write_text(json.dumps({"bridgeSessionId": bridge_id, "pid": pid}))
@@ -779,11 +782,11 @@ class Harness:
 
     def is_running(self, name: str) -> bool:
         assert self.engine is not None
-        return self.engine.get(e2e_name(name)).state.value == "running"
+        return self.engine.get(e2e_id(name)).state.value == "running"
 
     def kill(self, name: str) -> None:
         assert self.engine is not None
-        self.engine.kill(e2e_name(name))
+        self.engine.kill(e2e_id(name))
 
     def project(self, name: str) -> str:
         """The IDENTIFIER, for a test that needs to select on it.

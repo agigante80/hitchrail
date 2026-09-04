@@ -10,6 +10,8 @@ from pathlib import Path
 import pytest
 from playwright.async_api import Page, expect
 
+from support import DEFAULT_LABEL
+
 from .conftest import Harness
 
 pytestmark = pytest.mark.e2e
@@ -147,8 +149,12 @@ async def test_a_folder_that_cannot_be_a_project_is_accounted_for(
     Hitchrail could not see."""
     server.seed(stopped=["vessel"], unsupported=["my app"])
     await page.goto(server.base)
-    await expect(page.locator('[data-unsupported="my app"]')).to_be_visible()
-    await expect(page.locator('[data-unsupported="my app"]')).to_contain_text("space")
+    # Qualified, like every other name the interface shows. "`my app` is not a
+    # project" is a puzzle when two roots are configured and only one has it.
+    await expect(page.locator(f'[data-unsupported="{DEFAULT_LABEL}~my app"]')).to_be_visible()
+    await expect(page.locator(f'[data-unsupported="{DEFAULT_LABEL}~my app"]')).to_contain_text(
+        "space"
+    )
     await expect(page.locator('[data-project="my app"]')).to_have_count(0)
 
 
