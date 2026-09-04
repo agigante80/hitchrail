@@ -557,27 +557,12 @@ Errors return a JSON body with a stable machine readable `code` and a human
 readable `message`. The complete set, because a short list reads as a complete
 one and a client cannot tell the difference:
 
-| Code | Status | Meaning |
-|---|---|---|
-| `invalid_name` | 400 | not a name we will turn into a path |
-| `invalid_body` | 400 | the request body is not the shape this route takes |
-| `unauthorized` | 401 | no valid token was presented |
-| `not_found` | 404 | no such ROUTE on this server |
-| `unknown_project` | 404 | no such folder under the root |
-| `method_not_allowed` | 405 | the route exists and does not accept this method |
-| `already_running` | 409 | a session is already live there |
-| `already_exists` | 409 | a folder of that name is already there |
-| `not_running` | 409 | there is no session to act on |
-| `locked` | 409 | a start is already in flight for this folder |
-| `ram_soft` | 409 | starting would leave the machine short; resubmit acknowledged |
-| `url_pending` | 409 | the session has no link yet; ask again shortly |
-| `no_agent` | 409 | the state rules the action out: nothing to ask, or nothing to kill |
-| `stop_unsafe` | 409 | the agent's screen could not be vouched for; it was not asked to exit |
-| `self_protected` | 423 | this is the folder Hitchrail is running in |
-| `start_died` | 502 | the session did not come up within the grace window |
-| `root_unavailable` | 503 | the configured root cannot be read right now |
-| `machine_unreadable` | 503 | tmux or the process table could not be read |
-| `ram_hard` | 507 | not enough memory, and not overridable |
+**The complete error table lives in [`docs/api.md`](../../api.md)**, which is
+checked against the server in both directions by `tests/test_docs_are_true.py`.
+It was here, and it listed six of the codes the server returns while the
+complete set sat in a closed phase's plan (#58). One copy, and it is the one a
+person integrating would look in.
+
 
 Four of these exist because of a decision rather than a condition, and the
 decision is the part a client author needs.

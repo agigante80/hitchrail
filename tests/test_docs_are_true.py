@@ -137,31 +137,52 @@ def _codes_the_server_returns() -> set[str]:
     return codes
 
 
-def _codes_the_spec_documents() -> set[str]:
-    text = SPEC.read_text()
-    section = text[text.index("## 6. HTTP interface") : text.index("## 7. Interface design")]
-    return set(re.findall(r"^\| `([a-z_]+)` \| \d+ \|", section, re.M))
+SECURITY_SRC = SRC / "security.py"
+API = ROOT / "docs" / "api.md"
 
 
-def test_the_spec_documents_every_code_the_server_can_return() -> None:
+def _codes_the_middleware_returns() -> set[str]:
+    """The three refusals that never reach a handler.
+
+    #58's original table missed these entirely, because it read `_error(` in
+    `server.py` and the boundary answers with `deny(` in `security.py`. A
+    client gets `host_rejected` and `origin_rejected` more often than most
+    handler codes, and neither was documented anywhere.
+    """
+    return set(re.findall(r'deny\(\s*\d+,\s*"([a-z_]+)"', SECURITY_SRC.read_text()))
+
+
+def _codes_the_api_doc_documents() -> set[str]:
+    return set(re.findall(r"^\| `([a-z_]+)` \| \d+ \|", API.read_text(), re.M))
+
+
+def test_the_api_doc_documents_every_code_the_server_can_return() -> None:
     """The table listed six of fifteen, and a reader cannot tell a short list
     from a complete one. `machine_unreadable` was the costly omission: a client
     that renders its 503 as a failed request shows an empty list where the
-    truth is that the machine cannot be read."""
-    missing = _codes_the_server_returns() - _codes_the_spec_documents()
+    truth is that the machine cannot be read.
+
+    Reads `docs/api.md` rather than the design (#58). A design document is the
+    argument for building the thing; an integrator looks for a reference, and
+    the complete table used to exist only in a CLOSED phase's plan.
+    """
+    missing = (
+        _codes_the_server_returns() | _codes_the_middleware_returns()
+    ) - _codes_the_api_doc_documents()
     assert not missing, (
-        f"the server returns codes the design does not document: {sorted(missing)}. "
-        "Add them to section 6's table."
+        f"the server returns codes docs/api.md does not document: {sorted(missing)}"
     )
 
 
-def test_the_spec_documents_no_code_the_server_cannot_return() -> None:
-    """The other direction, and it is not symmetry for its own sake. A spec
+def test_the_api_doc_documents_no_code_the_server_cannot_return() -> None:
+    """The other direction, and it is not symmetry for its own sake. A document
     describing a refusal that cannot happen sends a client author writing a
     dead branch, which is the same class of harm as omitting a live one."""
-    stale = _codes_the_spec_documents() - _codes_the_server_returns()
+    stale = _codes_the_api_doc_documents() - (
+        _codes_the_server_returns() | _codes_the_middleware_returns()
+    )
     assert not stale, (
-        f"the design documents codes the server cannot return: {sorted(stale)}. "
+        f"docs/api.md documents codes the server cannot return: {sorted(stale)}. "
         "Remove them, or the client writes branches that never run."
     )
 
@@ -350,3 +371,61 @@ def test_contributing_points_at_documents_that_exist() -> None:
         if not (ROOT / target).exists()
     ]
     assert not broken, f"CONTRIBUTING.md links documents that are not there: {broken}"
+
+
+# -- #62: the changelog, which is the operator contract reported against ----
+
+CHANGELOG = ROOT / "CHANGELOG.md"
+
+
+def test_the_changelog_has_somewhere_to_put_the_next_change() -> None:
+    """`Unreleased` exists so a release is an edit to a heading rather than an
+    archaeology exercise. Without it, entries accrue in the commit log and get
+    reconstructed at release time, badly."""
+    assert re.search(r"^## Unreleased$", CHANGELOG.read_text(), re.M), (
+        "CHANGELOG.md has no Unreleased section, so there is nowhere to write "
+        "the next operator visible change as it lands"
+    )
+
+
+def test_the_changelog_names_every_breaking_change_that_has_landed() -> None:
+    """The two that are already in `main` and cost an operator something.
+
+    Checked by their SUBJECT rather than by a ticket number, because a
+    changelog entry citing an issue number tells an operator nothing: they are
+    reading it to find out what to do, not what it was called.
+    """
+    text = CHANGELOG.read_text().lower()
+    required = {
+        "the removed query grant": "?token=",
+        "the token now demanded for declared reach": "--allow-host",
+    }
+    missing = [label for label, needle in required.items() if needle.lower() not in text]
+    assert not missing, (
+        "a breaking change is in main and not in the changelog: "
+        + ", ".join(missing)
+        + ". An operator upgrading has no way to learn it."
+    )
+
+
+def test_a_released_version_heading_matches_a_real_tag() -> None:
+    """A heading for a version nobody can install is worse than no heading.
+
+    Skips while there are no tags, which is the honest state before the first
+    release, and says so rather than passing silently.
+    """
+    import subprocess
+
+    tags = subprocess.run(
+        ["git", "tag"], cwd=ROOT, capture_output=True, text=True, check=False
+    ).stdout.split()
+    headings = re.findall(r"^## \[?v?(\d+\.\d+\.\d+)\]?", CHANGELOG.read_text(), re.M)
+    if not tags:
+        assert not headings, (
+            f"the changelog names released versions {headings} and the repository "
+            "has no tags, so nobody can install any of them"
+        )
+        pytest.skip("no tags yet, which is correct before the first release")
+    normalised = {t.lstrip("v") for t in tags}
+    unreleased = [h for h in headings if h not in normalised]
+    assert not unreleased, f"changelog versions with no tag: {unreleased}"

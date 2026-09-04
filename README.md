@@ -211,6 +211,16 @@ terminal. It shows the pid and stops there, because everything it can destroy
 is addressed by the session name it created, and signalling a bare pid would be
 the first thing outside that.
 
+## Documents
+
+| | |
+|---|---|
+| [`docs/api.md`](docs/api.md) | the HTTP API: routes, auth, and every error code |
+| [`SECURITY.md`](SECURITY.md) | what is in scope, and where to report it privately |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | how a change is expected to arrive |
+| [`CHANGELOG.md`](CHANGELOG.md) | what upgrading costs you |
+| [`AGENTS.md`](AGENTS.md) | the architecture and the non negotiables |
+
 ## Not affiliated with Anthropic
 
 Hitchrail is an independent open source tool. Claude and Claude Code are

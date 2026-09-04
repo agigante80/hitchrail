@@ -40,6 +40,9 @@ claiming otherwise.
   order. Work them in that order and do not start a phase before the previous
   one meets its exit criteria.
 - `docs/tech-guidelines.md` is binding for all code here.
+- `docs/api.md` is the HTTP reference, and it is checked against the server in
+  both directions: a code the server can return and the document does not list
+  fails, and so does a code the document lists and the server cannot return.
 - `docs/guides/ticket-standards.md` is the single source of truth for what a
   ready ticket contains. The issue templates collect it, `ticket-gate` scores
   against it, and `scripts/check-template-lockstep.sh` keeps them on one version.
