@@ -34,11 +34,13 @@ claiming otherwise.
 - `docs/roadmap.md` is the order of work. Read it before starting anything.
 - `docs/superpowers/specs/2026-08-25-hitchrail-design.md` is the design. It is
   the argument; follow it or change it deliberately, never drift from it.
-- `docs/superpowers/plans/` holds one plan per phase, six of them so far.
-  Phases 7 to 11 have none yet: a plan is written when its phase starts.
-  Tasks are numbered continuously across the phases, 1 to 17, in dependency
-  order. Work them in that order and do not start a phase before the previous
-  one meets its exit criteria.
+- `docs/superpowers/plans/` holds one plan per phase, written when its phase
+  starts, so the later phases have none yet. Tasks are numbered continuously
+  across the plans in dependency order, and the numbering does not restart at
+  each phase. Work them in that order and do not start a phase before the
+  previous one meets its exit criteria. **No counts in this line.** It said
+  "six of them" and "1 to 17" while the directory held seven plans numbered
+  past 25, which is the decay the Status section above already refuses.
 - `docs/tech-guidelines.md` is binding for all code here.
 - `docs/api.md` is the HTTP reference, and it is checked against the server in
   both directions: a code the server can return and the document does not list
@@ -118,22 +120,27 @@ and the HTTP layer testable without tmux.
 
 ```
 src/hitchrail/
-  hostnames.py   what a valid host or origin IS: one canonical form for each
-  config.py      the dataclass, its refusals, and the derived allowlists
-  discovery.py   root scanning, folder creation, path safety
-  tmux.py        the tmux adapter and its footguns
-  procs.py       process table snapshot
-  claude_ipc.py  everything that knows Claude Code internals
-  ram.py         memory readings and the guard decision
-  sessions.py    what a session IS, and every refusal the engine can make
-  events.py      the change feed the SSE stream serves, dropping slow clients
-  engine.py      state derivation, start, stop, log tail; an unreadable
-                 machine is an error rather than a fifth state
-  security.py    host allowlist, token, origin check, in that order
-  headers.py     nosniff, frame refusal and the CSP; refuses nothing
-  server.py      Starlette app, routes, middleware, SSE
-  web/           index.html, app.js, app.css (no build step)
-  cli.py         argument parsing, config, uvicorn launch
+  hostnames.py     what a valid host or origin IS: one canonical form for each
+  projectnames.py  what a valid project NAME is, and how one is safely shown
+  config.py        the dataclass, its refusals, and the derived allowlists
+  discovery.py     root scanning, folder creation, path safety
+  tmux.py          the tmux adapter and its footguns
+  procs.py         process table snapshot
+  claude_ipc.py    everything that knows Claude Code internals
+  ram.py           memory readings and the guard decision
+  sessions.py      what a session IS, and every refusal the engine can make
+  events.py        the change feed the SSE stream serves, dropping slow clients
+  derive.py        what state a project is in: a question, asked of one look at
+                   the machine, that mutates and spawns nothing. An unreadable
+                   machine is an error rather than a fifth state
+  engine.py        start, stop, log tail: what to DO about derive's answer
+  security.py      host allowlist, token, origin check, in that order
+  headers.py       nosniff, frame refusal and the CSP; refuses nothing
+  server.py        Starlette app, routes, middleware, SSE
+  pages.py         the two HTML pages and their assets, and the only code in
+                   the project that reads a file chosen by a URL
+  web/             index.html, grant.html, app.js, app.css, fonts (no build)
+  cli.py           argument parsing, config, uvicorn launch
 ```
 
 `hostnames.py` holds the pure vocabulary `security.py` reaches for on every
