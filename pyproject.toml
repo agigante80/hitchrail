@@ -104,7 +104,7 @@ warn_unreachable = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "-ra --strict-markers --strict-config"
+addopts = '-ra --strict-markers --strict-config -m "not screenshots"'
 markers = [
   # The tier a test belongs to is a DECLARATION, not an inference from its
   # imports. Before this, the only way to tell an integration test from a unit
@@ -114,6 +114,11 @@ markers = [
   "e2e: drives a real browser against a real server; needs `playwright install chromium`",
   "live: binds a real loopback socket on an ephemeral port",
   "live_tmux: drives a real tmux server on a private socket",
+  # Not a tier. It captures the interface into docs/screenshots/ and asserts
+  # almost nothing, so it is deselected by default below and run on purpose at
+  # a release. A capture that ran on every push would put a binary diff in
+  # every pull request. See #105.
+  "screenshots: captures the interface into docs/screenshots/, run on demand",
 ]
 
 [tool.coverage.run]

@@ -28,6 +28,23 @@ Stopping is a sequence rather than a button: it asks the agent to wrap up, shows
 you the wait, and keeps a kill control within reach the whole time if you would
 rather not wait.
 
+## What it looks like
+
+The phone case first, because it is the one this exists for.
+
+| | |
+|---|---|
+| <img src="docs/screenshots/phone-list.png" alt="The project list on a phone: four folders showing running, stopped, detached with its pid, and stale" width="300"> | <img src="docs/screenshots/phone-list-dark.png" alt="The same list in the dark theme" width="300"> |
+
+Four derived states in one listing: `running` with its memory and uptime,
+`stopped`, `detached` with the pid of an agent that outlived its terminal, and
+`stale` where a terminal outlived its agent.
+
+<img src="docs/screenshots/desktop-list.png" alt="The same list at a desktop width" width="620">
+
+These are captured from the running application against a scratch root, not
+taken by hand: `uv run pytest -m screenshots` regenerates every one of them.
+
 ## Prerequisites
 
 Hitchrail is a launcher, so the things it launches have to already be there. It

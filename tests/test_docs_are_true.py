@@ -429,3 +429,59 @@ def test_a_released_version_heading_matches_a_real_tag() -> None:
     normalised = {t.lstrip("v") for t in tags}
     unreleased = [h for h in headings if h not in normalised]
     assert not unreleased, f"changelog versions with no tag: {unreleased}"
+
+
+# -- #105: the images, which are published claims about the interface -------
+
+SCREENSHOTS = ROOT / "docs" / "screenshots"
+CAPTURE = ROOT / "tests" / "e2e" / "test_screenshots.py"
+
+
+def test_every_shot_the_capture_declares_is_committed() -> None:
+    """A README linking a missing image shows a broken icon to a stranger.
+
+    Derived from the capture module rather than from a list here, so adding a
+    shot cannot silently skip the check that it was committed. No pixel
+    comparison: that is flaky across font versions and a flaky gate is a
+    disabled gate, which #105 says explicitly.
+    """
+    declared = set(re.findall(r'_shoot\(page, "([a-z-]+)"\)', CAPTURE.read_text()))
+    assert declared, "the capture module declares no shots, so this checks nothing"
+    missing = sorted(n for n in declared if not (SCREENSHOTS / f"{n}.png").exists())
+    assert not missing, (
+        f"declared shots with no committed image: {missing}. "
+        "Run `uv run pytest -m screenshots`."
+    )
+
+
+def test_the_capture_never_photographs_a_real_root() -> None:
+    """The first run put `/tmp/pytest-of-<username>/...` in the page header,
+    because the interface displays the root it was given and the tier's own
+    fixture builds that path from the account name.
+
+    A screenshot is content this project publishes, so the root it renders has
+    to be neutral by construction rather than by whoever looked at the image.
+    """
+    import ast
+
+    # Parameters, not mentions. The first version read the whole file for
+    # "tmp_path_factory" and failed on its own docstring, which explains why
+    # that fixture is avoided. A guard that cannot tell a use from an
+    # explanation of itself is one somebody deletes.
+    tree = ast.parse(CAPTURE.read_text())
+    borrowed = sorted(
+        {
+            arg.arg
+            for node in ast.walk(tree)
+            if isinstance(node, ast.AsyncFunctionDef | ast.FunctionDef)
+            for arg in node.args.args
+            if arg.arg in {"tmp_path_factory", "tmp_path", "server"}
+        }
+    )
+    assert not borrowed, (
+        f"the capture takes {borrowed}, whose root carries the account name and "
+        "is rendered in the page header. Use the neutral shots_server."
+    )
+    assert "hitchrail-demo" in CAPTURE.read_text(), (
+        "the capture must seed a neutrally named root, since the interface displays it"
+    )
