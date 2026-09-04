@@ -51,6 +51,47 @@ _ALLOWED_EMAIL = re.compile(
     r"|example\.(?:com|org|net)"
 )
 
+# A `~/` rooted path, which is the class that slipped everything else.
+#
+# The design canvases showed the owner's real directory scheme as the example
+# root, spelled `~/<scheme>`. It has no `/home/` prefix, so `_HOME_PATH` never
+# saw it, and it is not a project name, so the private list did not hold it
+# either. It sat in a public repository naming how somebody files their work.
+#
+# The segments ABOVE a project are the sensitive part and the part people miss.
+# A path can name an employer, a client, a synced backup drive or a category
+# its owner considers private; the project at the end is the only piece anyone
+# meant to publish.
+#
+# Shape alone cannot say whether `~/foo` is private, so this inverts the test:
+# an ALLOWLIST of roots a document may show. That is checkable in the open, it
+# needs no secret, and it is what would have caught the canvases.
+_TILDE_ROOT = re.compile(r"~/([A-Za-z0-9._-]+)")
+_ALLOWED_ROOT = frozenset(
+    {
+        # The example root the README and the design use, and the only one an
+        # artboard should ever display.
+        "projects",
+        # Real, published locations a document legitimately names.
+        ".claude",
+        # Claude Code's own config file, which `claude_ipc` reads and several
+        # fixtures name. A published path belonging to another program.
+        ".claude.json",
+        ".config",
+        ".local",
+        ".cache",
+        ".ssh",
+        ".bashrc",
+        ".gitconfig",
+        # Placeholders, which are the point rather than an exception.
+        "dev",
+        "code",
+        "src",
+        "work",
+        "<root>",
+    }
+)
+
 # Binary and generated files have no prose to check and blow the runtime up.
 _SKIP_SUFFIX = {".png", ".jpg", ".jpeg", ".gif", ".ico", ".woff", ".woff2", ".lock"}
 
@@ -148,3 +189,38 @@ def test_the_placeholder_forms_are_not_flagged() -> None:
     for allowed in ("http://user:pass@box.lan", "noreply@anthropic.com"):
         m = _EMAIL.search(allowed)
         assert m is None or _ALLOWED_EMAIL.search(m.group(0)), allowed
+
+
+def test_no_tilde_path_shows_a_real_directory_scheme() -> None:
+    """`~/<scheme>` leaks how somebody files their work, without naming them.
+
+    An allowlist rather than a pattern, because shape cannot tell a private
+    scheme from a public one. Anything a document needs to show is either the
+    canonical example root or a real published location, and both are short
+    lists that a reviewer can read.
+
+    **This is the check that was missing.** The canvases displayed the owner's
+    actual parent directory as the example root for weeks in a public
+    repository. `_HOME_PATH` did not match it, because it starts with `~` and
+    not `/home/`, and the private name list did not hold it, because it is not
+    a project name. It was found by walking the path above the project and
+    grepping for each segment, which is not a thing anybody does twice.
+    """
+    offences = []
+    for path in _tracked():
+        try:
+            text = path.read_text()
+        except (UnicodeDecodeError, OSError):
+            continue
+        for line_no, line in enumerate(text.splitlines(), 1):
+            for match in _TILDE_ROOT.finditer(line):
+                if match.group(1) in _ALLOWED_ROOT:
+                    continue
+                offences.append(f"{path.relative_to(ROOT)}:{line_no}: {match.group(0)}")
+    assert not offences, (
+        "a `~/` path shows a directory scheme that is not an approved example "
+        "root. The segments above a project can name an employer, a client or "
+        "a private category:\n  "
+        + "\n  ".join(offences[:20])
+        + "\nUse ~/projects, or add the root to _ALLOWED_ROOT if it is public."
+    )
