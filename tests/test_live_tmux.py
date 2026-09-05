@@ -36,7 +36,8 @@ from hitchrail.claude_ipc import launch_argv
 from hitchrail.config import Config
 from hitchrail.procs import snapshot
 from hitchrail.sessions import State
-from hitchrail.tmux import Tmux, sanitize
+from hitchrail.tmux import Tmux
+from hitchrail.tmuxnames import sanitize
 from support import make_config
 
 pytestmark = [

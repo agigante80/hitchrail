@@ -95,6 +95,18 @@ class FakeTmux(Tmux):
         self.capture_calls = 0
         self.next_pid = 1000
         self.fail_pane_pids = False
+        # #102. A `new_session` that reports unavailable may have created the
+        # session anyway: `subprocess`'s timeout kills the tmux CLIENT and
+        # undoes nothing the server already did. `fail_new_session` models that
+        # by raising AFTER recording the session, which is the only shape the
+        # defect has. `fail_has_session` models tmux still being unreachable
+        # when the cleanup asks.
+        self.fail_new_session: Exception | None = None
+        self.fail_has_session: Exception | None = None
+        # Whether the server got far enough to create the session before the
+        # client was killed. Both outcomes are real and they need different
+        # handling, so the fake expresses both rather than one.
+        self.new_session_creates = True
 
     @staticmethod
     def _never(argv: list[str]) -> subprocess.CompletedProcess[str]:
@@ -109,6 +121,8 @@ class FakeTmux(Tmux):
         return {self.session_name(project): pid for project, pid in self.sessions.items()}
 
     def has_session(self, project: str) -> bool:
+        if self.fail_has_session is not None:
+            raise self.fail_has_session
         return project in self.sessions
 
     def pane_pid(self, project: str) -> int | None:
@@ -116,8 +130,14 @@ class FakeTmux(Tmux):
 
     def new_session(self, project: str, cwd: str, argv: list[str]) -> None:
         self.started.append((project, cwd, argv))
-        self.next_pid += 1
-        self.sessions[project] = self.next_pid
+        if self.new_session_creates:
+            self.next_pid += 1
+            self.sessions[project] = self.next_pid
+        # AFTER the session exists, deliberately. A fake that raised first
+        # could not express #102 at all, and a test written against it would
+        # prove the cleanup never runs.
+        if self.fail_new_session is not None:
+            raise self.fail_new_session
 
     def kill_session(self, project: str) -> None:
         self.killed.append(project)

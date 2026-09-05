@@ -1,5 +1,10 @@
 """A thin tmux adapter, carrying the target addressing footguns.
 
+**The adapter only.** What a valid tmux name IS, and what a tmux invocation
+looks like, moved to `tmuxnames.py` at #93: pure functions over strings do not
+belong in the module that spawns processes as the user. `lint-imports` asserts
+the direction, so the vocabulary cannot grow a subprocess later.
+
 Everything here exists because a tmux target spec does not mean what it looks
 like. Each behaviour below was verified against a real tmux 3.4 on a private
 socket rather than recalled, and #27 keeps that honest with a live tier: the
@@ -14,53 +19,13 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Callable
-from pathlib import PurePosixPath
+
+from hitchrail.tmuxnames import BINARY, sanitize
 
 # What a subprocess call looks like from here. Injected so the whole engine can
 # be tested without a machine, which is the single seam the architecture rests
 # on. `procs` consumes this alias too.
 Runner = Callable[[list[str]], "subprocess.CompletedProcess[str]"]
-
-# tmux reads both of these as target separators, so neither may appear in a
-# session name. `-` is the escape character, which is why it is escaped too.
-_SEPARATORS = (".", ":")
-
-# Marks a name that went through the encoding below. A name that would
-# otherwise start with it is encoded as well, which is what keeps the encoded
-# and unencoded forms disjoint and therefore the whole mapping injective.
-_ENCODED_PREFIX = "e-"
-
-# The binary every call in this class invokes. Named once so `is_tmux_argv`
-# below and `_argv` cannot disagree about what tmux is called.
-BINARY = "tmux"
-
-
-def is_tmux_argv(args: str) -> bool:
-    """Whether a command line is an invocation of tmux itself.
-
-    A tmux server keeps the argv of the invocation that started it, for life,
-    and that invocation ends with the command the first session was asked to
-    run. So a scan looking for a program by its argv tail finds the server too.
-    #84, and `derive.find_detached` is where that costs something.
-
-    Two mechanics, both checked against `ps -eww -o args` output on 2026-09-02
-    rather than assumed.
-
-    **argv[0], not a substring anywhere.** The argument after `-c` is a path we
-    do not control, so a search of the whole line refuses anything running
-    under a directory called tmux.
-
-    **Its basename, because argv[0] is however the caller spelled it.** A
-    leading `env -u TMUX` does not survive into the process: env execs tmux and
-    is replaced by it, so argv[0] arrives as `tmux` under the private socket
-    tiers exactly as it does elsewhere.
-
-    Deliberately NOT a check for `new-session`. `-S <socket>` sits between the
-    binary and the subcommand, so anything anchored on those two as one string
-    stops working under the invocation our own live tiers make.
-    """
-    head = args.split(maxsplit=1)
-    return bool(head) and PurePosixPath(head[0]).name == BINARY
 
 
 class NotOurSession(ValueError):
@@ -81,54 +46,6 @@ class TmuxUnavailable(OSError):
     """
 
 
-def sanitize(name: str) -> str:
-    """Make a project name addressable as a tmux session, ONE TO ONE.
-
-    tmux reads '.' and ':' as window and pane separators in a target spec.
-    Verified on 3.4: a session created as `hr-dotted.site` is stored as
-    `hr-dotted_site`, so it exists under a name nobody looked for and
-    `has-session -t =hr-dotted.site` fails while the agent is running, which
-    presents as the session having vanished. Emitting neither character
-    sidesteps the rewrite rather than trying to predict it.
-
-    Injectivity is the hard requirement here, not a nicety. If two project
-    names collide onto one session name, one project reads as running because
-    the other is, and stopping one kills the other's agent. That is the "two
-    agents in one folder" outcome #11 fixed from the discovery side, reached
-    from this one.
-
-    **A digest suffix does not deliver it, which is why this is an escape
-    encoding.** An earlier version returned `a-b-<6 hex of blake2b>` for `a.b`
-    and returned already safe names unchanged. A project named literally
-    `a-b-28b8f5` is already safe, so it came back unchanged and collided with
-    `a.b`, and the colliding name is trivially computable by anyone who can
-    create a folder. Widening the digest only raises the price: 6 hex is 24
-    bits, so distinct names also birthday collide by accident somewhere around
-    four thousand projects. Injective by construction beats injective by hash.
-
-    The encoding is the usual escape and escape-the-escape:
-
-        -  ->  --      .  ->  -d      :  ->  -c
-
-    and the whole thing gets an `e-` prefix so encoded and unencoded names
-    occupy disjoint spaces. A name that already starts with `e-` is encoded for
-    the same reason. Names with neither separator are returned untouched, so
-    the common case still reads plainly in `tmux ls`, and readability is the
-    right thing to trade away here anyway: the project already keeps the
-    display name apart from the tmux name.
-    """
-    if not _needs_encoding(name):
-        return name
-    body = name.replace("-", "--").replace(".", "-d").replace(":", "-c")
-    return f"{_ENCODED_PREFIX}{body}"
-
-
-def _needs_encoding(name: str) -> bool:
-    """A name is encoded if it holds a separator, or could be mistaken for one
-    that was. The second half is what keeps the two spaces disjoint."""
-    return any(sep in name for sep in _SEPARATORS) or name.startswith(_ENCODED_PREFIX)
-
-
 # How long any single tmux call may take before it is abandoned (#67).
 #
 # **Bounded because these run inside an HTTP handler.** `subprocess.run` with no
@@ -140,6 +57,14 @@ def _needs_encoding(name: str) -> bool:
 # Ten seconds is far beyond anything tmux does when it is working, which is
 # milliseconds, so this can only fire on the case it is for.
 _CALL_TIMEOUT_S = 10.0
+
+
+def _scrub_flags(names: tuple[str, ...]) -> list[str]:
+    """`-u NAME` for each, as separate argv elements. No shell, ever."""
+    flags: list[str] = []
+    for name in names:
+        flags += ["-u", name]
+    return flags
 
 
 def _default_runner(
@@ -173,6 +98,7 @@ class Tmux:
         prefix: str,
         socket: str | None = None,
         run: Runner | None = None,
+        scrub_env: tuple[str, ...] = (),
     ) -> None:
         if not prefix:
             # Refused here, not only in `Config`. Every guard in this class is
@@ -186,6 +112,10 @@ class Tmux:
             )
         self.prefix = prefix
         self.socket = socket
+        # #113. Variable names the spawned agent must NOT inherit. Passed in
+        # rather than named here: which variable holds the API token is
+        # configuration vocabulary, and this module knows about tmux.
+        self.scrub_env = scrub_env
         self._run: Runner = run or _default_runner
 
     def _argv(self, *args: str) -> list[str]:
@@ -367,14 +297,10 @@ class Tmux:
     def new_session(self, project: str, cwd: str, argv: list[str]) -> None:
         """Detached, in the project's directory, running the given argv.
 
-        **The child inherits our whole environment, `HITCHRAIL_TOKEN` with it**
-        (#109). Measured: a session started here can `printenv` it. Accepted,
-        because the agent runs as this user with permissions skipped and could
-        read the operator's `EnvironmentFile` anyway, so the variable grants it
-        nothing. It does make the token easy to stumble into, since an agent
-        told to dump its environment prints it into a pane the log drawer
-        shows. #113 carries stripping it, which is not a one liner: tmux hands
-        panes the SERVER's environment, not one client call's.
+        **The child inherits our whole environment except what `scrub_env`
+        names** (#109, closed by #113). The engine names the token variable
+        there. The mechanism, and why the obvious `env=` on this call is not
+        it, is in the comment on the first statement below.
 
         Created with the plain session NAME. Only targets carry the `=` anchor;
         passing an anchored string to `-s` would create a session whose name
@@ -411,6 +337,33 @@ class Tmux:
         cleanup is the place that already reasons about a start that did not
         come up, and #102 carries it.
         """
+        # #113. The agent must not inherit `HITCHRAIL_TOKEN`. It grants it
+        # nothing: it runs as this user with permissions skipped and could read
+        # the operator's `EnvironmentFile` anyway. What it changes is how easy
+        # the token is to stumble INTO, because "print your environment" is an
+        # ordinary request, the answer lands in a pane, and the log drawer
+        # shows panes.
+        #
+        # **`env=` on this call is the obvious fix and it does nothing.** A new
+        # pane gets the environment of the SERVER, taken when the server
+        # started, so filtering a client invocation changes nothing once one is
+        # running, which is the normal state of a developer's machine.
+        #
+        # Measured on tmux 3.4 against a pre existing server, because the
+        # ticket's warning is that each candidate silently does nothing in the
+        # wrong case:
+        #
+        #   inherited by default     printenv -> the real token
+        #   new-session -e VAR=      printenv -> empty, rc 0. SET, not absent
+        #   env -u VAR in the argv   printenv -> rc 1. Genuinely unset
+        #
+        # `env -u` also touches nothing belonging to tmux, which
+        # `set-environment -g -u` could not say, and it EXECS the agent and is
+        # replaced by it, so the prefix never reaches `ps`. That last part is
+        # not cosmetic: `find_detached` matches on the argv tail.
+        if self.scrub_env:
+            argv = ["env", *_scrub_flags(self.scrub_env), *argv]
+
         self._try(
             self._argv(
                 "new-session",

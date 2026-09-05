@@ -26,7 +26,7 @@ from hitchrail.config import ConfigError
 from hitchrail.hostnames import is_valid_host, normalise_host, normalise_origin
 from hitchrail.procs import ProcTable, parse_ps
 from hitchrail.security import parse_host
-from hitchrail.tmux import sanitize
+from hitchrail.tmuxnames import sanitize
 from support import make_config
 
 settings.register_profile("hitchrail", derandomize=True, max_examples=400)

@@ -103,6 +103,25 @@ def remote_reach(
     return None
 
 
+# The one setting that may arrive in the environment, and the only one that
+# ever will. Every other option stays a flag: this is not the start of an
+# environment based configuration layer.
+#
+# It exists because argv is world readable and the environment is not. Measured
+# on Linux rather than recalled: `/proc/<pid>/cmdline` is mode 444 and
+# `/proc/<pid>/environ` is mode 400, and a `/proc` mounted without `hidepid`
+# lets any local user read the first. So `--token` shows the secret to every
+# account on the machine, and `ps` does it for them.
+#
+# **It lives HERE rather than in `cli`, which is the only module that reads it
+# from the environment, because #113 gave it a second reader.** The engine has
+# to name the variable to strip it out of what it spawns, and the import
+# contract forbids the engine layer importing `cli`. Two string literals of the
+# same variable name in two layers is exactly the drift that makes a scrub stop
+# scrubbing silently, so there is one.
+TOKEN_ENV = "HITCHRAIL_TOKEN"  # noqa: S105  the NAME of a variable, not a secret
+
+
 @dataclass(frozen=True)
 class Config:
     """Validated at construction, so an unsafe configuration cannot exist.

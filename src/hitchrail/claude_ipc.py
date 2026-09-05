@@ -23,7 +23,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -96,6 +95,7 @@ _PROMPT = "\u276f"
 # draft without it, which is the only thing that tells the two apart.
 _DIM = "\x1b[2m"
 
+
 # CSI and OSC sequences, for deciding whether what is left is only padding.
 #
 # **Narrower than it looks like it should be, on purpose.** Round 2 of #89's
@@ -116,7 +116,74 @@ _DIM = "\x1b[2m"
 # adjusted a third time. The `ESC ( B` case is still open, as #97, and it fails
 # CLOSED: such a terminal refuses stops rather than mistyping into them, which
 # is the direction to be wrong in.
-_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+def _without_escapes(text: str) -> str:
+    """Every escape sequence removed, and NOTHING else.
+
+    #97, and a parser rather than a third regex, because the two regexes before
+    it failed in opposite directions and that is evidence about the approach
+    rather than about the attempts.
+
+    The first matched CSI and OSC only, so the charset designator `ESC ( B`
+    survived and an EMPTY box read as dirty: on a terminal that emits it every
+    graceful stop was refused, permanently. Failing closed is the right
+    direction and failing closed TOTALLY is the worst shape a working guard can
+    have.
+
+    The second widened the pattern to any two character escape, and its
+    trailing `[0-9A-Za-z]?` ate one PRINTABLE character after one. `ESC M`
+    swallowed the `a` in a one character draft, an empty box was reported, and
+    the stop would type into a half written sentence. That is failing OPEN on
+    the one guard whose whole job is to fail closed, which is worse than what it
+    fixed.
+
+    A regex cannot express "consume exactly this sequence and not the character
+    after it" for every form at once without becoming unreadable, so this walks
+    the string. Each branch consumes precisely its own sequence and stops:
+
+    - `ESC [` ... a final byte in `@` to `~`, which is CSI, colours included.
+    - `ESC ]` ... terminated by BEL or by a string terminator, which is OSC, the title.
+    - `ESC` then one of `( ) * +` then ONE character: a charset designator, the
+      case #97 is named for.
+    - `ESC` then one other character: everything else, and the byte after the
+      escape is consumed, never the one after THAT.
+
+    An `ESC` at the very end of the capture is dropped rather than treated as
+    text, because a truncated read is not a draft.
+    """
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch != "\x1b":
+            out.append(ch)
+            i += 1
+            continue
+        i += 1
+        if i >= n:
+            break
+        kind = text[i]
+        if kind == "[":
+            i += 1
+            while i < n and not ("\x40" <= text[i] <= "\x7e"):
+                i += 1
+            i += 1
+        elif kind == "]":
+            i += 1
+            while i < n:
+                if text[i] == "\x07":
+                    i += 1
+                    break
+                if text[i] == "\x1b" and i + 1 < n and text[i + 1] == "\\":
+                    i += 2
+                    break
+                i += 1
+        elif kind in "()*+":
+            # The designator's argument is one character, and exactly one.
+            i += 2
+        else:
+            i += 1
+    return "".join(out)
+
 
 # A keystroke reaches the pty at once and the agent repaints when it gets
 # round to it, and nothing tells us when that was. So the box is read after a
@@ -190,7 +257,7 @@ def input_is_clear(pane: str) -> bool | None:
     after = row.split(_PROMPT, 1)[1]
     if after.lstrip().startswith(_DIM):
         return True
-    return _ANSI.sub("", after).strip() == ""
+    return _without_escapes(after).strip() == ""
 
 
 class Pane(Protocol):
@@ -310,7 +377,7 @@ def launch_argv(binary: str, project: str) -> list[str]:
     return [binary, "--dangerously-skip-permissions", REMOTE_CONTROL_MARKER, project]
 
 
-def request_stop(pane: Pane, project: str, settle: Callable[[], None] | None = None) -> None:
+def request_stop(pane: Pane, project: str, settle: Callable[[float], None]) -> None:
     """Ask the agent to exit, verifying between steps. Raises `StopNotSafe`.
 
     The engine calls this and learns nothing more. Iterating GRACEFUL_STOP_KEYS
@@ -363,7 +430,20 @@ def request_stop(pane: Pane, project: str, settle: Callable[[], None] | None = N
     it, and there is a grep test for that, because no import contract can see
     a `for` loop.
     """
-    wait = settle or (lambda: time.sleep(_SETTLE_S))
+
+    # #95. The engine hands its own injected sleep in, and the DURATION stays
+    # here. `_SETTLE_S` is a fact about how a Claude Code pane settles after a
+    # keystroke, which is quarantine knowledge; how to wait is the machine seam
+    # the architecture says is always injected. Splitting them that way keeps
+    # both rules.
+    #
+    # **No default any more.** A default is what let the seam be bypassed for as
+    # long as it was: the parameter existed, the unit tests passed a fake, and
+    # the real path slept on a wall clock regardless. A caller that forgets now
+    # fails to call rather than silently sleeping.
+    def wait() -> None:
+        settle(_SETTLE_S)
+
     # Unpacked rather than iterated, deliberately. Verification happens between
     # the groups, so a fourth one is not something this function could absorb
     # by looping: it needs a decision about where its checkpoint goes. The

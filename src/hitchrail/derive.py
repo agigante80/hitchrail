@@ -21,7 +21,8 @@ from hitchrail import claude_ipc, discovery
 from hitchrail.config import Config
 from hitchrail.procs import ProcTable
 from hitchrail.sessions import MachineUnreadable, Session, State
-from hitchrail.tmux import Tmux, TmuxUnavailable, is_tmux_argv
+from hitchrail.tmux import Tmux, TmuxUnavailable
+from hitchrail.tmuxnames import is_tmux_argv
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,26 @@ def look(
 
     Plus one file read when `agent_config` is given, for the same budget
     reason: the trust map answers every project's question at once.
+
+    **`ps` is read BEFORE tmux, deliberately, and #49 is why it says so.** The
+    two reads cannot be one instant, so one of them is always the older, and
+    which one decides what the product shows under load.
+
+    Reading `ps` first makes the table the older. A session killed between the
+    reads leaves its agent in the table with no pane owning it, so the row
+    derives `detached`, with a pid. Reading tmux first would move that skew to
+    `stale` instead, and turn the START race into a false `detached`.
+
+    Neither is wrong, so the choice is made on which lie is safer. **A false
+    `detached` is loud and recoverable**: the row shows a pid and offers a kill.
+    **A false `stale` offers Start**, and a start gives a second agent in the
+    same folder, which is the outcome this whole derivation exists to prevent.
+    It is the same argument that rejected #85's narrow fix, and it is the
+    design's oldest one.
+
+    `test_the_process_table_is_read_before_the_pane_map` pins the order, so a
+    reorder for readability fails rather than silently changing which failure
+    the product shows.
     """
     table = procs_fn()
     if not table.ok:
@@ -93,6 +114,26 @@ def derive(
     pane_pid = machine.pane_pids.get(tmux.session_name(name))
 
     if pane_pid is not None:
+        # **#46. This direction is LOOSER than the orphan one below, and that is
+        # a decision rather than an oversight.** It accepts any marked process
+        # anywhere in the pane's tree, whatever project its command line names;
+        # `find_detached` demands the exact argv tail.
+        #
+        # Ownership beats argv. A process inside our pane is ours whatever it
+        # calls itself, and that survives a change to `launch_argv` that would
+        # blind the orphan direction entirely. Tightening this to match the
+        # project name would turn every running session `stale` the day that
+        # argv changes, which is a far worse failure than the mislabelled pid it
+        # would fix.
+        #
+        # The cost is real and narrow: an agent hand started in the wrong window
+        # makes its pane's project show that agent's pid and link. Reachable
+        # only by hand, because Hitchrail offers no flow that does it.
+        #
+        # **Written here because the risk is a later tidy up.** "Let us make
+        # these consistent" resolved in the wrong direction is the failure this
+        # project has already hit twice with removed workarounds, and both
+        # behaviours now have a test that fails if either is changed.
         agent = machine.table.first_matching_in_tree(pane_pid, claude_ipc.REMOTE_CONTROL_MARKER)
         if agent is not None:
             return live(

@@ -37,7 +37,7 @@ import time
 from collections.abc import Callable
 
 from hitchrail import claude_ipc, derive, discovery, ram
-from hitchrail.config import Config
+from hitchrail.config import TOKEN_ENV, Config
 from hitchrail.derive import Machine
 from hitchrail.events import EventBus
 from hitchrail.procs import ProcTable, snapshot
@@ -77,7 +77,14 @@ class Engine:
         bus: EventBus | None = None,
     ) -> None:
         self.config = config
-        self.tmux = tmux or Tmux(prefix=config.session_prefix, socket=config.tmux_socket)
+        # #113. Named here rather than inside `Tmux`, because which variable
+        # holds the token is this application's vocabulary and tmux knows
+        # nothing about it. An injected adapter is a test's own, untouched.
+        self.tmux = tmux or Tmux(
+            prefix=config.session_prefix,
+            socket=config.tmux_socket,
+            scrub_env=(TOKEN_ENV,),
+        )
         self._procs_fn = procs_fn or snapshot
         self._meminfo_fn = meminfo_fn or ram.read_meminfo
         self._clock = clock
@@ -380,8 +387,42 @@ class Engine:
                 name, path_str, claude_ipc.launch_argv(self.config.agent_binary, name)
             )
         except TmuxUnavailable as exc:
+            self._abandon_partial_session(name)
             raise MachineUnreadable(str(exc)) from exc
         return self._await_running(name)
+
+    def _abandon_partial_session(self, name: str) -> None:
+        """Clean up a session `new_session` may have created before it failed.
+
+        #102. `subprocess`'s timeout kills the tmux CLIENT it was waiting on. It
+        does not kill the server and it undoes nothing the server already did,
+        so `new_session` can report unavailable while the session exists with
+        `remain-on-exit` on. Such a session never closes its pane when the
+        process exits, so it lingers and the engine derives `stale` for as long
+        as it lives: the person sees a project that will not start, and a row
+        saying there is no agent in the session.
+
+        **This asks rather than guesses, which is the distinction the ticket
+        drew.** Assuming the session was created would kill something that may
+        not exist; assuming it was not leaves exactly the defect. `has-session`
+        answers, and the answer is acted on.
+
+        **A failure here never replaces the original error.** The machine being
+        unreadable is what the caller has to be told; if the tidy up cannot
+        reach tmux either, that is the same cause showing twice, and reporting
+        the second one would hide the first. `kill_session` is scoped by the
+        prefix in `Tmux.__init__`, so this cannot reach a session we did not
+        name.
+        """
+        try:
+            if self.tmux.has_session(name):
+                self.tmux.kill_session(name)
+        except TmuxUnavailable:
+            logger.warning(
+                "could not check or clean up a partial session for %s; "
+                "if it exists it will read as stale",
+                name,
+            )
 
     def _await_running(self, name: str) -> Session:
         """Poll until the agent appears, or the grace window runs out.
@@ -530,7 +571,7 @@ class Engine:
         # timeout, the marker and the refusal to escalate; the adapter owns the
         # mechanism.
         try:
-            claude_ipc.request_stop(self.tmux, name)
+            claude_ipc.request_stop(self.tmux, name, settle=self._sleep)
         except TmuxUnavailable as exc:
             with self._stopping_guard:
                 self._stopping.pop(name, None)

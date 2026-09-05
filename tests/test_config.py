@@ -927,7 +927,20 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # This is the module whose whole value is being the one place that
         # knows how an agent is talked to, so what that costs the operator
         # belongs in it.
-        "claude_ipc.py": 571,
+        # 571 to 581 for #95. The settle seam lost its default and gained the
+        # split that keeps two rules at once: the DURATION is quarantine
+        # knowledge about how a Claude Code pane settles, the WAITING is the
+        # machine seam the architecture injects. Both reasons are at the code.
+        # 583 to 649 for #97. The regex became a parser, and the growth is
+        # mostly the reason: two regexes failed in OPPOSITE directions, one
+        # refusing every stop and one eating a draft character, and a third
+        # regex would have been the same bet a third time.
+        # 649 to 651, and neither line is prose: `ruff format` 0.16.4 wants two
+        # blank lines before the two module level comments that follow an
+        # assignment, and HEAD was committed without the formatter having run.
+        # Recorded so the next reader does not go looking for the behaviour that
+        # grew the file. It did not; the gate did.
+        "claude_ipc.py": 651,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.
@@ -937,7 +950,17 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # whole identifier read the separator as the thing it protects against
         # and rejected every real name. That was a live defect, so its reason
         # stays in the code.
-        "engine.py": 792,
+        # 792 to 826 for #102. The addition is a cleanup path plus the reason
+        # it asks rather than guesses, which is the distinction the ticket drew
+        # and the one a future reader would otherwise re-litigate: assuming the
+        # session exists kills something that may not, assuming it does not
+        # leaves the defect.
+        # 826 to 833 for #113. The default `Tmux` is now built with the variable
+        # names a spawned agent must not inherit, and the comment says why the
+        # name is passed from here rather than known by the adapter: which
+        # variable holds the token is this application's vocabulary, and tmux
+        # knows nothing about it.
+        "engine.py": 833,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -961,19 +984,24 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # name vocabulary, pure and subprocess free, sitting beside an adapter
         # that spawns things. That is the same split #18 already made when it
         # took the host vocabulary out of config.py into hostnames.py.
-        # Raised from 505 for #109, and NOT for behaviour, which is the only
-        # reason the note above sanctions. The exception is deliberate and this
-        # entry is where it is argued: the addition records that a spawned
-        # agent inherits HITCHRAIL_TOKEN, measured rather than assumed, and a
-        # decision about what the spawn hands a child has to be readable at the
-        # spawn. That is the same argument this entry already makes for its
-        # length, which is that the explanations are the value.
-        # 514 to 523 for #91, documentation again rather than behaviour, and
-        # again argued here rather than waved through: `send_keys` writes to a
-        # pty and what it writes is attributed to the operator, so the one
-        # module allowed to call it is recorded at the method a future caller
-        # would read first.
-        "tmux.py": 522,
+        # **#93 landed and this entry loses its argument with it.** Every note
+        # here defended a length caused by a module doing two jobs: the name
+        # vocabulary and the adapter that spawns processes. The vocabulary is
+        # `tmuxnames.py` now, and 522 became 438 without a line of explanation
+        # being deleted, which is the outcome the old notes kept insisting was
+        # not available. Recorded rather than silently reset, because the
+        # previous entries argued in good faith from a premise that a split
+        # removed.
+        # 439 to 475 for #113, and the growth is the measurement rather than the
+        # code. Two lines prefix `env -u VAR` to the spawn; the rest records what
+        # was measured on tmux 3.4 against a pre existing server, because the two
+        # options that read as correct in the manual are the ones that silently
+        # do nothing: a pane inherits from the SERVER, so `env=` on the client
+        # call changes nothing, and `new-session -e VAR=` leaves the variable set
+        # and empty rather than absent. Deleting that table would leave a
+        # workaround that looks like a longer way to write the option somebody
+        # will "simplify" it back to. Same argument as every entry above it.
+        "tmux.py": 475,
         # 413, and thirteen lines over the guideline is not a second job. #18
         # already took the host vocabulary out of this file, and what is left
         # is one dataclass and its startup refusals, which is one thing. The
@@ -991,7 +1019,14 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # the root that label names, and refuses if there is none. Three
         # refusals where there was one, because with several roots there are
         # three ways to name a folder that is not there.
-        "config.py": 488,
+        # 488 to 507 for #113. `TOKEN_ENV` moved here from `cli`, which was its
+        # only reader until the engine gained a second one: the engine has to
+        # name the variable to strip it out of what it spawns, and the import
+        # contract forbids the engine layer importing `cli`. The move is the
+        # whole growth, comment included, and the comment is what stops it
+        # drifting back: two literals of one variable name in two layers is how a
+        # scrub stops scrubbing without anything going red.
+        "config.py": 507,
         # 409, nine lines over, down from 542. #115 deleted the `?token=`
         # carrier: 135 lines once the two blocks inside `TokenMiddleware`
         # that only served it are counted.
@@ -1166,6 +1201,40 @@ def test_the_refusal_names_the_flag_and_the_root(tmp_path: Path) -> None:
         Config(roots=_r(tmp_path), self_project="main~typo")
     message = str(exc.value)
     assert "--self-project" in message and "typo" in message and str(tmp_path) in message
+
+
+def test_tmuxnames_does_not_import_the_adapter() -> None:
+    """#93. The dependency runs one way, the third time this seam is cut.
+
+    `tmux` imports `tmuxnames` for `sanitize` and `BINARY`. If the vocabulary
+    ever imports the adapter back, the split stops being a seam and becomes a
+    cut through a cycle, and the next person to tidy up will reasonably merge
+    them again.
+
+    **The point is not tidiness.** `tmuxnames` holds pure functions over strings
+    and `lint-imports` cannot express "and no subprocess", so this is what stops
+    the vocabulary acquiring one: a module that cannot import the adapter cannot
+    borrow its runner.
+    """
+    import ast
+
+    source = (Path(__file__).parent.parent / "src" / "hitchrail" / "tmuxnames.py").read_text()
+    # **Parsed imports, never the file text.** The first version of this asserted
+    # `"subprocess" not in source` and failed on the module docstring, which says
+    # "No subprocess, no state, no server". That is the fourth time in this
+    # repository that a guard has matched the sentence explaining the thing it
+    # forbids, and the only way to make the text version pass is to delete the
+    # explanation. Read what the module IMPORTS.
+    imported = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            imported |= {a.name.split(".")[0] for a in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module.split(".")[-1] if node.level == 0 else node.module)
+    assert "tmux" not in imported, "the vocabulary imports the adapter, so the seam is a cycle"
+    assert "subprocess" not in imported, (
+        "the name vocabulary imports subprocess, which is the thing the split exists to prevent"
+    )
 
 
 def test_projectnames_does_not_import_config() -> None:

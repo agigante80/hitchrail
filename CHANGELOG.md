@@ -22,6 +22,43 @@ the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 Nothing yet.
 
+## 0.3.0 - 2026-09-05
+
+**MINOR, and nothing to do on upgrade unless you were reading the token from
+inside a session Hitchrail started.**
+
+### Security
+
+**A session Hitchrail starts no longer inherits `HITCHRAIL_TOKEN`.** Before this
+version it did, and the agent could print it. That is worth saying plainly: the
+token is the only thing between a stranger on your network and a shell on this
+machine, "print your environment" is an ordinary thing to ask an agent, the
+answer lands in a pane, and the log drawer shows panes. It was also reachable
+without anybody asking, since an agent reads repositories that can contain
+instructions.
+
+What it never was: an escalation. The agent runs as you with permissions
+skipped, so it could already read whatever file you put the token in. What
+changes is how easy the token is to stumble into and how likely it is to end up
+somewhere you did not intend, such as a transcript.
+
+Nothing to configure. The spawn is prefixed with `env -u HITCHRAIL_TOKEN`.
+
+### Fixed
+
+Answers about a shared machine, where another tool's tmux server, a tmux binary
+under a different name, or a terminal emitting an unusual escape used to produce
+a confident wrong answer:
+
+- a tmux binary named `tmux3.4` or `tmux-next` is recognised as tmux, so it no
+  longer appears as a detached agent of yours. `tmuxinator` still does not count
+- a terminal that emits a charset escape into an empty input box no longer makes
+  every graceful stop refuse on that terminal
+- a start that timed out could leave a session behind with `remain-on-exit` set,
+  and the row then offered Start on a project that had one. It is cleaned up
+- the graceful stop waits on the clock the rest of the engine waits on, so a
+  stop is as fast as the agent is rather than as slow as a fixed sleep
+
 ## 0.2.1 - 2026-09-05
 
 **PATCH, and it changes no behaviour.** `pyproject.toml` names `README.md` as the

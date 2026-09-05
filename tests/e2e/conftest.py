@@ -63,7 +63,8 @@ from hitchrail.engine import Engine
 from hitchrail.events import EventBus
 from hitchrail.roots import Root
 from hitchrail.server import create_app
-from hitchrail.tmux import Tmux, is_tmux_argv
+from hitchrail.tmux import Tmux
+from hitchrail.tmuxnames import is_tmux_argv
 from support import DEFAULT_LABEL, make_config
 
 pytestmark = pytest.mark.e2e

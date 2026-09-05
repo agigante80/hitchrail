@@ -26,8 +26,9 @@ from conftest import (
     procs_from,
     ps_row,
 )
-from hitchrail import discovery
+from hitchrail import derive, discovery
 from hitchrail.claude_ipc import GRACEFUL_STOP_KEYS, launch_argv
+from hitchrail.config import TOKEN_ENV
 from hitchrail.engine import (
     AlreadyRunning,
     Engine,
@@ -2132,3 +2133,219 @@ def test_a_dead_start_still_reports_when_the_cleanup_fails(root: Path) -> None:
     with pytest.raises(StartFailed) as raised:
         engine.start(proj("vessel"))
     assert "exploded" in raised.value.output
+
+
+# -- #102: a timed out new_session can leave a session behind ----------------
+
+
+def test_a_timed_out_start_kills_the_session_tmux_may_have_created(root: Path) -> None:
+    """#102. `subprocess`'s timeout kills the tmux CLIENT, not the server, and
+    undoes nothing the server already did.
+
+    So `new_session` can report unavailable while the session exists with
+    `remain-on-exit` on. That session never closes its pane when the process
+    exits, so it lingers and derives `stale` forever: the person sees a project
+    that will not start, and a row saying there is no agent in the session.
+
+    **Asking is not guessing.** The ticket rejected assuming either way, and
+    this assumes neither: it asks `has-session` and acts on the answer.
+    """
+    engine, tmux = engine_for(root)
+    tmux.fail_new_session = TmuxUnavailable("tmux timed out after 10.0s")
+
+    with pytest.raises(MachineUnreadable):
+        engine.start(proj("vessel"))
+
+    assert proj("vessel") in tmux.killed, (
+        "the session tmux created was left behind, so it derives stale forever"
+    )
+
+
+def test_a_timed_out_start_that_created_nothing_kills_nothing(root: Path) -> None:
+    """The other half, and the one that would make a guess destructive. If the
+    session does not exist there is nothing to clean up, and issuing a kill
+    anyway would be acting on an assumption rather than an answer."""
+    engine, tmux = engine_for(root)
+    tmux.fail_new_session = TmuxUnavailable("tmux timed out after 10.0s")
+    # The session never came into being, so there is nothing to ask about.
+    tmux.new_session_creates = False
+
+    with pytest.raises(MachineUnreadable):
+        engine.start(proj("vessel"))
+
+    assert tmux.killed == []
+
+
+def test_a_cleanup_that_also_fails_does_not_replace_the_real_error(root: Path) -> None:
+    """The machine is unreadable; that is what the caller must be told.
+
+    If the tidy up cannot reach tmux either, the original refusal still stands.
+    Reporting the cleanup's failure instead would name the second symptom of
+    one cause and hide the first.
+    """
+    engine, tmux = engine_for(root)
+    tmux.fail_new_session = TmuxUnavailable("tmux timed out after 10.0s")
+    tmux.fail_has_session = TmuxUnavailable("tmux still gone")
+
+    with pytest.raises(MachineUnreadable) as raised:
+        engine.start(proj("vessel"))
+    assert "timed out" in str(raised.value)
+
+
+# -- #46: the two directions match with different strictness, deliberately ---
+
+
+def test_the_pane_direction_claims_any_agent_in_its_tree(root: Path) -> None:
+    """#46, half one, and this asserts the LOOSER behaviour on purpose.
+
+    A process inside our pane is ours whatever its command line says.
+    `first_matching_in_tree` accepts any marked process anywhere in the tree,
+    regardless of which project the argv names, and that is a decision rather
+    than an oversight: ownership beats argv.
+
+    Constructed exactly as the ticket did: alpha's pane owns a process whose
+    command line names bravo.
+    """
+    (root / "alpha").mkdir(exist_ok=True)
+    (root / "bravo").mkdir(exist_ok=True)
+    pane, wrong_agent = 500, 501
+    table = ps_row(pane, 1) + ps_row(wrong_agent, pane, project=proj("bravo"))
+    engine, _ = engine_for(root, sessions={proj("alpha"): pane}, table=table)
+
+    assert engine.get(proj("alpha")).state is State.RUNNING
+    assert engine.get(proj("alpha")).pid == wrong_agent, (
+        "the pane direction stopped claiming a process in its own tree"
+    )
+
+
+def test_the_orphan_direction_demands_the_exact_argv_tail(root: Path) -> None:
+    """#46, half two, and this asserts the STRICTER behaviour on purpose.
+
+    With no pane, argv is the only evidence there is, so it has to be exact. A
+    bare marker match claimed any process mentioning it: a `grep -r` for the
+    marker across a project directory derived as that project's detached agent.
+    """
+    (root / "alpha").mkdir(exist_ok=True)
+    engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, project=proj("bravo")))
+
+    assert state_of(engine, proj("alpha")) is State.STOPPED, (
+        "the orphan direction claimed a process whose argv names another project"
+    )
+
+
+def test_the_asymmetry_is_deliberate_and_documented(root: Path) -> None:
+    """**The actual deliverable of #46**, which is not a behaviour change.
+
+    The ticket argues the looser pane match is arguably right, and that the
+    real risk is a later "let us make these consistent" tidy up resolving it in
+    the wrong direction: tightening the pane direction to match the project
+    name would turn every running session `stale` the day `launch_argv`
+    changes, which is far worse than a mislabelled pid.
+
+    That is the failure mode this project has already hit twice with removed
+    workarounds, so the reasoning is pinned where a tidy up would meet it, and
+    this test fails if it is deleted.
+    """
+    source = (Path(__file__).parent.parent / "src" / "hitchrail" / "derive.py").read_text()
+    assert "#46" in source, (
+        "the reason the two directions differ is no longer written in derive.py, "
+        "so the next consistency tidy up has nothing to read"
+    )
+
+
+def test_the_process_table_is_read_before_the_pane_map(root: Path) -> None:
+    """#49. The order decides which failure the product shows under load, and
+    nothing was pinning it.
+
+    `ps` first means the table is the older of the two, so a session killed
+    between the reads leaves its agent in the table with no pane owning it and
+    the row derives `detached` with a pid. Reading tmux first would move that
+    skew to `stale` instead.
+
+    **Neither is wrong; the trade was invisible.** The next person reordering
+    two lines for readability changes which lie the product tells under load,
+    and without this nothing fails.
+
+    The order kept is `ps` first, on the reasoning `derive.look` now states: a
+    false `detached` is loud and recoverable, because the row shows a pid and
+    offers a kill, whereas a false `stale` offers Start and a start gives a
+    second agent in the same folder. That is the same argument that rejected
+    #85's narrow fix on the same day, and it is the design's oldest one.
+    """
+    calls: list[str] = []
+
+    def recording_procs() -> ProcTable:
+        calls.append("ps")
+        return procs_from("")()
+
+    tmux = FakeTmux()
+    real_panes = tmux.pane_pids
+
+    def recording_panes() -> dict[str, int]:
+        calls.append("tmux")
+        return real_panes()
+
+    tmux.pane_pids = recording_panes  # type: ignore[method-assign]
+    derive.look(recording_procs, tmux)
+
+    assert calls == ["ps", "tmux"], (
+        "the read order changed, which changes whether a session killed between "
+        "the two reads shows as detached or stale. See derive.look's docstring."
+    )
+
+
+def test_a_graceful_stop_waits_through_the_engines_injected_sleep(root: Path) -> None:
+    """#95. `request_stop` defaulted its settle to a real `time.sleep`, going
+    round the clock seam the architecture says every external surface uses.
+
+    `AGENTS.md`: "Every external surface is injected: tmux, the process table,
+    memory readings, the Claude state directory, the clock. That is what makes
+    the engine testable without a real machine."
+
+    The consequence was not tidiness. A test that wanted to prove the retry
+    behaviour of `_require_clear` THROUGH the engine could not control the wait,
+    so it either slept for real or did not exist. It did not exist.
+    """
+    slept: list[float] = []
+    table = ps_row(PANE, 1) + ps_row(AGENT, PANE, project=proj("vessel"))
+    engine, tmux = engine_for(root, sessions={proj("vessel"): PANE}, table=table)
+    engine._sleep = slept.append
+    tmux.pane_text[proj("vessel")] = CLEAR_INPUT_BOX
+
+    engine.stop(proj("vessel"))
+
+    assert slept, (
+        "the stop waited on a real clock instead of the engine's injected sleep, "
+        "so no test above claude_ipc can control the retry loop"
+    )
+
+
+def test_the_settle_seam_has_no_default_to_fall_back_to(root: Path) -> None:
+    """The half that keeps it wired. A default is what let the seam be bypassed
+    silently for as long as it was: the parameter existed, the unit tests passed
+    a fake, and the real path slept anyway."""
+    import inspect
+
+    from hitchrail import claude_ipc
+
+    settle = inspect.signature(claude_ipc.request_stop).parameters["settle"]
+    assert settle.default is inspect.Parameter.empty, (
+        "request_stop can still default its settle, so a caller that forgets to "
+        "pass one sleeps on a real clock and nothing says so"
+    )
+
+
+def test_the_default_tmux_adapter_strips_the_token_from_what_it_spawns(root: Path) -> None:
+    """#113. The wiring, which the `tmux` unit tests cannot see.
+
+    They build a `Tmux` with `scrub_env` themselves and prove the argv, so they
+    stay green if this line loses its argument and every spawned agent inherits
+    the token again. This asserts the construction the product actually uses,
+    and it is the only place the two halves meet.
+
+    Built with no `tmux=`, on purpose: an injected adapter is a test's own and
+    must be left as the test built it.
+    """
+    engine = Engine(make_config(root))
+
+    assert engine.tmux.scrub_env == (TOKEN_ENV,)

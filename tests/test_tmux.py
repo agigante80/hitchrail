@@ -14,115 +14,11 @@ from pathlib import Path
 import pytest
 
 from hitchrail.procs import _default_runner as procs_runner
-from hitchrail.tmux import NotOurSession, Tmux, TmuxUnavailable, sanitize
+from hitchrail.tmux import NotOurSession, Tmux, TmuxUnavailable
 from hitchrail.tmux import _default_runner as tmux_runner
+from hitchrail.tmuxnames import sanitize
 
 # -- sanitize --------------------------------------------------------------
-
-
-@pytest.mark.parametrize("name", ["dotted.site", "a:b", "a:b.c", "..", "a.b.c.d"])
-def test_a_name_with_a_separator_becomes_addressable(name: str) -> None:
-    """tmux reads '.' and ':' as window and pane separators in a target spec.
-
-    Verified on tmux 3.4: a session created as `hr-dotted.site` is STORED as
-    `hr-dotted_site`, so it exists under a name nobody looked for and
-    `has-session -t =hr-dotted.site` fails while the agent is running. That
-    presents as the session vanishing. Emitting neither character sidesteps the
-    rewrite entirely.
-    """
-    out = sanitize(name)
-    assert "." not in out
-    assert ":" not in out
-
-
-def test_an_ordinary_name_is_untouched() -> None:
-    """The readability guarantee that actually matters.
-
-    Most project names hold neither separator, and those pass through
-    unchanged, so `tmux ls` stays legible for the common case. Names that must
-    be encoded are less pretty, and that is the right trade: the project keeps
-    the display name apart from the tmux name precisely so the tmux name can be
-    optimised for correctness.
-    """
-    for name in ("hitchrail", "my-app", "project_2", "a-b-28b8f5"):
-        assert sanitize(name) == name
-
-
-def test_an_encoded_name_keeps_its_stem_recognisable() -> None:
-    """Not required for correctness, but it is why the encoding is not a hash."""
-    assert "dotted" in sanitize("dotted.site")
-
-
-@pytest.mark.parametrize(
-    ("a", "b"),
-    [
-        ("a.b", "a-b"),
-        ("a:b", "a.b"),
-        ("a.b", "a:b"),
-        # The pair that broke the digest version. `a.b` mapped to
-        # `a-b-<6 hex of blake2b>`, and a project literally named that string
-        # was already safe so it came back unchanged and collided. The
-        # colliding name is computable by anyone who can create a folder.
-        ("a.b", "a-b-28b8f5"),
-        ("dotted.site", "e-dotted-dit"),
-        ("a-b", "e-a--b"),
-    ],
-)
-def test_sanitize_is_injective(a: str, b: str) -> None:
-    """The expensive one to leave out.
-
-    A plain replacement maps `a.b` and `a-b` onto the same string, so two
-    folders share one tmux session: one reads as running because the other is,
-    and stopping one kills the other's agent. That is the same "two agents in
-    one folder" outcome #11 fixed from the discovery side.
-    """
-    assert sanitize(a) != sanitize(b)
-
-
-def test_sanitize_is_injective_over_a_generated_corpus() -> None:
-    """Injectivity asserted by exhaustion, not by three hand picked pairs.
-
-    Hand picked pairs are how the digest version passed while colliding: every
-    pair somebody thought to write down was fine. This builds every string up
-    to length four over an alphabet holding both separators, the escape
-    character and the encoded prefix, and asserts the mapping never merges two
-    of them.
-    """
-    from itertools import product
-
-    alphabet = ".:-abe"
-    names = ["".join(p) for n in range(1, 5) for p in product(alphabet, repeat=n)]
-    seen: dict[str, str] = {}
-    for name in names:
-        out = sanitize(name)
-        clash = seen.get(out)
-        assert clash is None, f"{name!r} and {clash!r} both sanitize to {out!r}"
-        seen[out] = name
-    assert len(seen) == len(names)
-
-
-@pytest.mark.parametrize("name", ["a.b", "e-x", "a-b", "..", "e-", "a:b.c"])
-def test_a_sanitized_name_is_free_of_separators(name: str) -> None:
-    """Whatever the encoding does, the output must be addressable."""
-    out = sanitize(name)
-    assert "." not in out
-    assert ":" not in out
-
-
-def test_an_already_safe_name_is_left_alone() -> None:
-    """No digest on a name that needed no change, so ordinary names stay readable."""
-    assert sanitize("a-b") == "a-b"
-    assert sanitize("hitchrail") == "hitchrail"
-
-
-def test_sanitize_is_deterministic() -> None:
-    """A session has to survive a restart of Hitchrail, so this cannot be salted."""
-    assert sanitize("dotted.site") == sanitize("dotted.site")
-
-
-def test_sanitize_handles_an_empty_name() -> None:
-    """`scan` never yields one, but a crash here would be a 500 on a listing."""
-    assert sanitize("") == ""
 
 
 # -- target addressing -----------------------------------------------------
@@ -484,3 +380,66 @@ def test_a_tmux_that_never_answers_becomes_an_honest_refusal() -> None:
 
     with pytest.raises(TmuxUnavailable):
         Tmux(prefix="hr-", run=wedged).pane_pids()
+
+
+def test_the_spawn_does_not_hand_the_agent_the_api_token() -> None:
+    """#113. An agent Hitchrail starts inherited `HITCHRAIL_TOKEN`.
+
+    The agent runs as the same user with `--dangerously-skip-permissions`, so it
+    could read the operator's `EnvironmentFile` anyway and the variable grants no
+    capability it did not have. What it changes is how easy the token is to
+    stumble INTO: "print your environment" is an ordinary thing to ask an agent,
+    prompt injection from a repository it reads is an ordinary thing to worry
+    about, the result lands in a pane, and the log drawer shows panes.
+
+    Measured on tmux 3.4 rather than chosen from the manual, because the ticket
+    warns each option "silently does nothing" in the wrong case:
+
+    - a pane inherits the variable from the SERVER, which took it when the
+      server started, so filtering one client invocation changes nothing;
+    - `new-session -e HITCHRAIL_TOKEN=` works even on a pre existing server, and
+      leaves the variable SET AND EMPTY rather than absent;
+    - `env -u` in the argv we already control leaves it genuinely UNSET
+      (`printenv` exits 1), works whatever the server's state, mutates nothing
+      belonging to tmux or to anybody else's sessions, and does not survive into
+      `ps`, so argv tail matching is untouched.
+    """
+    run = FakeRunner()
+    tmux = Tmux(prefix="hr-", run=run, scrub_env=("HITCHRAIL_TOKEN",))
+    tmux.new_session("vessel", "/srv/vessel", ["claude", "--remote-control", "vessel"])
+
+    spawn = next(c for c in run.calls if "new-session" in c)
+    assert "env" in spawn and "-u" in spawn and "HITCHRAIL_TOKEN" in spawn
+    assert spawn.index("env") < spawn.index("claude"), "the scrub must come before the agent"
+
+
+def test_the_scrub_does_not_disturb_the_argv_tail_detection_matches_on() -> None:
+    """`env` execs the agent and is replaced by it, so the prefix never reaches
+    `ps`, verified on a real machine. The tail is what `find_detached` matches,
+    and it is unchanged.
+
+    The tail is read up to the `;` rather than off the end of the list, because
+    #66 chains `set-option ... remain-on-exit on` after the agent's argv: the
+    command does not END with what the agent runs, and asserting on `[-3:]`
+    tests the chaining instead. Reading to the separator is also what makes
+    this a real guard: the scrub goes in FRONT, so any implementation that put
+    it behind, or that split an argument, moves these three elements.
+    """
+    run = FakeRunner()
+    tmux = Tmux(prefix="hr-", run=run, scrub_env=("HITCHRAIL_TOKEN",))
+    tmux.new_session("vessel", "/srv/vessel", ["claude", "--remote-control", "vessel"])
+
+    spawn = next(c for c in run.calls if "new-session" in c)
+    chained = spawn.index(";")
+    assert spawn[chained - 3 : chained] == ["claude", "--remote-control", "vessel"]
+
+
+def test_nothing_is_scrubbed_when_nothing_is_named() -> None:
+    """The default. A `Tmux` built without the list spawns exactly what it was
+    given, so this cannot quietly change what an unrelated caller runs."""
+    run = FakeRunner()
+    tmux = Tmux(prefix="hr-", run=run)
+    tmux.new_session("vessel", "/srv/vessel", ["claude", "--remote-control", "vessel"])
+
+    spawn = next(c for c in run.calls if "new-session" in c)
+    assert "env" not in spawn

@@ -468,7 +468,27 @@ fragile.
 another name, and a terminal that emits an unusual escape all produce an honest
 answer rather than a confident wrong one.
 
-Tickets: #85, #46, #49, #32, #96, #102, #97, #100, #95, #93.
+**Plan: [`superpowers/plans/2026-09-05-hitchrail-phase-9-shared-machine.md`](superpowers/plans/2026-09-05-hitchrail-phase-9-shared-machine.md)**
+Started 2026-09-05. Twelve tickets, tasks 30 to 41, in six batches.
+
+Tickets: #93, #96, #102, #85, #46, #49, #95, #97, #100, #32, #113, #107.
+
+**That list gained two and was reordered, both deliberately.** #113 arrived from
+Phase 7's retrospective and #107 from #83, after the original line was written,
+so this section named ten while the milestone held twelve. The order is now the
+plan's batch order rather than the order they were filed, because the ordering is
+a dependency: #107 must follow #96 and #85, since it builds a destructive control
+on top of an identification that has been wrong twice this month.
+
+**Eight shipped and the phase is not closed.** #93, #96, #102, #46, #49, #95,
+#97 and #113 are done and closed with their commits. #85, #100 and #32 were
+escalated rather than implemented, and #107 is blocked behind #85. Each of the
+four is a decision rather than an implementation: what a row should SAY about an
+agent in another tool's session (#85), whether telling two modals apart is worth
+a `capture-pane` per running row on every listing (#100), and which of two
+tickets decides what makes a project name durable (#32, against #119). The plan
+records the reasoning for each. The phase's first exit criterion belongs to #85
+and stays open with it.
 
 ## Phase 10: A suite that would notice
 
