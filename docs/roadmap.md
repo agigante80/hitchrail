@@ -524,7 +524,28 @@ with a ceiling, and `app.js` split along the seam it already has.
 **Done when:** no screen states something it did not read, every token pair
 passes AA, and no file in `web/` does more than one thing.
 
-Tickets: #68, #69, #71, #72, #78, #82, #90, #161, #162, #163, #165, #166.
+Tickets: #68, #69, #71, #72, #78, #82, #90, #161, #162, #163, #165, #166, #169.
+
+**#169 is the one to read, because it is a dead end and its justification was
+false.** A stop whose input box will not clear refuses to type, correctly, and
+the resulting dialog offers only Close. The comment above it justifies
+withholding a kill by saying "Kill is still on the row". `renderRow` renders
+Open, Get link, Start, Stop and Clear, and no kill at all; `killNow` is
+reachable from three places and all three are downstream of a `DELETE` that
+succeeded. So the session cannot be ended from the interface, and the reasoning
+that made that acceptable pointed at an affordance nobody had built.
+
+That is #83's defect inverted. There, a button existed with no route behind it
+and a browser test asserted only that it was visible. Here a route exists with
+no button, and a comment asserts a button that does not.
+
+**Section 7 forbids escalation by DEFAULT, not availability**, and the two
+timeout dialogs already resolve the identical situation the other way, with the
+kill second and styled danger. Three terminal dialogs, two offering a decision
+and one offering Close; the inconsistency was the bug. The operator's position
+is recorded on the ticket as the decision: a force kill is always theirs to
+choose. Putting a kill on the row itself stays out, because that WOULD be
+escalation by default, and it gets its own ticket if it is ever wanted.
 
 **Three arrived from using it and they are the shape this phase was cut for.**
 #161 is a defect with a measured cause: every dialog is pinned to the bottom of
