@@ -26,7 +26,7 @@ from hitchrail.engine import Engine
 from hitchrail.events import EventBus
 from hitchrail.procs import ProcTable
 from hitchrail.server import create_app
-from hitchrail.tmux import TmuxUnavailable
+from hitchrail.tmux import Panes, TmuxUnavailable
 from support import DEFAULT_LABEL, make_config
 
 
@@ -596,10 +596,10 @@ def _unreadable_tmux() -> FakeTmux:
     """A tmux that cannot be run, which is not the same as an empty one."""
     tmux = FakeTmux()
 
-    def gone() -> dict[str, int]:
+    def gone() -> Panes:
         raise TmuxUnavailable("tmux: command not found")
 
-    tmux.pane_pids = gone  # type: ignore[method-assign]
+    tmux.panes = gone  # type: ignore[method-assign]
     return tmux
 
 
@@ -953,6 +953,63 @@ async def test_the_listing_carries_the_root_it_is_listing(
     # "one root" would be wrong the day a second was added, which is why #119
     # made the qualified form universal.
     assert body["roots"] == [{"label": r.label, "path": str(r.path)} for r in config.roots]
+
+
+async def test_the_listing_reports_what_the_sweep_found_and_captures_nothing(
+    config: Config,
+) -> None:
+    """#100 through the route, and the assertion that matters is the second one.
+
+    The whole placement decision was that no capture lands on a request path:
+    the interface polls this route every 700 ms during a stop wait, and a
+    capture here would put the adapter's ten second call timeout on the
+    executor that also serves the operator's stop.
+    """
+    modal = "Background work is running\n\x1b[39m\u276f\x1b[38;5;153m1. Exit and stop\n"
+    tmux = FakeTmux(sessions={proj("vessel"): 500})
+    tmux.pane_text[proj("vessel")] = modal
+    engine = make_engine(config, tmux=tmux, procs=procs_from(RUNNING_PS))
+    engine.scan_for_stuck()
+    captures = tmux.capture_calls
+
+    async with client_for(engine, config) as client:
+        body = (await client.get("/api/projects", headers=HEADERS)).json()
+
+    rows = {row["name"]: row for row in body["projects"]}
+    assert rows[proj("vessel")]["awaiting_input"] is True
+    assert tmux.capture_calls == captures, "the listing route captured a pane"
+
+
+async def test_the_listing_carries_the_owner_of_a_foreign_agent(
+    config: Config, tmux: FakeTmux
+) -> None:
+    """#85 on the wire. The field is what the row's sentence is built from.
+
+    `null` rather than absent when nothing owns it, so a client can tell "we
+    looked and saw no owner" from "this server does not send the field", which
+    are different answers and only one of them is about the machine.
+    """
+    # Another tool's pane, a shell under it, and the agent under that. The
+    # shell is why ownership is read from the whole subtree rather than from
+    # the pane's children.
+    foreign_ps = """\
+ 700     1   4096   600 tmux new-session -d -s cc-vessel
+ 701   700   4096   600 -bash
+ 702   701 512000   600 claude --dangerously-skip-permissions --remote-control main~vessel
+"""
+    engine = make_engine(
+        config, tmux=FakeTmux(foreign={"cc-vessel": 700}), procs=procs_from(foreign_ps)
+    )
+    async with client_for(engine, config) as client:
+        body = (await client.get("/api/projects", headers=HEADERS)).json()
+
+    rows = {row["name"]: row for row in body["projects"]}
+    assert rows[proj("vessel")]["state"] == "detached"
+    assert rows[proj("vessel")]["foreign_session"] == "cc-vessel"
+    # Null rather than absent on a row nothing owns, which is the half a
+    # client has to be able to read.
+    assert rows[proj("network")]["state"] == "stopped"
+    assert rows[proj("network")]["foreign_session"] is None
 
 
 async def test_the_listing_carries_a_memory_total_for_the_proportion(

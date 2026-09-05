@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import sys
 from pathlib import Path
 
 import pytest
@@ -605,3 +606,65 @@ def test_a_bare_root_says_what_to_do_instead_of_naming_a_function(
     err = capsys.readouterr().err
     assert "parse_root_argument" not in err, "the operator was shown a function name"
     assert "label=path" in err, "the refusal does not say what to type instead"
+
+
+# -- #145: the banner has to LEAVE the process ------------------------------
+
+
+class BlockBuffered:
+    """A stdout that only becomes readable when it is flushed.
+
+    Which is what Python's own stdout is under a systemd unit: not a terminal,
+    therefore block buffered, therefore a `print` that is never flushed sits in
+    an 8 KB buffer until the process exits. A server does not exit, so the
+    banner written for the journal never reached it.
+
+    `capsys` cannot see this, and that is why the fake exists: pytest's capture
+    reads what was WRITTEN, so an unflushed banner looks identical to a flushed
+    one and every existing banner test passes against the defect.
+    """
+
+    def __init__(self) -> None:
+        self.pending: list[str] = []
+        self.visible = ""
+
+    def write(self, text: str) -> int:
+        self.pending.append(text)
+        return len(text)
+
+    def flush(self) -> None:
+        self.visible += "".join(self.pending)
+        self.pending.clear()
+
+
+def test_the_banner_reaches_the_journal_before_the_server_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#145. Observed on a real unit: the whole log was four uvicorn lines.
+
+    uvicorn logs to stderr and appeared; the banner went to a block buffered
+    stdout and did not. What is lost is the only statement of which addresses
+    this server answers to, in the one deployment where you cannot look at a
+    terminal, plus the warning that fires when a service has no
+    `HITCHRAIL_TOKEN` and is silently invalidating the phone's link on every
+    restart.
+
+    Asserted at the moment the server is constructed rather than after `main`
+    returns, because a buffer flushed at exit is no use to a process that does
+    not exit.
+    """
+    (tmp_path / "vessel").mkdir()
+    monkeypatch.setenv(JOURNAL_ENV, "9:1234")
+    stdout = BlockBuffered()
+    monkeypatch.setattr(sys, "stdout", stdout)
+    monkeypatch.setattr("shutil.which", lambda _n: "/usr/bin/x")
+    at_serve_time: dict[str, str] = {}
+
+    def fake_run(_app: object, **_kwargs: object) -> None:
+        at_serve_time["visible"] = stdout.visible
+
+    monkeypatch.setattr("uvicorn.run", fake_run)
+
+    main(["--root", f"main={tmp_path}", "--host", "0.0.0.0", "--token", "x" * 16])
+
+    assert "Open one of these on your phone" in at_serve_time["visible"]

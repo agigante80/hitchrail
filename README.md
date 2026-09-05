@@ -157,50 +157,142 @@ Installing Hitchrail with `uvx` will succeed on a machine with no tmux and no
 Claude Code, because neither is a Python dependency. It will then fail at the
 first attempt to start a session. Check the two commands above first.
 
+## The usual setup
+
+**Several folders of projects, always on, reachable from your phone.** That is
+what most people want, so here is the whole of it. It takes about two minutes
+and every line is explained afterwards.
+
+The example uses four roots. Use your own paths and your own labels.
+
+**Point it at a scratch folder the first time.** Hitchrail only recognises the
+tmux sessions it started itself, so starting a project that already has a
+session from another tool gives you a second agent in the same directory. Once
+you have seen it work, swap the roots for your real ones.
+
+```sh
+# 1. Install it so the path is stable. Not `uvx`: that runs out of a cache it
+#    is free to evict, and a service needs an executable still there next month.
+uv tool install hitchrail
+
+# 2. A token that survives restarts, in a file only you can read.
+mkdir -p ~/.config/hitchrail
+printf 'HITCHRAIL_TOKEN=%s\n' "$(python3 -c 'import secrets;print(secrets.token_urlsafe(24))')" \
+    > ~/.config/hitchrail/env
+chmod 600 ~/.config/hitchrail/env
+
+# 3. The unit template, then edit the roots and the address into it.
+mkdir -p ~/.config/systemd/user
+curl -fsSL https://raw.githubusercontent.com/agigante80/hitchrail/main/packaging/hitchrail.service \
+    -o ~/.config/systemd/user/hitchrail.service
+$EDITOR ~/.config/systemd/user/hitchrail.service
+```
+
+The one line to change is `ExecStart`. Point it at your folders and at the
+address your phone will use:
+
+```ini
+ExecStart=%h/.local/bin/hitchrail \
+    --host 192.168.1.10 \
+    --root work=%h/work \
+    --root personal=%h/personal \
+    --root homelab=%h/homelab \
+    --root confidential=%h/confidential \
+    --self-project work~hitchrail
+```
+
+```sh
+# 4. Start it, and make it survive logout and reboot.
+systemctl --user daemon-reload
+systemctl --user enable --now hitchrail
+loginctl enable-linger "$USER"
+
+# 5. Read the token, and open the link on your phone.
+cat ~/.config/hitchrail/env
+#   http://192.168.1.10:8787/grant#token=<the value from that file>
+```
+
+`journalctl --user -u hitchrail` shows the startup banner, which lists every
+address the server will answer to. It prints the links without the `#token=`
+fragment on purpose, because the journal is persistent and readable by root and
+by the `systemd-journal` group, and it expects you to append the value you
+already have.
+
+### What each part of that is doing
+
+**`--root LABEL=PATH`, repeated.** Every directory directly inside each root
+becomes a row. The label becomes part of the project's name, so
+`work~vessel` and `personal~vessel` are two projects rather than one ambiguous
+row, and stopping one leaves the other alone. The label is required even with a
+single root: if one root were unlabelled, adding a second later would rename
+everything you had saved a link to. A root inside another root is refused at
+startup, naming both.
+
+**`--self-project`.** The folder Hitchrail itself runs from, if it is inside one
+of your roots. Its row then refuses to be stopped, so you cannot end the session
+you are using to end sessions. Omit it if Hitchrail is not in a root.
+
+**`--host 192.168.1.10`, and never `0.0.0.0`.** Naming one address is the whole
+difference. The wildcard is not a shortcut for it: it means every interface this
+machine has, including the VPN tunnel and the dozen Docker bridges you forgot
+about, and Hitchrail will not offer it as a link because it is not an address
+anybody can open.
+
+**The token in an `EnvironmentFile` at mode 600.** A generated token changes on
+every start, so a service that restarts would invalidate the link saved on your
+phone with each one. Anyone who can read that file can run code as you, which is
+what the mode is for. `--token` on the command line would do the same job and
+show it to every other account on the machine, because `/proc/<pid>/cmdline` is
+world readable and `/proc/<pid>/environ` is not.
+
+**A user unit, not a system one.** Hitchrail spawns agents as you, reading your
+`~/.claude` state and your projects. A system unit would want a `User=` and
+would invite running a shell as root.
+
+**`Restart=on-failure`, not `always`.** Hitchrail refuses to start on a
+configuration it judges unsafe. Those refusals are deliberate stops, and
+`always` would turn each into a boot loop that buries its own explanation.
+
+### Before you enable it
+
+**An always on service is a standing exposure rather than a session shaped
+one.** Until now the window in which this was reachable was the window in which
+you were sitting at the machine watching it. A unit removes that coupling: it is
+reachable while you sleep, and on whatever network the machine joined when it
+woke up.
+
+The address above is the **second** of three answers to "how does my phone reach
+this", and it is second for a reason. It needs nothing installed and it is
+correct while you are on a network you trust. Nothing will tell you when the
+machine joins one you do not.
+[`docs/guides/phone-access.md`](docs/guides/phone-access.md) is that decision in
+full, best first: an overlay network such as `tailscale serve`, which opens no
+inbound port and stays correct when the machine moves; then the named address
+above; and never the wildcard.
+
+Whichever you choose, the token is the only control. There is no second factor
+and no source address restriction, and over plain HTTP the cookie it becomes
+crosses your network in cleartext on every request.
+
 ## Run it
 
-Nothing is published yet, so this is the way in. It needs `uv`, `tmux` and
+To try it without a service, or from a checkout. It needs `uv`, `tmux` and
 Claude Code on `PATH`, per the table above.
 
 ```sh
-git clone https://github.com/agigante80/hitchrail
+uvx hitchrail --root main=~/projects        # published, installs nothing
+
+git clone https://github.com/agigante80/hitchrail   # or from source
 cd hitchrail
 uv run hitchrail --root main=~/projects
 ```
 
-`--root` is `label=path`: a folder holding your projects, and a name for it.
-Every directory directly inside becomes a row. **Point it at a scratch folder
-the first time**: Hitchrail only recognises the tmux sessions it started
-itself, so starting a project that already has a session from another tool
-gives you a second agent in the same directory.
+`--root` is `label=path`, and it repeats. What the label buys, and why a root
+inside another root is refused, is under
+[the usual setup](#the-usual-setup) above.
 
-**The flag repeats, which is what the label is for.** Keep work and personal
-trees apart and see both at once:
-
-```sh
-uv run hitchrail --root work=~/work --root personal=~/personal
-```
-
-The label becomes part of every project's name, `work~vessel` and
-`personal~vessel`, so two folders called `vessel` are two projects rather than
-one ambiguous row. That is why the label is required even with a single root:
-if one root were unlabelled, adding a second would rename everything you had
-saved a link to.
-
-A root inside another root is refused at startup, naming both, because one
-folder reachable under two names is the problem this is here to prevent.
-
-On loopback that is all.
-
-To open it from your phone you have to decide how the phone reaches it, and
-there are three answers with an order to them. **[`docs/guides/phone-access.md`](docs/guides/phone-access.md)
-is that decision**, best first: an overlay network such as `tailscale serve`,
-which needs no inbound port and survives the machine changing networks; a named
-LAN address; and never the wildcard. The default is loopback, so the safe thing
-is what happens when you pass nothing.
-
-The middle route is the one with no prerequisites, and it is the one shown
-here. Bind to the machine's LAN address and it prints a link to tap:
+On loopback that is all, and loopback is the default. Bind to the machine's LAN
+address instead and it prints a link to tap:
 
 ```sh
 uv run hitchrail --root main=~/projects --host 192.168.1.10
@@ -265,28 +357,14 @@ on your phone. A token from the environment survives.
 
 ### Keeping it running
 
-Hitchrail dies when you close the terminal, and a phone is useful precisely
-when you are not at the machine. `packaging/hitchrail.service` is a systemd
-**user** unit template: copy it, edit the paths, and it survives logout and
-reboot.
+Hitchrail dies when you close the terminal, and a phone is useful precisely when
+you are not at the machine. [The usual setup](#the-usual-setup) is the whole
+recipe, and `packaging/hitchrail.service` is the template it copies, with the
+reasoning for each line in comments.
 
-```sh
-cp packaging/hitchrail.service ~/.config/systemd/user/
-systemctl --user enable --now hitchrail
-loginctl enable-linger "$USER"
-```
-
-A user unit rather than a system one, because Hitchrail spawns agents as you
-and a `User=` invites running a shell as root. `Restart=on-failure` rather than
-`always`, because a configuration Hitchrail refuses is a deliberate stop and a
-boot loop would bury the reason. The token must come from the unit's
-`EnvironmentFile` at mode 600: a generated one changes every restart and kills
-the link on your phone, and the banner withholds it from the journal anyway.
-
-**An always on service is a standing exposure rather than a session shaped
-one.** Until now the window in which this was reachable was the window in which
-you were watching it. Read [`docs/guides/phone-access.md`](docs/guides/phone-access.md)
-before enabling it.
+It is written up there rather than here because it is what most people want
+rather than an appendix, and it is written once because two copies of a setup
+guide is one copy that goes stale.
 
 ## Install
 

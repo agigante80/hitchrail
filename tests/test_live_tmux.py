@@ -31,7 +31,7 @@ from pathlib import Path
 
 import pytest
 
-from hitchrail import derive
+from hitchrail import claude_ipc, derive
 from hitchrail.claude_ipc import launch_argv
 from hitchrail.config import Config
 from hitchrail.procs import snapshot
@@ -188,7 +188,7 @@ def test_the_adapter_resolves_its_own_session_and_not_a_sibling(
     tmux = adapter(server)
     assert tmux.has_session("vessel") is True
     assert tmux.pane_pid("vessel") is not None
-    assert tmux.pane_pids().keys() >= {f"{PREFIX}vessel", f"{PREFIX}vessel-social"}
+    assert tmux.panes().ours.keys() >= {f"{PREFIX}vessel", f"{PREFIX}vessel-social"}
 
 
 def test_the_adapter_refuses_a_session_that_does_not_exist(
@@ -491,14 +491,60 @@ def test_a_foreign_tmux_servers_argv_is_not_read_as_our_detached_agent(
     )
     session = derive.derive(LIVE_PROJECT, derive.look(snapshot, adapter), config, adapter, ())
 
-    # The #84 assertion, and only it: WHICH process the row points at. That it
-    # comes back `detached` at all is #85, because `pane_pids` keeps only
-    # sessions carrying our own prefix, so a foreign session's pane never lands
-    # in `owned` and the agent inside it looks orphaned. Asserting a state here
-    # would make this test fail the day #85 is fixed, for a reason that has
-    # nothing to do with #84.
+    # The #84 assertion, and only it: WHICH process the row points at.
+    #
+    # **The note that used to sit here expected #85 to change the STATE, and it
+    # did not.** #85 decided that `detached` means no session HITCHRAIL CAN
+    # ADDRESS owns the agent, which is what this code always derived, and put
+    # the missing fact in `foreign_session` instead. So the state below is
+    # still `detached` and this test keeps both its assertions. The test one
+    # down is where the owner name is asserted.
     assert session.pid != server_pid, "the row is showing the tmux server's pid"
     assert session.pid == pane_pid, "the row must point at the agent in the pane"
+
+
+@pytest.mark.live_tmux
+def test_a_live_foreign_session_is_named_on_the_row(
+    server: PrivateTmux, machine: tuple[Config, Tmux, Path]
+) -> None:
+    """#85 against a real server, which is the only tier that can see it.
+
+    Every other tier builds the pane map from a dict. What is being proven here
+    is that a real `list-panes -a` returns the foreign session at all, that its
+    name arrives in the shape the adapter parses, and that the agent under it
+    is reached through the real process tree rather than a fixture's.
+    """
+    config, adapter, agent = machine
+    _foreign_server(server, agent, LIVE_PROJECT)
+    time.sleep(0.5)
+
+    session = derive.derive(LIVE_PROJECT, derive.look(snapshot, adapter), config, adapter, ())
+
+    assert session.state is State.DETACHED
+    assert session.foreign_session == f"{FOREIGN_PREFIX}{LIVE_PROJECT}", (
+        "the row cannot say which terminal holds this agent, so it will keep "
+        "telling somebody it is orphaned while they have it open"
+    )
+
+
+@pytest.mark.live_tmux
+def test_a_foreign_session_survives_our_own_listing_untouched(
+    server: PrivateTmux, machine: tuple[Config, Tmux, Path]
+) -> None:
+    """The second Done when, on a real server rather than a fake.
+
+    Reading who owns an agent is the new thing #85 does. This asserts the old
+    thing it must not have changed: after a full derivation over a machine
+    holding somebody else's session, that session is still there.
+    """
+    config, adapter, agent = machine
+    _foreign_server(server, agent, LIVE_PROJECT)
+    time.sleep(0.5)
+
+    derive.derive(LIVE_PROJECT, derive.look(snapshot, adapter), config, adapter, ())
+
+    alive = server.run("has-session", "-t", f"={FOREIGN_PREFIX}{LIVE_PROJECT}")
+    assert alive.returncode == 0, "our listing ended a session we did not create"
 
 
 def test_the_servers_argv_outlives_the_agent_that_gave_it(
@@ -529,3 +575,55 @@ def test_the_servers_argv_outlives_the_agent_that_gave_it(
     session = derive.derive(LIVE_PROJECT, derive.look(snapshot, adapter), config, adapter, ())
     assert session.state is State.STOPPED, "the server's stale argv derived as a detached agent"
     assert session.pid is None
+
+
+# -- #100: the predicate against a real capture -----------------------------
+
+
+@pytest.mark.live_tmux
+@pytest.mark.parametrize(
+    ("painted", "expected"),
+    [
+        # A real input box: the ornament followed by U+00A0.
+        ("\x1b[39m\u276f\u00a0   ", True),
+        # A modal: the same ornament, a colour reset, then an ordinary space.
+        ("\x1b[39m\u276f\x1b[39m \x1b[38;5;153mNo, exit", False),
+    ],
+    ids=["input box", "modal"],
+)
+def test_a_real_capture_carries_what_the_predicate_reads(
+    server: PrivateTmux, painted: str, expected: bool
+) -> None:
+    """#100 against a real `capture-pane`, which is what no fake can prove.
+
+    The whole predicate turns on one byte, U+00A0, surviving the round trip
+    from a pane through `capture-pane -e` and back. Every other tier asserts it
+    against a string a test wrote, which proves the parser and nothing about
+    the terminal.
+
+    Painted with `printf` rather than by running an agent: what is under test
+    is the transport, and involving Claude Code here would make the test depend
+    on a vendor's screen rather than on the bytes.
+    """
+    name = f"{PREFIX}painted"
+    # The row is passed as an ARGUMENT rather than interpolated into the
+    # command. Interpolating it wrote the escape sequences literally, so the
+    # pane held the four characters `\`, `x`, `a`, `0` instead of one U+00A0,
+    # and the test passed for the modal case while proving nothing.
+    server.run(
+        "new-session",
+        "-d",
+        "-s",
+        name,
+        "sh",
+        "-c",
+        'printf %s "$1"; sleep 30',
+        "sh",
+        painted,
+    )
+    server.created.append(name)
+    time.sleep(0.4)
+
+    captured = adapter(server).capture_pane("painted", escapes=True)
+
+    assert claude_ipc.shows_input_box(captured) is expected, repr(captured)

@@ -35,8 +35,9 @@ import logging
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import replace
 
-from hitchrail import claude_ipc, derive, discovery, ram
+from hitchrail import attention, claude_ipc, derive, discovery, ram
 from hitchrail.config import TOKEN_ENV, Config
 from hitchrail.derive import Machine
 from hitchrail.events import EventBus
@@ -61,6 +62,36 @@ from hitchrail.sessions import (
 from hitchrail.tmux import Tmux, TmuxUnavailable
 
 logger = logging.getLogger(__name__)
+
+
+def _no_session_here(session: Session, consequence: str) -> str:
+    """Why a `detached` row cannot be acted on, without overclaiming (#85).
+
+    Both refusals used to open "has no tmux session", which is the sentence
+    #85 removed from the interface for being a claim this tool cannot make.
+    Ownership is read from one `list-panes -a` against the server Hitchrail is
+    configured to use, so "no session" is only ever "no session we found".
+
+    When the owner IS known the message says so, because that is the one thing
+    the person can act on: the agent is somewhere, and knowing where turns a
+    dead end into an instruction.
+
+    One builder rather than two f-strings, because these two messages went out
+    of step with the row's copy by being edited separately, which is the whole
+    shape of this defect.
+    """
+    if session.foreign_session is not None:
+        return (
+            f"the agent for {session.name} is in the tmux session "
+            f"{session.foreign_session}, which Hitchrail did not create, so "
+            f"there is {consequence} here; attach to that session, or end its "
+            f"process, {session.pid}, directly"
+        )
+    return (
+        f"the agent for {session.name} is in no tmux session Hitchrail can "
+        f"address, so there is {consequence}; its process, {session.pid}, has "
+        "to be ended directly"
+    )
 
 
 class Engine:
@@ -99,6 +130,21 @@ class Engine:
         # and a marker that outlived the process would be a claim about a
         # screen nobody has looked at since.
         self._awaiting_input: set[str] = set()
+        # The SECOND source of the same flag, added at #100, and the second
+        # thing in this class that is remembered rather than derived.
+        #
+        # `_awaiting_input` above describes one stop ATTEMPT. This describes a
+        # standing observation: a running row with no session link that was
+        # last seen showing something other than an ordinary input box. Name to
+        # the time it was observed, because a row the sweep did not reach this
+        # pass keeps its last answer until `STUCK_TTL_S` rather than blinking
+        # off, and a row it did reach is updated or removed outright.
+        #
+        # Not persisted, for the same reason neither of the others is: it is a
+        # claim about a screen, and a claim that outlived the process would be
+        # about a screen nobody has looked at since. A restart loses it and the
+        # next sweep re establishes it within a second.
+        self._stuck: dict[str, float] = {}
         # Guarded for the same reason `_starting` is: stop, kill and the
         # expiry ticker all run on worker threads. Without it, iterating in
         # `expire_stops` while `stop` adds raises "dictionary changed size
@@ -130,11 +176,29 @@ class Engine:
     def _look(self) -> Machine:
         return derive.look(self._procs_fn, self.tmux, self.config.agent_config_path)
 
-    def _derive(self, name: str, machine: Machine) -> Session:
+    def _derive(
+        self, name: str, machine: Machine, needs_a_person: frozenset[str] | None = None
+    ) -> Session:
+        """One row. `needs_a_person` is computed ONCE per listing, not per row.
+
+        **Passed in rather than read here, and the note on `_stopping_guard`
+        is why.** That note says `_derive` deliberately reads `self._stopping`
+        without the lock, because taking it here would put a lock acquisition
+        on the path of every derived row. #100's second source needs the lock,
+        since it iterates a dict rather than testing membership, so the union
+        is built once by the caller and handed down. A version that built it
+        here would acquire the lock and walk that dict once per project per
+        listing, which is exactly what the existing note forbids.
+
+        `None` is for the single row callers, where once per listing and once
+        per row are the same thing.
+        """
+        if needs_a_person is None:
+            needs_a_person = self._needs_a_person()
         # `self._stopping` is passed unguarded on purpose: see the note on
         # `_stopping_guard`. `derive` only asks `name in stopping`.
         session = derive.derive(
-            name, machine, self.config, self.tmux, self._stopping, self._awaiting_input
+            name, machine, self.config, self.tmux, self._stopping, needs_a_person
         )
         if session.state is State.STOPPED:
             # Reconciled on read, which is the only place the transition is
@@ -165,7 +229,8 @@ class Engine:
             if listing is None
             else list(listing.projects)
         )
-        return [self._derive(name, machine) for name in names]
+        waiting = self._needs_a_person()
+        return [self._derive(name, machine, waiting) for name in names]
 
     def get(self, name: str) -> Session:
         return self._derive(name, self._look())
@@ -378,6 +443,12 @@ class Engine:
         if verdict is ram.Verdict.SOFT and not acknowledged:
             raise MemoryNeedsAck(available, self.config.session_mb)
 
+        # Before anything is spawned. Whatever the last screen here was, it
+        # belonged to a previous agent, and the row about to appear is a new
+        # one: `attention.MIN_UPTIME_S` means the sweep will not look at it for
+        # fifteen seconds, so a claim left standing here is one nothing would
+        # correct.
+        self._forget_attention(name)
         try:
             if current.state is State.STALE:
                 # A terminal with no agent in it. Reusing it would start the
@@ -528,8 +599,7 @@ class Engine:
         # A fresh attempt starts from nothing (#101). The flag describes ONE
         # stop, and a prompt the person has since answered would otherwise go
         # on being reported at them.
-        with self._stopping_guard:
-            self._awaiting_input.discard(name)
+        self._forget_attention(name)
         # Refused from the STATE, before any subprocess and before any key
         # (#98). `_require_live` admits `stale` and `detached`, and neither has
         # an agent to ask:
@@ -557,11 +627,7 @@ class Engine:
                 "else"
             )
         if session.state is State.DETACHED:
-            raise NoAgent(
-                f"the agent for {name} has no tmux session, so there is no "
-                f"terminal to type into; its process, {session.pid}, has to be "
-                "ended directly"
-            )
+            raise NoAgent(_no_session_here(session, "no terminal to type into"))
         with self._stopping_guard:
             self._stopping[name] = self._clock()
         # One call, and the engine does not learn what a stop physically is.
@@ -616,11 +682,7 @@ class Engine:
         """
         session = self._require_live(name)
         if session.state is State.DETACHED:
-            raise NoAgent(
-                f"the agent for {name} has no tmux session, so there is "
-                f"nothing here to kill; its process, {session.pid}, has to be "
-                "ended directly"
-            )
+            raise NoAgent(_no_session_here(session, "nothing here to kill"))
         try:
             self.tmux.kill_session(name)
         except TmuxUnavailable as exc:
@@ -668,6 +730,139 @@ class Engine:
     # which shadows the builtin for every annotation after it, and mypy reads
     # the bare form as "returns Engine.list". The design names that method
     # `list`, so the qualified builtin is the smaller compromise.
+    def _forget_attention(self, name: str) -> None:
+        """Drop every standing claim that this project needs a person.
+
+        **Both sources, in one place, and #101's rule is why.** The design says
+        the overlay describes ONE attempt, so a fresh action has to start from
+        nothing: a prompt the person has since answered must not go on being
+        reported at them.
+
+        `stop` did this for the attempt marker and nothing did it for the
+        standing observation, which review found is not a corner. `kill` then
+        `start` inside the TTL rendered a BRAND NEW agent as "waiting for an
+        answer", and the sweep could not correct it, because
+        `attention.MIN_UPTIME_S` makes a young session no candidate for its
+        first fifteen seconds. The stale claim outlived the agent it was about.
+
+        **Two call sites, and the reason there are not four is worth writing
+        down**, because the obvious reading is that every path which ends an
+        agent should clear this. `derive` sets `awaiting_input` only on a
+        RUNNING row: a `stopped`, `stale` or `detached` session is built
+        without it and cannot carry it whatever these sets hold. So clearing
+        after a kill, or when a row is reconciled to `stopped`, would be
+        clearing something nothing reads, and this project's own rule about a
+        guard that cannot execute applies to a clear that cannot be observed.
+
+        What matters is the moment a row becomes RUNNING again with a DIFFERENT
+        agent in it, and there is exactly one of those: `start`. Plus `stop`,
+        where the row stays running and #101's rule is that a fresh attempt
+        starts from nothing.
+
+        The caller holds no lock. This one takes it.
+        """
+        with self._stopping_guard:
+            self._awaiting_input.discard(name)
+            self._stuck.pop(name, None)
+
+    def _needs_a_person(self) -> frozenset[str]:
+        """Every name the `awaiting_input` overlay is true for, from both sources.
+
+        The union, built once per LISTING by the caller and handed into
+        `_derive`, never per row: `_derive` used to hand `derive` the attempt
+        set directly, and #100 gave the flag a second source that has to be
+        combined somewhere. `_stopping_guard`'s own note is why the combining
+        cannot happen inside `_derive`, and there is a test on the call count.
+
+        Combined HERE rather than in `derive`, so that `get`, `list` and the
+        event published after an action all read the same answer. A version
+        that flagged rows only inside `list` would have blinked the flag off
+        every time an event arrived, because the interface replaces a row
+        wholesale from an event payload.
+
+        The TTL is `attention`'s, and so is the reason for one.
+        """
+        now = self._clock()
+        with self._stopping_guard:
+            return frozenset(self._awaiting_input) | attention.standing(self._stuck, now)
+
+    def scan_for_stuck(self) -> builtins.list[str]:
+        """Record which running rows are waiting on a person (#100).
+
+        Driven by the sweep that already expires stop markers, never by a
+        request. `attention` carries the argument for that and the bounds; this
+        is the part that touches the machine and holds the answer.
+
+        **It does nothing while nobody is watching**, and that is not an
+        optimisation. Before #100 an idle tick was free: `expire_stops` with no
+        markers runs no subprocess at all. A look is a `ps`, a
+        `tmux list-panes -a` and a file read, and doing that every second for
+        the life of a user unit, on a machine with no browser open and nothing
+        running, is a cost this feature has no claim on. It would also make the
+        sweep look more often than the polling browser whose cost was the
+        argument for moving off the request path in the first place.
+
+        The subscriber count is the honest test for "somebody is watching":
+        outside a stop wait the page only refreshes on an event, so with no
+        stream there is nobody this could tell anything to. The first sweep
+        after a client connects re establishes the flag within one interval,
+        which is the same freshness a client gets on any other row.
+
+        A bus is always attached in the running application, by `create_app`.
+        `None` means an engine built directly, which is a test asking for one
+        scan rather than a process idling, so it scans.
+
+        Never raises. It runs on the loop that expires stops, and an exception
+        there kills that loop for the life of the process.
+        """
+        if self._bus is not None and self._bus.subscriber_count == 0:
+            return []
+        try:
+            machine = self._look()
+            names = discovery.list_root_projects(self.config.roots)
+        except (MachineUnreadable, discovery.RootUnavailable):
+            # We could not look. That is not evidence about anybody's screen,
+            # so nothing is added and nothing already known is dropped.
+            return []
+        # Sorted, so which rows a truncated budget reaches is deterministic
+        # rather than a property of iteration order.
+        waiting = self._needs_a_person()
+        rows = [self._derive(name, machine, waiting) for name in sorted(names)]
+        stuck, clear = attention.scan(
+            attention.candidates(rows), self._pane_needs_a_person, self._clock
+        )
+        now = self._clock()
+        with self._stopping_guard:
+            # What CHANGED, computed under the lock beside the write, because
+            # announcing what did not change is how a page that is already
+            # right redraws itself once a second.
+            changed = [name for name in stuck if name not in self._stuck]
+            changed += [name for name in clear if name in self._stuck]
+            for name in stuck:
+                self._stuck[name] = now
+            for name in clear + attention.expired(self._stuck, now):
+                self._stuck.pop(name, None)
+        # Announced, OUTSIDE the lock, exactly as `expire_stops` does it and
+        # for the reason its docstring gives: outside a stop wait the page does
+        # not poll at all, so a change visible only on the next listing is one
+        # the interface cannot report. The person this exists for is holding a
+        # phone, looking at a row that will not change on its own.
+        #
+        # **From the row already derived, not from `self.get(name)`.**
+        # `expire_stops` uses `get` because it holds no rows; this method
+        # derived every one of them a moment ago, and re deriving would spend a
+        # whole machine look per changed row: ten changes would be ten more
+        # `ps` and `tmux` pairs inside one tick, which is the cost this ticket
+        # moved off the request path in the first place. It is also more
+        # consistent, since the payload then comes from the same look the
+        # decision came from rather than from a newer one that may disagree.
+        by_name = {row.name: row for row in rows}
+        for name in changed:
+            row = by_name.get(name)
+            if row is not None:
+                self._announce(replace(row, awaiting_input=name in stuck))
+        return stuck
+
     def _pane_needs_a_person(self, name: str) -> bool:
         """Whether this agent's screen is showing something only a human can
         answer. False whenever that cannot be told.
@@ -684,9 +879,18 @@ class Engine:
         except TmuxUnavailable:
             return False
         # `is False` and not `is not True`: `None` means the row could not be
-        # read at all, which is not evidence of a prompt. Only a box we can see
-        # and that holds something counts.
-        return claude_ipc.input_is_clear(pane) is False
+        # read at all, which is not evidence of a prompt. Only a screen we can
+        # see and that is not an ordinary input box counts.
+        #
+        # **`shows_input_box`, not `input_is_clear`, and #100 is why.** The two
+        # differ on exactly one case: an ordinary box with text in it. That is a
+        # person's draft, and a draft is not somebody being needed. The design's
+        # own words for this overlay are "showing something that had to be
+        # answered, not an ordinary input box", which is this predicate; the
+        # other one was an approximation that also fired on the draft, and it
+        # cannot be reused here because #89 shortened its anchor deliberately so
+        # that a modal and a box would both match.
+        return claude_ipc.shows_input_box(pane) is False
 
     def expire_stops(self) -> builtins.list[str]:
         """Drop stop markers older than the timeout, and say so.

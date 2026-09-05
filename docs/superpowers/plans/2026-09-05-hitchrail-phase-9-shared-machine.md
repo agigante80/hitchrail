@@ -87,7 +87,7 @@ The mechanical batch, and first because it clears the ground for the rest.
 The phase's headline, and the hardest. All three are about what counts as a
 match and when.
 
-- [ ] **Task 33, #85.** An agent inside another tool's tmux session is reported
+- [x] **Task 33, #85.** An agent inside another tool's tmux session is reported
       `detached`. `pane_pids` filters to sessions carrying our prefix, which is
       correct, and the second direction then calls any agent no PREFIXED pane
       owns detached. An agent owned by somebody else's pane is owned; it is just
@@ -109,6 +109,38 @@ match and when.
       It needs a decision about the state model, which is design section 4.1.
       Four options are written on the ticket, which now carries `needs-human`.
       Tasks 34 and 35 do not depend on it; task 41 does, by its own body.
+
+      **Decided and done 2026-09-05.** Option 3 plus an overlay: four states
+      kept, `detached` redefined to what the code already derived, and the
+      missing fact carried in `Session.foreign_session`, the name of the tmux
+      session that owns the agent.
+
+      What settled it was not on the option list. A foreign owned agent and a
+      true orphan are operationally IDENTICAL: start refuses for both, a
+      graceful stop has no pane of ours to type into for both, a kill has no
+      session of ours to kill for both. Only the sentence on the row differs,
+      and this project already has three overlays for exactly that. A fifth
+      state would have cost `api.md`, the design, `app.js`, `app.css`,
+      `TALL_STATES` and every state test to change no action.
+
+      A NAME rather than a flag, because its absence has to mean "no owner was
+      SEEN". `list-panes -a` covers one server on one socket, so an agent under
+      another socket, under screen or under a plain terminal lands there too.
+      The row says "no session Hitchrail can address"; the old copy said "no
+      tmux session" and could not know it.
+
+      Two things the implementation found that the ticket had not. The parser
+      split on the first space, so a foreign name containing one was dropped
+      and its agent looked unowned: this defect, reached through the parser.
+      And the two API refusals still opened "has no tmux session", so the claim
+      deleted from the interface was still being made to the person who read
+      the row and then tapped Stop.
+
+      Review then found that `rpartition` made one input WORSE: a foreign
+      session called `hr-my project` classified as ours, hid the agent under
+      its pane and derived `stopped`, which offers Start. Fixed by refusing a
+      space on the `ours` side, which is safe because `session_name` cannot
+      produce one.
 
 - [x] **Task 34, #46.** The two directions match with different strictness and
       neither behaviour is written down or tested. The pane direction accepts any
@@ -183,7 +215,7 @@ match and when.
       whole set rather than only the one the ticket names, because a fix that
       special cases `ESC ( B` leaves the next terminal to file the next ticket.
 
-- [ ] **Task 38, #100.** A modal that is not the trust prompt still reports a
+- [x] **Task 38, #100.** A modal that is not the trust prompt still reports a
       healthy running row. #88 covers the trust prompt exactly, by reading the
       agent's own config; anything else on screen is invisible. The Remote
       Control modal is the named example and it has actionable entries.
@@ -192,12 +224,64 @@ match and when.
       screen stays in that module, and the interface degrades to something honest
       rather than reporting a state it cannot support.
 
+      **Done 2026-09-05, and the ticket's own proposal was wrong twice.**
+
+      It proposed reusing `claude_ipc.input_is_clear`. That predicate cannot do
+      this: #89 shortened its anchor to the prompt ornament ALONE so a modal and
+      an input box would both match, which is right for deciding whether to type
+      and useless for deciding whether a person is needed. It returns False for
+      a person's half typed draft exactly as it does for a modal. The
+      distinguishing byte is the one the anchor gave up: an input box renders a
+      non breaking space after the ornament and a modal does not. So
+      `shows_input_box` sits beside it rather than replacing it, and the two
+      differ on exactly one case.
+
+      `engine._pane_needs_a_person` switched to it as well, which is a defect
+      fix in shipping code: the design's own words for that overlay are
+      "showing something that had to be answered, not an ordinary input box",
+      and the old predicate also fired on the draft.
+
+      **The capture runs on the SWEEP, not on the listing**, and that is the
+      cost decision the ticket asked for. Measured: `capture-pane` is 3.0 ms
+      against a warm server, which is not what decides it. The interface polls
+      the listing every 700 ms for a whole stop wait, and the adapter's call
+      timeout is ten seconds, so a cap of ten captures on that route would be a
+      hundred seconds of worst case latency on the executor that also serves
+      the operator's stop. On the sweep the ceiling is ten captures per second
+      machine wide, whatever any client is doing, and
+      `test_list_captures_no_pane` keeps its assertion unchanged.
+
+      Three bounds, each for a different failure: a cap on count, a wall clock
+      budget because the cap alone does not bound time, and a TTL because a
+      remembered claim about a screen has to expire on its own. The deciding
+      moved to a new module, `attention.py`, along the seam `derive.py` already
+      established.
+
 ## Batch 4: discovery, task 39
 
-- [ ] **Task 39, #32.** Aliases to an unlistable target can still rename a running
+- [x] **Task 39, #32.** Aliases to an unlistable target can still rename a running
       project. `_dedup_order` prefers a real directory over a symlink so the
       surviving name is durable; when every candidate is a symlink there is no
       durable name to prefer. Standalone, and it can be taken at any point.
+
+      **Closed 2026-09-05 as a decision rather than a fix**, and the behaviour,
+      its docstring and the test that pins it are all unchanged. The complete
+      fix is option B from #11, keying sessions off the resolved path, and it
+      now contradicts two settled arguments rather than one open question:
+      #119's `<root-label>~<folder>` identity, shipped in 0.2.0 the day before,
+      and `sanitize`'s own "injective by construction beats injective by hash",
+      which is exactly what a resolved path with separators and no length bound
+      would force.
+
+      One option nobody had listed was considered and rejected: prefer the alias
+      that currently owns a live tmux session. It fixes the real harm and
+      requires `discovery` to know about tmux, inverting a dependency the module
+      split exists to keep one way, and it would make the names in a listing
+      depend on what is running.
+
+      The work went to the CAUSE instead, as #173: the trigger is our own error
+      message refusing a folder for a space, which makes a symlink the obvious
+      response.
 
 ## Batch 5: the token an agent inherits, task 40
 
@@ -224,13 +308,27 @@ match and when.
 
 ## Batch 6: ending a detached agent, task 41
 
-- [ ] **Task 41, #107. SKIPPED, and this is the recorded reason.** It depends on
-      #85, and #85 was escalated rather than implemented: it asks for a decision
-      about the state model that is not mine to make. Building the project's
-      first unscoped destructive path on top of an identification that is still
-      under review is exactly the ordering the ticket itself argues against, so
-      the dependency is honoured by not starting rather than by starting
-      carefully.
+- [ ] **Task 41, #107. NOT BUILT, and MOVED OUT of this phase.** It was skipped
+      first because #85 was undecided, and after #85 landed the gate found that
+      its scoping premise does not hold at all.
+
+      **`foreign_session is None` does not mean orphaned.** It means no owner
+      was SEEN, which is the distinction #85 spent a commit teaching the
+      interface to make: ownership is read from one server on one socket, while
+      `ps -eww` sees every process on the machine. That bucket also holds an
+      agent under a different socket, under screen, under a plain terminal, and
+      another user's agent, since tmux sockets are per uid and the process table
+      is not. Signalling on that basis is the interface's own new warning
+      inverted, and the wrong action here is the destructive one.
+
+      What it actually needs is a POSITIVE establishment that nothing owns the
+      process, which is #172's cgroup test. So the chain is #172 then #107, and
+      #85 was necessary and not sufficient. Both moved to Phase 14, where every
+      ticket touches a security control and each is a decision before it is
+      work. This phase's objective is that derivation is right on a machine
+      Hitchrail does not own; adding the most destructive capability in the
+      project is the opposite direction, and it sat here only because its
+      blockers did.
 
       A detached agent cannot be ended from a phone, and doing
       so needs the first UNSCOPED destructive path in the project: signalling a
@@ -246,8 +344,11 @@ match and when.
 
 Ticked only with evidence.
 
-- [ ] An agent inside another tool's tmux session produces an honest answer
-      rather than a confident wrong one.
+- [x] An agent inside another tool's tmux session produces an honest answer
+      rather than a confident wrong one. #85: the row names the session that
+      owns it, and where no owner can be seen it says that rather than claiming
+      there is none. Proven against a real tmux on a private socket and through
+      a browser against a real foreign session, not only against a fake.
 - [x] A tmux binary under another name does not invent a detached agent. #96:
       `tmux3.4` and `tmux-next` are tmux, `tmuxinator` is not.
 - [x] A terminal emitting an unusual escape does not refuse every graceful stop.
@@ -278,24 +379,34 @@ than writing a test that agrees with the bug.
 
 ## How this phase actually ended
 
-Eight of the eleven tickets shipped: #93, #96, #102, #46, #49, #95, #97, #113.
-Each is closed with the commit and the reasoning on the ticket.
+**In two passes, and the second one is the interesting half.**
 
-**Three were escalated rather than implemented, and one is blocked behind one of
-them.** That is a finished outcome for each, not a shortfall:
+The first pass shipped eight tickets and escalated four: #85, #100 and #32 for
+decisions, and #107 behind #85. That is recorded above at each task, including
+the attempt at #85 that was made and reverted.
 
-- **#85** asks what a row should say about an agent inside another tool's tmux
-  session. An attempt was made and reverted (`ce8f768`): every version of the
-  narrow fix trades a loud, recoverable wrong answer for a quiet one, and which
-  lie the product tells is a product decision.
-- **#100** is a cost decision. Telling a modal that is not the trust prompt from
-  one that is costs a `capture-pane` per running row on every listing, which is
-  the price the design refused for the session link.
-- **#32** conflicts with #119. Both change what makes a project's name durable,
-  and taking either alone would decide the other by accident.
-- **#107** depends on #85. It is the first unscoped destructive path in the
-  project, and it is not built on an identification that is still under review.
+The second pass, later the same day, took all four decisions. Two became code,
+one became a closed decision, and one left the phase:
 
-The first exit criterion belongs to #85 and stays unticked. **Phase 9 is
-therefore not closed by this work**, and the remaining four items are a decision
-to be made rather than code to be written.
+- **#85 decided and built.** Four states kept, `detached` redefined to what the
+  code already derived, the missing fact carried as an overlay. The argument
+  that settled it was not among the four options on the ticket: a foreign owned
+  agent and an orphan are operationally identical, so a fifth state would have
+  changed no action.
+- **#100 decided and built.** The capture is paid for, and paid for on the sweep
+  rather than the listing, because the cost has to scale with the state of the
+  machine rather than with how often a browser polls. Two of the ticket's own
+  proposals were wrong and are corrected at the task above.
+- **#32 closed as a decision.** The complete fix now contradicts two settled
+  arguments, and the work went to the cause instead, as #173.
+- **#107 moved to Phase 14**, because the gate found its scoping premise false:
+  the field it wanted to scope on means "no owner seen", not "no owner". It
+  needs #172 first.
+
+**Every exit criterion is ticked with evidence.** The phase closes.
+
+Six tickets were filed from this work rather than fixed inside it: #172 and
+#173 from the decisions, #174 from a count that had drifted, and #175, #176 and
+#177 from the review of #85. Filing them is the finished outcome; three of them
+name defects in code this phase touched, and two name tests this phase added
+that could not fail on what they claimed.

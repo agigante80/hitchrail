@@ -940,7 +940,14 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # assignment, and HEAD was committed without the formatter having run.
         # Recorded so the next reader does not go looking for the behaviour that
         # grew the file. It did not; the gate did.
-        "claude_ipc.py": 651,
+        # 651 to 692 for #100: `shows_input_box`, and the reason it exists
+        # beside `input_is_clear` rather than replacing it. The two differ on
+        # one case, an ordinary box with text in it, and the captured rows that
+        # prove the difference are most of the addition. The rest is why the
+        # escapes are deliberately NOT stripped here: the stripper eats one
+        # printable character after a two character escape (#97), and the
+        # character it would eat is the U+00A0 this predicate reads.
+        "claude_ipc.py": 692,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.
@@ -960,7 +967,45 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # name is passed from here rather than known by the adapter: which
         # variable holds the token is this application's vocabulary, and tmux
         # knows nothing about it.
-        "engine.py": 833,
+        # 833 to 855 for #85. Two refusals opened "has no tmux session", which
+        # is the sentence #85 removed from the interface for being a claim this
+        # tool cannot make: ownership is read from one server on one socket.
+        # They are one builder now rather than two f-strings, because the two
+        # messages had already gone out of step with the row's copy by being
+        # edited separately, which is the shape of the defect itself. The
+        # growth is that reason plus the branch that names the owning session
+        # when there is one, which turns a dead end into an instruction.
+        # 855 to 934 for #100, AFTER taking the seam rather than instead of
+        # taking it. The deciding moved out to `attention.py`: which rows are
+        # worth a subprocess, the cap, the wall clock budget, the TTL and the
+        # argument for all four. What could not follow it is what this class
+        # is: the remembered observation, the lock that guards it, and the one
+        # method that actually touches a pane.
+        #
+        # The growth that remains is a second source for an existing overlay
+        # and the reason it is combined in one place, which is that `get`,
+        # `list` and the event published after an action must agree. A version
+        # that flagged rows inside `list` alone would blink the flag off every
+        # time an event arrived, since the interface replaces a row wholesale
+        # from an event payload. That is exactly the kind of reason that
+        # belongs at the code rather than in a ticket.
+        # 934 to 953: the waiting set moved out of the row loop, and the
+        # docstring saying why is the growth. `_stopping_guard`'s own note
+        # forbids `_derive` taking that lock per row, and #100's second source
+        # iterates a dict rather than testing membership, so the union is built
+        # once per listing and handed down. A reader who does not know that
+        # will inline it back, which is why the reason is at the parameter
+        # rather than on the ticket. See #178 for the pre existing half of the
+        # same note that the code still contradicts.
+        # 954 to 1037 in review of #100, and all three additions are things
+        # the first cut left out rather than growth. `_forget_attention`, so a
+        # brand new agent does not inherit the last one's prompt, with the
+        # reason there are two call sites and not four. The announce, because
+        # recording a change and telling nobody is half a fix and `expire_stops`
+        # already argues that in its own docstring. And the subscriber gate,
+        # because an idle tick used to cost nothing and this had made it a `ps`
+        # and a `tmux` call every second for the life of a user unit.
+        "engine.py": 1037,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -1001,7 +1046,33 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # and empty rather than absent. Deleting that table would leave a
         # workaround that looks like a longer way to write the option somebody
         # will "simplify" it back to. Same argument as every entry above it.
-        "tmux.py": 475,
+        # 475 to 523 for #85, and the growth is one dataclass plus the reason
+        # this adapter now returns what it used to throw away. `list-panes -a`
+        # has always returned every pane on the server and this module dropped
+        # the ones without our prefix, so an agent alive inside another tool's
+        # session was owned by a pane we had seen and discarded, and derivation
+        # called it an orphan. Returning both halves costs no second call.
+        #
+        # Most of the added lines are two explanations a reader would otherwise
+        # undo: why `rpartition` rather than `partition`, which is the parser
+        # accepting a foreign session name with a space in it, and why the
+        # foreign half is keyed by pid while ours is keyed by name. Behaviour
+        # plus its reason, which the note above permits.
+        # 524 to 539 in review of #85, and every added line is the reason for
+        # one condition. `rpartition` fixed a foreign name with a space being
+        # dropped and, for one input, made the outcome worse: a foreign session
+        # called `hr-my project` classified as OURS, hid the agent under its
+        # pane, and derived `stopped`, which offers Start. The comment says why
+        # a space disqualifies a name from being ours, because the next reader
+        # will see a redundant looking check beside a `startswith` and remove
+        # it.
+        #
+        # It briefly said 554, because a `str.replace` put that same comment
+        # into `kill_session`'s docstring as well, onto the illustrative guard
+        # whose next paragraph explains that the condition can never be true.
+        # The cap was raised for sixteen lines nobody meant to add, which is
+        # how a size guideline stops meaning anything.
+        "tmux.py": 539,
         # 413, and thirteen lines over the guideline is not a second job. #18
         # already took the host vocabulary out of this file, and what is left
         # is one dataclass and its startup refusals, which is one thing. The
@@ -1056,7 +1127,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 513 to 517 for #120. The listing payload reports every configured
         # root as a labelled list rather than one path string, and the comment
         # says why one root is still a list.
-        "server.py": 517,
+        # 517 to 523 for #100. Six lines: the sweep now calls a second engine
+        # method, and the comment says why that call is here rather than on the
+        # listing route, which is the whole decision the ticket turned on.
+        "server.py": 523,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

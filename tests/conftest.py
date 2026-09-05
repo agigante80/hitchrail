@@ -13,7 +13,7 @@ import pytest
 
 from hitchrail.claude_ipc import launch_argv
 from hitchrail.procs import ProcTable, parse_ps
-from hitchrail.tmux import Tmux
+from hitchrail.tmux import Panes, Tmux
 
 # What the stubbed resolver answers with. `.invalid` is reserved by RFC 2606
 # precisely so it can never resolve, and 203.0.113.0/24 is TEST-NET-3, so
@@ -80,9 +80,20 @@ class FakeTmux(Tmux):
     `tests/test_tmux.py`; what this stands in for is the server.
     """
 
-    def __init__(self, prefix: str = "hr-", sessions: dict[str, int] | None = None) -> None:
+    def __init__(
+        self,
+        prefix: str = "hr-",
+        sessions: dict[str, int] | None = None,
+        foreign: dict[str, int] | None = None,
+    ) -> None:
         super().__init__(prefix=prefix, run=self._never)
         self.sessions: dict[str, int] = dict(sessions or {})
+        # #85. Sessions on the same server that are not ours, keyed by session
+        # NAME here because a test reads better that way, and inverted to
+        # pid -> name on the way out because that is the question derivation
+        # asks. A real `list-panes -a` returns both halves in one call, so the
+        # fake returns both from one method for the same reason.
+        self.foreign: dict[str, int] = dict(foreign or {})
         self.pane_text: dict[str, str] = {}
         self.killed: list[str] = []
         self.started: list[tuple[str, str, list[str]]] = []
@@ -91,10 +102,10 @@ class FakeTmux(Tmux):
         self.capture_escapes: list[bool] = []
         self.dead_panes: set[str] = set()
         self.sent: list[tuple[str, tuple[str, ...]]] = []
-        self.pane_pids_calls = 0
+        self.panes_calls = 0
         self.capture_calls = 0
         self.next_pid = 1000
-        self.fail_pane_pids = False
+        self.fail_panes = False
         # #102. A `new_session` that reports unavailable may have created the
         # session anyway: `subprocess`'s timeout kills the tmux CLIENT and
         # undoes nothing the server already did. `fail_new_session` models that
@@ -112,13 +123,16 @@ class FakeTmux(Tmux):
     def _never(argv: list[str]) -> subprocess.CompletedProcess[str]:
         raise AssertionError(f"FakeTmux must never shell out: {argv}")
 
-    def pane_pids(self) -> dict[str, int]:
-        self.pane_pids_calls += 1
-        if self.fail_pane_pids:
+    def panes(self) -> Panes:
+        self.panes_calls += 1
+        if self.fail_panes:
             # What a real one returns with no server running: legitimately
             # "no sessions", which is NOT the same as a failed ps.
-            return {}
-        return {self.session_name(project): pid for project, pid in self.sessions.items()}
+            return Panes(ours={}, foreign={})
+        return Panes(
+            ours={self.session_name(project): pid for project, pid in self.sessions.items()},
+            foreign={pid: name for name, pid in self.foreign.items()},
+        )
 
     def has_session(self, project: str) -> bool:
         if self.fail_has_session is not None:

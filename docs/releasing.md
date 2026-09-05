@@ -163,12 +163,20 @@ Steps 1 to 5 happen ON the pull request. Steps 6 onward happen after it merges.
    the README from the repository. Regenerating at a release rather than on
    every change is what keeps a binary diff out of ordinary pull requests.
 
-5. **Run the gates**, and the browser tier, which is not in the default run:
+5. **Run the gates**, then the tiers the default run leaves out:
 
    ```sh
    uv run ruff format --check . && uv run ruff check && uv run mypy \
      && uv run lint-imports && uv run pytest
+   uv run pytest -m "e2e or live or live_tmux"
    ```
+
+   **`-m` REPLACES the default deselection rather than narrowing it.** `addopts`
+   carries `-m "not screenshots"`, so any `-m` of your own drops that and the
+   screenshots tier runs with whatever else you asked for, rewriting five PNGs.
+   Harmless at a release, since step 4 regenerates them anyway; a surprise binary
+   diff at any other time. Name `screenshots` when you want it and check
+   `git status` when you did not.
 
 6. **Merge the pull request.** That is the release, and nothing follows it.
 

@@ -207,9 +207,24 @@ function badgeFor(project) {
 
 function metaFor(project) {
   if (project.state === "detached") {
-    // The pid, and that no tmux session owns it. This is the state a naive
-    // tool gets wrong, so it is never rendered as an ordinary stopped row.
-    return `pid ${project.pid}  ·  no tmux session`;
+    // The pid, and who owns the agent when anything we can see does (#85).
+    // This is the state a naive tool gets wrong, so it is never rendered as an
+    // ordinary stopped row.
+    //
+    // **The two branches are not the same claim, and the old single line made
+    // the stronger one.** It said "no tmux session", which the server cannot
+    // know: ownership is read from one `list-panes -a`, covering the tmux
+    // server on Hitchrail's own socket and nothing else. An agent under a
+    // different socket, under screen, or under a plain terminal arrives here
+    // with `foreign_session` null and is not orphaned at all.
+    //
+    // Telling somebody their agent is unowned when it is sitting in a terminal
+    // they have open invites the wrong action, and the wrong action here is the
+    // destructive one.
+    if (project.foreign_session) {
+      return `pid ${project.pid}  ·  in tmux session ${project.foreign_session}`;
+    }
+    return `pid ${project.pid}  ·  no session Hitchrail can address`;
   }
   if (project.state === "stale") return "no agent in the session";
   // Says what to do, because nothing here can do it. Hitchrail cannot answer

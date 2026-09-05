@@ -19,8 +19,9 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Callable
+from dataclasses import dataclass
 
-from hitchrail.tmuxnames import BINARY, sanitize
+from hitchrail.tmuxnames import BINARY, foreign_name, sanitize
 
 # What a subprocess call looks like from here. Injected so the whole engine can
 # be tested without a machine, which is the single seam the architecture rests
@@ -44,6 +45,23 @@ class TmuxUnavailable(OSError):
     #28's preflight refuses to start at all when tmux is missing. This is what
     happens if it disappears while running.
     """
+
+
+@dataclass(frozen=True)
+class Panes:
+    """One `list-panes -a`, split by whether the session carries our prefix.
+
+    Two shapes rather than one, because the two halves answer different
+    questions. `ours` is keyed by SESSION NAME, since the caller has a project
+    and wants its pane. `foreign` is keyed by PANE PID, since the caller has a
+    process and wants to know whether anything owns it.
+
+    `foreign` names are already escaped through `display_name`: they come from
+    whoever created that session and end up on a screen.
+    """
+
+    ours: dict[str, int]
+    foreign: dict[int, str]
 
 
 # How long any single tmux call may take before it is abandoned (#67).
@@ -213,8 +231,8 @@ class Tmux:
             == 0
         )
 
-    def pane_pids(self) -> dict[str, int]:
-        """Every session we own, mapped to its first pane's pid, in ONE call.
+    def panes(self) -> Panes:
+        """Every pane on the server, split into ours and everyone else's, in ONE call.
 
         The engine asks this once per list, not once per project. A call per
         project is a subprocess spawn per row, and at the row counts the design
@@ -222,26 +240,72 @@ class Tmux:
         a test asserting the single call, because the cost of losing it is
         invisible until the folder is large.
 
+        **This was `pane_pids`, returning only ours, and #85 is why it is not.**
+        `list-panes -a` has always returned every pane on the server and this
+        method threw the foreign ones away, so an agent alive inside another
+        tool's session was owned by a pane we had seen and discarded, and
+        derivation called it an orphan. Returning both is free: the foreign
+        panes come from the same call, in the same output, and there is exactly
+        one method rather than one that answers half the question and another
+        that repeats the call to answer the rest.
+
+        **What we learn about foreign sessions and what we do about them are
+        different things.** Nothing here widens what can be created, signalled
+        or killed: that is fixed by the empty prefix refusal in `__init__` and
+        the fact that every write path builds its target from `session_name`.
+        A test asserts it separately from anything that reads this.
+
         A non zero return means no server is running, which is the ordinary
         state of a machine with nothing started, not an error.
         """
         result = self._try(self._argv("list-panes", "-a", "-F", "#{session_name} #{pane_pid}"))
         if result.returncode != 0:
-            return {}
-        found: dict[str, int] = {}
+            return Panes(ours={}, foreign={})
+        ours: dict[str, int] = {}
+        foreign: dict[int, str] = {}
         for line in result.stdout.splitlines():
-            name, _, raw_pid = line.partition(" ")
-            # Sessions we did not create are none of our business, and a
-            # session already seen keeps its FIRST pane: a window split must
-            # not change which pid a project reports.
-            if not name.startswith(self.prefix) or name in found:
-                continue
+            # `rpartition`, not `partition`. The pid is the LAST field and
+            # cannot contain a space; a session NAME can, and ours cannot only
+            # because `NAME_PATTERN` refuses one (#173). Foreign names are not
+            # ours to constrain, and splitting on the first space turned
+            # `my work 4242` into the pid `work 4242`, dropped the line, and
+            # left the agent inside that session looking unowned: the exact
+            # defect #85 exists to remove, reached through the parser.
+            name, _, raw_pid = line.rpartition(" ")
             try:
-                found[name] = int(raw_pid)
+                pid = int(raw_pid)
             except ValueError:
                 # One malformed line must not lose the well formed ones.
                 continue
-        return found
+            # **A space disqualifies a name from being ours, and that is not
+            # belt and braces.** `session_name` is `prefix + sanitize(project)`,
+            # `sanitize` introduces no space, and both halves of
+            # `<root-label>~<folder>` go through `NAME_PATTERN`, which forbids
+            # one. So a name with a space is one we could not have created.
+            #
+            # Without this, `rpartition` makes things WORSE than the parser it
+            # replaced for one input: a foreign session called `hr-my project`
+            # used to be dropped as malformed and now classifies as ours, which
+            # puts a foreign pane pid into `owned`, hides the agent underneath
+            # it, and derives `stopped`. `stopped` offers Start, and Start on a
+            # folder that already has an agent is the second agent in one
+            # folder this whole module's derivation exists to prevent. Found in
+            # review, and it is the reverted narrow fix's outcome reached
+            # through the parser.
+            if " " in name or not name.startswith(self.prefix):
+                # Keyed by PID rather than by name, because the question asked
+                # of this half is "who owns this process", never "where is
+                # session X".
+                #
+                # Escaped and bounded by `foreign_name`, which is where the
+                # reasons are. This is the only string the interface renders
+                # that no allowlist of ours constrains.
+                foreign.setdefault(pid, foreign_name(name))
+                continue
+            # A session already seen keeps its FIRST pane: a window split must
+            # not change which pid a project reports.
+            ours.setdefault(name, pid)
+        return Panes(ours=ours, foreign=foreign)
 
     def pane_pid(self, project: str) -> int | None:
         """One session's pane pid. For detail paths; `pane_pids` for lists."""

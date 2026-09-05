@@ -137,6 +137,9 @@ src/hitchrail/
   derive.py        what state a project is in: a question, asked of one look at
                    the machine, that mutates and spawns nothing. An unreadable
                    machine is an error rather than a fifth state
+  attention.py     which sessions are waiting on a person, and the budget that
+                   makes looking affordable: reading a screen is a subprocess
+                   per row, where derivation answers every row from one look
   engine.py        start, stop, log tail: what to DO about derive's answer
   security.py      host allowlist, token, origin check, in that order
   headers.py       nosniff, frame refusal and the CSP; refuses nothing
@@ -169,17 +172,33 @@ the same folder.
 |---|---|
 | `running` | tmux session alive, owns a live Claude process |
 | `stale` | tmux session alive, no Claude in it |
-| `detached` | Claude alive, no tmux session owns it |
+| `detached` | Claude alive, no tmux session Hitchrail can address owns it |
 | `stopped` | neither |
 
 `detached` is surfaced with its pid and never silently reconciled. It is the
 state a naive implementation gets wrong, and it has its own test.
 
-**One piece of state is not derived:** the in flight graceful stop, held in
-memory in the engine, keyed by session name, deliberately not persisted. It is
-an overlay on the table above, not a fifth state. If Hitchrail restarts mid
-stop that knowledge is lost and the session reads as `running` again, which is
-the truth; a `stopping` marker that outlived the process would be a lie.
+**"Hitchrail can address" is load bearing** (#85). Ownership is read from one
+`list-panes -a` against the tmux server this instance is configured to use, so
+an agent under another socket, under screen, or under a plain terminal is not
+orphaned and looks it. When the owner IS visible the session carries its name in
+`foreign_session`, and nothing that renders a null one may say "no tmux
+session": that is a claim this tool cannot make.
+
+**Two pieces of state are not derived**, both held in memory in the engine,
+both keyed by session name, both deliberately not persisted, and both overlays
+on the table above rather than states in it.
+
+The **in flight graceful stop**. If Hitchrail restarts mid stop that knowledge
+is lost and the session reads as `running` again, which is the truth; a
+`stopping` marker that outlived the process would be a lie.
+
+The **standing observation that a row is waiting on a person** (#100), written
+by the sweep rather than by a request, because reading a screen is a subprocess
+and doing it on the listing route makes the cost scale with how often a browser
+polls. It carries a TTL for the same reason the stop marker is not persisted: a
+claim about a screen that outlives the thing watching it is a claim nobody has
+checked since.
 
 Stopping is a sequence: confirm, graceful request, kill available throughout the
 wait, then a 30 second timeout that reports and **does not escalate on its own**.

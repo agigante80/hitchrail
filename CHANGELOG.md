@@ -20,7 +20,59 @@ the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
-Nothing yet.
+## [0.4.0] - 2026-09-05
+
+### Fixed
+
+**A session stuck on a prompt looked healthy.** If an agent put up anything that
+needed answering, other than the workspace trust prompt, its row said `running`
+and nothing else: no link, no explanation, and no way to tell it apart from a
+session that was working. From a phone there was nothing to act on. Such a row
+now says it is waiting for an answer, the same wording a timed out stop already
+produced.
+
+A row where somebody is simply typing is NOT flagged, which the previous check
+could not tell apart. It looked for an empty input box; the question is whether
+there is an input box at all.
+
+**What this costs:** Hitchrail now reads the screen of running sessions that
+have no link yet, on the background timer rather than when you load the page, at
+most ten of them a second and never for longer than three seconds at a stretch.
+Nothing you tap waits on it. On a machine with nothing stuck it reads nothing,
+and with nobody looking at the page it does not even check: a Hitchrail sitting
+idle overnight costs exactly what it did before.
+
+**A live agent inside another tool's tmux session was reported as orphaned.**
+If anything else on your machine runs agents in its own tmux sessions, those
+projects showed as `detached` with the words "no tmux session", while the agent
+was sitting in a terminal you had open. On the machine this was found on, eight
+rows at once. Nothing was lost by it, but `detached` is the row that invites you
+to go and deal with a process by hand, so it pointed people at the wrong action.
+
+Such a row now names the session that holds the agent, and a row where no owner
+can be seen says "no session Hitchrail can address" rather than claiming there
+is no session at all. Hitchrail reads which sessions exist and still creates,
+signals and kills only its own.
+
+**For anyone driving the API:** every session now carries `foreign_session`,
+which is the owning session's name or `null`. `null` means no owner was seen,
+not that the agent is orphaned: ownership is read from the one tmux server
+Hitchrail is configured to talk to.
+
+**Under a systemd unit the startup banner never reached the journal.** Python
+block buffers standard output when it is not a terminal, so the banner sat in a
+buffer that a running server never flushes, and the whole log was uvicorn's four
+lines. What was lost is the only statement of which addresses the server will
+answer to, and the warning that fires when a service has no `HITCHRAIL_TOKEN`
+and is therefore invalidating the link on your phone at every restart. Nothing
+to do: the banner flushes itself now, and `packaging/hitchrail.service` also
+sets `PYTHONUNBUFFERED=1` for everything else a service prints.
+
+### Documentation
+
+The README leads with the setup most people want: several roots, running as a
+service, reachable from a phone, as one recipe rather than four sections that
+each held part of it.
 
 ## 0.3.0 - 2026-09-05
 

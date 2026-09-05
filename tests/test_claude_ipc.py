@@ -19,6 +19,7 @@ from hitchrail.claude_ipc import (
     input_is_clear,
     launch_argv,
     request_stop,
+    shows_input_box,
     trusted_folders,
 )
 
@@ -749,3 +750,58 @@ def test_a_draft_survives_every_one_of_them() -> None:
     draft would pass the test above and be far more dangerous."""
     for escape in ("\x1b(B", "\x1b)0", "\x1b*A", "\x1b+B", "\x1bM", "\x1b7", "\x1b8", "\x1b="):
         assert input_is_clear(f"\x1b[39m\u276f\xa0{escape}half a sentence") is False, escape
+
+
+# -- #100: telling an input box from everything else ------------------------
+
+
+def test_the_input_box_is_recognised_by_the_nbsp_after_the_ornament() -> None:
+    """All three captured shapes of a real input box, including the draft.
+
+    The draft is the case that matters: `input_is_clear` calls it dirty, which
+    is right for deciding whether to type and wrong for deciding whether a
+    person is needed. Somebody typing is not somebody being waited for.
+    """
+    for row in (CLEAR_BOX, PLACEHOLDER_BOX, DRAFT_BOX):
+        assert shows_input_box(pane_text(row)) is True, row
+
+
+def test_the_trust_modal_is_not_an_input_box() -> None:
+    """From the same capture as `input_is_clear`'s modal test, which is the
+    point: one row, two predicates, and they disagree only where they should."""
+    assert shows_input_box(pane_text(MODAL_BOX)) is False
+
+
+def test_a_pane_with_no_ornament_is_unknown_rather_than_false() -> None:
+    """A busy agent has printed over its own input row. Unknown is not
+    evidence, and the caller tests `is False` rather than falsiness."""
+    assert shows_input_box("building the thing\nstill building\n") is None
+
+
+def test_the_predicate_does_not_strip_escapes_before_looking() -> None:
+    """The advisory made executable, and it is the whole correctness here.
+
+    `_without_escapes` eats one printable character after a two character
+    escape (#97, and it was a live defect). The character it would eat on this
+    row is the U+00A0 itself, which inverts the answer and reports a healthy
+    box as a modal. So the check is the character IMMEDIATELY after the
+    ornament, with nothing stripped first.
+    """
+    assert shows_input_box(pane_text("\x1b[39m\u276f\xa0   ")) is True
+    # The shape that would break a stripping implementation: a two character
+    # escape sits between the ornament and the space on a real modal, and its
+    # NBSP is absent.
+    assert shows_input_box(pane_text("\x1b[39m\u276f\x1bM\xa0   ")) is False
+
+
+def test_the_two_predicates_disagree_only_on_a_draft() -> None:
+    """Written as a table because the reason for two functions IS the
+    difference, and a reader who cannot see it will collapse them back."""
+    for row, clear, box in (
+        (CLEAR_BOX, True, True),
+        (PLACEHOLDER_BOX, True, True),
+        (DRAFT_BOX, False, True),
+        (MODAL_BOX, False, False),
+    ):
+        assert input_is_clear(pane_text(row)) is clear, row
+        assert shows_input_box(pane_text(row)) is box, row

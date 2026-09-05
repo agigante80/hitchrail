@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from playwright.async_api import Page, expect
 
+from hitchrail import attention
 from support import DEFAULT_LABEL
 
 from .conftest import Harness
@@ -58,7 +59,11 @@ async def test_a_detached_row_names_its_pid_and_offers_nothing_that_cannot_act(
 
     # The pid and the reason, which is the whole of what the design promises.
     pid = server.engine.get(server.project("forge-kit")).pid
-    await expect(row).to_contain_text("no tmux session")
+    # **Not "no tmux session", which is what this said until #85.** Ownership
+    # is read from one `list-panes -a`, which covers the server on Hitchrail's
+    # own socket and nothing else, so the row can say it has not found an owner
+    # and cannot say there is none.
+    await expect(row).to_contain_text("no session Hitchrail can address")
     await expect(row).to_contain_text(f"pid {pid}")
 
     # And no control at all, because every one this row could offer either does
@@ -66,6 +71,35 @@ async def test_a_detached_row_names_its_pid_and_offers_nothing_that_cannot_act(
     assert await row.get_by_role("button").count() == 0, (
         "a detached row is offering a control; if it cannot act, it is #83 again"
     )
+
+
+async def test_an_agent_in_another_tools_tmux_session_says_where_it_is(
+    page: Page, server: Harness
+) -> None:
+    """#85, through the whole stack, in the state the development machine was in.
+
+    Eight live agents rendered as orphans at once because another tool's
+    sessions were on the same tmux server. Every tier below this one builds the
+    pane map from a dict; this one puts a real foreign session on the real
+    socket and reads what the row ends up saying.
+
+    The row stays `detached`, because it behaves exactly like an orphan: there
+    is no session of ours to type into or to kill. What changes is that it
+    stops claiming the agent is unowned, which is the claim that invites
+    somebody to reach for the destructive option.
+    """
+    server.seed(foreign=["forge-kit"])
+    assert server.engine is not None
+    await page.goto(server.base)
+    row = page.locator('[data-project="main~hrx-forge-kit"]')
+    await expect(row).to_have_attribute("data-state", "detached")
+
+    await expect(row).to_contain_text("in tmux session e2eother-hrx-forge-kit")
+    await expect(row).not_to_contain_text("no session Hitchrail can address")
+
+    # Still nothing to tap. Knowing where the agent is does not give Hitchrail
+    # a way to end it, and #107 is where that argument is had.
+    assert await row.get_by_role("button").count() == 0
 
 
 async def test_a_running_row_is_taller_than_a_stopped_one(page: Page, server: Harness) -> None:
@@ -458,3 +492,43 @@ async def test_a_running_row_with_every_control_does_not_crush_its_name(
         " parseFloat(getComputedStyle(el).lineHeight || '20')"
     )
     assert name_lines < 2, f"the project name wrapped onto {name_lines:.1f} lines"
+
+
+async def test_a_stuck_row_says_so_without_the_page_asking(
+    page: Page, server: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#100 through the running application, which is the half no other tier has.
+
+    The unit tier proves the engine records it and the live tmux tier proves a
+    real `capture-pane` carries the byte the predicate reads. Neither can see
+    the thing that actually matters to a person: that the sweep runs on the
+    server's own task, and that the answer reaches a page nobody touched.
+
+    **Nobody touches the page.** Outside a stop wait the interface does not
+    poll, so this passing means the announcement went out over the event stream
+    and the row redrew itself. Review found that half missing, with everything
+    else already working.
+
+    `MIN_UPTIME_S` is patched to zero because it is not what is under test: it
+    exists so a session still painting its first frame is not flagged, and
+    waiting fifteen real seconds here would buy a slower suite and no more
+    confidence. The server runs in this process, so the constant it reads is
+    this one.
+    """
+    monkeypatch.setattr(attention, "MIN_UPTIME_S", 0)
+    server.seed(running=["alpha"], agent_shows_a_modal=True)
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("alpha")}"]')
+    await expect(row).to_have_attribute("data-state", "running")
+
+    # Not "waiting to be trusted", which is #88's overlay and reaches the same
+    # badge by a different route. The seeded folder IS trusted, so this is the
+    # sweep's answer or nothing.
+    await expect(row).to_contain_text("waiting for an answer", timeout=15_000)
+
+    # And the badge still reads `running`, which is #183 rather than an
+    # oversight here: `awaiting_trust` replaces the badge and `awaiting_input`
+    # does not, so the two overlays that both mean "a person is needed" look
+    # different at a glance. Asserted so the day that is decided, this test
+    # fails and is updated deliberately rather than drifting.
+    await expect(row.locator(".badge")).to_have_text("running")

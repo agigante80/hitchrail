@@ -418,7 +418,19 @@ foreground shell:
 **Plan: [`superpowers/plans/2026-09-04-hitchrail-phase-8-release.md`](superpowers/plans/2026-09-04-hitchrail-phase-8-release.md)**
 Started 2026-09-04. Six tasks, 24 to 29.
 
-Tickets: #58, #59, #60, #61, #62, #105, #110, #116, #117.
+Tickets: #58, #59, #60, #61, #62, #105, #110, #116, #117, #170.
+
+**#170 arrived late and belongs here rather than in a later phase**, because it
+is a defect in the unit template #110 shipped. `Restart=on-failure` restarts on
+any non-zero exit and a config refusal exits 2, so an `EnvironmentFile` with a
+blank token loops: measured at 37 restarts and 38 copies of the same message,
+never rate limited because `RestartSec=5` keeps it under systemd's default. The
+template's comment claims `on-failure` prevents exactly that. Verified fix is
+`RestartPreventExitStatus=2`, and a uvicorn bind failure exits 3, so the case
+where retrying IS right still retries.
+
+**Phase 8 therefore reopens for two items**, both on the same file: #110's
+manual reboot verification, and this.
 
 **#106 was the gate and is closed**, by decision rather than by the objects
 being purged. What it described remains true: the pre-rewrite objects are served
@@ -453,6 +465,10 @@ funding link serves none of install, understand or report.
 
 ## Phase 9: The truth on a shared machine
 
+**Status: done**, closed 2026-09-05 at `ccfa3c3`. Issues #93, #96, #102, #46,
+#49, #95, #97, #113, #85, #100 and #32. Every exit criterion is ticked with
+evidence, and #107 left the phase rather than being skipped in it.
+
 **Objective: derivation is right on a machine Hitchrail does not own.**
 
 Every defect in this phase was found the same way: by running against a real
@@ -480,15 +496,77 @@ plan's batch order rather than the order they were filed, because the ordering i
 a dependency: #107 must follow #96 and #85, since it builds a destructive control
 on top of an identification that has been wrong twice this month.
 
-**Eight shipped and the phase is not closed.** #93, #96, #102, #46, #49, #95,
-#97 and #113 are done and closed with their commits. #85, #100 and #32 were
-escalated rather than implemented, and #107 is blocked behind #85. Each of the
-four is a decision rather than an implementation: what a row should SAY about an
-agent in another tool's session (#85), whether telling two modals apart is worth
-a `capture-pane` per running row on every listing (#100), and which of two
-tickets decides what makes a project name durable (#32, against #119). The plan
-records the reasoning for each. The phase's first exit criterion belongs to #85
-and stays open with it.
+**Eight shipped, then four decisions were taken on 2026-09-05, two of them
+became code the same day, and the phase closed.** #93, #96, #102, #46, #49, #95, #97 and #113 are
+done and closed with their commits. #85, #100 and #32 were escalated rather than
+implemented, and #107 was blocked behind #85. Each of the four was a decision
+rather than an implementation, and each is now decided on the ticket:
+
+- **#85: `detached` is redefined, and the missing fact becomes an overlay.** The
+  four options were a fifth state, `running` qualified, the label redefined, and
+  reporting `stopped`. What settled it is that a foreign-owned agent and a true
+  orphan are operationally identical - start refuses, graceful stop is
+  impossible, kill-by-session is impossible for both - and differ only in what
+  the row should say. That is what this project's overlays are for, and the
+  discriminator is free: `list-panes -a` already returns the foreign panes and
+  `pane_pids` discards them. The design's section 4.1 wording moves with it.
+- **#100: the capture is paid for, capped at ten.** Measured rather than argued:
+  `capture-pane` costs 3.0 ms against a warm server on the development machine,
+  so ten stuck rows is +30 ms on a listing and fifty is +149 ms, and the browser
+  refreshes every 700 ms for a whole stop wait. Two corrections came out of
+  reading the code: `input_is_clear` cannot be reused, because its anchor was
+  shortened so a modal and a person's draft both read as "not clear", and the
+  free "no link yet" signal cannot replace the capture, because a link is not
+  written for every session.
+- **#32: closed as a decision.** Option B, keying sessions off the resolved path,
+  now contradicts two settled arguments rather than one open question: #119's
+  `<root-label>~<folder>` identity, and `sanitize`'s own "injective by
+  construction beats injective by hash". The behaviour, its docstring and the
+  test that pins it are unchanged, and the work went to the cause instead.
+- **#107 is unblocked and smaller.** With an owner name on the wire it refuses
+  whenever a foreign session owns the agent, so the first unscoped destructive
+  path applies only to agents nothing is known to own. The race its body accepts
+  is closable rather than only narrowable: this project declares Linux and 3.11,
+  so a pidfd pins the process the pid was reused from, and the ordering is
+  acquire-then-verify.
+
+**Two tickets left for Backlog, both causes rather than defects.** #172 is the
+cgroup owner test, which would see the sockets and terminals the pane map
+cannot, deferred because it is a new external surface that has to degrade and
+because a tmux-spawn scope registration race can make it report a live agent as
+detached. #173 asks whether `NAME_PATTERN` must still refuse a space, which is
+what makes the alias in #32 the obvious response to our own error message; it
+also records that `pane_pids` parses `#{session_name} #{pane_pid}` on the first
+space, so widening the pattern is not a one-line change.
+
+**How the four actually ended.**
+
+- **#85 built** at `0b24fbb`, with review round 1 at `acafafc` and `ccfa3c3`.
+  The row names the session that owns a foreign agent; where none can be seen it
+  says so rather than claiming there is none. The first exit criterion is
+  ticked, proven against a real tmux and through a browser rather than only
+  against a fake.
+- **#100 built** at `ccfa3c3`, and the cost decision went the other way from the
+  ticket: the capture runs on the sweep, never on the listing route, so the cost
+  scales with the state of the machine rather than with how often a browser
+  polls. `test_list_captures_no_pane` keeps its assertion untouched, which is
+  the outcome the placement was chosen for.
+- **#32 closed as a decision**, unchanged behaviour, with the reasoning on the
+  ticket and the cause filed as #173.
+- **#107 moved to Phase 14**, not skipped. The gate found its scoping premise
+  false: `foreign_session is None` means no owner was SEEN, not that there is
+  none, and that bucket holds agents under another socket, under screen, under a
+  plain terminal, and another user's, since tmux sockets are per uid and the
+  process table is not. Signalling on that basis is the warning #85 just added
+  to the interface, inverted. It needs #172 first, which establishes
+  orphanhood positively, so both are in Phase 14 now.
+
+**Six tickets came out of this work rather than being fixed inside it**, which
+is the phase behaving as intended: #172 and #173 from the decisions, #174 from a
+control count that had drifted across three documents, and #175, #176 and #177
+from the review of #85. Two of those name tests this phase itself added that
+could not fail on what they claimed, which is the failure Phase 10 exists for
+and worth noticing in a phase about honest answers.
 
 ## Phase 10: A suite that would notice
 
@@ -507,7 +585,15 @@ beside it, no tier's result depends on what the machine running it happens to
 have, and a phase's progress count in prose is checked against the boxes it
 describes.
 
-Tickets: #94, #104, #70, #73, #92, #67, #30, #10, #86, #5, #51.
+Tickets: #94, #104, #70, #73, #92, #67, #30, #10, #86, #5, #114, #118, #128,
+#135, #136, #143.
+
+**#51 left this phase for Backlog.** It corrects two commit messages that
+describe a different change. The trees are right and the gates were green, so
+nothing here would have caught it and nothing is proposed that would: it was in
+a phase whose exit criteria it cannot meet. The list above also gained the six
+tickets filed into this milestone since it was written, which is the drift #92
+is open about.
 
 ## Phase 11: The interface in every state
 
@@ -524,7 +610,211 @@ with a ceiling, and `app.js` split along the seam it already has.
 **Done when:** no screen states something it did not read, every token pair
 passes AA, and no file in `web/` does more than one thing.
 
-Tickets: #68, #69, #71, #72, #78, #82, #90.
+Tickets: #68, #69, #71, #72, #78, #82, #90, #161, #162, #163, #165, #166, #169.
+
+**#169 is the one to read, because it is a dead end and its justification was
+false.** A stop whose input box will not clear refuses to type, correctly, and
+the resulting dialog offers only Close. The comment above it justifies
+withholding a kill by saying "Kill is still on the row". `renderRow` renders
+Open, Get link, Start, Stop and Clear, and no kill at all; `killNow` is
+reachable from three places and all three are downstream of a `DELETE` that
+succeeded. So the session cannot be ended from the interface, and the reasoning
+that made that acceptable pointed at an affordance nobody had built.
+
+That is #83's defect inverted. There, a button existed with no route behind it
+and a browser test asserted only that it was visible. Here a route exists with
+no button, and a comment asserts a button that does not.
+
+**Section 7 forbids escalation by DEFAULT, not availability**, and the two
+timeout dialogs already resolve the identical situation the other way, with the
+kill second and styled danger. Three terminal dialogs, two offering a decision
+and one offering Close; the inconsistency was the bug. The operator's position
+is recorded on the ticket as the decision: a force kill is always theirs to
+choose. Putting a kill on the row itself stays out, because that WOULD be
+escalation by default, and it gets its own ticket if it is ever wanted.
+
+**Three arrived from using it and they are the shape this phase was cut for.**
+#161 is a defect with a measured cause: every dialog is pinned to the bottom of
+the viewport, because `margin-bottom` resolving to `0px` replaces the user
+agent's `margin-bottom: auto` and collapses the centring. A regression from
+#103's keyboard fix, whose reasoning is right and whose default is not, and
+whose test covered only the keyboard-open direction. It matters more than a
+misplaced box: `showDialog` orders actions safest first so the dangerous one is
+furthest from the thumb, and a bottom-pinned dialog inverts that.
+
+#162 and #163 are "the wordings that are wrong", literally. `Open` is the one
+control that does not open the session, and `Continue` is Claude Code's own word
+borrowed out of the sentence that explained it. **They are one decision filed as
+two tickets**, and both say so: renaming the log control to `Logs` is what frees
+`open` for the control that actually opens a session.
+
+## Phase 13: Fifty rows on a phone
+
+**Objective: the interface stays usable when there are fifty projects across
+five roots, and says what it knows about each.**
+
+Phase 11 is about states saying something true. This is about a person finding
+the row they want among a lot of them, and about the page answering questions it
+currently cannot: which version am I looking at, since when, as whom.
+
+Cut from a real five root install rather than from the design. Every ticket here
+came from using it, which is also why none of them is a new power: the list is
+complete and correct, and what is missing is navigation and provenance.
+
+Delivers: filtering by root, a header that survives scrolling, a footer that
+names the version and links to the source, the server's own start time and
+account, logs at a URL you can bookmark, and an icon set.
+
+**Done when:** a fifty row list can be narrowed to one root in one tap, the
+primary action is reachable at any scroll position, and the page answers "which
+build is this and who is it running as" without an SSH session.
+
+Tickets: #146, #147, #148, #149, #150, #151, #160, #164, #168, #179.
+
+**#179 came from a phone, and it is a rule whose premise moved rather than a
+regression.** A stopped row crushes its name to one or two characters per line:
+an eighteen character name over three lines, a six character one over two. The
+guard for exactly
+this exists, from #75, and covers `running`, `stale` and `detached`, because
+when it was written a stopped row carried a name, a badge and one button, which
+fit. #122 then added the root chip, `flex-shrink: 0` like everything else on
+that line, so the name became the only item that could give and
+`overflow-wrap: anywhere` let it give all the way down.
+
+It belongs here rather than in Phase 11 because the fix spends vertical space
+this phase is otherwise trying to save: a stopped row roughly doubles in height,
+which at fifty rows is about 2,200px of scroll becoming 4,400px. #150 is what
+gives that space back, by turning six word badges into glyphs, so the two should
+be read together.
+
+**#150 was rewritten from twenty icons to seven, and the two icon tickets pull
+in opposite directions on purpose.** #150 is a SET, so it is vendored from an
+existing library and never generated: a set has to agree with itself on grid,
+stroke weight and optical alignment, and that agreement is what generation gets
+wrong. #160 is the application's own MARK, one drawing that has to agree with
+nothing and that no library ships, so drawing it is the right call there.
+
+The seven are the six state badges plus the protected row. The badge is the one
+place a shape does something a word cannot, because a list of fifty is scanned
+rather than read, and because it stops six states being told apart by colour
+alone while #69 is open. Everything else keeps its word: an argument that Stop
+and Clear needed distinct glyphs did not survive reading the code, since Stop
+renders only on a running row and Clear only on a stale one, so the pair never
+appears together.
+
+**One of these closed a question rather than opening one.** #149 was filed as
+"research how to improve the header, iframed?". Measured on `claude.ai`:
+`x-frame-options: SAMEORIGIN`, plus a CSP that says the same thing. Framing the
+session view under our header is refused by the browser, twice, and the only
+workarounds are a proxy that strips a vendor's frame guard on an authenticated
+session or a browser extension. It is recorded as impossible rather than left
+open as untried, and what remains is the real question underneath it.
+
+## Phase 14: The perimeter, chosen rather than assumed
+
+**Objective: the operator chooses how this is reached and how it is proved,
+instead of being handed one answer.**
+
+Three tickets, and all three touch a security control, so each is a decision
+before it is work. They are together because they interact: TLS changes what a
+sign-in form costs, and both change what the README's stated limitations say.
+
+Delivers: HTTPS from the server itself rather than only from a proxy in front of
+it; a sign-in page for people who have a token but not the saved link; and roots
+that come from a config file rather than only from a unit's `ExecStart`.
+
+**Two of the three are deliberately NOT what was asked for**, and the tickets
+argue it rather than quietly narrowing the scope:
+
+- **#153.** A prompt is missing and should exist. Replacing a 192 bit token with
+  a password a person can type on a phone is a downgrade on an API equivalent to
+  a shell, with no rate limiting anywhere in this codebase. Stage 1 is a form
+  that accepts the token. A passphrase ships only with a slow KDF, rate
+  limiting, and a refusal off loopback without TLS, and that list is the cost
+  rather than an obstacle course.
+- **#154.** A route that takes a PATH removes control 5 outright: the credential
+  that lists projects would become one that runs an agent anywhere the user can
+  write. The answer is a config file the operator edits on the machine, and a UI
+  that can only toggle roots already in it. That is most of what was wanted and
+  none of what it would have cost.
+
+**Done when:** a LAN deployment can be HTTPS without a second daemon, a person
+holding a token can get in without a saved link, and adding a folder does not
+mean editing a systemd unit.
+
+Tickets: #152, #153, #154, #123.
+
+**#123 moved here from Backlog.** `session_prefix` is a config field with
+validation and no flag, which is the same shape as #154's problem: configuration
+that exists in the code and cannot be reached by the operator. #154 says taking
+it first makes this a two-line addition, and the Backlog note below no longer
+means anything now that Phase 12 has closed.
+
+## Phase 15: The package as strangers meet it
+
+**Objective: somebody who has never seen this project can install it, tell what
+it is, see that it is maintained, and be helped when it goes wrong.**
+
+Everything here came from looking at the published PyPI page beside our own
+README and finding they disagree, or say nothing.
+
+**The last clause of the objective was added for #167 rather than #167 being
+squeezed under the original.** Logging is not part of meeting a package, and
+answering a stranger's bug report is the other half of publishing one. Widening
+the phase is the honest move; filing it here under "installation" would not
+have been.
+
+Delivers: `pip` acknowledged as an install route, the deprecated licence
+classifier removed and the licence made clickable, a badge row on the first
+screen, and a bot that keeps the dependencies and the pinned actions honest.
+
+**#155 is P0 and the only P0 open.** Every third party action here is pinned to a
+commit SHA on purpose, because a tag is a mutable pointer. That pin is correct
+and it cannot update itself, so today nothing tells anybody a newer version
+exists. A supply chain that only updates when somebody remembers is not a
+control, and this package is installed with `uvx` on other people's machines.
+
+**Done when:** the PyPI page and the README agree, the licence is one clickable
+statement rather than four scattered ones, and a direct dependency going stale
+arrives as a pull request against `develop`.
+
+Tickets: #155, #156, #157, #158, #167, #141, #17.
+
+**#167 came from failing to answer a support question about this machine.** An
+operator asked whether a stop request had actually been sent. The journal held
+uvicorn's access lines and nothing else: not the keystrokes, not the pane check,
+not the decision to stop waiting. Measured afterwards, the nine `logger` calls
+in the tree have no handler at all, so a warning prints as a bare message with
+no timestamp and no level, and `info` and `debug` are discarded entirely. Two of
+the nine are therefore dead in every deployment. That is the gap to close before
+strangers start filing bug reports.
+
+## Phase 16: What survives a reboot
+
+**Objective: decide whether Hitchrail remembers anything, and if so what.**
+
+One ticket, and it is a phase rather than a Backlog entry because of what it
+changes rather than how big it is.
+
+**Hitchrail holds no state.** The security argument says so in as many words:
+no database, no session registry, every answer derived from the operating
+system on demand. That is why nothing can get out of sync, nothing needs
+migrating, and no file's contents decide what runs.
+
+Remembering which sessions were running is the first persistent state in the
+product, and it is specifically a file that decides what gets spawned. The
+ticket is written for the requested default of ON, and it lists the six things
+that have to be true for that default to be defensible: the memory guard
+re-evaluated between each restored start, a cap, never doubling an agent that
+survived, a command line kill switch, protection against a restart loop
+multiplying it, and restored rows being visibly restored. If any of the six is
+not built, the default is off and the feature still ships.
+
+**Done when:** a reboot brings back what was running, exactly once each, without
+a person tapping anything, and the security argument has been rewritten rather
+than quietly outgrown.
+
+Tickets: #159.
 
 ## Deliberately later
 
@@ -533,10 +823,23 @@ Not scheduled, and not to be smuggled into an earlier phase:
 - Restart as its own operation. It is stop then start, and the interface can
   compose it.
 - More than one root.
-- Authentication beyond a single shared token.
-- Streaming logs. A tail on demand is enough until it demonstrably is not.
+- Authentication beyond a single shared token. #153 is not this: it adds a way
+  to TYPE the existing credential, and says why a second kind of credential is a
+  downgrade rather than a feature.
+- Streaming logs. A tail on demand is enough until it demonstrably is not. #151
+  gives the tail its own URL and deliberately does not stream it.
 - Sending input to a session. Hitchrail starts and stops agents; it is not a
-  terminal, and making it one is a different product.
+  terminal, and making it one is a different product. #159 restores sessions
+  and deliberately does not reach into an agent's own conversation state.
+
+  **#166 asks for one keystroke and is not this**, and the difference is
+  written on that ticket in four conditions: only in reply to a prompt our own
+  stop provoked, only from a set fixed in code, only while the pane still shows
+  that prompt, and never chosen for the operator. The interface today offers
+  `Kill it` for a question whose safe answer is one keypress, which is the
+  destructive option offered and the safe one withheld, in a situation
+  Hitchrail created. If any of the four conditions is dropped it becomes the
+  deferred item and the deferral stands.
 
 ## Deliberate additions to the design
 
@@ -648,7 +951,8 @@ each ticket rather than left to be discovered.
 
 Tickets: #119, #120, #121, #122.
 
-The interim workaround is in Backlog rather than here: `session_prefix` is a
-config field with validation and no CLI flag, so the two instance arrangement
-cannot even be made safe today. That is small and worth doing before this phase
-starts.
+The interim workaround was #123, kept out of this phase because it was a
+workaround for the limitation this phase removed. **It is now in Phase 14**, on
+its merits rather than as an interim anything: one instance takes several roots,
+so nobody needs two, and `session_prefix` is simply a setting the operator
+cannot reach.

@@ -151,12 +151,35 @@ same folder. Four states result:
 |---|---|
 | `running` | tmux session alive, and it owns a live Claude process |
 | `stale` | tmux session alive, no Claude process in it |
-| `detached` | Claude process alive, no tmux session owns it |
+| `detached` | Claude process alive, no tmux session Hitchrail can address owns it |
 | `stopped` | neither |
 
 `detached` is surfaced in the UI with its pid and an explanation. Hitchrail never
 silently reconciles it, because the safe action depends on what that agent is
 doing, which Hitchrail cannot know.
+
+**That row said "no tmux session owns it" until #85, and the code never derived
+that.** Ownership is read from `list-panes -a`, which returns the panes on the
+tmux server Hitchrail is talking to, and the sessions without our prefix were
+discarded. An agent alive inside another tool's session was therefore owned by a
+pane we had seen and thrown away, and eight of them rendered as orphans at once
+on the machine this was developed on.
+
+The fix is the definition, not a fifth state. `foreign` was the honest sounding
+option and it buys nothing: such an agent behaves exactly like an orphan in
+every direction that matters, since a start must refuse for both, a graceful
+stop has no pane of ours to type into for both, and a kill has no session of
+ours to kill for both. A state that changes no action is a word, and four states
+fit on a phone.
+
+What the row gains instead is `foreign_session`, an overlay in the same family
+as `stopping` and `awaiting_trust`: the name of the session that owns the agent,
+when one can be seen. **Its absence means no owner was seen, never that there is
+none.** `list-panes -a` covers one server on one socket, so an agent under a
+different socket, under screen, or under a plain terminal arrives with the field
+null and is not orphaned at all. Anything rendering it says "no session Hitchrail
+can address" rather than "no tmux session", because the second is a claim this
+tool cannot make.
 
 ### 4.2 tmux behaviours to encode deliberately
 
@@ -269,11 +292,43 @@ a confirmation whose entries decide what happens to that work, and waits. The
 row then reads `running` while the interface says the session "has not finished"
 and offers a kill, which is true and useless.
 
-Found by looking at the pane ONCE, when a stop's wait expires. That is the only
-moment it is affordable: a `capture-pane` per running row on every listing is the
-cost 4.4 refuses for the session link, while a stop that runs out of patience is
-rare by construction. It is an overlay on one attempt rather than a property of
-the session, so a fresh stop clears it.
+Found by looking at the pane when a stop's wait expires, and, since #100, also
+by a bounded sweep that looks for the same thing without a stop having happened.
+
+**#88 answered one prompt from a file. Every other one needs the screen**, and
+#100 is where that is paid for. The refusal in 4.4 stands as written for the
+session link: a `capture-pane` per running row on every listing is what turns a
+fifty row page into fifty subprocess calls. What changed is where the looking
+happens, not whether it is affordable.
+
+It happens on the sweep that already expires stop markers, never on a request,
+and only while somebody is connected to the event stream. Before #100 an idle
+tick cost nothing at all, and a look is a `ps`, a `tmux list-panes -a` and a
+file read: doing that every second for the life of a user unit with no browser
+open is a cost this feature has no claim on, and it would leave the sweep
+looking more often than the polling browser whose cost moved it off the request
+path.
+That bounds the cost by the state of the MACHINE rather than by how often a
+browser polls, which matters because the interface polls the listing every
+700 ms for a whole stop wait, and because the adapter's own call timeout is ten
+seconds: a cap of ten captures on the listing route would be a hundred seconds
+of worst case latency on the executor that also serves the operator's stop.
+
+Three bounds, each for a different failure. A cap on how many panes one sweep
+reads, since a machine full of stuck agents would otherwise cost a spawn per
+stuck row every second. A wall clock budget, since the cap alone bounds count
+and not time. And a TTL on what a sweep found, since a claim about a screen that
+outlives the thing watching it is a claim nobody has checked since. Rows the cap
+does not reach carry no flag, which means NOT CHECKED rather than healthy.
+
+The predicate is "is this an ordinary input box", not "is the box empty". Those
+differ on exactly one case, a person's half typed draft, and a draft is not
+somebody being needed. The distinguishing byte is the non breaking space the
+input box renders after its prompt ornament and a modal does not.
+
+It remains an overlay on one attempt rather than a property of the session: a
+fresh stop clears BOTH sources, and the sweep re establishes its own within a
+second if it is still true.
 
 Hitchrail does not answer that prompt either, for the same reason and with more
 force: those entries decide the fate of work the operator did not ask to end.

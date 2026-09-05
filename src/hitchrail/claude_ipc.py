@@ -260,6 +260,47 @@ def input_is_clear(pane: str) -> bool | None:
     return _without_escapes(after).strip() == ""
 
 
+def shows_input_box(pane: str) -> bool | None:
+    """Whether the agent is sitting at an ORDINARY input box (#100).
+
+    A different question from `input_is_clear`, which asks whether it is safe
+    to type. That one cannot answer this: #89 deliberately shortened `_PROMPT`
+    to the ornament alone so a modal and an input box would BOTH match, which
+    is right for a stop and useless for a listing. It returns False for a modal
+    and equally for a person's half typed draft, and a row built on it would
+    say "waiting for an answer" about a session somebody is typing in.
+
+    What separates them is the character the anchor gave up. Captured from a
+    real session on 2026-09-02:
+
+        input box    '\x1b[39m\u276f\xa0                     '
+        trust modal  '\x1b[39m \x1b[38;5;153m\u276f\x1b[39m \x1b[38;5;153mNo,'
+
+    The box renders the ornament followed by a NON BREAKING space. The modal
+    renders the same ornament followed by a colour reset and an ORDINARY one.
+
+    **The escapes are deliberately NOT stripped first**, and that is the whole
+    of the correctness here. `_without_escapes` exists for the other predicate
+    and carries a documented history of eating one printable character after a
+    two character escape (#97). The character it would eat here is the U+00A0
+    itself, which inverts the answer and reports a healthy box as stuck. So
+    this looks at the character IMMEDIATELY after the ornament and nothing
+    else.
+
+    `None` when no ornament row is present at all, which is an ordinary state:
+    an agent mid turn has printed over it. Unknown is not "stuck", and the
+    caller must test `is False` rather than falsiness.
+
+    **This covers modals nobody has captured yet, but only those that reuse the
+    ornament.** One drawn without it returns `None` and goes unflagged, which
+    is the honest failure direction: a missing warning rather than a false one.
+    """
+    row = next((line for line in reversed(pane.splitlines()) if _PROMPT in line), None)
+    if row is None:
+        return None
+    return row.split(_PROMPT, 1)[1].startswith("\xa0")
+
+
 class Pane(Protocol):
     """The narrow surface `request_stop` needs from whatever hosts the session.
 
