@@ -22,6 +22,29 @@ the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 Nothing yet.
 
+## 0.2.1 - 2026-09-05
+
+**PATCH, and it changes no behaviour.** `pyproject.toml` names `README.md` as the
+package description, so the README is what PyPI shows on the project page. The
+0.2.0 page said **"It is not on PyPI yet"** and "hitchrail is not on PyPI, so none
+of these work today", which was written before the first release and was wrong the
+moment there was a page to display it on.
+
+### Fixed
+
+- **The README no longer denies its own existence.** The Install section now
+  documents the three routes as working, and says why a systemd unit wants
+  `uv tool install` rather than `uvx`.
+- **The status line no longer names a phase range.** It said "phases 0 to 6" and
+  was several out of date; `docs/roadmap.md` is the one place that says what is
+  built, and a test already asserts the README has not gone back to claiming
+  otherwise.
+
+### Added
+
+- **An options table**, so somebody deciding whether to install this can read the
+  flags without installing it first. `hitchrail --help` remains the authority.
+
 ## 0.2.0 - 2026-09-05
 
 **MINOR, and it carries a breaking change.** While the version is `0.y.z` a breaking
