@@ -1258,3 +1258,91 @@ def test_a_non_loopback_bind_still_demands_a_token(tmp_path: Path, host: str) ->
     """Regression guard: the new predicate must not weaken the old rule."""
     with pytest.raises(ConfigError, match="token"):
         Config(roots=_r(tmp_path), host=host, token=None)
+
+
+# -- #131: the mutation config has to be able to assemble a tree that imports -
+
+# Local to this section: this file resolves the repository root inline at each
+# use rather than through a module constant, so the section brings its own.
+_REPO = Path(__file__).resolve().parents[1]
+
+
+def _mutmut_config() -> dict[str, list[str]]:
+    """`[tool.mutmut]`, or a failure.
+
+    **Fails rather than skips when the section is missing or unparseable.** A
+    configuration guard that passes when it cannot find its configuration is
+    the exact failure mode this exists to prevent, and it is how the
+    `AGENTS.md` guards used to pass quietly on a clone.
+    """
+    import tomllib
+
+    raw = (_REPO / "pyproject.toml").read_bytes()
+    parsed: object = tomllib.loads(raw.decode()).get("tool", {}).get("mutmut")
+    assert isinstance(parsed, dict), (
+        "pyproject.toml has no usable [tool.mutmut]; the sweep cannot be configured"
+    )
+    section: dict[str, list[str]] = parsed
+    assert section.get("source_paths"), "[tool.mutmut] names no source_paths to mutate"
+    return section
+
+
+def _first_party_imports(path: Path) -> set[str]:
+    """Every `hitchrail` module this file imports, by module name.
+
+    `ast.walk`, not `tree.body`: an import inside a function fails a mutmut run
+    just as hard as a top level one, and later.
+    """
+    import ast
+
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text())):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("hitchrail"):
+            parts = (node.module or "").split(".")
+            if len(parts) > 1:
+                found.add(parts[1] + ".py")
+            # `from hitchrail import claude_ipc, discovery`
+            found |= {a.name + ".py" for a in node.names if len(parts) == 1}
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                bits = alias.name.split(".")
+                if bits[0] == "hitchrail" and len(bits) > 1:
+                    found.add(bits[1] + ".py")
+    return found
+
+
+def test_every_mutated_module_can_be_imported_from_the_mutants_tree() -> None:
+    """#131. mutmut copies `source_paths` mutated plus `also_copy` verbatim, and
+    nothing else. A mutated module importing something in neither list produces
+    a tree that cannot import, and the run dies before scoring one mutant.
+
+    **This has broken twice.** Once on `tests/conftest.py`, because `also_copy`
+    does not create parent directories, and once on `roots.py` (#130), where
+    `config` and `discovery` both import a module the config never copied.
+
+    The check is a `tomllib` read and an `ast` walk, so it costs milliseconds
+    and needs no mutation run. That shape is the point: the expensive sweep
+    stays on demand, per `AGENTS.md`, and the cheap invariant that keeps it
+    RUNNABLE becomes a gate. A check exempt from CI is a check that can rot
+    without anybody learning.
+
+    Structure, never file text. A guard that grepped `pyproject.toml` for a
+    module name would match this docstring, which is the trap this repository
+    has now hit three times.
+    """
+    section = _mutmut_config()
+    copied = {Path(p).name for p in section["source_paths"] + section.get("also_copy", [])}
+
+    missing: dict[str, set[str]] = {}
+    for rel in section["source_paths"]:
+        module = _REPO / rel
+        gaps = {i for i in _first_party_imports(module) if i not in copied}
+        if gaps:
+            missing[Path(rel).name] = gaps
+
+    assert not missing, (
+        "the mutants tree cannot import: "
+        + "; ".join(f"{m} imports {sorted(g)}" for m, g in sorted(missing.items()))
+        + ". Add each to [tool.mutmut] source_paths or also_copy, or `uv run mutmut run` "
+        "dies before it scores a single mutant."
+    )

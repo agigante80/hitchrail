@@ -198,6 +198,15 @@ source_paths = [
   "src/hitchrail/config.py",
   "src/hitchrail/projectnames.py",
   "src/hitchrail/discovery.py",
+  # #130. Added when multi root landed: `roots.py` decides which root an
+  # identifier names and holds the injectivity argument that keeps two
+  # projects off one tmux session. That is squarely between a web page and a
+  # shell, so it is mutated rather than merely copied.
+  #
+  # Its ABSENCE was not a gap but a break: `config` and `discovery` both
+  # import it, so the assembled tree could not import and `mutmut run` died
+  # before scoring a mutant. #131 is the guard that now catches this.
+  "src/hitchrail/roots.py",
 ]
 # The tests that actually exercise those five. The full suite takes 34 seconds
 # and would make a single run hours; these 441 take 1.5, which is what makes
@@ -259,4 +268,8 @@ pytest_add_cli_args_test_selection = [
   # The assertions this check produced. They belong in the selection or the
   # next run reports the mutants they kill as surviving again.
   "tests/test_mutation_survivors.py",
+  # The 26 tests that kill mutants in `roots.py`, and some in `config` and
+  # `discovery` that only these reach. Without them the run reports gaps in
+  # the suite that are really gaps in this list.
+  "tests/test_roots.py",
 ]

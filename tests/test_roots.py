@@ -205,3 +205,47 @@ def test_the_operators_ordering_is_kept(tmp_path: Path) -> None:
     roots = (_root("zeta", a), _root("alpha", b))
     check_roots(roots)
     assert [r.label for r in roots] == ["zeta", "alpha"]
+
+
+# -- survivors from the 2026-09-05 sweep, killed -----------------------------
+#
+# #130's run was the first this module had ever been in. These are the mutants
+# it reported surviving, each read rather than counted, and each naming an
+# assertion that was missing or too loose.
+
+
+def test_the_split_is_at_the_first_qualifier_and_not_the_last() -> None:
+    """Killed `partition` -> `rpartition`, which survived every test above.
+
+    Nothing pinned WHICH `~` splits, and the whole injectivity argument is that
+    there is exactly one split point. The allowlist makes a two qualifier
+    identifier unconstructible through the front door, so both spellings refuse
+    it in the end, which is why no existing test could tell them apart. They
+    refuse it for different reasons, and the docstring claims the first one.
+
+    Asserting the split directly is what makes the claim checkable rather than
+    merely stated.
+    """
+    assert split_identifier("a~b~c") == ("a", "b~c")
+
+
+def test_an_unqualified_identifier_says_what_a_project_is_named() -> None:
+    """Killed the mutant that replaced this refusal's message with `None`.
+
+    An operator upgrading from 0.1.0 meets this refusal, and a refusal that
+    says nothing is the defect this project fixed in `--root` on the same day:
+    argparse showed a function name instead of the sentence saying what to
+    type. The message is part of the behaviour, so it is asserted.
+    """
+    with pytest.raises(RootError) as e:
+        split_identifier("vessel")
+    message = str(e.value)
+    assert "vessel" in message, "the refusal does not name what was rejected"
+    assert QUALIFIER in message, "the refusal does not show the form to use"
+
+
+def test_no_roots_at_all_says_how_to_configure_one() -> None:
+    """Killed the mutant that replaced this refusal's message with `None`."""
+    with pytest.raises(RootError) as e:
+        check_roots(())
+    assert "--root" in str(e.value), "the refusal does not name the flag that fixes it"
