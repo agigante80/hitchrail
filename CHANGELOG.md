@@ -20,6 +20,19 @@ the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.2.0 - 2026-09-05
+
+**MINOR, and it carries a breaking change.** While the version is `0.y.z` a breaking
+change may ship as MINOR, per `docs/versioning.md`. It is recorded as breaking anyway,
+because the point of this file is what a version costs you: every project identifier
+gains a prefix, so every saved link and every API caller written against 0.1.0 changes.
+
+**This is the first release to reach `main` through a pull request.** Work now happens on
+`develop`, and the release gate blocks a merge whose version was not bumped. It fired for
+the first time on the pull request that introduced it, correctly refusing itself.
+
 ### Changed, and it renames every project you have
 
 - **A project is now `<root-label>~<folder>`**, so `--root` takes `label=path`
