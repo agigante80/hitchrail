@@ -163,7 +163,7 @@ match and when.
       keeps it wired: a default is exactly what let the seam be bypassed while
       the parameter existed and the unit tests passed a fake.
 
-- [ ] **Task 37, #97.** A charset escape in an empty input box refuses every
+- [x] **Task 37, #97.** A charset escape in an empty input box refuses every
       graceful stop on that terminal. The ticket is explicit that widening the
       regex is not the fix: two attempts produced one incomplete pattern and one
       dangerous one, which is evidence about the approach.
@@ -171,6 +171,17 @@ match and when.
       Consider deciding emptiness from the CHARACTERS rather than by subtraction,
       or stripping escapes with a small parser. Whatever is chosen, the captured
       bytes from a real terminal are the test input, not a hand written string.
+
+      **Done 2026-09-05, a parser.** A regex cannot express "consume exactly
+      this sequence and not the character after it" for every form at once
+      without becoming unreadable, which is what both previous attempts
+      demonstrated by failing in OPPOSITE directions: one refused every stop
+      forever, the other ate a draft character and would have typed into a half
+      written sentence. Four branches, each consuming precisely its own
+      sequence: CSI, OSC, a charset designator with its one character argument,
+      and every other two character escape. Tested in both directions across the
+      whole set rather than only the one the ticket names, because a fix that
+      special cases `ESC ( B` leaves the next terminal to file the next ticket.
 
 - [ ] **Task 38, #100.** A modal that is not the trust prompt still reports a
       healthy running row. #88 covers the trust prompt exactly, by reading the

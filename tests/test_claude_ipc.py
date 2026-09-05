@@ -709,3 +709,43 @@ def test_only_the_quarantine_types_into_a_pane() -> None:
         "claude_ipc's business: a second caller is a second place that can "
         "put words in the operator's mouth."
     )
+
+
+# -- #97: escapes that are neither CSI nor OSC ------------------------------
+
+
+def test_a_charset_designator_does_not_make_an_empty_box_look_dirty() -> None:
+    """#97. `ESC ( B` selects the ASCII character set and is neither CSI nor
+    OSC, so the regex left it in the remainder and an EMPTY box read as dirty.
+
+    On a terminal that emits it, every graceful stop is refused, permanently. It
+    fails closed, which is the right direction, and it fails closed TOTALLY,
+    which is the worst shape a working guard can have.
+    """
+    assert input_is_clear("\x1b[39m\u276f\xa0\x1b(B   ") is True
+
+
+def test_a_two_character_escape_does_not_eat_the_draft_after_it() -> None:
+    """The regression the second attempt introduced, which is why #97 was filed
+    rather than fixed: a widened pattern with a trailing `[0-9A-Za-z]?` ate one
+    PRINTABLE character after a two character escape.
+
+    `ESC M` then swallowed the `a`, an empty box was reported for a one
+    character draft, and the stop typed into somebody's half written sentence.
+    That is failing OPEN on the one guard whose whole job is to fail closed.
+    """
+    assert input_is_clear("\x1b[39m\u276f\xa0\x1bMa") is False
+
+
+def test_the_other_escapes_a_terminal_emits_are_all_skipped() -> None:
+    """Not only the one #97 names. A fix that special cases `ESC ( B` leaves the
+    next terminal to file the next ticket."""
+    for escape in ("\x1b(B", "\x1b)0", "\x1b*A", "\x1b+B", "\x1bM", "\x1b7", "\x1b8", "\x1b="):
+        assert input_is_clear(f"\x1b[39m\u276f\xa0{escape}   ") is True, escape
+
+
+def test_a_draft_survives_every_one_of_them() -> None:
+    """The other direction for the same set, because a stripper that ate the
+    draft would pass the test above and be far more dangerous."""
+    for escape in ("\x1b(B", "\x1b)0", "\x1b*A", "\x1b+B", "\x1bM", "\x1b7", "\x1b8", "\x1b="):
+        assert input_is_clear(f"\x1b[39m\u276f\xa0{escape}half a sentence") is False, escape
