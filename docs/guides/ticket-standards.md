@@ -1,4 +1,4 @@
-<!-- template-version: 6 -->
+<!-- template-version: 7 -->
 
 # Ticket standards (canonical)
 

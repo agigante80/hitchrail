@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        <!-- template-version: 6 -->
+        <!-- template-version: 7 -->
         ## Design / UX Task
         The canvas is the reference, not a suggestion:
         https://claude.ai/code/artifact/e02013e2-d501-405a-a95c-6404ebe492a6
@@ -180,7 +180,7 @@ body:
     attributes:
       label: Required reviews (mandatory)
       options:
-        - label: "**ticket-gate** - mandatory before implementation. All selected agents must score 10/10."
+        - label: "**ticket-gate** - mandatory before implementation. Must return PASS."
           required: true
 
   - type: textarea

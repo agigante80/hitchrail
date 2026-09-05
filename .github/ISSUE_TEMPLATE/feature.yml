@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        <!-- template-version: 6 -->
+        <!-- template-version: 7 -->
         ## Feature Request
         Please fill in all required fields. Hitchrail spawns `claude --dangerously-skip-permissions`,
         so the blast radius and test sections below are not paperwork: they are how a change gets
@@ -186,10 +186,10 @@ body:
     attributes:
       label: Required reviews (mandatory)
       description: |
-        The gate auto-selects specialist agents from labels and content. All selected agents
-        must score 10/10 before implementation begins.
+        The gate runs deterministic mechanical checks, then one critic, plus a specialist
+        lens where the labels call for it. It must return PASS before implementation begins.
       options:
-        - label: "**ticket-gate** - mandatory before implementation. Runs 5 core agents (Security, Architect, Developer, QA, Blast Radius) + dynamic agents based on labels. All must score 10/10."
+        - label: "**ticket-gate** - mandatory before implementation. Runs mechanical checks, then one critic, plus a lens where the labels call for it. Must return PASS."
           required: true
 
   - type: textarea

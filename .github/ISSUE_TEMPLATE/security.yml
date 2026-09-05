@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        <!-- template-version: 6 -->
+        <!-- template-version: 7 -->
         ## Security Issue
         **Do not file an exploitable vulnerability here while the repository is public.** Use the
         contact in `SECURITY.md` instead. This template is for hardening work and for issues that
@@ -174,7 +174,7 @@ body:
       description: |
         A `security` label makes the gate run ALL agents, not only the triggered ones.
       options:
-        - label: "**ticket-gate** - mandatory before implementation. All agents run and all must score 10/10."
+        - label: "**ticket-gate** - mandatory before implementation. The security lens always runs. Must return PASS."
           required: true
 
   - type: textarea
