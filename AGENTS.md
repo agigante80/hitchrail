@@ -77,7 +77,7 @@ On demand, not a gate, and not in `dev` so `uv sync` stays lean:
 
 ```sh
 uv sync --group mutation   # once
-uv run mutmut run          # the five modules between a web page and a shell
+uv run mutmut run          # the modules between a web page and a shell
 uv run mutmut results      # survivors are READ, never counted
 ```
 

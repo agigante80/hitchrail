@@ -300,14 +300,15 @@ colliding pair, and one asserted three things about host normalisation that a
 one sided strip satisfies. A property that cannot fail is the same trap as a
 teardown assertion that runs after its socket is deleted.
 
-Mutation testing is adopted too, scoped to the five modules between a web page
+Mutation testing is adopted too, scoped to the modules between a web page
 and a shell and to nothing else: `security`, `hostnames`, `config`,
-`projectnames` and `discovery`. Its own dependency group, so `uv sync` does not
-pull it:
+`projectnames`, `discovery`, `roots` and `tmux`. The list is the authority and no
+count accompanies it, because this sentence said "five" for a day after the set
+became seven. Its own dependency group, so `uv sync` does not pull it:
 
 ```sh
 uv sync --group mutation
-uv run mutmut run          # about a minute
+uv run mutmut run          # 1133 mutants, about 104 seconds
 uv run mutmut results      # the survivors
 uv run mutmut show <name>  # one survivor as a diff
 ```

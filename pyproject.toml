@@ -207,6 +207,21 @@ source_paths = [
   # import it, so the assembled tree could not import and `mutmut run` died
   # before scoring a mutant. #131 is the guard that now catches this.
   "src/hitchrail/roots.py",
+  # #130 asked whether this belongs here and required the answer with a
+  # number. **Measured on 2026-09-05: adding it takes the sweep from 829
+  # mutants to 1133, and from 91 seconds to 104.** Thirteen seconds, which is
+  # not a trade worth thinking about twice.
+  #
+  # It earns the place on merit rather than on cheapness. `sanitize`'s
+  # injectivity became load bearing for the multi root identifier at #119: it
+  # is what stops `work~a.b` and `work~a-b` reaching one session. Its own
+  # docstring argues at length that injectivity is the hard requirement and
+  # that a digest suffix did not deliver it, which is exactly the class of
+  # claim a sweep exists to check rather than take on trust.
+  #
+  # The first run with it reported 48 mutants with NO covering test, which is
+  # a coverage gap this module was hiding by not being here.
+  "src/hitchrail/tmux.py",
 ]
 # The tests that actually exercise those five. The full suite takes 34 seconds
 # and would make a single run hours; these 441 take 1.5, which is what makes
@@ -228,7 +243,6 @@ also_copy = [
   "src/hitchrail/ram.py",
   "src/hitchrail/server.py",
   "src/hitchrail/sessions.py",
-  "src/hitchrail/tmux.py",
   "src/hitchrail/web",
   # The whole directory, not `tests/conftest.py`: `also_copy` does not create
   # parent directories, so naming the file alone fails on a clean `mutants/`
@@ -272,4 +286,8 @@ pytest_add_cli_args_test_selection = [
   # `discovery` that only these reach. Without them the run reports gaps in
   # the suite that are really gaps in this list.
   "tests/test_roots.py",
+  # The suite that kills mutants in `tmux.py`, hermetic: `Tmux` takes its
+  # runner injected, so nothing here spawns a real tmux and no mutant can
+  # leak a process group.
+  "tests/test_tmux.py",
 ]
