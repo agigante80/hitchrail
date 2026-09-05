@@ -121,6 +121,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # An ANNOTATED tag carries a message and a tagger date, which a release
+          # deserves, and annotating needs a committer identity the runner does not
+          # have: `git tag -a` fails with "empty ident name" before anything is
+          # pushed. Found on this workflow's first real run, which failed cleanly
+          # with no tag, no release and nothing on PyPI.
+          #
+          # The bot identity rather than a person's: the tagger is the automation,
+          # and attributing it to whoever merged would be a small lie in the one
+          # place a reader looks to find out who released a version.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           v="v${{ steps.decide.outputs.version }}"
           git tag -a "$v" -m "hitchrail ${{ steps.decide.outputs.version }}"
           git push origin "$v"
