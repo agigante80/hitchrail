@@ -468,7 +468,17 @@ fragile.
 another name, and a terminal that emits an unusual escape all produce an honest
 answer rather than a confident wrong one.
 
-Tickets: #85, #46, #49, #32, #96, #102, #97, #100, #95, #93.
+**Plan: [`superpowers/plans/2026-09-05-hitchrail-phase-9-shared-machine.md`](superpowers/plans/2026-09-05-hitchrail-phase-9-shared-machine.md)**
+Started 2026-09-05. Twelve tickets, tasks 30 to 41, in six batches.
+
+Tickets: #93, #96, #102, #85, #46, #49, #95, #97, #100, #32, #113, #107.
+
+**That list gained two and was reordered, both deliberately.** #113 arrived from
+Phase 7's retrospective and #107 from #83, after the original line was written,
+so this section named ten while the milestone held twelve. The order is now the
+plan's batch order rather than the order they were filed, because the ordering is
+a dependency: #107 must follow #96 and #85, since it builds a destructive control
+on top of an identification that has been wrong twice this month.
 
 ## Phase 10: A suite that would notice
 
