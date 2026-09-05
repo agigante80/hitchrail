@@ -175,11 +175,29 @@ class Engine:
     def _look(self) -> Machine:
         return derive.look(self._procs_fn, self.tmux, self.config.agent_config_path)
 
-    def _derive(self, name: str, machine: Machine) -> Session:
+    def _derive(
+        self, name: str, machine: Machine, needs_a_person: frozenset[str] | None = None
+    ) -> Session:
+        """One row. `needs_a_person` is computed ONCE per listing, not per row.
+
+        **Passed in rather than read here, and the note on `_stopping_guard`
+        is why.** That note says `_derive` deliberately reads `self._stopping`
+        without the lock, because taking it here would put a lock acquisition
+        on the path of every derived row. #100's second source needs the lock,
+        since it iterates a dict rather than testing membership, so the union
+        is built once by the caller and handed down. A version that built it
+        here would acquire the lock and walk that dict once per project per
+        listing, which is exactly what the existing note forbids.
+
+        `None` is for the single row callers, where once per listing and once
+        per row are the same thing.
+        """
+        if needs_a_person is None:
+            needs_a_person = self._needs_a_person()
         # `self._stopping` is passed unguarded on purpose: see the note on
         # `_stopping_guard`. `derive` only asks `name in stopping`.
         session = derive.derive(
-            name, machine, self.config, self.tmux, self._stopping, self._needs_a_person()
+            name, machine, self.config, self.tmux, self._stopping, needs_a_person
         )
         if session.state is State.STOPPED:
             # Reconciled on read, which is the only place the transition is
@@ -210,7 +228,8 @@ class Engine:
             if listing is None
             else list(listing.projects)
         )
-        return [self._derive(name, machine) for name in names]
+        waiting = self._needs_a_person()
+        return [self._derive(name, machine, waiting) for name in names]
 
     def get(self, name: str) -> Session:
         return self._derive(name, self._look())
@@ -748,7 +767,8 @@ class Engine:
             return []
         # Sorted, so which rows a truncated budget reaches is deterministic
         # rather than a property of iteration order.
-        rows = [self._derive(name, machine) for name in sorted(names)]
+        waiting = self._needs_a_person()
+        rows = [self._derive(name, machine, waiting) for name in sorted(names)]
         stuck, clear = attention.scan(
             attention.candidates(rows), self._pane_needs_a_person, self._clock
         )

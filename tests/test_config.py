@@ -989,7 +989,15 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # time an event arrived, since the interface replaces a row wholesale
         # from an event payload. That is exactly the kind of reason that
         # belongs at the code rather than in a ticket.
-        "engine.py": 934,
+        # 934 to 953: the waiting set moved out of the row loop, and the
+        # docstring saying why is the growth. `_stopping_guard`'s own note
+        # forbids `_derive` taking that lock per row, and #100's second source
+        # iterates a dict rather than testing membership, so the union is built
+        # once per listing and handed down. A reader who does not know that
+        # will inline it back, which is why the reason is at the parameter
+        # rather than on the ticket. See #178 for the pre existing half of the
+        # same note that the code still contradicts.
+        "engine.py": 954,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon

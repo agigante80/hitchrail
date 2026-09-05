@@ -2778,3 +2778,34 @@ def test_asking_again_clears_what_the_last_observation_found(root: Path) -> None
     engine.stop(proj("vessel"))
 
     assert engine.get(proj("vessel")).awaiting_input is False
+
+
+def test_the_waiting_set_is_built_once_per_listing_not_once_per_row(root: Path) -> None:
+    """The note on `_stopping_guard` says `_derive` deliberately reads
+    `self._stopping` WITHOUT the lock, because taking it there would put a lock
+    acquisition on the path of every derived row.
+
+    #100 gave `awaiting_input` a second source that does need the lock, since
+    it iterates a dict rather than testing membership. So the union is built
+    once by the caller and handed down. Built inside `_derive` instead it would
+    take the lock and walk that dict once per project per listing, which is
+    exactly what the existing note forbids, and nothing else in the suite would
+    have noticed.
+    """
+    for n in range(12):
+        (root / f"p{n}").mkdir(exist_ok=True)
+    engine, _ = engine_for(root)
+    calls = {"n": 0}
+    real = engine._needs_a_person
+
+    def counting() -> frozenset[str]:
+        calls["n"] += 1
+        return real()
+
+    engine._needs_a_person = counting  # type: ignore[method-assign]
+
+    assert len(engine.list()) >= 12
+    assert calls["n"] == 1, (
+        f"the waiting set was built {calls['n']} times for one listing; it "
+        "belongs once per listing, not once per row"
+    )
