@@ -21,8 +21,7 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from hitchrail.projectnames import display_name
-from hitchrail.tmuxnames import BINARY, sanitize
+from hitchrail.tmuxnames import BINARY, foreign_name, sanitize
 
 # What a subprocess call looks like from here. Injected so the whole engine can
 # be tested without a machine, which is the single seam the architecture rests
@@ -281,10 +280,12 @@ class Tmux:
             if not name.startswith(self.prefix):
                 # Keyed by PID rather than by name, because the question asked
                 # of this half is "who owns this process", never "where is
-                # session X". Escaped on the way in: a foreign name is chosen
-                # by whoever created that session, it is rendered in the
-                # interface, and nothing downstream would know to escape it.
-                foreign.setdefault(pid, display_name(name))
+                # session X".
+                #
+                # Escaped and bounded by `foreign_name`, which is where the
+                # reasons are. This is the only string the interface renders
+                # that no allowlist of ours constrains.
+                foreign.setdefault(pid, foreign_name(name))
                 continue
             # A session already seen keeps its FIRST pane: a window split must
             # not change which pid a project reports.

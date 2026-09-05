@@ -63,6 +63,36 @@ from hitchrail.tmux import Tmux, TmuxUnavailable
 logger = logging.getLogger(__name__)
 
 
+def _no_session_here(session: Session, consequence: str) -> str:
+    """Why a `detached` row cannot be acted on, without overclaiming (#85).
+
+    Both refusals used to open "has no tmux session", which is the sentence
+    #85 removed from the interface for being a claim this tool cannot make.
+    Ownership is read from one `list-panes -a` against the server Hitchrail is
+    configured to use, so "no session" is only ever "no session we found".
+
+    When the owner IS known the message says so, because that is the one thing
+    the person can act on: the agent is somewhere, and knowing where turns a
+    dead end into an instruction.
+
+    One builder rather than two f-strings, because these two messages went out
+    of step with the row's copy by being edited separately, which is the whole
+    shape of this defect.
+    """
+    if session.foreign_session is not None:
+        return (
+            f"the agent for {session.name} is in the tmux session "
+            f"{session.foreign_session}, which Hitchrail did not create, so "
+            f"there is {consequence} here; attach to that session, or end its "
+            f"process, {session.pid}, directly"
+        )
+    return (
+        f"the agent for {session.name} is in no tmux session Hitchrail can "
+        f"address, so there is {consequence}; its process, {session.pid}, has "
+        "to be ended directly"
+    )
+
+
 class Engine:
     """Derivation, and in later tickets the session lifecycle."""
 
@@ -557,11 +587,7 @@ class Engine:
                 "else"
             )
         if session.state is State.DETACHED:
-            raise NoAgent(
-                f"the agent for {name} has no tmux session, so there is no "
-                f"terminal to type into; its process, {session.pid}, has to be "
-                "ended directly"
-            )
+            raise NoAgent(_no_session_here(session, "no terminal to type into"))
         with self._stopping_guard:
             self._stopping[name] = self._clock()
         # One call, and the engine does not learn what a stop physically is.
@@ -616,11 +642,7 @@ class Engine:
         """
         session = self._require_live(name)
         if session.state is State.DETACHED:
-            raise NoAgent(
-                f"the agent for {name} has no tmux session, so there is "
-                f"nothing here to kill; its process, {session.pid}, has to be "
-                "ended directly"
-            )
+            raise NoAgent(_no_session_here(session, "nothing here to kill"))
         try:
             self.tmux.kill_session(name)
         except TmuxUnavailable as exc:

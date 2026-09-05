@@ -960,7 +960,15 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # name is passed from here rather than known by the adapter: which
         # variable holds the token is this application's vocabulary, and tmux
         # knows nothing about it.
-        "engine.py": 833,
+        # 833 to 855 for #85. Two refusals opened "has no tmux session", which
+        # is the sentence #85 removed from the interface for being a claim this
+        # tool cannot make: ownership is read from one server on one socket.
+        # They are one builder now rather than two f-strings, because the two
+        # messages had already gone out of step with the row's copy by being
+        # edited separately, which is the shape of the defect itself. The
+        # growth is that reason plus the branch that names the owning session
+        # when there is one, which turns a dead end into an instruction.
+        "engine.py": 855,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -1013,7 +1021,7 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # accepting a foreign session name with a space in it, and why the
         # foreign half is keyed by pid while ours is keyed by name. Behaviour
         # plus its reason, which the note above permits.
-        "tmux.py": 523,
+        "tmux.py": 524,
         # 413, and thirteen lines over the guideline is not a second job. #18
         # already took the host vocabulary out of this file, and what is left
         # is one dataclass and its startup refusals, which is one thing. The

@@ -29,6 +29,8 @@ from __future__ import annotations
 
 from pathlib import PurePosixPath
 
+from hitchrail.projectnames import display_name
+
 # tmux reads both of these as target separators, so neither may appear in a
 # session name. `-` is the escape character, which is why it is escaped too.
 _SEPARATORS = (".", ":")
@@ -105,6 +107,44 @@ def _is_tmux_binary(name: str) -> bool:
         return False
     suffix = name[len(BINARY) :]
     return not suffix or not suffix[0].isalpha()
+
+
+# How much of a foreign session's name a row will carry (#85).
+#
+# Our own names are bounded by `NAME_PATTERN` at 255; a foreign one is bounded
+# by tmux, which is not a bound. Long enough that a real session name survives
+# whole, short enough that a hostile one is a truncated string rather than a
+# layout.
+FOREIGN_NAME_MAX = 64
+
+
+def foreign_name(name: str) -> str:
+    """A session name we did not create, made safe to put in a row (#85).
+
+    Here rather than in the adapter for the reason #93 split this module out:
+    it is a pure function of a string, and the adapter is the thing that spawns
+    processes.
+
+    Two separate jobs, and neither does the other's:
+
+    - `display_name` defuses the terminal and bidi control characters a session
+      name can carry, because a name chosen by whoever created that session
+      reaches a screen through us.
+    - The cap bounds LENGTH, which `display_name` does not touch. tmux accepts
+      thousands of characters in a session name, and this is the only string
+      the interface renders that no allowlist of ours constrains.
+
+    **Neither of them is what makes this safe in a browser.** What stops markup
+    is the interface writing it through `textContent`. Crediting the escaping
+    with that job is how a later refactor moves the sink to `innerHTML`
+    believing it is covered.
+    """
+    shown = display_name(name)
+    if len(shown) <= FOREIGN_NAME_MAX:
+        return shown
+    # A marker rather than a silent cut, so a truncated name reads as one
+    # rather than as a different session.
+    return shown[:FOREIGN_NAME_MAX] + "(truncated)"
 
 
 def sanitize(name: str) -> str:

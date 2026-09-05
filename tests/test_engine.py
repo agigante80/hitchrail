@@ -2486,3 +2486,37 @@ def test_a_stop_on_a_foreign_owned_agent_refuses_the_same_way(root: Path) -> Non
         engine.kill(proj("vessel"))
     with pytest.raises(AlreadyRunning):
         engine.start(proj("vessel"))
+
+
+def test_a_refusal_on_a_foreign_owned_agent_says_where_it_is(root: Path) -> None:
+    """#85. The refusal is the other place the row's claim was made.
+
+    Both `stop` and `kill` opened "has no tmux session", which is the sentence
+    this ticket removed from the interface for being a claim the tool cannot
+    make. Worse than wrong: the person is holding a phone, the agent IS
+    somewhere, and the message is the only thing that could tell them where.
+    """
+    foreign, table = foreign_machine(proj("vessel"))
+    engine, _ = engine_for(root, foreign=foreign, table=table)
+
+    with pytest.raises(NoAgent) as stopped:
+        engine.stop(proj("vessel"))
+    with pytest.raises(NoAgent) as killed:
+        engine.kill(proj("vessel"))
+
+    for refusal in (str(stopped.value), str(killed.value)):
+        assert f"cc-{proj('vessel')}" in refusal
+        assert "has no tmux session" not in refusal
+
+
+def test_a_refusal_on_a_real_orphan_does_not_claim_there_is_no_session(root: Path) -> None:
+    """The other half. We did not find an owner, which is not the same as
+    there being none, and the message says the weaker true thing."""
+    engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, project=proj("vessel")))
+
+    with pytest.raises(NoAgent) as refused:
+        engine.stop(proj("vessel"))
+
+    message = str(refused.value)
+    assert "no tmux session Hitchrail can address" in message
+    assert str(ORPHAN) in message, "the pid is the only thing left to act on"

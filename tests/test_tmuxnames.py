@@ -16,7 +16,13 @@ from __future__ import annotations
 
 import pytest
 
-from hitchrail.tmuxnames import BINARY, is_tmux_argv, sanitize
+from hitchrail.tmuxnames import (
+    BINARY,
+    FOREIGN_NAME_MAX,
+    foreign_name,
+    is_tmux_argv,
+    sanitize,
+)
 
 
 @pytest.mark.parametrize("name", ["dotted.site", "a:b", "a:b.c", "..", "a.b.c.d"])
@@ -186,3 +192,43 @@ def test_the_wider_tmux_family_is_not_claimed() -> None:
 
 def test_the_binary_constant_is_still_the_stem_everything_matches_on() -> None:
     assert BINARY == "tmux"
+
+
+# -- #85: a session name we did not create ---------------------------------
+
+
+def test_a_short_foreign_name_is_returned_whole() -> None:
+    assert foreign_name("cc-vessel") == "cc-vessel"
+
+
+def test_a_foreign_name_at_the_cap_is_not_truncated() -> None:
+    """The boundary, because an off by one here silently renames a session."""
+    name = "c" * FOREIGN_NAME_MAX
+    assert foreign_name(name) == name
+
+
+def test_a_long_foreign_name_is_cut_and_says_so() -> None:
+    """tmux bounds this at thousands of characters, which is not a bound.
+
+    Our own names come from `NAME_PATTERN`; this is the only string the
+    interface renders that no allowlist of ours constrains, so without the cap
+    one session name could push a row off a phone screen.
+    """
+    shown = foreign_name("c" * 5000)
+    assert shown.startswith("c" * FOREIGN_NAME_MAX)
+    assert shown.endswith("(truncated)")
+    assert len(shown) == FOREIGN_NAME_MAX + len("(truncated)")
+
+
+def test_a_foreign_name_carrying_an_escape_is_defused() -> None:
+    """A session name is chosen by whoever created it, and it reaches a screen
+    through us. The escaping is `display_name`'s, asserted here because this is
+    the call site that decides a foreign name goes through it at all."""
+    assert "\x1b" not in foreign_name("ev\x1b[2Jil")
+
+
+def test_the_cap_is_applied_after_escaping_not_before() -> None:
+    """Escaping LENGTHENS: one control character becomes six. Capping first
+    would let an escaped name arrive well over the bound the cap exists to
+    impose, which is the whole point of the order."""
+    assert len(foreign_name("\x1b" * 100)) == FOREIGN_NAME_MAX + len("(truncated)")
