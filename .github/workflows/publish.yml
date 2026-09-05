@@ -32,16 +32,12 @@ on:
         type: choice
         options: [testpypi, pypi]
         default: testpypi
-  # CALLED by `release.yml` on a merge to main. A reusable workflow runs inside the
-  # caller's run, which is what lets an automated release publish WITHOUT a stored
-  # credential: a tag pushed by the default token starts no workflow, and the usual fix
-  # is an App token or a PAT. See release.yml's header for the full argument.
-  workflow_call:
-    inputs:
-      index:
-        description: which index to publish to
-        type: string
-        default: pypi
+  # **Not `workflow_call`, and that is load bearing.** `release.yml` briefly called this
+  # as a reusable workflow, which avoided the token trap neatly and does not work: PyPI's
+  # Trusted Publishing does not support reusable workflows, because the OIDC claim names
+  # the callee while the trust matches the top level caller. The publish action says so
+  # itself. `release.yml` DISPATCHES this instead, so it runs top level and its claim is
+  # the one PyPI trusts. Do not reintroduce `workflow_call` here.
 
 permissions:
   contents: read

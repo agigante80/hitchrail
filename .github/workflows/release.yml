@@ -8,16 +8,29 @@
 # This workflow tags and releases that number and never invents one. Do not add a bump
 # step here; that is the whole disagreement with the upstream lane.
 #
-# **No credential, and that constraint chose the design.** The obvious build is: push a tag,
-# let `publish.yml` fire on it. It does not work. GitHub refuses to start a workflow from an
-# event caused by the default `GITHUB_TOKEN`, to stop workflows triggering themselves, so
-# the tag would land and nothing would publish: a silent half release. forge-kit's fix is a
-# GitHub App token or a PAT, and both are a stored secret in a repository whose entire
-# publishing argument is that it holds none (`test_no_workflow_holds_a_publish_credential`).
+# **No credential, and that constraint chose the design twice.**
 #
-# So `publish.yml` is CALLED rather than triggered. A reusable workflow runs inside this
-# run, so there is no event to be suppressed and no identity to mint. The trap is avoided
-# rather than paid for.
+# The obvious build is: push a tag, let `publish.yml` fire on it. It does not work. GitHub
+# refuses to start a workflow from an event caused by the default `GITHUB_TOKEN`, so the tag
+# lands and nothing publishes. forge-kit's fix is a GitHub App token or a PAT, both of which
+# are a stored secret in a repository whose whole publishing argument is that it holds none
+# (`test_no_workflow_holds_a_publish_credential`).
+#
+# The second attempt CALLED `publish.yml` as a reusable workflow, which sidesteps the token
+# entirely. **PyPI rejects that shape**, and said so on the first real run:
+#
+#     Potential workflow misconfiguration: the claims in this token suggest that the
+#     calling workflow is a reusable workflow ... Reusable workflows are not currently
+#     supported by PyPI's Trusted Publishing
+#
+# The OIDC claim names `publish.yml` while its parent is this file, and the trusted
+# publisher matches on the top level workflow. So the publish must run as a TOP LEVEL
+# workflow, which brings back the triggering problem.
+#
+# **`workflow_dispatch` is the way through, and it is the one door the default token can
+# open.** GitHub's exceptions to the no-recursion rule are `workflow_dispatch` and
+# `repository_dispatch`. Dispatching `publish.yml` starts it as a top level run, so its OIDC
+# claim is the one PyPI trusts, and no identity is minted. Costs `actions: write` here.
 #
 # **Triggered by the push, and it does not wait for anything.** The preconditions are met
 # BEFORE the merge, deliberately: CI green on the pull request from `develop`, and a full
@@ -51,7 +64,8 @@ jobs:
   decide:
     runs-on: ubuntu-latest
     permissions:
-      contents: write     # the tag and the GitHub release, and nothing else
+      contents: write     # the tag and the GitHub release
+      actions: write      # dispatching publish.yml, which is the only way it can run
     outputs:
       version: ${{ steps.decide.outputs.version }}
       release: ${{ steps.decide.outputs.release }}
@@ -137,14 +151,14 @@ jobs:
           git push origin "$v"
           gh release create "$v" --title "hitchrail ${{ steps.decide.outputs.version }}" --notes-file /tmp/notes.md
 
-  publish:
-    needs: decide
-    if: needs.decide.outputs.release == 'true'
-    # CALLED, not triggered. See the header: a tag pushed with the default token starts no
-    # workflow, and the alternative is a stored credential this project refuses to hold.
-    uses: ./.github/workflows/publish.yml
-    with:
-      index: pypi
-    permissions:
-      id-token: write
-      contents: read
+      - name: dispatch the publish
+        if: steps.decide.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # DISPATCHED, not called and not triggered by the release event. See the header:
+          # a reusable workflow cannot hold PyPI's trust, and a release created by the
+          # default token starts nothing. `workflow_dispatch` is the exception.
+          gh workflow run publish.yml --ref main -f index=pypi
+          echo "::notice::release: dispatched publish.yml for v${{ steps.decide.outputs.version }}."
