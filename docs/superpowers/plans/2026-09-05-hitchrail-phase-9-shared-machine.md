@@ -68,10 +68,19 @@ The mechanical batch, and first because it clears the ground for the rest.
       whole case, and it costs a tmux call per listing that
       `test_list_issues_one_tmux_call_and_one_ps_call` forbids.
 
-- [ ] **Task 32, #102.** A timed out `new_session` can leave a session with
+- [x] **Task 32, #102.** A timed out `new_session` can leave a session with
       `remain-on-exit` still on, which presents as a `stale` row that never
       clears. #67 gave every tmux call a ten second bound and that bound is what
       makes this reachable.
+
+      **Done 2026-09-05.** `_abandon_partial_session` on the `TmuxUnavailable`
+      path, which ASKS `has-session` and acts on the answer rather than assuming
+      either way: assuming it exists kills something that may not, assuming it
+      does not leaves the defect. A failure in the cleanup never replaces the
+      original error, because the machine being unreadable is what the caller
+      must be told and the cleanup failing is the same cause showing twice. The
+      fake now models both outcomes of a timed out create, since a fake that
+      raised before creating could not express the defect at all.
 
 ## Batch 2: derivation agrees with itself, tasks 33 to 35
 

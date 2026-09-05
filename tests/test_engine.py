@@ -2132,3 +2132,60 @@ def test_a_dead_start_still_reports_when_the_cleanup_fails(root: Path) -> None:
     with pytest.raises(StartFailed) as raised:
         engine.start(proj("vessel"))
     assert "exploded" in raised.value.output
+
+
+# -- #102: a timed out new_session can leave a session behind ----------------
+
+
+def test_a_timed_out_start_kills_the_session_tmux_may_have_created(root: Path) -> None:
+    """#102. `subprocess`'s timeout kills the tmux CLIENT, not the server, and
+    undoes nothing the server already did.
+
+    So `new_session` can report unavailable while the session exists with
+    `remain-on-exit` on. That session never closes its pane when the process
+    exits, so it lingers and derives `stale` forever: the person sees a project
+    that will not start, and a row saying there is no agent in the session.
+
+    **Asking is not guessing.** The ticket rejected assuming either way, and
+    this assumes neither: it asks `has-session` and acts on the answer.
+    """
+    engine, tmux = engine_for(root)
+    tmux.fail_new_session = TmuxUnavailable("tmux timed out after 10.0s")
+
+    with pytest.raises(MachineUnreadable):
+        engine.start(proj("vessel"))
+
+    assert proj("vessel") in tmux.killed, (
+        "the session tmux created was left behind, so it derives stale forever"
+    )
+
+
+def test_a_timed_out_start_that_created_nothing_kills_nothing(root: Path) -> None:
+    """The other half, and the one that would make a guess destructive. If the
+    session does not exist there is nothing to clean up, and issuing a kill
+    anyway would be acting on an assumption rather than an answer."""
+    engine, tmux = engine_for(root)
+    tmux.fail_new_session = TmuxUnavailable("tmux timed out after 10.0s")
+    # The session never came into being, so there is nothing to ask about.
+    tmux.new_session_creates = False
+
+    with pytest.raises(MachineUnreadable):
+        engine.start(proj("vessel"))
+
+    assert tmux.killed == []
+
+
+def test_a_cleanup_that_also_fails_does_not_replace_the_real_error(root: Path) -> None:
+    """The machine is unreadable; that is what the caller must be told.
+
+    If the tidy up cannot reach tmux either, the original refusal still stands.
+    Reporting the cleanup's failure instead would name the second symptom of
+    one cause and hide the first.
+    """
+    engine, tmux = engine_for(root)
+    tmux.fail_new_session = TmuxUnavailable("tmux timed out after 10.0s")
+    tmux.fail_has_session = TmuxUnavailable("tmux still gone")
+
+    with pytest.raises(MachineUnreadable) as raised:
+        engine.start(proj("vessel"))
+    assert "timed out" in str(raised.value)

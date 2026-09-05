@@ -937,7 +937,12 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # whole identifier read the separator as the thing it protects against
         # and rejected every real name. That was a live defect, so its reason
         # stays in the code.
-        "engine.py": 792,
+        # 792 to 826 for #102. The addition is a cleanup path plus the reason
+        # it asks rather than guesses, which is the distinction the ticket drew
+        # and the one a future reader would otherwise re-litigate: assuming the
+        # session exists kills something that may not, assuming it does not
+        # leaves the defect.
+        "engine.py": 826,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
