@@ -140,3 +140,44 @@ async def test_a_search_spans_the_roots_and_says_where_each_hit_is(
     await page.locator("[data-search]").fill("personal")
     await expect(personal).to_be_visible()
     await expect(work).to_be_hidden()
+
+
+async def test_the_new_folder_sheet_says_which_root_and_lets_you_change_it(
+    page: Page, server: Harness
+) -> None:
+    """#129. With two roots the sheet must show where the folder will go BEFORE
+    a name is typed, and creating must honour the choice.
+
+    The placeholder this replaces picked whichever root was typed first on the
+    command line and said nothing, so a folder landed in the wrong tree with
+    the new row as the only evidence.
+    """
+    server.seed(running=["vessel"], also_in=TWO_ROOTS)
+    await page.goto(server.base)
+    await expect(
+        page.locator(f'[data-project="{server.project("vessel")}"]')
+    ).to_have_attribute("data-state", "running", timeout=15_000)
+
+    await page.get_by_role("button", name="New").click()
+    picker = page.get_by_label("Root")
+    await expect(picker).to_be_visible()
+
+    await picker.select_option("personal")
+    await page.get_by_label("Folder name").fill("invoices")
+    await page.get_by_role("button", name="Create").click()
+
+    created = page.locator('[data-project="personal~invoices"]')
+    await expect(created).to_be_visible(timeout=15_000)
+    await expect(created.locator(".row-root")).to_have_text("personal")
+    # And it went nowhere else.
+    await expect(page.locator('[data-project="main~invoices"]')).to_have_count(0)
+
+
+async def test_one_root_gets_no_root_control_at_all(page: Page, server: Harness) -> None:
+    """The same rule the row chip follows: a single root deployment keeps the
+    sheet it has today rather than growing a control with one option."""
+    server.seed(stopped=["vessel"])
+    await page.goto(server.base)
+    await page.get_by_role("button", name="New").click()
+    await expect(page.get_by_label("Folder name")).to_be_visible()
+    await expect(page.get_by_label("Root")).to_have_count(0)
