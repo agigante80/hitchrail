@@ -282,6 +282,19 @@ main { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
 .row-name { font-weight: 700; overflow-wrap: anywhere; }
 .row-actions { display: flex; gap: 8px; flex-shrink: 0; margin-left: auto; }
 
+/* #122. Which root a row is in, shown only when there is more than one.
+   Quieter than `.badge` on purpose: the state badge is what a person scans a
+   list for, and a root chip that competed with it would make forty rows harder
+   to read to solve a problem that only exists when two names collide.
+   `flex-shrink: 0` so the label never wraps to one character per line, which
+   is the failure #75 found on a real phone for `.row-actions`. */
+.row-root {
+  font-size: 12px; font-weight: 600;
+  padding: 2px 8px; border-radius: 999px;
+  background: var(--surface-alt); color: var(--muted);
+  flex-shrink: 0;
+}
+
 .row[data-state="running"], .row[data-state="detached"], .row[data-state="stale"] {
   display: flex; flex-direction: column; gap: 10px;
 }

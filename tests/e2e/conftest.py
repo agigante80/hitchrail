@@ -828,6 +828,17 @@ class Harness:
         assert self.engine is not None
         self.engine.kill(e2e_id(name, label))
 
+    def displayed(self, name: str, label: str | None = None) -> str:
+        """What a PERSON reads for this project, not what addresses it.
+
+        #122: the interface shows the FOLDER, and adds the root only when there
+        is more than one to tell apart. Pass `label` for the several roots
+        case; leave it out for the single root one, which is every test written
+        before #120 and which must keep reading exactly as it did.
+        """
+        folder = e2e_name(name)
+        return f"{folder} in {label}" if label else folder
+
     def project(self, name: str, label: str = DEFAULT_LABEL) -> str:
         """The IDENTIFIER, for a test that needs to select on it.
 

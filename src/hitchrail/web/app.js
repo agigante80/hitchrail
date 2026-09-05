@@ -230,6 +230,33 @@ function metaFor(project) {
    lists the same three and the two must not drift. */
 const TALL_STATES = new Set(["running", "detached", "stale"]);
 
+/* -- #122: the root a row is in ----------------------------------------
+ *
+ * A project is `<root-label>~<folder>` on the wire. The interface shows the
+ * FOLDER, because that is what the person named, and adds the label only when
+ * there is more than one root to tell apart. A single root deployment does not
+ * pay for a feature it is not using, which is what #122 asks for and what
+ * keeps the one line row the design argues for.
+ *
+ * Splitting on the FIRST `~` is exact rather than lenient: neither half can
+ * contain one, because both are held to the same folder allowlist. */
+function splitProject(identifier) {
+  const cut = identifier.indexOf("~");
+  if (cut < 0) return { label: "", folder: identifier };
+  return { label: identifier.slice(0, cut), folder: identifier.slice(cut + 1) };
+}
+
+function severalRoots() {
+  return (state.roots ?? []).length > 1;
+}
+
+/* What to call a project where a person reads it, as opposed to where the API
+ * addresses it. With one root that is the bare folder, exactly as before. */
+function displayProject(identifier) {
+  const { label, folder } = splitProject(identifier);
+  return severalRoots() && label ? `${folder} in ${label}` : folder;
+}
+
 function renderRow(project) {
   const row = document.createElement("article");
   row.className = "row";
@@ -241,12 +268,26 @@ function renderRow(project) {
   const head = document.createElement("div");
   head.className = "row-head";
 
+  const { label, folder } = splitProject(project.name);
+
   const name = document.createElement("span");
   name.className = "row-name";
   // textContent, never innerHTML. A project name is a folder name and
-  // therefore attacker chosen by anybody who can write to the root.
-  name.textContent = project.name;
+  // therefore attacker chosen by anybody who can write to the root. The label
+  // is not: it comes from `--root`, which the operator typed. Both go through
+  // textContent anyway, because the rule is about the sink and not the source.
+  name.textContent = folder;
   head.append(name);
+
+  // Only with something to tell apart. One root means one possible answer, and
+  // a chip repeating it on every row is noise on the scarcest screen.
+  if (severalRoots() && label) {
+    const where = document.createElement("span");
+    where.className = "row-root";
+    where.dataset.rootLabel = label;
+    where.textContent = label;
+    head.append(where);
+  }
 
   const badge = document.createElement("span");
   badge.className = "badge";
@@ -588,7 +629,9 @@ function showDialog({ title, body, actions, extra, forProject }) {
 
 function confirmStop(project) {
   showDialog({
-    title: `Stop ${project.name}?`,
+    // The name a PERSON reads, which with several roots says which one.
+    // A confirmation naming the wrong project is worse than none.
+    title: `Stop ${displayProject(project.name)}?`,
     // #89: this used to say "It will be asked to finish what it is doing",
     // which no version of the sequence has ever done. The first thing sent is
     // an interrupt. Say that, and carry the warning about part done work here
