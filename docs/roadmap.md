@@ -418,7 +418,19 @@ foreground shell:
 **Plan: [`superpowers/plans/2026-09-04-hitchrail-phase-8-release.md`](superpowers/plans/2026-09-04-hitchrail-phase-8-release.md)**
 Started 2026-09-04. Six tasks, 24 to 29.
 
-Tickets: #58, #59, #60, #61, #62, #105, #110, #116, #117.
+Tickets: #58, #59, #60, #61, #62, #105, #110, #116, #117, #170.
+
+**#170 arrived late and belongs here rather than in a later phase**, because it
+is a defect in the unit template #110 shipped. `Restart=on-failure` restarts on
+any non-zero exit and a config refusal exits 2, so an `EnvironmentFile` with a
+blank token loops: measured at 37 restarts and 38 copies of the same message,
+never rate limited because `RestartSec=5` keeps it under systemd's default. The
+template's comment claims `on-failure` prevents exactly that. Verified fix is
+`RestartPreventExitStatus=2`, and a uvicorn bind failure exits 3, so the case
+where retrying IS right still retries.
+
+**Phase 8 therefore reopens for two items**, both on the same file: #110's
+manual reboot verification, and this.
 
 **#106 was the gate and is closed**, by decision rather than by the objects
 being purged. What it described remains true: the pre-rewrite objects are served
@@ -507,7 +519,15 @@ beside it, no tier's result depends on what the machine running it happens to
 have, and a phase's progress count in prose is checked against the boxes it
 describes.
 
-Tickets: #94, #104, #70, #73, #92, #67, #30, #10, #86, #5, #51.
+Tickets: #94, #104, #70, #73, #92, #67, #30, #10, #86, #5, #114, #118, #128,
+#135, #136, #143.
+
+**#51 left this phase for Backlog.** It corrects two commit messages that
+describe a different change. The trees are right and the gates were green, so
+nothing here would have caught it and nothing is proposed that would: it was in
+a phase whose exit criteria it cannot meet. The list above also gained the six
+tickets filed into this milestone since it was written, which is the drift #92
+is open about.
 
 ## Phase 11: The interface in every state
 
@@ -640,15 +660,27 @@ argue it rather than quietly narrowing the scope:
 holding a token can get in without a saved link, and adding a folder does not
 mean editing a systemd unit.
 
-Tickets: #152, #153, #154.
+Tickets: #152, #153, #154, #123.
+
+**#123 moved here from Backlog.** `session_prefix` is a config field with
+validation and no flag, which is the same shape as #154's problem: configuration
+that exists in the code and cannot be reached by the operator. #154 says taking
+it first makes this a two-line addition, and the Backlog note below no longer
+means anything now that Phase 12 has closed.
 
 ## Phase 15: The package as strangers meet it
 
 **Objective: somebody who has never seen this project can install it, tell what
-it is, and see that it is maintained, without reading the source.**
+it is, see that it is maintained, and be helped when it goes wrong.**
 
 Everything here came from looking at the published PyPI page beside our own
 README and finding they disagree, or say nothing.
+
+**The last clause of the objective was added for #167 rather than #167 being
+squeezed under the original.** Logging is not part of meeting a package, and
+answering a stranger's bug report is the other half of publishing one. Widening
+the phase is the honest move; filing it here under "installation" would not
+have been.
 
 Delivers: `pip` acknowledged as an install route, the deprecated licence
 classifier removed and the licence made clickable, a badge row on the first
@@ -664,7 +696,7 @@ control, and this package is installed with `uvx` on other people's machines.
 statement rather than four scattered ones, and a direct dependency going stale
 arrives as a pull request against `develop`.
 
-Tickets: #155, #156, #157, #158, #167.
+Tickets: #155, #156, #157, #158, #167, #141, #17.
 
 **#167 came from failing to answer a support question about this machine.** An
 operator asked whether a stop request had actually been sent. The journal held
@@ -837,7 +869,8 @@ each ticket rather than left to be discovered.
 
 Tickets: #119, #120, #121, #122.
 
-The interim workaround is in Backlog rather than here: `session_prefix` is a
-config field with validation and no CLI flag, so the two instance arrangement
-cannot even be made safe today. That is small and worth doing before this phase
-starts.
+The interim workaround was #123, kept out of this phase because it was a
+workaround for the limitation this phase removed. **It is now in Phase 14**, on
+its merits rather than as an interim anything: one instance takes several roots,
+so nobody needs two, and `session_prefix` is simply a setting the operator
+cannot reach.
