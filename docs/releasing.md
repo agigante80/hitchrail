@@ -124,6 +124,13 @@ index.
 
 ## Every release
 
+**A release is a pull request from `develop` to `main`**, since #132. Work lands on
+`develop`; opening the PR is what says "this batch is a release", and `version-bumped`
+is a required status check on `main`, so the merge is blocked until step 3 is done. The
+gate is no longer advisory and no longer dormant.
+
+Steps 1 to 5 happen ON the pull request. Steps 6 onward happen after it merges.
+
 1. **Decide the level** from `docs/versioning.md`. Semver here is an operator
    contract: a change is MAJOR when the person running `uvx hitchrail` must
    change something. While the version is `0.y.z`, a breaking change may ship
@@ -134,8 +141,10 @@ index.
    not what changed. A security fix says plainly what was reachable and by
    whom, including the parts that are embarrassing.
 
-3. **Bump `version` in `pyproject.toml`.** `release-gate.yml` checks on every
-   pull request that it is ahead of the latest release tag.
+3. **Bump `version` in `pyproject.toml`.** `release-gate.yml` checks on every pull
+   request that it is ahead of the latest release tag, and since #132 it is a REQUIRED
+   check, so forgetting this blocks the merge rather than producing a release that
+   quietly reuses a number.
 
 4. **Regenerate the screenshots** if the interface changed:
 
