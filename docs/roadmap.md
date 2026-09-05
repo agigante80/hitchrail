@@ -669,7 +669,23 @@ account, logs at a URL you can bookmark, and an icon set.
 primary action is reachable at any scroll position, and the page answers "which
 build is this and who is it running as" without an SSH session.
 
-Tickets: #146, #147, #148, #149, #150, #151, #160, #164, #168.
+Tickets: #146, #147, #148, #149, #150, #151, #160, #164, #168, #179.
+
+**#179 came from a phone, and it is a rule whose premise moved rather than a
+regression.** A stopped row crushes its name to one or two characters per line:
+an eighteen character name over three lines, a six character one over two. The
+guard for exactly
+this exists, from #75, and covers `running`, `stale` and `detached`, because
+when it was written a stopped row carried a name, a badge and one button, which
+fit. #122 then added the root chip, `flex-shrink: 0` like everything else on
+that line, so the name became the only item that could give and
+`overflow-wrap: anywhere` let it give all the way down.
+
+It belongs here rather than in Phase 11 because the fix spends vertical space
+this phase is otherwise trying to save: a stopped row roughly doubles in height,
+which at fifty rows is about 2,200px of scroll becoming 4,400px. #150 is what
+gives that space back, by turning six word badges into glyphs, so the two should
+be read together.
 
 **#150 was rewritten from twenty icons to seven, and the two icon tickets pull
 in opposite directions on purpose.** #150 is a SET, so it is vendored from an
