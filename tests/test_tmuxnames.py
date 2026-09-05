@@ -140,7 +140,7 @@ def test_a_tmux_server_argv_is_recognised_as_tmux() -> None:
 def test_only_argv_zero_counts_not_a_substring_anywhere() -> None:
     """The argument after `-c` is a path nobody controls, so a search of the
     whole line refuses anything running under a directory called tmux."""
-    assert not is_tmux_argv("/bin/sh -c /home/me/tmux/run.sh")
+    assert not is_tmux_argv("/bin/sh -c /opt/tmux/run.sh")
 
 
 def test_the_basename_is_what_matches_because_argv_zero_is_however_it_was_spelled() -> None:
@@ -152,19 +152,37 @@ def test_an_empty_command_line_is_not_tmux() -> None:
     assert not is_tmux_argv("")
 
 
-def test_a_differently_named_tmux_is_currently_missed() -> None:
-    """**This asserts the DEFECT, deliberately, and #96 is the ticket.**
+def test_a_versioned_or_suffixed_tmux_is_recognised() -> None:
+    """#96. A server started as `tmux-3.4`, or as `tmux3`, is a tmux.
 
-    `is_tmux_argv` compares the basename to the literal `BINARY`, so a tmux
-    installed as `tmux3` or reached through a wrapper is not recognised, and
-    #84 reopens: the server's own argv is mistaken for an agent.
+    #84 returns for that machine otherwise: the server's argv still ends with
+    the agent's command line, orphan attribution claims it, and the row shows
+    the SERVER's pid, RSS and uptime, with `ram_mb` feeding the memory guard.
 
-    Written as an assertion of what the code does rather than of what it should
-    do, so it FAILS the day #96 is fixed and has to be updated deliberately. A
-    test asserting the correct behaviour would be a failing test nobody can
-    merge; this one records the gap where the next reader meets it.
+    Argv captured from `ps -eww -o args` shapes rather than described: the tail
+    is a real `new-session` invocation, because that tail is the whole reason
+    the server is mistaken for an agent.
     """
+    for spelling in ("tmux", "tmux3", "tmux-3.4", "tmux_next", "/usr/local/bin/tmux-3.5a"):
+        assert is_tmux_argv(
+            f"{spelling} -S /tmp/s new-session -d -s hr-vessel claude --remote-control vessel"
+        ), spelling
+
+
+def test_the_wider_tmux_family_is_not_claimed() -> None:
+    """The obvious fix, `startswith("tmux")`, trades a narrow false negative for
+    a broad false positive.
+
+    `tmuxinator`, `tmuxp` and `tmuxifier` are real programs that SPAWN tmux, and
+    a process of theirs is not a tmux server. Claiming one would hide a genuine
+    agent rather than reveal a false one, which is the worse direction.
+
+    The rule that separates them: a version or build suffix never starts with a
+    letter, and a different program's name always does.
+    """
+    for other in ("tmuxinator", "tmuxp", "tmuxifier", "tmuxinatord"):
+        assert not is_tmux_argv(f"{other} start myproject"), other
+
+
+def test_the_binary_constant_is_still_the_stem_everything_matches_on() -> None:
     assert BINARY == "tmux"
-    assert not is_tmux_argv("tmux3 -S /tmp/s new-session -d -s x cmd"), (
-        "if this now passes, #96 was fixed: delete this test and assert the fix instead"
-    )

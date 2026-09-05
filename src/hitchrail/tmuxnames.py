@@ -68,7 +68,43 @@ def is_tmux_argv(args: str) -> bool:
     stops working under the invocation our own live tiers make.
     """
     head = args.split(maxsplit=1)
-    return bool(head) and PurePosixPath(head[0]).name == BINARY
+    if not head:
+        return False
+    return _is_tmux_binary(PurePosixPath(head[0]).name)
+
+
+def _is_tmux_binary(name: str) -> bool:
+    """Whether a basename names tmux itself, allowing a version or build suffix.
+
+    #96. `== BINARY` alone missed `tmux-3.4` and `tmux3`, and a server somebody
+    ELSE started under such a name reopens #84 on that machine: its argv still
+    ends with the agent's command line, so orphan attribution claims it and the
+    row shows the server's pid, RSS and uptime, with `ram_mb` feeding the memory
+    guard. Our own `_argv` invokes plain `BINARY`, so this can only ever be
+    another tool's server on the same default socket, which is precisely #84's
+    finding.
+
+    **`startswith` is the obvious fix and it is wrong.** It claims `tmuxinator`,
+    `tmuxp` and `tmuxifier`, which are real programs that SPAWN tmux. Claiming
+    one hides a genuine agent, which is worse than the false negative it fixes.
+
+    The rule that separates them: **a version or build suffix never begins with
+    a letter, and another program's name always does.** `tmux-3.4`, `tmux3` and
+    `tmux_next` are tmux; `tmuxinator` is a different program that happens to
+    start with the same four characters.
+
+    **Not `display-message -p '#{pid}'`, which the ticket suggested and which is
+    exact.** It asks the server we are talking to, so it covers our own socket
+    only and could not see the foreign server that is the whole case here. It
+    also costs a tmux call per listing, and
+    `test_list_issues_one_tmux_call_and_one_ps_call` asserts there is exactly
+    one, because a call per row is a subprocess spawn per row. Exactness that
+    does not cover the case, at a price a test forbids, is not the trade.
+    """
+    if not name.startswith(BINARY):
+        return False
+    suffix = name[len(BINARY) :]
+    return not suffix or not suffix[0].isalpha()
 
 
 def sanitize(name: str) -> str:

@@ -51,12 +51,22 @@ The mechanical batch, and first because it clears the ground for the rest.
       #96's defect so it fails the day #96 is fixed. Sweep: 852 killed to 856,
       survivors 233 to 229.
 
-- [ ] **Task 31, #96.** `is_tmux_argv` compares `argv[0]`'s basename to the
+- [x] **Task 31, #96.** `is_tmux_argv` compares `argv[0]`'s basename to the
       literal `"tmux"`, so a tmux installed as `tmux3`, or invoked through a
       wrapper, reopens #84: a tmux server's own argv satisfies the agent match
       and a detached agent is invented.
 
       Write it in the module task 30 created.
+
+      **Done 2026-09-05.** A version or build suffix never begins with a letter
+      and another program's name always does, so `tmux-3.4`, `tmux3` and
+      `tmux_next` match while `tmuxinator`, `tmuxp` and `tmuxifier` do not.
+      `startswith` alone would have claimed all three of those, and claiming one
+      HIDES a genuine agent, which is worse than the false negative it fixes.
+      The ticket's `display-message -p '#{pid}'` was not taken: it asks the
+      server we are talking to, so it cannot see the foreign server that is the
+      whole case, and it costs a tmux call per listing that
+      `test_list_issues_one_tmux_call_and_one_ps_call` forbids.
 
 - [ ] **Task 32, #102.** A timed out `new_session` can leave a session with
       `remain-on-exit` still on, which presents as a `stale` row that never
