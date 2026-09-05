@@ -492,15 +492,50 @@ plan's batch order rather than the order they were filed, because the ordering i
 a dependency: #107 must follow #96 and #85, since it builds a destructive control
 on top of an identification that has been wrong twice this month.
 
-**Eight shipped and the phase is not closed.** #93, #96, #102, #46, #49, #95,
-#97 and #113 are done and closed with their commits. #85, #100 and #32 were
-escalated rather than implemented, and #107 is blocked behind #85. Each of the
-four is a decision rather than an implementation: what a row should SAY about an
-agent in another tool's session (#85), whether telling two modals apart is worth
-a `capture-pane` per running row on every listing (#100), and which of two
-tickets decides what makes a project name durable (#32, against #119). The plan
-records the reasoning for each. The phase's first exit criterion belongs to #85
-and stays open with it.
+**Eight shipped, then four decisions were taken on 2026-09-05 and the phase has
+three implementations left.** #93, #96, #102, #46, #49, #95, #97 and #113 are
+done and closed with their commits. #85, #100 and #32 were escalated rather than
+implemented, and #107 was blocked behind #85. Each of the four was a decision
+rather than an implementation, and each is now decided on the ticket:
+
+- **#85: `detached` is redefined, and the missing fact becomes an overlay.** The
+  four options were a fifth state, `running` qualified, the label redefined, and
+  reporting `stopped`. What settled it is that a foreign-owned agent and a true
+  orphan are operationally identical - start refuses, graceful stop is
+  impossible, kill-by-session is impossible for both - and differ only in what
+  the row should say. That is what this project's overlays are for, and the
+  discriminator is free: `list-panes -a` already returns the foreign panes and
+  `pane_pids` discards them. The design's section 4.1 wording moves with it.
+- **#100: the capture is paid for, capped at ten.** Measured rather than argued:
+  `capture-pane` costs 3.0 ms against a warm server on the development machine,
+  so ten stuck rows is +30 ms on a listing and fifty is +149 ms, and the browser
+  refreshes every 700 ms for a whole stop wait. Two corrections came out of
+  reading the code: `input_is_clear` cannot be reused, because its anchor was
+  shortened so a modal and a person's draft both read as "not clear", and the
+  free "no link yet" signal cannot replace the capture, because a link is not
+  written for every session.
+- **#32: closed as a decision.** Option B, keying sessions off the resolved path,
+  now contradicts two settled arguments rather than one open question: #119's
+  `<root-label>~<folder>` identity, and `sanitize`'s own "injective by
+  construction beats injective by hash". The behaviour, its docstring and the
+  test that pins it are unchanged, and the work went to the cause instead.
+- **#107 is unblocked and smaller.** With an owner name on the wire it refuses
+  whenever a foreign session owns the agent, so the first unscoped destructive
+  path applies only to agents nothing is known to own. The race its body accepts
+  is closable rather than only narrowable: this project declares Linux and 3.11,
+  so a pidfd pins the process the pid was reused from, and the ordering is
+  acquire-then-verify.
+
+**Two tickets left for Backlog, both causes rather than defects.** #172 is the
+cgroup owner test, which would see the sockets and terminals the pane map
+cannot, deferred because it is a new external surface that has to degrade and
+because a tmux-spawn scope registration race can make it report a live agent as
+detached. #173 asks whether `NAME_PATTERN` must still refuse a space, which is
+what makes the alias in #32 the obvious response to our own error message; it
+also records that `pane_pids` parses `#{session_name} #{pane_pid}` on the first
+space, so widening the pattern is not a one-line change.
+
+The phase's first exit criterion belongs to #85 and stays open with it.
 
 ## Phase 10: A suite that would notice
 
