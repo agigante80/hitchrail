@@ -3,14 +3,22 @@
 A web UI for starting and stopping headless Claude Code sessions across a
 folder of projects. Open it on your phone, tap a folder, get a session link.
 
-**Status: it runs.** Phases 0 to 6 are built and closed: the configuration and
-its refusals, the folder discovery that makes the root a hard boundary, the
-three security controls between a web page and a shell, the adapters, the
-engine, the HTTP API and the browser interface. It has been driven from a real
+**Status: it runs, and it is published.**
+
+```sh
+uvx hitchrail --root main=~/projects
+```
+
+The configuration and its refusals, the folder discovery that makes each root a
+hard boundary, the security controls between a web page and a shell, the
+adapters, the engine, the HTTP API and the browser interface are all built, and
+more than one root of projects is supported. It has been driven from a real
 phone against a real machine.
 
-**It is not on PyPI yet**, so the `uvx` commands below do not work. Until they
-do, run it from a clone: see [Run it](#run-it).
+**No phase count here**, deliberately: this line named "phases 0 to 6" for long
+enough to be wrong by several. [`docs/roadmap.md`](docs/roadmap.md) is the one
+place that says what is built, and a test asserts this file has not gone back to
+claiming otherwise.
 
 See [`docs/roadmap.md`](docs/roadmap.md) for what is left,
 [`docs/superpowers/specs/2026-08-25-hitchrail-design.md`](docs/superpowers/specs/2026-08-25-hitchrail-design.md)
@@ -214,6 +222,28 @@ because that is what you do to put Hitchrail behind a proxy such as
 reaches no server log. Over plain HTTP the cookie it becomes still crosses your
 network in clear, so put TLS in front of it if that matters to you.
 
+### Every option
+
+`hitchrail --help` is the authority and prints this list; it is repeated here
+because a person choosing whether to install something should not have to
+install it first.
+
+| Option | Default | What it does |
+|---|---|---|
+| `--root LABEL=PATH` | none, and required | A labelled folder holding projects. **Repeatable**, and the label becomes part of every project's name, so `work~vessel` and `personal~vessel` are two projects rather than one ambiguous row |
+| `--host` | `127.0.0.1` | Address to bind. The default is the safe one: loopback |
+| `--port` | `8787` | Port to bind |
+| `--token` | generated | Required as soon as anything off this machine can reach Hitchrail. Prefer `HITCHRAIL_TOKEN`; see below |
+| `--allow-host` | none | An extra hostname the server will answer to. Repeatable. Needed behind a proxy |
+| `--allow-origin` | none | An exact origin a browser may claim, `scheme://host[:port]`. Repeatable. Needed behind a TLS terminating proxy, whose scheme and port cannot be derived from our own bind |
+| `--self-project` | none | A project that must never be stopped, named as `label~folder`. Point it at the folder Hitchrail itself runs from |
+| `--agent-binary` | `claude` | The agent executable to run. Must be on `PATH` or an absolute path |
+| `--stop-timeout` | `30` | Seconds to wait for a graceful stop before reporting that it timed out. It reports; it does not escalate |
+| `--version` | | Print the version and exit |
+| `-h`, `--help` | | Print the options and exit |
+
+There are no subcommands. Hitchrail does one thing, and the flags configure it.
+
 ### Where the token comes from
 
 In order: `--token`, then `HITCHRAIL_TOKEN` in the environment, then one
@@ -260,18 +290,22 @@ before enabling it.
 
 ## Install
 
-**Not yet.** `hitchrail` is not on PyPI, so none of these work today. They are
-here so the intended shape is on the record, and they become true at Phase 8.
-
 Hitchrail is a Python package, so the equivalent of `npx` here is `uvx`:
 
 ```sh
-uvx hitchrail                  # run it, install nothing
-uv tool install hitchrail      # keep it on PATH
-pipx install hitchrail         # if you already live in pipx
+uvx hitchrail --root main=~/projects     # run it, install nothing
+uv tool install hitchrail                # keep it on PATH
+pipx install hitchrail                   # if you already live in pipx
 ```
 
-One word, no hyphen.
+One word, no hyphen. It is on PyPI as
+[`hitchrail`](https://pypi.org/project/hitchrail/), and it needs Python 3.11 or
+newer.
+
+**`uv tool install`, not `uvx`, if you are going to run it as a service.** `uvx`
+resolves and runs out of a cache it is free to evict, which is what makes it
+right for trying something and wrong for a systemd unit: that needs an
+executable still there next month. See `packaging/hitchrail.service`.
 
 **The service route is `uv tool install`, not `uvx`.** `uvx` resolves and runs
 out of a cache it is free to evict, which is what makes it good for trying
