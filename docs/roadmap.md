@@ -524,7 +524,7 @@ with a ceiling, and `app.js` split along the seam it already has.
 **Done when:** no screen states something it did not read, every token pair
 passes AA, and no file in `web/` does more than one thing.
 
-Tickets: #68, #69, #71, #72, #78, #82, #90, #161, #162, #163.
+Tickets: #68, #69, #71, #72, #78, #82, #90, #161, #162, #163, #165, #166.
 
 **Three arrived from using it and they are the shape this phase was cut for.**
 #161 is a defect with a measured cause: every dialog is pinned to the bottom of
@@ -562,7 +562,7 @@ account, logs at a URL you can bookmark, and an icon set.
 primary action is reachable at any scroll position, and the page answers "which
 build is this and who is it running as" without an SSH session.
 
-Tickets: #146, #147, #148, #149, #150, #151, #160, #164.
+Tickets: #146, #147, #148, #149, #150, #151, #160, #164, #168.
 
 **#150 was rewritten from twenty icons to seven, and the two icon tickets pull
 in opposite directions on purpose.** #150 is a SET, so it is vendored from an
@@ -643,7 +643,16 @@ control, and this package is installed with `uvx` on other people's machines.
 statement rather than four scattered ones, and a direct dependency going stale
 arrives as a pull request against `develop`.
 
-Tickets: #155, #156, #157, #158.
+Tickets: #155, #156, #157, #158, #167.
+
+**#167 came from failing to answer a support question about this machine.** An
+operator asked whether a stop request had actually been sent. The journal held
+uvicorn's access lines and nothing else: not the keystrokes, not the pane check,
+not the decision to stop waiting. Measured afterwards, the nine `logger` calls
+in the tree have no handler at all, so a warning prints as a bare message with
+no timestamp and no level, and `info` and `debug` are discarded entirely. Two of
+the nine are therefore dead in every deployment. That is the gap to close before
+strangers start filing bug reports.
 
 ## Phase 16: What survives a reboot
 
@@ -687,6 +696,15 @@ Not scheduled, and not to be smuggled into an earlier phase:
 - Sending input to a session. Hitchrail starts and stops agents; it is not a
   terminal, and making it one is a different product. #159 restores sessions
   and deliberately does not reach into an agent's own conversation state.
+
+  **#166 asks for one keystroke and is not this**, and the difference is
+  written on that ticket in four conditions: only in reply to a prompt our own
+  stop provoked, only from a set fixed in code, only while the pane still shows
+  that prompt, and never chosen for the operator. The interface today offers
+  `Kill it` for a question whose safe answer is one keypress, which is the
+  destructive option offered and the safe one withheld, in a situation
+  Hitchrail created. If any of the four conditions is dropped it becomes the
+  deferred item and the deferral stands.
 
 ## Deliberate additions to the design
 
