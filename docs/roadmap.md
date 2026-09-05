@@ -526,6 +526,71 @@ passes AA, and no file in `web/` does more than one thing.
 
 Tickets: #68, #69, #71, #72, #78, #82, #90.
 
+## Phase 13: Fifty rows on a phone
+
+**Objective: the interface stays usable when there are fifty projects across
+five roots, and says what it knows about each.**
+
+Phase 11 is about states saying something true. This is about a person finding
+the row they want among a lot of them, and about the page answering questions it
+currently cannot: which version am I looking at, since when, as whom.
+
+Cut from a real five root install rather than from the design. Every ticket here
+came from using it, which is also why none of them is a new power: the list is
+complete and correct, and what is missing is navigation and provenance.
+
+Delivers: filtering by root, a header that survives scrolling, a footer that
+names the version and links to the source, the server's own start time and
+account, logs at a URL you can bookmark, and an icon set.
+
+**Done when:** a fifty row list can be narrowed to one root in one tap, the
+primary action is reachable at any scroll position, and the page answers "which
+build is this and who is it running as" without an SSH session.
+
+Tickets: #146, #147, #148, #149, #150, #151.
+
+**One of these closed a question rather than opening one.** #149 was filed as
+"research how to improve the header, iframed?". Measured on `claude.ai`:
+`x-frame-options: SAMEORIGIN`, plus a CSP that says the same thing. Framing the
+session view under our header is refused by the browser, twice, and the only
+workarounds are a proxy that strips a vendor's frame guard on an authenticated
+session or a browser extension. It is recorded as impossible rather than left
+open as untried, and what remains is the real question underneath it.
+
+## Phase 14: The perimeter, chosen rather than assumed
+
+**Objective: the operator chooses how this is reached and how it is proved,
+instead of being handed one answer.**
+
+Three tickets, and all three touch a security control, so each is a decision
+before it is work. They are together because they interact: TLS changes what a
+sign-in form costs, and both change what the README's stated limitations say.
+
+Delivers: HTTPS from the server itself rather than only from a proxy in front of
+it; a sign-in page for people who have a token but not the saved link; and roots
+that come from a config file rather than only from a unit's `ExecStart`.
+
+**Two of the three are deliberately NOT what was asked for**, and the tickets
+argue it rather than quietly narrowing the scope:
+
+- **#153.** A prompt is missing and should exist. Replacing a 192 bit token with
+  a password a person can type on a phone is a downgrade on an API equivalent to
+  a shell, with no rate limiting anywhere in this codebase. Stage 1 is a form
+  that accepts the token. A passphrase ships only with a slow KDF, rate
+  limiting, and a refusal off loopback without TLS, and that list is the cost
+  rather than an obstacle course.
+- **#154.** A route that takes a PATH removes control 5 outright: the credential
+  that lists projects would become one that runs an agent anywhere the user can
+  write. The answer is a config file the operator edits on the machine, and a UI
+  that can only toggle roots already in it. That is most of what was wanted and
+  none of what it would have cost.
+
+**Done when:** a LAN deployment can be HTTPS without a second daemon, a person
+holding a token can get in without a saved link, and adding a folder does not
+mean editing a systemd unit.
+
+Tickets: #152, #153, #154.
+
 ## Deliberately later
 
 Not scheduled, and not to be smuggled into an earlier phase:
@@ -533,8 +598,11 @@ Not scheduled, and not to be smuggled into an earlier phase:
 - Restart as its own operation. It is stop then start, and the interface can
   compose it.
 - More than one root.
-- Authentication beyond a single shared token.
-- Streaming logs. A tail on demand is enough until it demonstrably is not.
+- Authentication beyond a single shared token. #153 is not this: it adds a way
+  to TYPE the existing credential, and says why a second kind of credential is a
+  downgrade rather than a feature.
+- Streaming logs. A tail on demand is enough until it demonstrably is not. #151
+  gives the tail its own URL and deliberately does not stream it.
 - Sending input to a session. Hitchrail starts and stops agents; it is not a
   terminal, and making it one is a different product.
 
