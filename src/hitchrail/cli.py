@@ -342,7 +342,26 @@ def main(argv: list[str] | None = None) -> int:
 
     text = banner(config)
     if text:
-        print(text)
+        # **`flush=True`, and #145 is why it is not decoration.** Python block
+        # buffers stdout when it is not a terminal. Under a systemd unit stdout
+        # IS the journal, so this print landed in an 8 KB buffer and stayed
+        # there: a server does not exit, so nothing ever flushed it. Observed on
+        # a real unit, where the entire log was uvicorn's four lines, which
+        # appear only because uvicorn logs to stderr.
+        #
+        # What that lost is the whole of `banner`'s reason to exist under a
+        # service. It is the only statement of which addresses this server will
+        # answer to, `allowed_hosts` being derived rather than configured, and
+        # it carries the warning that fires when a service has no
+        # `HITCHRAIL_TOKEN` and is therefore invalidating the phone's link on
+        # every restart. Both are exactly the deployment where you cannot look
+        # at a terminal instead.
+        #
+        # `packaging/hitchrail.service` also sets `PYTHONUNBUFFERED=1`, and that
+        # is not belt and braces. This fixes OUR line; that covers everything
+        # else the process writes to stdout for a unit whose only output surface
+        # is the journal.
+        print(text, flush=True)
 
     engine = Engine(config=config)
     # One bus, built here and owned here, because the CLI owns the process.

@@ -130,6 +130,13 @@ every start, so a service that restarts invalidates the link saved on your
 phone. Put `HITCHRAIL_TOKEN` in the unit's `EnvironmentFile` and `chmod 600`
 it, because anyone who can read that file can run code as you.
 
+**The unit sets `PYTHONUNBUFFERED=1`, and the banner below is why.** Python
+block buffers stdout when it is not a terminal, and under a unit stdout is the
+journal. Hitchrail flushes the banner itself since #145, so the template's line
+is for everything else the process prints. Before that fix the entire log was
+uvicorn's four lines, which appear only because uvicorn logs to stderr, and a
+missing message reads as a clean start rather than as a missing message.
+
 **The banner withholds the token when it is talking to the journal.** Under a
 unit, standard output is journald: persistent, and readable by root and by
 members of the `systemd-journal` group. A token printed to a terminal scrolls

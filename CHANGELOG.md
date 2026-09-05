@@ -20,7 +20,22 @@ the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
-Nothing yet.
+### Fixed
+
+**Under a systemd unit the startup banner never reached the journal.** Python
+block buffers standard output when it is not a terminal, so the banner sat in a
+buffer that a running server never flushes, and the whole log was uvicorn's four
+lines. What was lost is the only statement of which addresses the server will
+answer to, and the warning that fires when a service has no `HITCHRAIL_TOKEN`
+and is therefore invalidating the link on your phone at every restart. Nothing
+to do: the banner flushes itself now, and `packaging/hitchrail.service` also
+sets `PYTHONUNBUFFERED=1` for everything else a service prints.
+
+### Documentation
+
+The README leads with the setup most people want: several roots, running as a
+service, reachable from a phone, as one recipe rather than four sections that
+each held part of it.
 
 ## 0.3.0 - 2026-09-05
 

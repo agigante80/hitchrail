@@ -46,6 +46,14 @@ ExecStart=%h/.local/bin/hitchrail --root main=%h/projects
 # notices it is talking to the journal.
 EnvironmentFile=%h/.config/hitchrail/env
 
+# #145. Python block buffers stdout when it is not a terminal, and under a unit
+# stdout is the journal. Hitchrail flushes its own banner, so this is not what
+# makes that appear; it covers everything else the process writes to stdout for
+# a service whose only output surface is a log you read later. The failure it
+# prevents is silence, which reads as "it started fine" rather than as a
+# missing message.
+Environment=PYTHONUNBUFFERED=1
+
 # **on-failure, never always.** Hitchrail refuses to start on a configuration
 # it judges unsafe: no token where one is required, an unreachable root, a
 # host it will not bind. Those refusals are deliberate stops and must stay
