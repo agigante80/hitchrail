@@ -23,7 +23,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -310,7 +309,7 @@ def launch_argv(binary: str, project: str) -> list[str]:
     return [binary, "--dangerously-skip-permissions", REMOTE_CONTROL_MARKER, project]
 
 
-def request_stop(pane: Pane, project: str, settle: Callable[[], None] | None = None) -> None:
+def request_stop(pane: Pane, project: str, settle: Callable[[float], None]) -> None:
     """Ask the agent to exit, verifying between steps. Raises `StopNotSafe`.
 
     The engine calls this and learns nothing more. Iterating GRACEFUL_STOP_KEYS
@@ -363,7 +362,20 @@ def request_stop(pane: Pane, project: str, settle: Callable[[], None] | None = N
     it, and there is a grep test for that, because no import contract can see
     a `for` loop.
     """
-    wait = settle or (lambda: time.sleep(_SETTLE_S))
+
+    # #95. The engine hands its own injected sleep in, and the DURATION stays
+    # here. `_SETTLE_S` is a fact about how a Claude Code pane settles after a
+    # keystroke, which is quarantine knowledge; how to wait is the machine seam
+    # the architecture says is always injected. Splitting them that way keeps
+    # both rules.
+    #
+    # **No default any more.** A default is what let the seam be bypassed for as
+    # long as it was: the parameter existed, the unit tests passed a fake, and
+    # the real path slept on a wall clock regardless. A caller that forgets now
+    # fails to call rather than silently sleeping.
+    def wait() -> None:
+        settle(_SETTLE_S)
+
     # Unpacked rather than iterated, deliberately. Verification happens between
     # the groups, so a fourth one is not something this function could absorb
     # by looping: it needs a decision about where its checkpoint goes. The

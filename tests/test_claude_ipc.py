@@ -145,7 +145,7 @@ def test_request_stop_clears_before_it_interrupts() -> None:
     first: `C-u` is safe whatever state the pane is in, and doing it after an
     interrupt leaves a window where a draft is still present."""
     pane = FakePane()
-    request_stop(pane, "vessel", settle=lambda: None)
+    request_stop(pane, "vessel", settle=lambda _s: None)
     assert [sent[1:] for sent in pane.sent] == list(GRACEFUL_STOP_KEYS)
     assert GRACEFUL_STOP_KEYS[0] == ("C-u",)
 
@@ -154,7 +154,7 @@ def test_request_stop_verifies_the_box_before_typing_into_it() -> None:
     """Two captures, and both before `/exit`. The first guards a draft that was
     already there, the second guards whatever `Escape` did."""
     pane = FakePane()
-    request_stop(pane, "vessel", settle=lambda: None)
+    request_stop(pane, "vessel", settle=lambda _s: None)
     assert len(pane.captured) == 2
 
 
@@ -164,7 +164,7 @@ def test_request_stop_refuses_when_a_draft_survived_the_clear() -> None:
     submits the pair with the operator's authority."""
     pane = FakePane([pane_text(DRAFT_BOX)])
     with pytest.raises(StopNotSafe):
-        request_stop(pane, "vessel", settle=lambda: None)
+        request_stop(pane, "vessel", settle=lambda _s: None)
     assert not any("/exit" in sent for sent in pane.sent), "typed anyway"
 
 
@@ -209,7 +209,7 @@ def test_a_pane_with_no_input_box_is_refused_rather_than_typed_into() -> None:
     """
     pane = FakePane(["hitchrail-shim: started\nsome output and no input row\n"])
     with pytest.raises(StopNotSafe):
-        request_stop(pane, "vessel", settle=lambda: None)
+        request_stop(pane, "vessel", settle=lambda _s: None)
     assert not any("/exit" in sent for sent in pane.sent)
 
 
@@ -228,7 +228,7 @@ def test_a_box_seen_dirty_once_is_never_downgraded_to_unknown() -> None:
     dirty = pane_text(DRAFT_BOX)
     pane = FakePane([dirty, dirty, dirty, ""])
     with pytest.raises(StopNotSafe):
-        request_stop(pane, "vessel", settle=lambda: None)
+        request_stop(pane, "vessel", settle=lambda _s: None)
 
     # Asserted on the keys, not on the exception. With the bug the FIRST
     # checkpoint proceeds, `Escape` goes out, and the second checkpoint raises
@@ -244,7 +244,7 @@ def test_request_stop_refuses_a_pane_it_cannot_read() -> None:
     """Fails closed. An unreadable pane is not an empty one."""
     pane = FakePane([""])
     with pytest.raises(StopNotSafe):
-        request_stop(pane, "vessel", settle=lambda: None)
+        request_stop(pane, "vessel", settle=lambda _s: None)
     assert not any("/exit" in sent for sent in pane.sent)
 
 
@@ -260,7 +260,7 @@ def test_request_stop_refuses_when_escape_leaves_the_box_dirty() -> None:
     """
     pane = FakePane([pane_text(CLEAR_BOX), pane_text(DRAFT_BOX)])
     with pytest.raises(StopNotSafe):
-        request_stop(pane, "vessel", settle=lambda: None)
+        request_stop(pane, "vessel", settle=lambda _s: None)
     assert not any("/exit" in sent for sent in pane.sent)
 
 
@@ -274,13 +274,13 @@ def test_request_stop_captures_with_escape_sequences() -> None:
             seen.append(escapes)
             return super().capture_pane(project, lines, escapes)
 
-    request_stop(Recording(), "vessel", settle=lambda: None)
+    request_stop(Recording(), "vessel", settle=lambda _s: None)
     assert seen and all(seen), "captured without escapes, so dim and bright are one thing"
 
 
 def test_request_stop_targets_the_project_it_was_given() -> None:
     pane = FakePane()
-    request_stop(pane, "vessel", settle=lambda: None)
+    request_stop(pane, "vessel", settle=lambda _s: None)
     assert {sent[0] for sent in pane.sent} == {"vessel"}
 
 
@@ -307,7 +307,7 @@ def test_request_stop_takes_anything_shaped_like_a_pane() -> None:
             return pane_text(CLEAR_BOX)
 
     pane = NotATmux()
-    request_stop(pane, "vessel", settle=lambda: None)
+    request_stop(pane, "vessel", settle=lambda _s: None)
     assert pane.count == len(GRACEFUL_STOP_KEYS)
 
 

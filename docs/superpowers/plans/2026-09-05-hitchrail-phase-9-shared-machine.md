@@ -148,10 +148,20 @@ match and when.
 
 ## Batch 3: claude_ipc stops being fragile, tasks 36 to 38
 
-- [ ] **Task 36, #95.** `request_stop` defaults `settle` to a real `time.sleep`,
+- [x] **Task 36, #95.** `request_stop` defaults `settle` to a real `time.sleep`,
       which the architecture says must be injected. **First in this batch because
       it is what makes the other two testable without wall clocks**, and because
       #70 in Phase 10 is about tests that wait on clocks instead of events.
+
+      **Done 2026-09-05, and smaller than the ticket assumed.** It said the
+      engine "acquires a SLEEP seam, which it does not have", and estimated a
+      change to the constructor and to every test that builds an engine. The
+      engine already has `_sleep`, added later for `_await_running`, so the work
+      was passing it through and deleting the default. The DURATION stays in
+      `claude_ipc` because how a Claude Code pane settles is quarantine
+      knowledge; the WAITING is the injected seam. Removing the default is what
+      keeps it wired: a default is exactly what let the seam be bypassed while
+      the parameter existed and the unit tests passed a fake.
 
 - [ ] **Task 37, #97.** A charset escape in an empty input box refuses every
       graceful stop on that terminal. The ticket is explicit that widening the

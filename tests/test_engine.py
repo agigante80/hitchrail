@@ -2291,3 +2291,44 @@ def test_the_process_table_is_read_before_the_pane_map(root: Path) -> None:
         "the read order changed, which changes whether a session killed between "
         "the two reads shows as detached or stale. See derive.look's docstring."
     )
+
+
+def test_a_graceful_stop_waits_through_the_engines_injected_sleep(root: Path) -> None:
+    """#95. `request_stop` defaulted its settle to a real `time.sleep`, going
+    round the clock seam the architecture says every external surface uses.
+
+    `AGENTS.md`: "Every external surface is injected: tmux, the process table,
+    memory readings, the Claude state directory, the clock. That is what makes
+    the engine testable without a real machine."
+
+    The consequence was not tidiness. A test that wanted to prove the retry
+    behaviour of `_require_clear` THROUGH the engine could not control the wait,
+    so it either slept for real or did not exist. It did not exist.
+    """
+    slept: list[float] = []
+    table = ps_row(PANE, 1) + ps_row(AGENT, PANE, project=proj("vessel"))
+    engine, tmux = engine_for(root, sessions={proj("vessel"): PANE}, table=table)
+    engine._sleep = slept.append
+    tmux.pane_text[proj("vessel")] = CLEAR_INPUT_BOX
+
+    engine.stop(proj("vessel"))
+
+    assert slept, (
+        "the stop waited on a real clock instead of the engine's injected sleep, "
+        "so no test above claude_ipc can control the retry loop"
+    )
+
+
+def test_the_settle_seam_has_no_default_to_fall_back_to(root: Path) -> None:
+    """The half that keeps it wired. A default is what let the seam be bypassed
+    silently for as long as it was: the parameter existed, the unit tests passed
+    a fake, and the real path slept anyway."""
+    import inspect
+
+    from hitchrail import claude_ipc
+
+    settle = inspect.signature(claude_ipc.request_stop).parameters["settle"]
+    assert settle.default is inspect.Parameter.empty, (
+        "request_stop can still default its settle, so a caller that forgets to "
+        "pass one sleeps on a real clock and nothing says so"
+    )

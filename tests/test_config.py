@@ -927,7 +927,11 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # This is the module whose whole value is being the one place that
         # knows how an agent is talked to, so what that costs the operator
         # belongs in it.
-        "claude_ipc.py": 571,
+        # 571 to 581 for #95. The settle seam lost its default and gained the
+        # split that keeps two rules at once: the DURATION is quarantine
+        # knowledge about how a Claude Code pane settles, the WAITING is the
+        # machine seam the architecture injects. Both reasons are at the code.
+        "claude_ipc.py": 583,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.

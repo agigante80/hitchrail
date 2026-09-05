@@ -564,7 +564,7 @@ class Engine:
         # timeout, the marker and the refusal to escalate; the adapter owns the
         # mechanism.
         try:
-            claude_ipc.request_stop(self.tmux, name)
+            claude_ipc.request_stop(self.tmux, name, settle=self._sleep)
         except TmuxUnavailable as exc:
             with self._stopping_guard:
                 self._stopping.pop(name, None)
