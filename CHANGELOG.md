@@ -22,6 +22,23 @@ the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ### Fixed
 
+**A live agent inside another tool's tmux session was reported as orphaned.**
+If anything else on your machine runs agents in its own tmux sessions, those
+projects showed as `detached` with the words "no tmux session", while the agent
+was sitting in a terminal you had open. On the machine this was found on, eight
+rows at once. Nothing was lost by it, but `detached` is the row that invites you
+to go and deal with a process by hand, so it pointed people at the wrong action.
+
+Such a row now names the session that holds the agent, and a row where no owner
+can be seen says "no session Hitchrail can address" rather than claiming there
+is no session at all. Hitchrail reads which sessions exist and still creates,
+signals and kills only its own.
+
+**For anyone driving the API:** every session now carries `foreign_session`,
+which is the owning session's name or `null`. `null` means no owner was seen,
+not that the agent is orphaned: ownership is read from the one tmux server
+Hitchrail is configured to talk to.
+
 **Under a systemd unit the startup banner never reached the journal.** Python
 block buffers standard output when it is not a terminal, so the banner sat in a
 buffer that a running server never flushes, and the whole log was uvicorn's four

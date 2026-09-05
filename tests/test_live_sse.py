@@ -217,6 +217,7 @@ async def test_the_stream_carries_the_whole_session_shape(live: Fixture) -> None
         "protected",
         "awaiting_trust",
         "awaiting_input",
+        "foreign_session",
     }
 
 

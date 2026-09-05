@@ -151,12 +151,35 @@ same folder. Four states result:
 |---|---|
 | `running` | tmux session alive, and it owns a live Claude process |
 | `stale` | tmux session alive, no Claude process in it |
-| `detached` | Claude process alive, no tmux session owns it |
+| `detached` | Claude process alive, no tmux session Hitchrail can address owns it |
 | `stopped` | neither |
 
 `detached` is surfaced in the UI with its pid and an explanation. Hitchrail never
 silently reconciles it, because the safe action depends on what that agent is
 doing, which Hitchrail cannot know.
+
+**That row said "no tmux session owns it" until #85, and the code never derived
+that.** Ownership is read from `list-panes -a`, which returns the panes on the
+tmux server Hitchrail is talking to, and the sessions without our prefix were
+discarded. An agent alive inside another tool's session was therefore owned by a
+pane we had seen and thrown away, and eight of them rendered as orphans at once
+on the machine this was developed on.
+
+The fix is the definition, not a fifth state. `foreign` was the honest sounding
+option and it buys nothing: such an agent behaves exactly like an orphan in
+every direction that matters, since a start must refuse for both, a graceful
+stop has no pane of ours to type into for both, and a kill has no session of
+ours to kill for both. A state that changes no action is a word, and four states
+fit on a phone.
+
+What the row gains instead is `foreign_session`, an overlay in the same family
+as `stopping` and `awaiting_trust`: the name of the session that owns the agent,
+when one can be seen. **Its absence means no owner was seen, never that there is
+none.** `list-panes -a` covers one server on one socket, so an agent under a
+different socket, under screen, or under a plain terminal arrives with the field
+null and is not orphaned at all. Anything rendering it says "no session Hitchrail
+can address" rather than "no tmux session", because the second is a claim this
+tool cannot make.
 
 ### 4.2 tmux behaviours to encode deliberately
 

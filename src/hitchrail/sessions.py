@@ -148,6 +148,15 @@ class State(StrEnum):
 
     An `IntEnum` would put the ordering into the API, and inserting a fifth
     member later would change what an old client reads.
+
+    **Still four, and #85 is where that was tested.** An agent alive inside
+    another tool's tmux session was a candidate for a fifth member, `foreign`.
+    It did not get one, because it differs from an orphan in nothing that
+    drives behaviour: start refuses for both, a graceful stop has no pane of
+    ours to type into for both, and a kill has no session of ours to kill for
+    both. What differs is the sentence the row shows, and that is what
+    `Session.foreign_session` carries. A state that changes no action is a word,
+    and this enum is where actions are decided.
     """
 
     RUNNING = "running"
@@ -185,6 +194,19 @@ class Session:
     # path that is rare by construction. The interface says a different thing
     # for each, which is the point of knowing which it was.
     awaiting_input: bool = False
+    # The tmux session that owns this agent when it is not one of ours (#85).
+    # An overlay like the two above, and a NAME rather than a boolean on
+    # purpose: a flag plus a name is two facts that can disagree, and the name
+    # is the only part a person can act on. It is what turns "your agent is
+    # orphaned" into "your agent is in cc-vessel, attach there".
+    #
+    # **`None` means we could not see an owner, not that there is none.**
+    # Ownership is read from `list-panes -a`, which covers the tmux server on
+    # our own socket and nothing else, so an agent under a different socket,
+    # under screen, or under a bare terminal comes back `None`. Anything
+    # rendering this has to say "no session Hitchrail can address" rather than
+    # "no tmux session", which is what the row used to claim and could not know.
+    foreign_session: str | None = None
 
     def as_dict(self) -> dict[str, object]:
         """Serialising a session is not HTTP knowledge.
@@ -204,4 +226,5 @@ class Session:
             "protected": self.protected,
             "awaiting_trust": self.awaiting_trust,
             "awaiting_input": self.awaiting_input,
+            "foreign_session": self.foreign_session,
         }

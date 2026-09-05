@@ -1001,7 +1001,19 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # and empty rather than absent. Deleting that table would leave a
         # workaround that looks like a longer way to write the option somebody
         # will "simplify" it back to. Same argument as every entry above it.
-        "tmux.py": 475,
+        # 475 to 523 for #85, and the growth is one dataclass plus the reason
+        # this adapter now returns what it used to throw away. `list-panes -a`
+        # has always returned every pane on the server and this module dropped
+        # the ones without our prefix, so an agent alive inside another tool's
+        # session was owned by a pane we had seen and discarded, and derivation
+        # called it an orphan. Returning both halves costs no second call.
+        #
+        # Most of the added lines are two explanations a reader would otherwise
+        # undo: why `rpartition` rather than `partition`, which is the parser
+        # accepting a foreign session name with a space in it, and why the
+        # foreign half is keyed by pid while ours is keyed by name. Behaviour
+        # plus its reason, which the note above permits.
+        "tmux.py": 523,
         # 413, and thirteen lines over the guideline is not a second job. #18
         # already took the host vocabulary out of this file, and what is left
         # is one dataclass and its startup refusals, which is one thing. The

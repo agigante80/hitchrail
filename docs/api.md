@@ -88,12 +88,23 @@ Derived on demand, never stored.
 |---|---|
 | `running` | tmux session alive, owns a live agent process |
 | `stale` | tmux session alive, no agent in it |
-| `detached` | agent alive, no tmux session owns it |
+| `detached` | agent alive, no tmux session Hitchrail can address owns it |
 | `stopped` | neither |
 
 `detached` is surfaced with its pid and never silently reconciled. Hitchrail
 cannot end a detached agent: everything it can destroy is addressed by a
 session name it created, and a bare pid has no name.
+
+A session carries `foreign_session`: the name of the tmux session that owns the
+agent when Hitchrail can see one, and `null` when it cannot. It is sent on every
+session, and `null` is sent rather than the field being omitted, so a client can
+tell "no owner was seen" from "this server does not send the field".
+
+**`null` does not mean the agent is orphaned.** Ownership is read from one
+`list-panes -a` against the tmux server Hitchrail is configured to use, so an
+agent under a different socket, under screen, or under a plain terminal has no
+owner Hitchrail can see and is reported the same way as a genuine orphan. A
+client rendering this must not turn `null` into "no tmux session".
 
 ## The error envelope
 

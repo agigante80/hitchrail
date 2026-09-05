@@ -58,7 +58,11 @@ async def test_a_detached_row_names_its_pid_and_offers_nothing_that_cannot_act(
 
     # The pid and the reason, which is the whole of what the design promises.
     pid = server.engine.get(server.project("forge-kit")).pid
-    await expect(row).to_contain_text("no tmux session")
+    # **Not "no tmux session", which is what this said until #85.** Ownership
+    # is read from one `list-panes -a`, which covers the server on Hitchrail's
+    # own socket and nothing else, so the row can say it has not found an owner
+    # and cannot say there is none.
+    await expect(row).to_contain_text("no session Hitchrail can address")
     await expect(row).to_contain_text(f"pid {pid}")
 
     # And no control at all, because every one this row could offer either does
@@ -66,6 +70,35 @@ async def test_a_detached_row_names_its_pid_and_offers_nothing_that_cannot_act(
     assert await row.get_by_role("button").count() == 0, (
         "a detached row is offering a control; if it cannot act, it is #83 again"
     )
+
+
+async def test_an_agent_in_another_tools_tmux_session_says_where_it_is(
+    page: Page, server: Harness
+) -> None:
+    """#85, through the whole stack, in the state the development machine was in.
+
+    Eight live agents rendered as orphans at once because another tool's
+    sessions were on the same tmux server. Every tier below this one builds the
+    pane map from a dict; this one puts a real foreign session on the real
+    socket and reads what the row ends up saying.
+
+    The row stays `detached`, because it behaves exactly like an orphan: there
+    is no session of ours to type into or to kill. What changes is that it
+    stops claiming the agent is unowned, which is the claim that invites
+    somebody to reach for the destructive option.
+    """
+    server.seed(foreign=["forge-kit"])
+    assert server.engine is not None
+    await page.goto(server.base)
+    row = page.locator('[data-project="main~hrx-forge-kit"]')
+    await expect(row).to_have_attribute("data-state", "detached")
+
+    await expect(row).to_contain_text("in tmux session e2eother-hrx-forge-kit")
+    await expect(row).not_to_contain_text("no session Hitchrail can address")
+
+    # Still nothing to tap. Knowing where the agent is does not give Hitchrail
+    # a way to end it, and #107 is where that argument is had.
+    assert await row.get_by_role("button").count() == 0
 
 
 async def test_a_running_row_is_taller_than_a_stopped_one(page: Page, server: Harness) -> None:

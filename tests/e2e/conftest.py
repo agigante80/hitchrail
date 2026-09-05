@@ -86,6 +86,13 @@ STARTUP_TIMEOUT = 15.0
 # Python is already a dependency here, `sys.stdin.readline()` returning "" on
 # EOF is documented rather than shell dependent, and the loop is explicit
 # about what it does on each outcome.
+# #85. The prefix another tool's sessions carry in this tier. Nothing the
+# adapter can produce: `session_name` prefixes every name it builds with the
+# configured `hr-`, so a session under this name is foreign by construction and
+# stays foreign however the configuration changes.
+FOREIGN_SESSION_PREFIX = "e2eother-"
+
+
 _SHIM_HEAD = """#!{python}
 import sys, time
 print("hitchrail-shim: started as " + " ".join(sys.argv[1:]), flush=True)
@@ -274,6 +281,7 @@ class Harness:
         running: list[str] | None = None,
         stopped: list[str] | None = None,
         detached: list[str] | None = None,
+        foreign: list[str] | None = None,
         stale: list[str] | None = None,
         untrusted: list[str] | None = None,
         unsupported: list[str] | None = None,
@@ -315,6 +323,7 @@ class Harness:
             (running or [])
             + (stopped or [])
             + (detached or [])
+            + (foreign or [])
             + (stale or [])
             + (untrusted or [])
         ):
@@ -343,7 +352,13 @@ class Harness:
         # caught it. A fixture built from the production path fails when the
         # production path is wrong, which is the only reason to have one.
         untrusted_names = {e2e_name(n) for n in untrusted or []}
-        seeded = (running or []) + (stopped or []) + (detached or []) + (stale or [])
+        seeded = (
+            (running or [])
+            + (stopped or [])
+            + (detached or [])
+            + (foreign or [])
+            + (stale or [])
+        )
         # #120: every root, not just the primary one. Built as (root, name)
         # pairs so a project in an extra root gets the same trust entry. Before
         # this, projects seeded through `also_in` were absent from the file, so
@@ -441,6 +456,37 @@ class Harness:
                 )
             )
         if detached:
+            time.sleep(0.4)
+
+        # #85. An agent alive inside ANOTHER TOOL's tmux session, on the same
+        # server we talk to. This is the shape the development machine was in
+        # when eight live agents rendered as orphans at once, and it is not
+        # reachable by breaking either half of the derivation: the agent has a
+        # pane, the pane has a session, and the session simply is not ours.
+        #
+        # The prefix is hard coded rather than derived from the config, because
+        # the whole point is a name our own `session_name` could never produce.
+        for name in foreign or []:
+            subprocess.run(
+                [
+                    "env",
+                    "-u",
+                    "TMUX",
+                    "tmux",
+                    "-S",
+                    self._sock,
+                    "new-session",
+                    "-d",
+                    "-s",
+                    f"{FOREIGN_SESSION_PREFIX}{e2e_name(name)}",
+                    "-c",
+                    str(self.root / e2e_name(name)),
+                    *claude_ipc.launch_argv(str(self._agent), e2e_id(name)),
+                ],
+                check=True,
+                capture_output=True,
+            )
+        if foreign:
             time.sleep(0.4)
 
         # `stale` is a tmux session of ours with no agent in it, so it is

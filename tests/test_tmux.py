@@ -97,7 +97,7 @@ _VERBS = {
 def drive_every_method(tmux: Tmux) -> None:
     """Exercise the whole public surface, for the sweeps below."""
     tmux.has_session("p")
-    tmux.pane_pids()
+    tmux.panes()
     tmux.pane_pid("p")
     tmux.capture_pane("p")
     tmux.new_session("p", "/srv/p", ["claude"])
@@ -119,31 +119,94 @@ def test_the_pane_map_is_one_call_whatever_the_session_count() -> None:
     """
     runner = FakeRunner(stdout={"list-panes": "hr-a 1\nhr-b 2\nhr-c 3\n"})
     tmux = Tmux(prefix="hr-", run=runner)
-    assert tmux.pane_pids() == {"hr-a": 1, "hr-b": 2, "hr-c": 3}
+    assert tmux.panes().ours == {"hr-a": 1, "hr-b": 2, "hr-c": 3}
     assert len(runner.calls) == 1
     assert "-a" in runner.calls[0]
 
 
-def test_a_foreign_session_is_not_in_the_pane_map() -> None:
-    """Sessions we did not create are invisible to us, in both directions."""
+def test_both_halves_of_the_pane_map_come_from_the_same_call() -> None:
+    """#85. Reading who else is on the server must not cost a second call.
+
+    The whole reason foreign panes are affordable is that `list-panes -a`
+    already returned them and this adapter threw them away. A version that
+    asked twice would be the per row spawn the budget forbids, arrived at from
+    a different direction.
+    """
+    runner = FakeRunner(stdout={"list-panes": "cc-vessel 111\nhr-vessel 4242\n"})
+    panes = Tmux(prefix="hr-", run=runner).panes()
+    assert panes.ours == {"hr-vessel": 4242}
+    assert panes.foreign == {111: "cc-vessel"}
+    assert len(runner.calls) == 1
+
+
+def test_a_foreign_session_is_named_but_never_ours() -> None:
+    """#85 changed this test's meaning, deliberately, and it is kept for that.
+
+    It asserted that sessions we did not create are invisible in BOTH
+    directions, which is what made an agent inside one of them read as an
+    orphan. Foreign sessions are now visible to the READ path and still absent
+    from `ours`, which is what every write path builds its target from.
+    """
     runner = FakeRunner(stdout={"list-panes": "work 111\nhr-vessel 4242\n"})
-    assert Tmux(prefix="hr-", run=runner).pane_pids() == {"hr-vessel": 4242}
+    panes = Tmux(prefix="hr-", run=runner).panes()
+    assert panes.ours == {"hr-vessel": 4242}
+    assert "work" not in panes.ours
+    assert panes.foreign == {111: "work"}
+
+
+def test_a_foreign_session_name_with_a_space_survives_the_parse() -> None:
+    """#85, and the reason the split is `rpartition`.
+
+    Our own names cannot hold a space, because `NAME_PATTERN` refuses one
+    (#173). A foreign name is chosen by whoever made that session. Splitting on
+    the FIRST space read the pid as `work 111`, dropped the line, and left the
+    agent inside that session looking unowned: the defect this ticket removes,
+    reintroduced by the parser.
+    """
+    runner = FakeRunner(stdout={"list-panes": "my work 111\nhr-vessel 4242\n"})
+    panes = Tmux(prefix="hr-", run=runner).panes()
+    assert panes.foreign == {111: "my work"}
+    assert panes.ours == {"hr-vessel": 4242}
+
+
+def test_a_foreign_session_name_is_escaped_on_the_way_in() -> None:
+    """It reaches a screen, and nothing downstream would know to escape it.
+
+    A session name is chosen by whoever created it, so it can carry the control
+    sequences `display_name` exists to defuse. Escaped here, at the boundary
+    where untrusted output enters, rather than at each of the places that
+    render it.
+    """
+    runner = FakeRunner(stdout={"list-panes": "ev\x1b[2Jil 111\n"})
+    # The ESC is escaped and the rest is left alone, which is exactly enough:
+    # `[2J` without an ESC in front of it is four printable characters.
+    assert Tmux(prefix="hr-", run=runner).panes().foreign == {111: "ev\\u001b[2Jil"}
 
 
 def test_a_failed_list_panes_is_an_empty_map_not_an_exception() -> None:
     """No tmux server running is the normal state, not an error."""
     runner = FakeRunner(rc={"list-panes": 1})
-    assert Tmux(prefix="hr-", run=runner).pane_pids() == {}
+    panes = Tmux(prefix="hr-", run=runner).panes()
+    assert panes.ours == {}
+    assert panes.foreign == {}
 
 
 def test_a_malformed_pane_line_is_skipped_and_the_rest_survive() -> None:
     runner = FakeRunner(stdout={"list-panes": "hr-a notapid\nhr-b 7\n\n"})
-    assert Tmux(prefix="hr-", run=runner).pane_pids() == {"hr-b": 7}
+    assert Tmux(prefix="hr-", run=runner).panes().ours == {"hr-b": 7}
 
 
 def test_the_first_pane_wins_for_a_multi_pane_session() -> None:
     runner = FakeRunner(stdout={"list-panes": "hr-a 10\nhr-a 11\n"})
-    assert Tmux(prefix="hr-", run=runner).pane_pids() == {"hr-a": 10}
+    assert Tmux(prefix="hr-", run=runner).panes().ours == {"hr-a": 10}
+
+
+def test_the_first_pane_wins_for_a_multi_pane_foreign_session() -> None:
+    """The same rule on the other half. Two panes in one foreign session must
+    not make the second one overwrite the first, or which pid maps to which
+    name depends on tmux's output order."""
+    runner = FakeRunner(stdout={"list-panes": "cc-a 10\ncc-a 11\n"})
+    assert Tmux(prefix="hr-", run=runner).panes().foreign == {10: "cc-a", 11: "cc-a"}
 
 
 def test_pane_pid_uses_the_colon_terminated_target() -> None:
@@ -290,7 +353,7 @@ def missing_tmux(argv: list[str]) -> subprocess.CompletedProcess[str]:
 @pytest.mark.parametrize(
     "call",
     [
-        lambda t: t.pane_pids(),
+        lambda t: t.panes(),
         lambda t: t.has_session("p"),
         lambda t: t.pane_pid("p"),
         lambda t: t.capture_pane("p"),
@@ -298,7 +361,7 @@ def missing_tmux(argv: list[str]) -> subprocess.CompletedProcess[str]:
         lambda t: t.kill_session("p"),
         lambda t: t.send_keys("p", "C-c"),
     ],
-    ids=["pane_pids", "has_session", "pane_pid", "capture", "new", "kill", "keys"],
+    ids=["panes", "has_session", "pane_pid", "capture", "new", "kill", "keys"],
 )
 def test_a_tmux_that_cannot_be_run_raises_rather_than_lying(call: object) -> None:
     """ "Could not look" must not collapse into "nothing is there".
@@ -321,7 +384,7 @@ def test_a_tmux_that_runs_and_says_no_is_still_just_no() -> None:
     machine with nothing started."""
     runner = FakeRunner(rc=dict.fromkeys(_VERBS, 1))
     tmux = Tmux(prefix="hr-", run=runner)
-    assert tmux.pane_pids() == {}
+    assert tmux.panes().ours == {}
     assert tmux.has_session("p") is False
     assert tmux.pane_pid("p") is None
     assert tmux.capture_pane("p") == ""
@@ -379,7 +442,7 @@ def test_a_tmux_that_never_answers_becomes_an_honest_refusal() -> None:
         raise subprocess.TimeoutExpired(argv, 10.0)
 
     with pytest.raises(TmuxUnavailable):
-        Tmux(prefix="hr-", run=wedged).pane_pids()
+        Tmux(prefix="hr-", run=wedged).panes()
 
 
 def test_the_spawn_does_not_hand_the_agent_the_api_token() -> None:

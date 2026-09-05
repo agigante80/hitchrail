@@ -45,7 +45,7 @@ from hitchrail.engine import (
     UnknownProject,
 )
 from hitchrail.procs import ProcTable, snapshot
-from hitchrail.tmux import Tmux, TmuxUnavailable
+from hitchrail.tmux import Panes, Tmux, TmuxUnavailable
 from support import DEFAULT_LABEL, make_config
 
 
@@ -94,12 +94,13 @@ def engine_for(
     root: Path,
     *,
     sessions: dict[str, int] | None = None,
+    foreign: dict[str, int] | None = None,
     table: str = "",
     procs_fn: Callable[[], ProcTable] | None = None,
     self_project: str | None = None,
     agent_config: Path | None = None,
 ) -> tuple[Engine, FakeTmux]:
-    tmux = FakeTmux(sessions=sessions)
+    tmux = FakeTmux(sessions=sessions, foreign=foreign)
     # Pinned INSIDE the temporary root. Without it `Config` defaults to
     # ~/.claude/sessions, and `bridge_url` reads the developer's real session
     # files: verified opening /home/<user>/.claude/sessions/501.json during a
@@ -590,7 +591,7 @@ def test_no_tmux_server_is_not_an_error(root: Path) -> None:
     of a machine with nothing started.
     """
     engine, tmux = engine_for(root)
-    tmux.fail_pane_pids = True
+    tmux.fail_panes = True
     assert all(s.state is State.STOPPED for s in engine.list())
 
 
@@ -621,7 +622,7 @@ def test_list_issues_one_tmux_call_and_one_ps_call(tmp_path: Path, count: int) -
 
     engine, tmux = engine_for(tmp_path, procs_fn=counting_procs)
     assert len(engine.list()) == count
-    assert tmux.pane_pids_calls == 1
+    assert tmux.panes_calls == 1
     assert reads["n"] == 1
 
 
@@ -1771,10 +1772,10 @@ def test_an_unreadable_machine_does_not_kill_the_expiry_ticker(tmp_path: Path) -
     engine.stop(proj("alpha"))
     now[0] = 99.0
 
-    def gone() -> dict[str, int]:
+    def gone() -> Panes:
         raise TmuxUnavailable("tmux is gone")
 
-    tmux.pane_pids = gone  # type: ignore[method-assign]
+    tmux.panes = gone  # type: ignore[method-assign]
     # Reports the expiry rather than raising it...
     assert engine.expire_stops() == [proj("alpha")]
     # ...and the marker is gone, so the next tick does not re-expire it.
@@ -2279,13 +2280,13 @@ def test_the_process_table_is_read_before_the_pane_map(root: Path) -> None:
         return procs_from("")()
 
     tmux = FakeTmux()
-    real_panes = tmux.pane_pids
+    real_panes = tmux.panes
 
-    def recording_panes() -> dict[str, int]:
+    def recording_panes() -> Panes:
         calls.append("tmux")
         return real_panes()
 
-    tmux.pane_pids = recording_panes  # type: ignore[method-assign]
+    tmux.panes = recording_panes  # type: ignore[method-assign]
     derive.look(recording_procs, tmux)
 
     assert calls == ["ps", "tmux"], (
@@ -2349,3 +2350,139 @@ def test_the_default_tmux_adapter_strips_the_token_from_what_it_spawns(root: Pat
     engine = Engine(make_config(root))
 
     assert engine.tmux.scrub_env == (TOKEN_ENV,)
+
+
+# -- #85: an agent inside another tool's tmux session ----------------------
+#
+# The machine this project is actually developed on runs another tool's tmux
+# sessions beside ours, and eight live agents came up `detached` at once
+# because of it. None of these is reachable from a fixture that describes a
+# machine where Hitchrail is the only thing that has ever run, which is why
+# the defect survived a full suite for a month.
+
+FOREIGN_PANE = 700
+FOREIGN_SHELL = 701
+FOREIGN_AGENT = 702
+
+
+def foreign_machine(project: str) -> tuple[dict[str, int], str]:
+    """Another tool's session, with a shell between its pane and the agent.
+
+    The shell is not decoration. `look` walks DESCENDANTS rather than children
+    for our own panes precisely because one sits there, and a foreign walk that
+    only looked at children would call this agent unowned while claiming to
+    have fixed exactly that.
+    """
+    table = (
+        ps_row(FOREIGN_PANE, 1)
+        + ps_row(FOREIGN_SHELL, FOREIGN_PANE)
+        + ps_row(FOREIGN_AGENT, FOREIGN_SHELL, project=project)
+    )
+    return {f"cc-{project}": FOREIGN_PANE}, table
+
+
+def test_an_agent_in_a_foreign_pane_names_the_session_that_owns_it(root: Path) -> None:
+    """The row stops saying an agent is orphaned when a terminal has it."""
+    foreign, table = foreign_machine(proj("vessel"))
+    engine, _ = engine_for(root, foreign=foreign, table=table)
+
+    session = engine.get(proj("vessel"))
+
+    assert session.state is State.DETACHED
+    assert session.foreign_session == f"cc-{proj('vessel')}"
+
+
+def test_a_foreign_pane_does_not_hide_the_agent_it_owns(root: Path) -> None:
+    """The reverted fix, asserted so it cannot come back.
+
+    Skipping foreign owned candidates in `find_detached` reads as the obvious
+    fix and makes the row `stopped`, which offers Start, which is a second
+    agent in a folder that already has one. The agent must still be FOUND and
+    the row must still point at it; only what the row SAYS changes.
+    """
+    foreign, table = foreign_machine(proj("vessel"))
+    engine, _ = engine_for(root, foreign=foreign, table=table)
+
+    session = engine.get(proj("vessel"))
+
+    assert session.state is State.DETACHED, "a foreign owner must not make this stopped"
+    assert session.pid == FOREIGN_AGENT, "the row must still point at the agent"
+
+
+def test_a_genuine_orphan_names_no_session(root: Path) -> None:
+    """The other half, and the reason the field is a name rather than a flag.
+
+    Null means no owner was SEEN. `list-panes -a` covers the server on our own
+    socket, so an agent under another socket, under screen, or under a plain
+    terminal lands here too and is not orphaned at all.
+    """
+    engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, project=proj("vessel")))
+
+    session = engine.get(proj("vessel"))
+
+    assert session.state is State.DETACHED
+    assert session.foreign_session is None
+
+
+def test_a_running_session_of_ours_names_no_foreign_owner(root: Path) -> None:
+    """The overlay belongs to one state. A `running` row is ours by definition,
+    and carrying an owner name there would be two answers to one question."""
+    table = ps_row(PANE, 1) + ps_row(AGENT, PANE, project=proj("vessel"))
+    engine, _ = engine_for(root, sessions={proj("vessel"): PANE}, table=table)
+
+    assert engine.get(proj("vessel")).foreign_session is None
+
+
+def test_reading_a_foreign_session_costs_no_extra_call(root: Path) -> None:
+    """The budget, at the point the temptation to ask again would appear.
+
+    `test_list_issues_one_tmux_call_and_one_ps_call` asserts the count on an
+    empty machine. This asserts it on the machine that has foreign sessions,
+    which is where a second call would be introduced to go and look at them.
+    """
+    foreign, table = foreign_machine(proj("vessel"))
+    engine, tmux = engine_for(root, foreign=foreign, table=table)
+
+    engine.list()
+
+    assert tmux.panes_calls == 1
+    assert tmux.capture_calls == 0
+
+
+def test_a_foreign_session_is_never_created_signalled_or_killed(root: Path) -> None:
+    """#85's second Done when, asserted apart from anything about the display.
+
+    Learning who owns an agent is a read. Every write path builds its target
+    from `session_name`, so it can only ever name a session carrying our own
+    prefix, and this asserts that the new knowledge did not leak into one.
+    """
+    foreign, table = foreign_machine(proj("vessel"))
+    engine, tmux = engine_for(root, foreign=foreign, table=table)
+
+    engine.list()
+    with pytest.raises(NoAgent):
+        # A detached row has no session of ours to type into, whoever owns it.
+        engine.stop(proj("vessel"))
+
+    assert tmux.killed == []
+    assert tmux.started == []
+    assert tmux.sent == []
+    assert f"cc-{proj('vessel')}" not in tmux.sessions
+
+
+def test_a_stop_on_a_foreign_owned_agent_refuses_the_same_way(root: Path) -> None:
+    """The state did not move, so neither did any refusal that reads it.
+
+    This is what a fifth state would have cost: every branch that switches on
+    `State` would need a new arm, for an agent that behaves exactly like the
+    orphan beside it.
+    """
+    foreign, table = foreign_machine(proj("vessel"))
+    engine, _ = engine_for(root, foreign=foreign, table=table)
+
+    with pytest.raises(NoAgent):
+        engine.stop(proj("vessel"))
+    with pytest.raises(NoAgent):
+        engine.kill(proj("vessel"))
+    with pytest.raises(AlreadyRunning):
+        engine.start(proj("vessel"))

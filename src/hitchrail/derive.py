@@ -36,6 +36,16 @@ class Machine:
     table: ProcTable
     pane_pids: dict[str, int]
     owned: frozenset[int]
+    # Which foreign tmux session, if any, owns each process on this machine
+    # (#85). Every pid in a foreign pane's tree, mapped to that session's name,
+    # from the SAME `list-panes -a` this class already pays for.
+    #
+    # Deliberately NOT merged into `owned`. A foreign pane owning an agent must
+    # not make that agent ours: `find_detached` still has to FIND it, or the
+    # row reads `stopped` and offers Start, which is the second agent in one
+    # folder the whole derivation exists to prevent. This map changes what the
+    # row SAYS about the agent, never whether it is found.
+    foreign_owners: dict[int, str]
     # Which folders the agent will not show a trust prompt for, or None when
     # that cannot be told (#88). Read ONCE per look, like everything else here:
     # the alternative is a `capture-pane` per running row on every listing,
@@ -78,7 +88,7 @@ def look(
             "be determined; this is not the same as nothing running"
         )
     try:
-        pane_pids = tmux.pane_pids()
+        panes = tmux.panes()
     except TmuxUnavailable as exc:
         # The other half of the same honesty. An empty pane map means no
         # sessions; a tmux that could not be run means we do not know, and
@@ -86,16 +96,26 @@ def look(
         # not running.
         raise MachineUnreadable(str(exc)) from exc
     owned: set[int] = set()
-    for pid in pane_pids.values():
+    for pid in panes.ours.values():
         owned.add(pid)
         # Descendants, not children: a shell usually sits between the pane
         # and the agent, and an agent one level down that is not counted as
         # owned is reported as somebody else's orphan.
         owned.update(p.pid for p in table.descendants(pid))
+    # The same walk over everybody else's panes, and the same reason for
+    # descendants rather than children: a shell sits between their pane and
+    # their agent too. In memory only, over a table already read, so this costs
+    # no call however many sessions the machine has.
+    foreign_owners: dict[int, str] = {}
+    for pid, session in panes.foreign.items():
+        foreign_owners[pid] = session
+        for proc in table.descendants(pid):
+            foreign_owners.setdefault(proc.pid, session)
     return Machine(
         table=table,
-        pane_pids=pane_pids,
+        pane_pids=panes.ours,
         owned=frozenset(owned),
+        foreign_owners=foreign_owners,
         trusted=claude_ipc.trusted_folders(agent_config) if agent_config else None,
     )
 
@@ -164,7 +184,26 @@ def derive(
 
     orphan = find_detached(name, machine, config)
     if orphan is not None:
-        return live(name, orphan, machine, State.DETACHED, protected, config, stopping)
+        return live(
+            name,
+            orphan,
+            machine,
+            State.DETACHED,
+            protected,
+            config,
+            stopping,
+            # #85. `detached` means no session HITCHRAIL CAN ADDRESS owns this
+            # agent, which is what this function has always derived and not
+            # what the word implied. When another tool's session owns it we can
+            # say so, and the row stops telling somebody their agent is
+            # orphaned while it sits in a terminal they have open.
+            #
+            # `None` means we could not see an owner, NEVER that there is none:
+            # `list-panes -a` covers the server on our socket and nothing else.
+            # The copy above this has to keep that distinction; the old row
+            # said "no tmux session" and was overclaiming.
+            foreign_session=machine.foreign_owners.get(orphan),
+        )
 
     # Never `stopping` here, whatever the marker says. The graceful stop is an
     # OVERLAY on a live session, and once nothing is running there is nothing
@@ -282,6 +321,7 @@ def live(
     stopping: Container[str],
     awaiting_trust: bool = False,
     awaiting_input: bool = False,
+    foreign_session: str | None = None,
 ) -> Session:
     proc = machine.table.by_pid.get(pid)
     return Session(
@@ -299,4 +339,5 @@ def live(
         protected=protected,
         awaiting_trust=awaiting_trust,
         awaiting_input=awaiting_input,
+        foreign_session=foreign_session,
     )
