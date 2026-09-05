@@ -32,6 +32,16 @@ on:
         type: choice
         options: [testpypi, pypi]
         default: testpypi
+  # CALLED by `release.yml` on a merge to main. A reusable workflow runs inside the
+  # caller's run, which is what lets an automated release publish WITHOUT a stored
+  # credential: a tag pushed by the default token starts no workflow, and the usual fix
+  # is an App token or a PAT. See release.yml's header for the full argument.
+  workflow_call:
+    inputs:
+      index:
+        description: which index to publish to
+        type: string
+        default: pypi
 
 permissions:
   contents: read

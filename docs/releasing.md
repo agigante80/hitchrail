@@ -163,14 +163,22 @@ Steps 1 to 5 happen ON the pull request. Steps 6 onward happen after it merges.
      && uv run lint-imports && uv run pytest
    ```
 
-6. **Tag and publish a GitHub release.** A tag alone publishes nothing: the
-   workflow triggers on a published release, because a tag is a bookmark and
-   publishing is a decision.
+6. **Merge the pull request.** That is the release.
 
-7. **Approve the `release` environment** when GitHub asks. That is the human
-   click.
+   `release.yml` waits for CI to pass on the merged commit, then tags `vX.Y.Z`,
+   publishes a GitHub release whose notes ARE the changelog section you wrote in
+   step 2, and calls `publish.yml` to upload. Nothing else is needed and there is
+   no approval click; the review of the pull request is the human step.
 
-8. **Verify from the index**, not from the build:
+   **It refuses rather than guessing.** No changelog section for the version, a
+   version already on PyPI, or an unreadable answer from PyPI each stop the run
+   with a message naming the cause. A version number cannot be reused, only
+   yanked, so discovering a collision inside twine is too late.
+
+   Re-running it on an already tagged commit does nothing, so a re-run is never
+   destructive.
+
+7. **Verify from the index**, not from the build:
 
    ```sh
    uvx hitchrail@<the new version> --version
@@ -181,8 +189,10 @@ Steps 1 to 5 happen ON the pull request. Steps 6 onward happen after it merges.
 
 ## What is deliberately not automated
 
-**The version bump and the changelog.** Both are judgements about what a change
-costs an operator, and a generated changelog would carry every commit subject.
+**The version bump and the changelog**, and #133 deliberately kept them that way while
+automating everything after them. forge-kit's Lane C auto-patches every green merge; this
+project does not, because both are judgements about what a change costs an operator and a
+generated changelog would carry every commit subject.
 Those subjects are written for a reviewer and say why a change was not the
 obvious alternative, which is the wrong register for somebody deciding whether
 to upgrade.
