@@ -15,8 +15,20 @@ wrong register for somebody deciding whether to upgrade.
 **Security fixes say plainly what was reachable and by whom**, including the
 parts that are embarrassing. `docs/versioning.md` requires it.
 
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). While
-the version is `0.y.z`, a breaking change may ship as a MINOR.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), with
+one deliberate departure: **a version heading is `## 0.4.0 - 2026-09-05`,
+without the brackets that standard puts round the number.**
+
+That is not cosmetic and it is not free to get wrong. `release.yml` builds the
+GitHub release notes by finding `^## <version>`, so a bracketed heading matches
+nothing, the notes come back empty and the release refuses after the merge to
+`main`. It happened on 0.4.0, and the bracketed form is what a careful author
+writes precisely BECAUSE this line names that standard. The departure is
+written down here rather than left as a trap, and
+`test_every_released_version_has_notes_the_release_job_can_extract` runs the
+workflow's own script so it fails locally instead.
+
+While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 

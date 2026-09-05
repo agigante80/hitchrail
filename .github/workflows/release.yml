@@ -116,10 +116,26 @@ jobs:
           # The release notes ARE the changelog section, which makes the changelog
           # mandatory without a second guard to enforce it. `docs/releasing.md` keeps
           # writing it a deliberate human step; this is what that step buys.
-          notes="$(python3 -c "
-          import re,pathlib,sys
+          notes="$(VERSION="$version" python3 -c "
+          import os, pathlib, re, sys
+          version = os.environ['VERSION']
           text = pathlib.Path('CHANGELOG.md').read_text()
-          m = re.search(r'^## $version[^\n]*\n(.*?)(?=^## |\Z)', text, re.M | re.S)
+          # The version is ESCAPED and ANCHORED, and #188 is why both.
+          #
+          # Interpolated raw, its dots matched any character, so a lookup for
+          # 0.4.0 was satisfied by a heading '## 0x4x0'. Contrived and free to
+          # close.
+          #
+          # The lookahead is the one that was reachable on an ordinary release:
+          # without it '## 0.4.1' matches the heading '## 0.4.10', so a patch
+          # release would publish a later version's notes under its own number.
+          # Wrong notes are worse than none, because they look right, and the
+          # empty case is already refused below.
+          m = re.search(
+              rf'^## {re.escape(version)}(?![0-9.])[^\n]*\n(.*?)(?=^## |\Z)',
+              text,
+              re.M | re.S,
+          )
           sys.stdout.write(m.group(1).strip() if m else '')
           ")"
           if [ -z "$notes" ]; then

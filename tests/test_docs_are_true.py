@@ -19,8 +19,13 @@ in a document.**
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
+import subprocess
+import sys
+import tempfile
+import textwrap
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -484,6 +489,145 @@ def test_a_released_version_heading_matches_a_real_tag() -> None:
     allowed = normalised | ({preparing.group(1)} if preparing else set())
     unreleased = [h for h in headings if h not in allowed]
     assert not unreleased, f"changelog versions with no tag: {unreleased}"
+
+
+# -- #185, #188: the release notes the workflow can actually extract --------
+#
+# The changelog heading is described in three places and they disagreed. This
+# file's own `test_a_released_version_heading_matches_a_real_tag` accepts
+# `## [v0.4.0]`, brackets and prefix included; its `^## Unreleased$` check
+# accepts neither; and `release.yml` accepts neither. So the bracketed form
+# that `CHANGELOG.md`'s preamble tells an author to write passed every local
+# gate and failed AFTER a merge to `main`, which is the most expensive place to
+# find out. That happened, on 0.4.0.
+#
+# The rule is enforced here by RUNNING the workflow's own script rather than by
+# restating its pattern, because a restatement is a fourth copy of the thing
+# that drifted.
+
+RELEASE_YML = ROOT / ".github" / "workflows" / "release.yml"
+
+
+def _notes_script() -> str:
+    """The python `release.yml` runs to turn CHANGELOG.md into release notes.
+
+    Recovered from the workflow rather than copied, which is the whole point:
+    a copy is a second source of truth and this exists because there were
+    three. `tests/test_workflows_are_pinned.py` reads these files the same way,
+    and for the same reason PyYAML is not used: the runtime dependency budget
+    is three and full, so the parsing is stdlib.
+
+    **Fails rather than skips when it cannot find the block.** A guard that
+    quietly finds nothing to guard is the shape this whole test exists to
+    remove.
+    """
+    blocks = re.findall(r'python3 -c "\n(.*?)\n\s*"\)"', RELEASE_YML.read_text(), re.S)
+    notes = [b for b in blocks if "CHANGELOG.md" in b]
+    assert len(notes) == 1, (
+        f"expected exactly one CHANGELOG extraction in release.yml, found {len(notes)}; "
+        "this test can no longer tell what the release will publish"
+    )
+    script = textwrap.dedent(notes[0])
+    assert "VERSION" in script, (
+        "the extraction no longer reads a VERSION from the environment, so this "
+        "test cannot drive it for a given version"
+    )
+    return script
+
+
+def _extract_notes(version: str, changelog: str) -> str:
+    """What the release job would publish for `version`, given that changelog."""
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "CHANGELOG.md").write_text(changelog)
+        result = subprocess.run(
+            [sys.executable, "-c", _notes_script()],
+            cwd=tmp,
+            env={**os.environ, "VERSION": version},
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    return result.stdout.strip()
+
+
+def _released_versions() -> set[str]:
+    """Versions a release has to be able to publish notes for.
+
+    The tags, plus the one `pyproject.toml` names, which is the version in
+    flight and has no tag until the merge that creates it. VERSIONS rather than
+    headings, deliberately: enumerating headings would need a regex for what a
+    heading looks like, which is a fourth copy of the rule this test exists to
+    deduplicate, and it would drag in `## Unreleased`, whose section is empty by
+    design.
+    """
+    tags = subprocess.run(
+        ["git", "tag"], cwd=ROOT, capture_output=True, text=True, check=False
+    ).stdout.split()
+    versions = {t.lstrip("v") for t in tags}
+    preparing = re.search(
+        r'^version = "(\d+\.\d+\.\d+)"', (ROOT / "pyproject.toml").read_text(), re.M
+    )
+    if preparing:
+        versions.add(preparing.group(1))
+    return versions
+
+
+def test_every_released_version_has_notes_the_release_job_can_extract() -> None:
+    """#185, and it is the failure that produced this test.
+
+    0.4.0 was written as `## [0.4.0] - 2026-09-05`, which is what
+    [Keep a Changelog] specifies and what this file's preamble says it follows.
+    The release job refused, because its pattern is anchored on `^## $version`.
+    Nothing was tagged and nothing reached PyPI, which is the gate working, but
+    the failure landed after a merge to `main` when it could have landed here.
+    """
+    changelog = CHANGELOG.read_text()
+    missing = [v for v in sorted(_released_versions()) if not _extract_notes(v, changelog)]
+    assert not missing, (
+        f"the release job would find no notes for {missing}. Its pattern is "
+        "anchored on `^## <version>`, so a heading in any other shape, brackets "
+        "included, publishes nothing and stops the release after the merge"
+    )
+
+
+def test_a_bracketed_heading_still_extracts_nothing() -> None:
+    """The guardrail, and it is an assertion rather than a promise.
+
+    The fix for #185 must make the LOCAL check stricter, never the release
+    check looser. Widening what the workflow matches would let a release
+    publish under a heading nobody reviewed, and a version on PyPI cannot be
+    reused. This fails the day somebody relaxes the pattern to accept the
+    bracketed form instead of teaching the changelog to avoid it.
+    """
+    assert _extract_notes("9.9.9", "## [9.9.9] - 2026-01-01\n\nnotes\n") == ""
+
+
+def test_a_version_that_prefixes_another_gets_its_own_notes() -> None:
+    """#188. `^## 0.4.1` matched the heading `## 0.4.10`, so a patch release
+    would have published a later version's notes under its own number.
+
+    Synthetic rather than the real changelog, because the real one must not
+    have to grow a tenth patch release to keep this covered.
+    """
+    changelog = (
+        "# Changelog\n\n"
+        "## 0.4.10 - 2026-01-02\n\nnotes for four ten\n\n"
+        "## 0.4.1 - 2026-01-01\n\nnotes for four one\n"
+    )
+    assert _extract_notes("0.4.1", changelog) == "notes for four one"
+    assert _extract_notes("0.4.10", changelog) == "notes for four ten"
+
+
+def test_a_version_missing_from_the_changelog_extracts_nothing() -> None:
+    """The half that keeps the refusal meaningful: a release with no notes must
+    find none, rather than borrowing the nearest section."""
+    assert _extract_notes("0.4.1", "## 0.4.10 - 2026-01-02\n\nnotes\n") == ""
+
+
+def test_the_version_is_escaped_rather_than_read_as_a_pattern() -> None:
+    """#188's other half. Interpolated raw, a version's dots matched any
+    character, so `## 0x4x0` satisfied a lookup for `0.4.0`."""
+    assert _extract_notes("0.4.0", "## 0x4x0 - 2026-01-01\n\nnotes\n") == ""
 
 
 # -- #105: the images, which are published claims about the interface -------
