@@ -524,7 +524,22 @@ with a ceiling, and `app.js` split along the seam it already has.
 **Done when:** no screen states something it did not read, every token pair
 passes AA, and no file in `web/` does more than one thing.
 
-Tickets: #68, #69, #71, #72, #78, #82, #90.
+Tickets: #68, #69, #71, #72, #78, #82, #90, #161, #162, #163.
+
+**Three arrived from using it and they are the shape this phase was cut for.**
+#161 is a defect with a measured cause: every dialog is pinned to the bottom of
+the viewport, because `margin-bottom` resolving to `0px` replaces the user
+agent's `margin-bottom: auto` and collapses the centring. A regression from
+#103's keyboard fix, whose reasoning is right and whose default is not, and
+whose test covered only the keyboard-open direction. It matters more than a
+misplaced box: `showDialog` orders actions safest first so the dangerous one is
+furthest from the thumb, and a bottom-pinned dialog inverts that.
+
+#162 and #163 are "the wordings that are wrong", literally. `Open` is the one
+control that does not open the session, and `Continue` is Claude Code's own word
+borrowed out of the sentence that explained it. **They are one decision filed as
+two tickets**, and both say so: renaming the log control to `Logs` is what frees
+`open` for the control that actually opens a session.
 
 ## Phase 13: Fifty rows on a phone
 
@@ -547,7 +562,7 @@ account, logs at a URL you can bookmark, and an icon set.
 primary action is reachable at any scroll position, and the page answers "which
 build is this and who is it running as" without an SSH session.
 
-Tickets: #146, #147, #148, #149, #150, #151, #160.
+Tickets: #146, #147, #148, #149, #150, #151, #160, #164.
 
 **#150 was rewritten from twenty icons to seven, and the two icon tickets pull
 in opposite directions on purpose.** #150 is a SET, so it is vendored from an
