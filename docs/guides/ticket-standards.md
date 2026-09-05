@@ -80,7 +80,7 @@ that proposes E2E coverage without it is not ready.
 There is no GDPR section in this repository's templates, and its absence is deliberate.
 Hitchrail stores no personal data and has no database: state is derived on demand from the
 operating system, and the only thing it holds in memory is an in-flight stop marker. A GDPR
-section here would auto-score N/A on every ticket forever, which trains authors to skip sections.
+section here would be N/A on every ticket forever, which trains authors to skip sections.
 
 What replaces it is the thing this project actually risks. Hitchrail spawns
 `claude --dangerously-skip-permissions`, so anyone who can drive its API can run arbitrary code
@@ -89,7 +89,8 @@ as the user who started it. Every ticket states, in plain terms:
 - whether it touches one of the seven controls in `docs/tech-guidelines.md` section 5, and how
 - the exact argv of any new subprocess call (argument list, never a shell)
 - the target spec of any new tmux invocation, and how it is scoped to the configured prefix
-- how any new path is resolved and confirmed to be a direct child of the root
+- how any new path is resolved and confirmed to be a direct child of SOME configured root,
+  and how the identifier names which one (#119 made a project `<root-label>~<folder>`)
 - whether it adds a runtime dependency, against a budget of three
 - what the code does when a session's state cannot be determined
 
@@ -105,7 +106,7 @@ returns, and whether the route is mutating (Origin checked) or a `GET` (exempt, 
 Order matters and the ticket should reflect it: the host check runs before the token check, so a
 rebound request never reaches anything that could reveal whether a token is even correct.
 
-A `security` label makes the gate run every agent, not only the triggered ones.
+A `security` label dispatches the security lens regardless of what the content selection chose.
 
 ### 7. Required reviews
 
@@ -135,7 +136,7 @@ The candidates in this repository, and what each one owns:
 | `docs/roadmap.md` | phase scope, exit criteria, and the retrospective once a phase closes |
 | `docs/tech-guidelines.md` | a rule that generalises beyond this ticket |
 | `.claude/rules/*.md` | the same rule, where it loads automatically for the files it governs |
-| `.claude/CLAUDE.md` | project shape, commands, architecture, and the non negotiables |
+| `AGENTS.md` | project shape, commands, architecture, and the non negotiables. Tracked, and the canonical copy since #60; `.claude/CLAUDE.md` is a pointer |
 | `docs/versioning.md` | anything that changes the operator contract |
 
 Three cases where this section may **not** be N/A, because these are the ones that were
@@ -198,9 +199,20 @@ the question; it became #9 and #11, and the two halves land months apart.
 | **Type** | `bug`, `enhancement`, `security`, `design`, `testing`, `documentation` | At least one. A missing type warns rather than blocks |
 | **Process** | `gated`, `blocked`, `needs-human`, `from-review` | Optional, applied as the ticket moves |
 
-`gated` is applied by whoever runs `/gate-ticket` when every agent scores
-10/10, and it is the answer to "what can I start". Without it the gate's
-verdict lives only in a comment, which is not a thing you can query.
+`gated` is applied by whoever runs `/gate-ticket` on a PASS, and it is the
+answer to "what can I start". Without it the gate's verdict lives only in a
+comment, which is not a thing you can query.
+
+**A PASS is a verdict, not a score.** The gate used to run five agents that each
+scored 1 to 10 and required 10 from all of them. That model was retired: it ran
+five agents to reach a number, and a committee converging on 10/10 certifies
+less than one grounded critique with its sources. The gate now runs
+deterministic mechanical checks, then ONE critic, plus a specialist lens where
+the labels call for it, and returns PASS, NEEDS-WORK or BLOCKED with a concrete
+change list.
+
+What did not change is what a ready ticket must CONTAIN, which is this document.
+The gate's shape is how the rules are checked; the rules are here.
 
 `from-review` marks a ticket that came out of code review rather than out of
 using the tool. It is worth being able to see that ratio: if nearly everything
@@ -219,8 +231,8 @@ question you actually meant.
 
 ### Where this is enforced
 
-- **`ticket-gate` Step 0b** refuses to score a ticket with no area label or no
-  milestone. Nothing gets implemented without both.
+- **`ticket-gate` Step 0b** refuses to review a ticket with no area label or no
+  milestone, returning BLOCKED. Nothing gets implemented without both.
 - **`scripts/check-ticket-hygiene.sh`** sweeps every open issue and reports
   what is missing, because the gate only sees tickets somebody chose to run it
   on. Run it before planning a phase.
