@@ -465,6 +465,10 @@ funding link serves none of install, understand or report.
 
 ## Phase 9: The truth on a shared machine
 
+**Status: done**, closed 2026-09-05 at `ccfa3c3`. Issues #93, #96, #102, #46,
+#49, #95, #97, #113, #85, #100 and #32. Every exit criterion is ticked with
+evidence, and #107 left the phase rather than being skipped in it.
+
 **Objective: derivation is right on a machine Hitchrail does not own.**
 
 Every defect in this phase was found the same way: by running against a real
@@ -492,8 +496,8 @@ plan's batch order rather than the order they were filed, because the ordering i
 a dependency: #107 must follow #96 and #85, since it builds a destructive control
 on top of an identification that has been wrong twice this month.
 
-**Eight shipped, then four decisions were taken on 2026-09-05 and the phase has
-three implementations left.** #93, #96, #102, #46, #49, #95, #97 and #113 are
+**Eight shipped, then four decisions were taken on 2026-09-05, two of them
+became code the same day, and the phase closed.** #93, #96, #102, #46, #49, #95, #97 and #113 are
 done and closed with their commits. #85, #100 and #32 were escalated rather than
 implemented, and #107 was blocked behind #85. Each of the four was a decision
 rather than an implementation, and each is now decided on the ticket:
@@ -535,7 +539,34 @@ what makes the alias in #32 the obvious response to our own error message; it
 also records that `pane_pids` parses `#{session_name} #{pane_pid}` on the first
 space, so widening the pattern is not a one-line change.
 
-The phase's first exit criterion belongs to #85 and stays open with it.
+**How the four actually ended.**
+
+- **#85 built** at `0b24fbb`, with review round 1 at `acafafc` and `ccfa3c3`.
+  The row names the session that owns a foreign agent; where none can be seen it
+  says so rather than claiming there is none. The first exit criterion is
+  ticked, proven against a real tmux and through a browser rather than only
+  against a fake.
+- **#100 built** at `ccfa3c3`, and the cost decision went the other way from the
+  ticket: the capture runs on the sweep, never on the listing route, so the cost
+  scales with the state of the machine rather than with how often a browser
+  polls. `test_list_captures_no_pane` keeps its assertion untouched, which is
+  the outcome the placement was chosen for.
+- **#32 closed as a decision**, unchanged behaviour, with the reasoning on the
+  ticket and the cause filed as #173.
+- **#107 moved to Phase 14**, not skipped. The gate found its scoping premise
+  false: `foreign_session is None` means no owner was SEEN, not that there is
+  none, and that bucket holds agents under another socket, under screen, under a
+  plain terminal, and another user's, since tmux sockets are per uid and the
+  process table is not. Signalling on that basis is the warning #85 just added
+  to the interface, inverted. It needs #172 first, which establishes
+  orphanhood positively, so both are in Phase 14 now.
+
+**Six tickets came out of this work rather than being fixed inside it**, which
+is the phase behaving as intended: #172 and #173 from the decisions, #174 from a
+control count that had drifted across three documents, and #175, #176 and #177
+from the review of #85. Two of those name tests this phase itself added that
+could not fail on what they claimed, which is the failure Phase 10 exists for
+and worth noticing in a phase about honest answers.
 
 ## Phase 10: A suite that would notice
 
