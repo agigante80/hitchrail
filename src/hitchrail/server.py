@@ -477,6 +477,12 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
                 await asyncio.sleep(SWEEP_INTERVAL_S)
                 try:
                     await in_thread(engine.expire_stops)
+                    # #100. Here rather than on the listing route, which is the
+                    # decision `scan_for_stuck` documents: the cost then scales
+                    # with the state of the machine rather than with how often
+                    # a browser polls, and no capture lands on the executor that
+                    # serves the operator's stop.
+                    await in_thread(engine.scan_for_stuck)
                 except Exception:
                     logger.exception("stop sweep failed; the timer continues")
 

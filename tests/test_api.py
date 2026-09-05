@@ -955,6 +955,31 @@ async def test_the_listing_carries_the_root_it_is_listing(
     assert body["roots"] == [{"label": r.label, "path": str(r.path)} for r in config.roots]
 
 
+async def test_the_listing_reports_what_the_sweep_found_and_captures_nothing(
+    config: Config, tmux: FakeTmux
+) -> None:
+    """#100 through the route, and the assertion that matters is the second one.
+
+    The whole placement decision was that no capture lands on a request path:
+    the interface polls this route every 700 ms during a stop wait, and a
+    capture here would put the adapter's ten second call timeout on the
+    executor that also serves the operator's stop.
+    """
+    modal = "Background work is running\n\x1b[39m\u276f\x1b[38;5;153m1. Exit and stop\n"
+    tmux = FakeTmux(sessions={proj("vessel"): 500})
+    tmux.pane_text[proj("vessel")] = modal
+    engine = make_engine(config, tmux=tmux, procs=procs_from(RUNNING_PS))
+    engine.scan_for_stuck()
+    captures = tmux.capture_calls
+
+    async with client_for(engine, config) as client:
+        body = (await client.get("/api/projects", headers=HEADERS)).json()
+
+    rows = {row["name"]: row for row in body["projects"]}
+    assert rows[proj("vessel")]["awaiting_input"] is True
+    assert tmux.capture_calls == captures, "the listing route captured a pane"
+
+
 async def test_the_listing_carries_the_owner_of_a_foreign_agent(
     config: Config, tmux: FakeTmux
 ) -> None:

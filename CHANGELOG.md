@@ -22,6 +22,22 @@ the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ### Fixed
 
+**A session stuck on a prompt looked healthy.** If an agent put up anything that
+needed answering, other than the workspace trust prompt, its row said `running`
+and nothing else: no link, no explanation, and no way to tell it apart from a
+session that was working. From a phone there was nothing to act on. Such a row
+now says it is waiting for an answer, the same wording a timed out stop already
+produced.
+
+A row where somebody is simply typing is NOT flagged, which the previous check
+could not tell apart. It looked for an empty input box; the question is whether
+there is an input box at all.
+
+**What this costs:** Hitchrail now reads the screen of running sessions that
+have no link yet, on the background timer rather than when you load the page, at
+most ten of them a second and never for longer than three seconds at a stretch.
+Nothing you tap waits on it. On a machine with nothing stuck, it reads nothing.
+
 **A live agent inside another tool's tmux session was reported as orphaned.**
 If anything else on your machine runs agents in its own tmux sessions, those
 projects showed as `detached` with the words "no tmux session", while the agent

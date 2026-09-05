@@ -940,7 +940,14 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # assignment, and HEAD was committed without the formatter having run.
         # Recorded so the next reader does not go looking for the behaviour that
         # grew the file. It did not; the gate did.
-        "claude_ipc.py": 651,
+        # 651 to 692 for #100: `shows_input_box`, and the reason it exists
+        # beside `input_is_clear` rather than replacing it. The two differ on
+        # one case, an ordinary box with text in it, and the captured rows that
+        # prove the difference are most of the addition. The rest is why the
+        # escapes are deliberately NOT stripped here: the stripper eats one
+        # printable character after a two character escape (#97), and the
+        # character it would eat is the U+00A0 this predicate reads.
+        "claude_ipc.py": 692,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.
@@ -968,7 +975,21 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # edited separately, which is the shape of the defect itself. The
         # growth is that reason plus the branch that names the owning session
         # when there is one, which turns a dead end into an instruction.
-        "engine.py": 855,
+        # 855 to 934 for #100, AFTER taking the seam rather than instead of
+        # taking it. The deciding moved out to `attention.py`: which rows are
+        # worth a subprocess, the cap, the wall clock budget, the TTL and the
+        # argument for all four. What could not follow it is what this class
+        # is: the remembered observation, the lock that guards it, and the one
+        # method that actually touches a pane.
+        #
+        # The growth that remains is a second source for an existing overlay
+        # and the reason it is combined in one place, which is that `get`,
+        # `list` and the event published after an action must agree. A version
+        # that flagged rows inside `list` alone would blink the flag off every
+        # time an event arrived, since the interface replaces a row wholesale
+        # from an event payload. That is exactly the kind of reason that
+        # belongs at the code rather than in a ticket.
+        "engine.py": 934,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -1021,7 +1042,15 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # accepting a foreign session name with a space in it, and why the
         # foreign half is keyed by pid while ours is keyed by name. Behaviour
         # plus its reason, which the note above permits.
-        "tmux.py": 524,
+        # 524 to 554 in review of #85, and every added line is the reason for
+        # one condition. `rpartition` fixed a foreign name with a space being
+        # dropped and, for one input, made the outcome worse: a foreign session
+        # called `hr-my project` classified as OURS, hid the agent under its
+        # pane, and derived `stopped`, which offers Start. The comment says why
+        # a space disqualifies a name from being ours, because the next reader
+        # will see a redundant looking check beside a `startswith` and remove
+        # it.
+        "tmux.py": 554,
         # 413, and thirteen lines over the guideline is not a second job. #18
         # already took the host vocabulary out of this file, and what is left
         # is one dataclass and its startup refusals, which is one thing. The
@@ -1076,7 +1105,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 513 to 517 for #120. The listing payload reports every configured
         # root as a labelled list rather than one path string, and the comment
         # says why one root is still a list.
-        "server.py": 517,
+        # 517 to 523 for #100. Six lines: the sweep now calls a second engine
+        # method, and the comment says why that call is here rather than on the
+        # listing route, which is the whole decision the ticket turned on.
+        "server.py": 523,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

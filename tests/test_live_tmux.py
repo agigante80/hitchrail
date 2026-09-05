@@ -31,7 +31,7 @@ from pathlib import Path
 
 import pytest
 
-from hitchrail import derive
+from hitchrail import claude_ipc, derive
 from hitchrail.claude_ipc import launch_argv
 from hitchrail.config import Config
 from hitchrail.procs import snapshot
@@ -575,3 +575,55 @@ def test_the_servers_argv_outlives_the_agent_that_gave_it(
     session = derive.derive(LIVE_PROJECT, derive.look(snapshot, adapter), config, adapter, ())
     assert session.state is State.STOPPED, "the server's stale argv derived as a detached agent"
     assert session.pid is None
+
+
+# -- #100: the predicate against a real capture -----------------------------
+
+
+@pytest.mark.live_tmux
+@pytest.mark.parametrize(
+    ("painted", "expected"),
+    [
+        # A real input box: the ornament followed by U+00A0.
+        ("\x1b[39m\u276f\u00a0   ", True),
+        # A modal: the same ornament, a colour reset, then an ordinary space.
+        ("\x1b[39m\u276f\x1b[39m \x1b[38;5;153mNo, exit", False),
+    ],
+    ids=["input box", "modal"],
+)
+def test_a_real_capture_carries_what_the_predicate_reads(
+    server: PrivateTmux, painted: str, expected: bool
+) -> None:
+    """#100 against a real `capture-pane`, which is what no fake can prove.
+
+    The whole predicate turns on one byte, U+00A0, surviving the round trip
+    from a pane through `capture-pane -e` and back. Every other tier asserts it
+    against a string a test wrote, which proves the parser and nothing about
+    the terminal.
+
+    Painted with `printf` rather than by running an agent: what is under test
+    is the transport, and involving Claude Code here would make the test depend
+    on a vendor's screen rather than on the bytes.
+    """
+    name = f"{PREFIX}painted"
+    # The row is passed as an ARGUMENT rather than interpolated into the
+    # command. Interpolating it wrote the escape sequences literally, so the
+    # pane held the four characters `\`, `x`, `a`, `0` instead of one U+00A0,
+    # and the test passed for the modal case while proving nothing.
+    server.run(
+        "new-session",
+        "-d",
+        "-s",
+        name,
+        "sh",
+        "-c",
+        'printf %s "$1"; sleep 30',
+        "sh",
+        painted,
+    )
+    server.created.append(name)
+    time.sleep(0.4)
+
+    captured = adapter(server).capture_pane("painted", escapes=True)
+
+    assert claude_ipc.shows_input_box(captured) is expected, repr(captured)

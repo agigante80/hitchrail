@@ -154,6 +154,26 @@ def test_a_foreign_session_is_named_but_never_ours() -> None:
     assert panes.foreign == {111: "work"}
 
 
+def test_a_prefixed_name_with_a_space_is_not_ours() -> None:
+    """Found in review of #85, and it is the parser making things worse.
+
+    `rpartition` fixed a foreign name with a space being DROPPED. For one
+    input it made the outcome worse instead: `hr-my project` classifies as
+    ours, its pane pid lands in `owned`, the agent underneath is hidden, and
+    the row derives `stopped`. `stopped` offers Start, and Start on a folder
+    that already has an agent is the second agent in one folder the whole
+    derivation exists to prevent.
+
+    A space is what disqualifies it: `session_name` is `prefix + sanitize(...)`
+    and both halves of a qualified identifier go through `NAME_PATTERN`, which
+    forbids one, so we could not have created this session.
+    """
+    runner = FakeRunner(stdout={"list-panes": "hr-my project 5000\nhr-vessel 4242\n"})
+    panes = Tmux(prefix="hr-", run=runner).panes()
+    assert panes.ours == {"hr-vessel": 4242}
+    assert panes.foreign == {5000: "hr-my project"}
+
+
 def test_a_foreign_session_name_with_a_space_survives_the_parse() -> None:
     """#85, and the reason the split is `rpartition`.
 

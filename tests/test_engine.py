@@ -23,10 +23,11 @@ from conftest import (
     FakeClock,
     FakeTmux,
     ScriptedProcs,
+    failing_procs,
     procs_from,
     ps_row,
 )
-from hitchrail import derive, discovery
+from hitchrail import attention, derive, discovery
 from hitchrail.claude_ipc import GRACEFUL_STOP_KEYS, launch_argv
 from hitchrail.config import TOKEN_ENV
 from hitchrail.engine import (
@@ -99,6 +100,7 @@ def engine_for(
     procs_fn: Callable[[], ProcTable] | None = None,
     self_project: str | None = None,
     agent_config: Path | None = None,
+    clock: FakeClock | None = None,
 ) -> tuple[Engine, FakeTmux]:
     tmux = FakeTmux(sessions=sessions, foreign=foreign)
     # Pinned INSIDE the temporary root. Without it `Config` defaults to
@@ -119,15 +121,27 @@ def engine_for(
         # which folders this machine happens to have opened is not hermetic.
         agent_config_path=agent_config or (root / "no-agent-config.json"),
     )
-    return (
+    # Built explicitly rather than through `**kwargs`, so the two clock
+    # arguments keep their types. A dict of them widens to `object` and mypy
+    # loses the seam this helper exists to inject.
+    engine = (
         Engine(
             config,
             tmux=tmux,
             procs_fn=procs_fn or procs_from(table),
             meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
-        ),
-        tmux,
+            clock=clock,
+            sleep=clock.sleep,
+        )
+        if clock is not None
+        else Engine(
+            config,
+            tmux=tmux,
+            procs_fn=procs_fn or procs_from(table),
+            meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
+        )
     )
+    return engine, tmux
 
 
 def state_of(engine: Engine, name: str) -> State:
@@ -627,7 +641,14 @@ def test_list_issues_one_tmux_call_and_one_ps_call(tmp_path: Path, count: int) -
 
 
 def test_list_captures_no_pane(root: Path) -> None:
-    """Capturing is the expensive lookup and belongs in `session_url`."""
+    """Capturing is the expensive lookup and belongs in `session_url`.
+
+    **Still true after #100, and that is the point of leaving it here.** That
+    ticket gave `awaiting_input` a second source that costs a `capture-pane`,
+    and put it on the sweep rather than on this route precisely so this
+    assertion would not have to move. A change that makes the listing capture
+    again fails here, which is the outcome the ticket chose the placement for.
+    """
     table = ps_row(PANE, 1) + ps_row(AGENT, PANE, project=proj("vessel"))
     engine, tmux = engine_for(root, sessions={proj("vessel"): PANE}, table=table)
     engine.list()
@@ -1505,7 +1526,10 @@ def test_stopping_a_detached_agent_is_refused_by_state_too(root: Path) -> None:
     with pytest.raises(NoAgent) as refusal:
         engine.stop(proj("vessel"))
 
-    assert "no tmux session" in str(refusal.value).lower()
+    # The WHOLE phrase, not the substring. "no tmux session" is inside the
+    # honest sentence too, so asserting it alone stayed green through #85's
+    # rewording and would stay green if somebody put the overclaim back.
+    assert "no tmux session Hitchrail can address" in str(refusal.value)
     assert tmux.sent == []
     assert engine.stopping_since(proj("vessel")) is None
 
@@ -2520,3 +2544,237 @@ def test_a_refusal_on_a_real_orphan_does_not_claim_there_is_no_session(root: Pat
     message = str(refused.value)
     assert "no tmux session Hitchrail can address" in message
     assert str(ORPHAN) in message, "the pid is the only thing left to act on"
+
+
+# -- #100: a running row that is waiting on somebody -----------------------
+#
+# #88 answered the trust prompt case from a file, for the whole listing, in one
+# read. Every OTHER modal needs the screen, which is a subprocess per row, and
+# this is where that is paid for: on the sweep, never on a request.
+
+
+def running_table(pid: int = AGENT, etime_s: int = 60) -> str:
+    return ps_row(PANE, 1) + ps_row(pid, PANE, project=proj("vessel"), etime_s=etime_s)
+
+
+def sweeping_engine(root: Path, pane: str, etime_s: int = 60) -> tuple[Engine, FakeTmux]:
+    engine, tmux = engine_for(
+        root, sessions={proj("vessel"): PANE}, table=running_table(etime_s=etime_s)
+    )
+    tmux.pane_text[proj("vessel")] = pane
+    return engine, tmux
+
+
+def test_the_sweep_flags_a_running_row_showing_something_other_than_a_box(root: Path) -> None:
+    """The case #88 left open: a modal that is not the trust prompt.
+
+    The row is `running` and it is telling the truth. What it is not saying is
+    that the agent is holding a question only somebody at that terminal can
+    answer, and on a phone there is nobody at that terminal.
+    """
+    engine, tmux = sweeping_engine(root, MODAL_PANE)
+
+    assert engine.get(proj("vessel")).awaiting_input is False
+    assert engine.scan_for_stuck() == [proj("vessel")]
+    assert engine.get(proj("vessel")).awaiting_input is True
+    assert tmux.capture_calls == 1
+
+
+def test_a_draft_in_the_box_is_not_somebody_being_needed(root: Path) -> None:
+    """The predicate change, at the level that matters.
+
+    `input_is_clear` returns False for a person's half typed sentence exactly
+    as it does for a modal, because #89 shortened its anchor on purpose so that
+    both would match. Reused here it would tell somebody typing that they are
+    needed somewhere else.
+    """
+    engine, tmux = sweeping_engine(root, DIRTY_INPUT_BOX)
+
+    assert engine.scan_for_stuck() == []
+    assert engine.get(proj("vessel")).awaiting_input is False
+    assert tmux.capture_calls == 1, "it still had to look to find that out"
+
+
+def test_a_clear_box_is_not_flagged(root: Path) -> None:
+    engine, _ = sweeping_engine(root, CLEAR_INPUT_BOX)
+    assert engine.scan_for_stuck() == []
+
+
+def test_a_pane_with_no_prompt_row_at_all_is_not_flagged(root: Path) -> None:
+    """A busy agent mid turn has printed over its own input row. Unknown is not
+    evidence, and flagging it would put a warning on every working session that
+    happens to be producing output."""
+    engine, _ = sweeping_engine(root, "building the thing\nstill building\n")
+    assert engine.scan_for_stuck() == []
+
+
+def test_the_sweep_leaves_a_row_that_has_a_link_alone(root: Path) -> None:
+    """A row with a session link is reachable: tap it and you are there.
+
+    This clause is what keeps the sweep free on a healthy machine, and it is
+    the reason a capture is affordable at all.
+    """
+    engine, tmux = sweeping_engine(root, MODAL_PANE)
+    (root / ".sessions" / f"{AGENT}.json").write_text('{"bridgeSessionId": "session_abc"}')
+
+    assert engine.scan_for_stuck() == []
+    assert tmux.capture_calls == 0
+
+
+def test_the_sweep_leaves_a_young_row_alone(root: Path) -> None:
+    """A session still painting its first screen has no input box either."""
+    engine, tmux = sweeping_engine(root, MODAL_PANE, etime_s=3)
+
+    assert engine.scan_for_stuck() == []
+    assert tmux.capture_calls == 0
+
+
+def test_the_sweep_spends_no_more_than_its_cap(root: Path) -> None:
+    """The ceiling, per sweep, machine wide. Without it a machine full of stuck
+    agents is a spawn per stuck row every second, and the number of extra
+    spawns is exactly the number of rows the person most needs rendered."""
+    sessions = {}
+    table = ""
+    for n in range(attention.MAX_CAPTURES + 5):
+        (root / f"stuck{n}").mkdir(exist_ok=True)
+        pane, agent = 600 + n * 2, 601 + n * 2
+        sessions[proj(f"stuck{n}")] = pane
+        table += ps_row(pane, 1) + ps_row(agent, pane, project=proj(f"stuck{n}"))
+    engine, tmux = engine_for(root, sessions=sessions, table=table)
+    for name in sessions:
+        tmux.pane_text[name] = MODAL_PANE
+
+    found = engine.scan_for_stuck()
+
+    assert tmux.capture_calls == attention.MAX_CAPTURES
+    assert len(found) == attention.MAX_CAPTURES
+    # Deterministic, not whichever ten iteration happened to reach first.
+    assert found == sorted(sessions)[: attention.MAX_CAPTURES]
+
+
+def test_the_sweep_abandons_its_budget_rather_than_paying_every_timeout(root: Path) -> None:
+    """The cap bounds COUNT and the budget bounds TIME, and only the second one
+    saves the sweep from a wedged tmux.
+
+    Ten captures at the adapter's own ten second call timeout is a hundred
+    seconds, which overlaps the next sweep and the one after it.
+    """
+    sessions = {}
+    table = ""
+    for n in range(5):
+        (root / f"stuck{n}").mkdir(exist_ok=True)
+        pane, agent = 600 + n * 2, 601 + n * 2
+        sessions[proj(f"stuck{n}")] = pane
+        table += ps_row(pane, 1) + ps_row(agent, pane, project=proj(f"stuck{n}"))
+    clock = FakeClock()
+    engine, tmux = engine_for(root, sessions=sessions, table=table, clock=clock)
+    for name in sessions:
+        tmux.pane_text[name] = MODAL_PANE
+    real_capture = tmux.capture_pane
+
+    def slow_capture(project: str, lines: int = 40, escapes: bool = False) -> str:
+        clock.advance(attention.BUDGET_S)
+        return real_capture(project, lines, escapes)
+
+    tmux.capture_pane = slow_capture  # type: ignore[method-assign]
+
+    engine.scan_for_stuck()
+
+    assert tmux.capture_calls == 1, "the budget was spent and the rest kept going anyway"
+
+
+def test_a_capture_that_cannot_run_leaves_the_row_unflagged(root: Path) -> None:
+    """An unreadable pane is not evidence of a prompt, and it must not take the
+    sweep down with it: if this loop dies, no stop expires again for the life of
+    the process."""
+    engine, tmux = sweeping_engine(root, MODAL_PANE)
+
+    def gone(project: str, lines: int = 40, escapes: bool = False) -> str:
+        raise TmuxUnavailable("tmux is gone")
+
+    tmux.capture_pane = gone  # type: ignore[method-assign]
+
+    assert engine.scan_for_stuck() == []
+    assert engine.get(proj("vessel")).awaiting_input is False
+
+
+def test_an_unreadable_machine_forgets_nothing_and_claims_nothing(root: Path) -> None:
+    """We could not look. That is not evidence in either direction, so a row
+    already known to be waiting keeps saying so."""
+    engine, _ = sweeping_engine(root, MODAL_PANE)
+    engine.scan_for_stuck()
+
+    engine._procs_fn = failing_procs
+
+    assert engine.scan_for_stuck() == []
+    assert engine._needs_a_person() == frozenset({proj("vessel")})
+
+
+def test_get_and_list_agree_about_a_flagged_row_and_neither_captures(root: Path) -> None:
+    """The reason the union is built in one place.
+
+    The interface replaces a row wholesale from an event payload, so a flag
+    that existed only inside `list` would blink off every time anything
+    happened on the machine.
+    """
+    engine, tmux = sweeping_engine(root, MODAL_PANE)
+    engine.scan_for_stuck()
+    before = tmux.capture_calls
+
+    from_list = {s.name: s.awaiting_input for s in engine.list()}
+
+    assert from_list[proj("vessel")] is True
+    assert engine.get(proj("vessel")).awaiting_input is True
+    assert tmux.capture_calls == before, "a request path captured a pane"
+
+
+def test_an_answered_prompt_is_forgotten_on_the_next_sweep(root: Path) -> None:
+    """Removed rather than left to expire. Somebody answered it, and the row
+    should stop saying otherwise on the next listing rather than in half a
+    minute."""
+    engine, tmux = sweeping_engine(root, MODAL_PANE)
+    engine.scan_for_stuck()
+    assert engine.get(proj("vessel")).awaiting_input is True
+
+    tmux.pane_text[proj("vessel")] = CLEAR_INPUT_BOX
+
+    assert engine.scan_for_stuck() == []
+    assert engine.get(proj("vessel")).awaiting_input is False
+
+
+def test_an_observation_expires_if_the_sweep_stops_running(root: Path) -> None:
+    """The TTL is what makes a remembered observation safe to keep at all.
+
+    A claim about a screen that outlives the thing watching it is a claim
+    nobody has checked since, which is the same argument this project already
+    makes for not persisting the stop marker.
+    """
+    clock = FakeClock()
+    engine, tmux = engine_for(
+        root, sessions={proj("vessel"): PANE}, table=running_table(), clock=clock
+    )
+    tmux.pane_text[proj("vessel")] = MODAL_PANE
+    engine.scan_for_stuck()
+    assert engine.get(proj("vessel")).awaiting_input is True
+
+    clock.advance(attention.TTL_S + 1)
+
+    assert engine.get(proj("vessel")).awaiting_input is False
+
+
+def test_asking_again_clears_what_the_last_observation_found(root: Path) -> None:
+    """#101's rule, extended to the second source.
+
+    The design says this overlay describes ONE attempt. A standing observation
+    that survived a fresh stop would go on reporting a prompt the person has
+    since answered, which is the thing that rule exists to prevent. The sweep
+    re establishes it within a second if it is still true.
+    """
+    engine, tmux = sweeping_engine(root, MODAL_PANE)
+    engine.scan_for_stuck()
+    assert engine.get(proj("vessel")).awaiting_input is True
+
+    tmux.pane_text[proj("vessel")] = CLEAR_INPUT_BOX
+    engine.stop(proj("vessel"))
+
+    assert engine.get(proj("vessel")).awaiting_input is False

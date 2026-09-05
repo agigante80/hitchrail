@@ -292,11 +292,37 @@ a confirmation whose entries decide what happens to that work, and waits. The
 row then reads `running` while the interface says the session "has not finished"
 and offers a kill, which is true and useless.
 
-Found by looking at the pane ONCE, when a stop's wait expires. That is the only
-moment it is affordable: a `capture-pane` per running row on every listing is the
-cost 4.4 refuses for the session link, while a stop that runs out of patience is
-rare by construction. It is an overlay on one attempt rather than a property of
-the session, so a fresh stop clears it.
+Found by looking at the pane when a stop's wait expires, and, since #100, also
+by a bounded sweep that looks for the same thing without a stop having happened.
+
+**#88 answered one prompt from a file. Every other one needs the screen**, and
+#100 is where that is paid for. The refusal in 4.4 stands as written for the
+session link: a `capture-pane` per running row on every listing is what turns a
+fifty row page into fifty subprocess calls. What changed is where the looking
+happens, not whether it is affordable.
+
+It happens on the sweep that already expires stop markers, never on a request.
+That bounds the cost by the state of the MACHINE rather than by how often a
+browser polls, which matters because the interface polls the listing every
+700 ms for a whole stop wait, and because the adapter's own call timeout is ten
+seconds: a cap of ten captures on the listing route would be a hundred seconds
+of worst case latency on the executor that also serves the operator's stop.
+
+Three bounds, each for a different failure. A cap on how many panes one sweep
+reads, since a machine full of stuck agents would otherwise cost a spawn per
+stuck row every second. A wall clock budget, since the cap alone bounds count
+and not time. And a TTL on what a sweep found, since a claim about a screen that
+outlives the thing watching it is a claim nobody has checked since. Rows the cap
+does not reach carry no flag, which means NOT CHECKED rather than healthy.
+
+The predicate is "is this an ordinary input box", not "is the box empty". Those
+differ on exactly one case, a person's half typed draft, and a draft is not
+somebody being needed. The distinguishing byte is the non breaking space the
+input box renders after its prompt ornament and a modal does not.
+
+It remains an overlay on one attempt rather than a property of the session: a
+fresh stop clears BOTH sources, and the sweep re establishes its own within a
+second if it is still true.
 
 Hitchrail does not answer that prompt either, for the same reason and with more
 force: those entries decide the fate of work the operator did not ask to end.

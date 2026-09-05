@@ -36,7 +36,7 @@ import threading
 import time
 from collections.abc import Callable
 
-from hitchrail import claude_ipc, derive, discovery, ram
+from hitchrail import attention, claude_ipc, derive, discovery, ram
 from hitchrail.config import TOKEN_ENV, Config
 from hitchrail.derive import Machine
 from hitchrail.events import EventBus
@@ -129,6 +129,21 @@ class Engine:
         # and a marker that outlived the process would be a claim about a
         # screen nobody has looked at since.
         self._awaiting_input: set[str] = set()
+        # The SECOND source of the same flag, added at #100, and the second
+        # thing in this class that is remembered rather than derived.
+        #
+        # `_awaiting_input` above describes one stop ATTEMPT. This describes a
+        # standing observation: a running row with no session link that was
+        # last seen showing something other than an ordinary input box. Name to
+        # the time it was observed, because a row the sweep did not reach this
+        # pass keeps its last answer until `STUCK_TTL_S` rather than blinking
+        # off, and a row it did reach is updated or removed outright.
+        #
+        # Not persisted, for the same reason neither of the others is: it is a
+        # claim about a screen, and a claim that outlived the process would be
+        # about a screen nobody has looked at since. A restart loses it and the
+        # next sweep re establishes it within a second.
+        self._stuck: dict[str, float] = {}
         # Guarded for the same reason `_starting` is: stop, kill and the
         # expiry ticker all run on worker threads. Without it, iterating in
         # `expire_stops` while `stop` adds raises "dictionary changed size
@@ -164,7 +179,7 @@ class Engine:
         # `self._stopping` is passed unguarded on purpose: see the note on
         # `_stopping_guard`. `derive` only asks `name in stopping`.
         session = derive.derive(
-            name, machine, self.config, self.tmux, self._stopping, self._awaiting_input
+            name, machine, self.config, self.tmux, self._stopping, self._needs_a_person()
         )
         if session.state is State.STOPPED:
             # Reconciled on read, which is the only place the transition is
@@ -560,6 +575,11 @@ class Engine:
         # on being reported at them.
         with self._stopping_guard:
             self._awaiting_input.discard(name)
+            # BOTH sources (#100). The design says the overlay describes one
+            # attempt, and a standing observation from the sweep would outlive
+            # the attempt it belongs to if only the first were cleared. The
+            # sweep re establishes it within a second if it is still true.
+            self._stuck.pop(name, None)
         # Refused from the STATE, before any subprocess and before any key
         # (#98). `_require_live` admits `stale` and `detached`, and neither has
         # an agent to ask:
@@ -690,6 +710,56 @@ class Engine:
     # which shadows the builtin for every annotation after it, and mypy reads
     # the bare form as "returns Engine.list". The design names that method
     # `list`, so the qualified builtin is the smaller compromise.
+    def _needs_a_person(self) -> frozenset[str]:
+        """Every name the `awaiting_input` overlay is true for, from both sources.
+
+        The union, computed once per derivation rather than per row: `_derive`
+        used to hand `derive` the attempt set directly, and #100 gave the flag
+        a second source that has to be combined somewhere.
+
+        Combined HERE rather than in `derive`, so that `get`, `list` and the
+        event published after an action all read the same answer. A version
+        that flagged rows only inside `list` would have blinked the flag off
+        every time an event arrived, because the interface replaces a row
+        wholesale from an event payload.
+
+        The TTL is `attention`'s, and so is the reason for one.
+        """
+        now = self._clock()
+        with self._stopping_guard:
+            return frozenset(self._awaiting_input) | attention.standing(self._stuck, now)
+
+    def scan_for_stuck(self) -> builtins.list[str]:
+        """Record which running rows are waiting on a person (#100).
+
+        Driven by the sweep that already expires stop markers, never by a
+        request. `attention` carries the argument for that and the bounds; this
+        is the part that touches the machine and holds the answer.
+
+        Never raises. It runs on the loop that expires stops, and an exception
+        there kills that loop for the life of the process.
+        """
+        try:
+            machine = self._look()
+            names = discovery.list_root_projects(self.config.roots)
+        except (MachineUnreadable, discovery.RootUnavailable):
+            # We could not look. That is not evidence about anybody's screen,
+            # so nothing is added and nothing already known is dropped.
+            return []
+        # Sorted, so which rows a truncated budget reaches is deterministic
+        # rather than a property of iteration order.
+        rows = [self._derive(name, machine) for name in sorted(names)]
+        stuck, clear = attention.scan(
+            attention.candidates(rows), self._pane_needs_a_person, self._clock
+        )
+        now = self._clock()
+        with self._stopping_guard:
+            for name in stuck:
+                self._stuck[name] = now
+            for name in clear + attention.expired(self._stuck, now):
+                self._stuck.pop(name, None)
+        return stuck
+
     def _pane_needs_a_person(self, name: str) -> bool:
         """Whether this agent's screen is showing something only a human can
         answer. False whenever that cannot be told.
@@ -706,9 +776,18 @@ class Engine:
         except TmuxUnavailable:
             return False
         # `is False` and not `is not True`: `None` means the row could not be
-        # read at all, which is not evidence of a prompt. Only a box we can see
-        # and that holds something counts.
-        return claude_ipc.input_is_clear(pane) is False
+        # read at all, which is not evidence of a prompt. Only a screen we can
+        # see and that is not an ordinary input box counts.
+        #
+        # **`shows_input_box`, not `input_is_clear`, and #100 is why.** The two
+        # differ on exactly one case: an ordinary box with text in it. That is a
+        # person's draft, and a draft is not somebody being needed. The design's
+        # own words for this overlay are "showing something that had to be
+        # answered, not an ordinary input box", which is this predicate; the
+        # other one was an approximation that also fired on the draft, and it
+        # cannot be reused here because #89 shortened its anchor deliberately so
+        # that a modal and a box would both match.
+        return claude_ipc.shows_input_box(pane) is False
 
     def expire_stops(self) -> builtins.list[str]:
         """Drop stop markers older than the timeout, and say so.
