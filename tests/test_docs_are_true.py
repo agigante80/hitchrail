@@ -468,7 +468,21 @@ def test_a_released_version_heading_matches_a_real_tag() -> None:
         )
         pytest.skip("no tags yet, which is correct before the first release")
     normalised = {t.lstrip("v") for t in tags}
-    unreleased = [h for h in headings if h not in normalised]
+    # **The version being PREPARED is allowed to be untagged**, and #132 is why.
+    # A release is now a pull request from `develop` to `main`: the changelog
+    # heading has to be dated ON that request so it is reviewed with the change,
+    # and the tag cannot exist until after the merge. Without this the guard
+    # blocks the very merge that would create the tag it demands.
+    #
+    # Scoped to exactly one version, the one `pyproject.toml` currently names,
+    # so it stays a guard. Every OLDER heading still needs its tag: a heading
+    # for a version nobody can install is the failure this exists to catch, and
+    # the version in flight is the single case where nobody can install it YET.
+    preparing = re.search(
+        r'^version = "(\d+\.\d+\.\d+)"', (ROOT / "pyproject.toml").read_text(), re.M
+    )
+    allowed = normalised | ({preparing.group(1)} if preparing else set())
+    unreleased = [h for h in headings if h not in allowed]
     assert not unreleased, f"changelog versions with no tag: {unreleased}"
 
 
