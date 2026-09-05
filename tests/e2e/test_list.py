@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from playwright.async_api import Page, expect
 
+from hitchrail import attention
 from support import DEFAULT_LABEL
 
 from .conftest import Harness
@@ -491,3 +492,43 @@ async def test_a_running_row_with_every_control_does_not_crush_its_name(
         " parseFloat(getComputedStyle(el).lineHeight || '20')"
     )
     assert name_lines < 2, f"the project name wrapped onto {name_lines:.1f} lines"
+
+
+async def test_a_stuck_row_says_so_without_the_page_asking(
+    page: Page, server: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#100 through the running application, which is the half no other tier has.
+
+    The unit tier proves the engine records it and the live tmux tier proves a
+    real `capture-pane` carries the byte the predicate reads. Neither can see
+    the thing that actually matters to a person: that the sweep runs on the
+    server's own task, and that the answer reaches a page nobody touched.
+
+    **Nobody touches the page.** Outside a stop wait the interface does not
+    poll, so this passing means the announcement went out over the event stream
+    and the row redrew itself. Review found that half missing, with everything
+    else already working.
+
+    `MIN_UPTIME_S` is patched to zero because it is not what is under test: it
+    exists so a session still painting its first frame is not flagged, and
+    waiting fifteen real seconds here would buy a slower suite and no more
+    confidence. The server runs in this process, so the constant it reads is
+    this one.
+    """
+    monkeypatch.setattr(attention, "MIN_UPTIME_S", 0)
+    server.seed(running=["alpha"], agent_shows_a_modal=True)
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("alpha")}"]')
+    await expect(row).to_have_attribute("data-state", "running")
+
+    # Not "waiting to be trusted", which is #88's overlay and reaches the same
+    # badge by a different route. The seeded folder IS trusted, so this is the
+    # sweep's answer or nothing.
+    await expect(row).to_contain_text("waiting for an answer", timeout=15_000)
+
+    # And the badge still reads `running`, which is #183 rather than an
+    # oversight here: `awaiting_trust` replaces the badge and `awaiting_input`
+    # does not, so the two overlays that both mean "a person is needed" look
+    # different at a glance. Asserted so the day that is decided, this test
+    # fails and is updated deliberately rather than drifting.
+    await expect(row.locator(".badge")).to_have_text("running")

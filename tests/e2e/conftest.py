@@ -202,6 +202,23 @@ while True:
         time.sleep(0.2)
 """
 
+# Paints a modal straight away and sits on it, for #100. The head above has
+# already printed a real input box, and the predicate reads the LAST prompt row
+# in the capture, so this leaves the pane showing something that is not an
+# ordinary input box without anybody having asked it to stop.
+#
+# Distinct from PROMPTS_AFTER_STOP_BODY, which only reaches this state once the
+# stop sequence has typed at it. That one covers #101, where a person started
+# the sequence and is owed the outcome. This one covers the case #100 exists
+# for: nobody did anything, and the agent is waiting on somebody who is not
+# there.
+STUCK_BODY = """
+print("Background work is running", flush=True)
+print("\\x1b[39m\\u276f\\x1b[38;5;153m1. Exit and stop tasks", flush=True)
+while True:
+    time.sleep(0.2)
+"""
+
 # Exits at once, for the dead start flow.
 DYING_BODY = """
 print("hitchrail-shim: nothing to do, exiting", flush=True)
@@ -292,6 +309,7 @@ class Harness:
         box_will_not_clear: bool = False,
         prompts_after_stop: bool = False,
         agent_exits_immediately: bool = False,
+        agent_shows_a_modal: bool = False,
         token: str | None = None,
         also_in: dict[str, list[str]] | None = None,
     ) -> None:
@@ -317,6 +335,8 @@ class Harness:
             body = PROMPTS_AFTER_STOP_BODY
         if agent_exits_immediately:
             body = DYING_BODY
+        if agent_shows_a_modal:
+            body = STUCK_BODY
         self._write_shim(_SHIM_HEAD.format(python=sys.executable) + body)
 
         for name in (
