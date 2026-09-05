@@ -1,0 +1,52 @@
+# Keep the dependencies and the pinned actions honest, because a pin cannot
+# update itself.
+#
+# **The actions half is the reason this file exists** (#155). Every third party
+# action here is pinned to a commit SHA on purpose, with the version only in a
+# trailing comment, because a tag is a mutable pointer and whoever owns the
+# action repository can move it. `tests/test_workflows_are_pinned.py` enforces
+# that. The cost of a pin is that nothing tells you a newer version exists: a
+# person reading `# v4.2.1` cannot see that v4.3.0 shipped. This closes that
+# without giving up the pin, because Dependabot rewrites the SHA and the
+# comment together.
+#
+# Two ecosystems and no others. There is no Docker image and no npm package
+# here, and a stanza for something that does not exist is a line somebody later
+# reads as a claim that it does.
+
+version: 2
+updates:
+  # `uv`, not `pip`. The build backend is `uv_build`, dependencies are declared
+  # in `pyproject.toml`, and `uv.lock` is committed, which is the shape the
+  # `uv` ecosystem is for.
+  - package-ecosystem: "uv"
+    directory: "/"
+    # **`develop`, and it is not a preference.** `main` requires the
+    # `version-bumped` check, which fails unless `pyproject.toml`'s version is
+    # ahead of the latest release tag. A dependency bump does not bump the
+    # project version, so a pull request opened against `main` is red on a
+    # required check by construction. Work lands on `develop` and reaches
+    # `main` only as a release.
+    #
+    # This applies to VERSION updates only. A SECURITY update always targets
+    # the repository's default branch, whatever is written here, and that is a
+    # branch setting rather than something this file can reach.
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+    # Three at a time. The runtime budget is three dependencies, so a wider
+    # limit here would only ever be filled by the dev group, and a queue of
+    # tooling bumps is how the interesting one gets skimmed past.
+    open-pull-requests-limit: 3
+    labels: ["infrastructure"]
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+    labels: ["infrastructure"]
+    commit-message:
+      prefix: "ci"

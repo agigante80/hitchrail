@@ -132,3 +132,50 @@ def test_the_publishing_job_asks_for_no_more_than_it_needs() -> None:
     assert "environment:" in text, (
         "the publish job has no environment, so nothing gates it on a human"
     )
+
+
+# -- #155: what keeps those pins from going stale ---------------------------
+
+DEPENDABOT = Path(__file__).resolve().parents[1] / ".github" / "dependabot.yml"
+
+# Line based, like the pinning check above, and for the same reason: this
+# project has three runtime dependencies and a YAML parser is not one of them.
+_ECOSYSTEM = re.compile(r"^\s*-\s*package-ecosystem:\s*\"?([\w-]+)", re.M)
+_TARGET = re.compile(r"^\s*target-branch:\s*\"?([\w/-]+)", re.M)
+
+
+def test_the_pins_have_something_that_updates_them() -> None:
+    """A SHA pin is correct and it cannot update itself.
+
+    The test above asserts every action is pinned. Nothing asserted that
+    anybody would ever learn a newer version exists, which is the other half of
+    the same control: a person reading `# v4.2.1` cannot see that v4.3.0
+    shipped.
+    """
+    assert DEPENDABOT.exists(), (
+        "nothing updates the pinned actions, so the pin above degrades from a "
+        "control into a snapshot of whatever was current when it was written"
+    )
+    assert "github-actions" in _ECOSYSTEM.findall(DEPENDABOT.read_text())
+
+
+def test_every_ecosystem_targets_a_branch_its_pull_requests_can_merge_into() -> None:
+    """#155's real constraint, and it is this repository's rather than GitHub's.
+
+    `main` requires the `version-bumped` check, which fails unless
+    `pyproject.toml`'s version is ahead of the latest release tag. A dependency
+    bump does not bump the project version, so a pull request opened against
+    `main` is red on a required check by construction and cannot be merged.
+
+    An ecosystem added later without `target-branch` would inherit the default
+    branch and produce exactly that, which is a pull request nobody can act on
+    rather than a visible failure.
+    """
+    text = DEPENDABOT.read_text()
+    ecosystems = _ECOSYSTEM.findall(text)
+    targets = _TARGET.findall(text)
+    assert len(targets) == len(ecosystems), (
+        f"{len(ecosystems)} ecosystems and {len(targets)} target-branch lines: one "
+        "of them would open its pull requests against the release branch"
+    )
+    assert set(targets) == {"develop"}, targets
