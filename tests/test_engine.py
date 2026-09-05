@@ -2189,3 +2189,64 @@ def test_a_cleanup_that_also_fails_does_not_replace_the_real_error(root: Path) -
     with pytest.raises(MachineUnreadable) as raised:
         engine.start(proj("vessel"))
     assert "timed out" in str(raised.value)
+
+
+# -- #46: the two directions match with different strictness, deliberately ---
+
+
+def test_the_pane_direction_claims_any_agent_in_its_tree(root: Path) -> None:
+    """#46, half one, and this asserts the LOOSER behaviour on purpose.
+
+    A process inside our pane is ours whatever its command line says.
+    `first_matching_in_tree` accepts any marked process anywhere in the tree,
+    regardless of which project the argv names, and that is a decision rather
+    than an oversight: ownership beats argv.
+
+    Constructed exactly as the ticket did: alpha's pane owns a process whose
+    command line names bravo.
+    """
+    (root / "alpha").mkdir(exist_ok=True)
+    (root / "bravo").mkdir(exist_ok=True)
+    pane, wrong_agent = 500, 501
+    table = ps_row(pane, 1) + ps_row(wrong_agent, pane, project=proj("bravo"))
+    engine, _ = engine_for(root, sessions={proj("alpha"): pane}, table=table)
+
+    assert engine.get(proj("alpha")).state is State.RUNNING
+    assert engine.get(proj("alpha")).pid == wrong_agent, (
+        "the pane direction stopped claiming a process in its own tree"
+    )
+
+
+def test_the_orphan_direction_demands_the_exact_argv_tail(root: Path) -> None:
+    """#46, half two, and this asserts the STRICTER behaviour on purpose.
+
+    With no pane, argv is the only evidence there is, so it has to be exact. A
+    bare marker match claimed any process mentioning it: a `grep -r` for the
+    marker across a project directory derived as that project's detached agent.
+    """
+    (root / "alpha").mkdir(exist_ok=True)
+    engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, project=proj("bravo")))
+
+    assert state_of(engine, proj("alpha")) is State.STOPPED, (
+        "the orphan direction claimed a process whose argv names another project"
+    )
+
+
+def test_the_asymmetry_is_deliberate_and_documented(root: Path) -> None:
+    """**The actual deliverable of #46**, which is not a behaviour change.
+
+    The ticket argues the looser pane match is arguably right, and that the
+    real risk is a later "let us make these consistent" tidy up resolving it in
+    the wrong direction: tightening the pane direction to match the project
+    name would turn every running session `stale` the day `launch_argv`
+    changes, which is far worse than a mislabelled pid.
+
+    That is the failure mode this project has already hit twice with removed
+    workarounds, so the reasoning is pinned where a tidy up would meet it, and
+    this test fails if it is deleted.
+    """
+    source = (Path(__file__).parent.parent / "src" / "hitchrail" / "derive.py").read_text()
+    assert "#46" in source, (
+        "the reason the two directions differ is no longer written in derive.py, "
+        "so the next consistency tidy up has nothing to read"
+    )

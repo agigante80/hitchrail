@@ -110,7 +110,7 @@ match and when.
       Four options are written on the ticket, which now carries `needs-human`.
       Tasks 34 and 35 do not depend on it; task 41 does, by its own body.
 
-- [ ] **Task 34, #46.** The two directions match with different strictness and
+- [x] **Task 34, #46.** The two directions match with different strictness and
       neither behaviour is written down or tested. The pane direction accepts any
       marked process anywhere in the pane's tree regardless of which project its
       command line names; the orphan direction matches on the project name.
@@ -118,6 +118,16 @@ match and when.
       Task 33 changes what the second direction sees, so do it after. The
       deliverable is one stated rule both directions follow, with the asymmetry
       either removed or documented as deliberate with its reason.
+
+      **Done 2026-09-05, documented rather than removed**, which is what the
+      ticket argues for: ownership beats argv, and tightening the pane direction
+      would turn every running session `stale` the day `launch_argv` changes,
+      far worse than the mislabelled pid it would fix. Both behaviours now have
+      a test asserting them explicitly, and a third fails if the reasoning is
+      deleted from `derive.py`, because the risk the ticket names is a later
+      consistency tidy up rather than the asymmetry itself. Task 33 being
+      skipped did not block it: the two directions' strictness is independent of
+      what the second one sees.
 
 - [ ] **Task 35, #49.** `_look()` reads the process table before the pane map, so
       the table is always the older of the two, and nothing says why. A session

@@ -94,6 +94,26 @@ def derive(
     pane_pid = machine.pane_pids.get(tmux.session_name(name))
 
     if pane_pid is not None:
+        # **#46. This direction is LOOSER than the orphan one below, and that is
+        # a decision rather than an oversight.** It accepts any marked process
+        # anywhere in the pane's tree, whatever project its command line names;
+        # `find_detached` demands the exact argv tail.
+        #
+        # Ownership beats argv. A process inside our pane is ours whatever it
+        # calls itself, and that survives a change to `launch_argv` that would
+        # blind the orphan direction entirely. Tightening this to match the
+        # project name would turn every running session `stale` the day that
+        # argv changes, which is a far worse failure than the mislabelled pid it
+        # would fix.
+        #
+        # The cost is real and narrow: an agent hand started in the wrong window
+        # makes its pane's project show that agent's pid and link. Reachable
+        # only by hand, because Hitchrail offers no flow that does it.
+        #
+        # **Written here because the risk is a later tidy up.** "Let us make
+        # these consistent" resolved in the wrong direction is the failure this
+        # project has already hit twice with removed workarounds, and both
+        # behaviours now have a test that fails if either is changed.
         agent = machine.table.first_matching_in_tree(pane_pid, claude_ipc.REMOTE_CONTROL_MARKER)
         if agent is not None:
             return live(
