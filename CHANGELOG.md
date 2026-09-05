@@ -20,7 +20,7 @@ the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
-## [0.4.0] - 2026-09-05
+## 0.4.0 - 2026-09-05
 
 ### Fixed
 
