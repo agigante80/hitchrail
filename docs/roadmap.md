@@ -480,6 +480,16 @@ plan's batch order rather than the order they were filed, because the ordering i
 a dependency: #107 must follow #96 and #85, since it builds a destructive control
 on top of an identification that has been wrong twice this month.
 
+**Eight shipped and the phase is not closed.** #93, #96, #102, #46, #49, #95,
+#97 and #113 are done and closed with their commits. #85, #100 and #32 were
+escalated rather than implemented, and #107 is blocked behind #85. Each of the
+four is a decision rather than an implementation: what a row should SAY about an
+agent in another tool's session (#85), whether telling two modals apart is worth
+a `capture-pane` per running row on every listing (#100), and which of two
+tickets decides what makes a project name durable (#32, against #119). The plan
+records the reasoning for each. The phase's first exit criterion belongs to #85
+and stays open with it.
+
 ## Phase 10: A suite that would notice
 
 **Objective: the tests fail when the code is wrong, and only then.**

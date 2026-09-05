@@ -248,17 +248,21 @@ Ticked only with evidence.
 
 - [ ] An agent inside another tool's tmux session produces an honest answer
       rather than a confident wrong one.
-- [ ] A tmux binary under another name does not invent a detached agent.
-- [ ] A terminal emitting an unusual escape does not refuse every graceful stop.
-- [ ] The two derivation directions follow one stated rule, or their asymmetry is
-      documented with its reason and tested.
-- [ ] The read order in `_look()` names the race it prefers.
+- [x] A tmux binary under another name does not invent a detached agent. #96:
+      `tmux3.4` and `tmux-next` are tmux, `tmuxinator` is not.
+- [x] A terminal emitting an unusual escape does not refuse every graceful stop.
+      #97 replaced the regex with a parser, after two regexes failed in
+      opposite directions.
+- [x] The two derivation directions follow one stated rule, or their asymmetry is
+      documented with its reason and tested. #46 took the second branch, because
+      the asymmetry is correct: ownership beats argv.
+- [x] The read order in `_look()` names the race it prefers. #49.
 - [x] A spawned agent does not inherit the token. `env -u HITCHRAIL_TOKEN`
       prefixes the spawn; `tests/test_tmux.py` pins the argv and that the tail
       is unchanged, and `tests/test_engine.py` pins the wiring, which the tmux
       tests structurally cannot see.
-- [ ] `tmux.py` no longer holds the name vocabulary, and the dependency direction
-      is asserted.
+- [x] `tmux.py` no longer holds the name vocabulary, and the dependency direction
+      is asserted. #93, and 522 lines became 439 with nothing explanatory cut.
 
 ## What would make this phase a failure
 
@@ -271,3 +275,27 @@ Phase 10 is where the fixtures learn about shared machines (#94 is explicit abou
 the live tmux tier reading the real process table with no namespacing). Some
 tickets here will want that first; when one does, say so on the ticket rather
 than writing a test that agrees with the bug.
+
+## How this phase actually ended
+
+Eight of the eleven tickets shipped: #93, #96, #102, #46, #49, #95, #97, #113.
+Each is closed with the commit and the reasoning on the ticket.
+
+**Three were escalated rather than implemented, and one is blocked behind one of
+them.** That is a finished outcome for each, not a shortfall:
+
+- **#85** asks what a row should say about an agent inside another tool's tmux
+  session. An attempt was made and reverted (`ce8f768`): every version of the
+  narrow fix trades a loud, recoverable wrong answer for a quiet one, and which
+  lie the product tells is a product decision.
+- **#100** is a cost decision. Telling a modal that is not the trust prompt from
+  one that is costs a `capture-pane` per running row on every listing, which is
+  the price the design refused for the session link.
+- **#32** conflicts with #119. Both change what makes a project's name durable,
+  and taking either alone would decide the other by accident.
+- **#107** depends on #85. It is the first unscoped destructive path in the
+  project, and it is not built on an identification that is still under review.
+
+The first exit criterion belongs to #85 and stays unticked. **Phase 9 is
+therefore not closed by this work**, and the remaining four items are a decision
+to be made rather than code to be written.
