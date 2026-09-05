@@ -50,6 +50,26 @@ def look(
 
     Plus one file read when `agent_config` is given, for the same budget
     reason: the trust map answers every project's question at once.
+
+    **`ps` is read BEFORE tmux, deliberately, and #49 is why it says so.** The
+    two reads cannot be one instant, so one of them is always the older, and
+    which one decides what the product shows under load.
+
+    Reading `ps` first makes the table the older. A session killed between the
+    reads leaves its agent in the table with no pane owning it, so the row
+    derives `detached`, with a pid. Reading tmux first would move that skew to
+    `stale` instead, and turn the START race into a false `detached`.
+
+    Neither is wrong, so the choice is made on which lie is safer. **A false
+    `detached` is loud and recoverable**: the row shows a pid and offers a kill.
+    **A false `stale` offers Start**, and a start gives a second agent in the
+    same folder, which is the outcome this whole derivation exists to prevent.
+    It is the same argument that rejected #85's narrow fix, and it is the
+    design's oldest one.
+
+    `test_the_process_table_is_read_before_the_pane_map` pins the order, so a
+    reorder for readability fails rather than silently changing which failure
+    the product shows.
     """
     table = procs_fn()
     if not table.ok:

@@ -129,13 +129,22 @@ match and when.
       skipped did not block it: the two directions' strictness is independent of
       what the second one sees.
 
-- [ ] **Task 35, #49.** `_look()` reads the process table before the pane map, so
+- [x] **Task 35, #49.** `_look()` reads the process table before the pane map, so
       the table is always the older of the two, and nothing says why. A session
       killed between the reads leaves its agent in the table with no pane, which
       derives as `detached` for one listing.
 
       Whichever order survives, the choice gets a comment naming the race it
       prefers. Both orders have one; the bug is that neither is chosen.
+
+      **Done 2026-09-05.** `ps` first is kept, on the reasoning the ticket
+      proposed and `derive.look` now states: a false `detached` is loud and
+      recoverable because the row offers a kill, while a false `stale` offers
+      Start and a start gives a second agent in the same folder. That is the
+      same argument that rejected task 33's narrow fix on the same day, which
+      is worth noticing: the design has one consistent preference about which
+      lie is safe, and it is the oldest thing in it. Mutation verified by
+      swapping the two reads.
 
 ## Batch 3: claude_ipc stops being fragile, tasks 36 to 38
 

@@ -26,7 +26,7 @@ from conftest import (
     procs_from,
     ps_row,
 )
-from hitchrail import discovery
+from hitchrail import derive, discovery
 from hitchrail.claude_ipc import GRACEFUL_STOP_KEYS, launch_argv
 from hitchrail.engine import (
     AlreadyRunning,
@@ -2249,4 +2249,45 @@ def test_the_asymmetry_is_deliberate_and_documented(root: Path) -> None:
     assert "#46" in source, (
         "the reason the two directions differ is no longer written in derive.py, "
         "so the next consistency tidy up has nothing to read"
+    )
+
+
+def test_the_process_table_is_read_before_the_pane_map(root: Path) -> None:
+    """#49. The order decides which failure the product shows under load, and
+    nothing was pinning it.
+
+    `ps` first means the table is the older of the two, so a session killed
+    between the reads leaves its agent in the table with no pane owning it and
+    the row derives `detached` with a pid. Reading tmux first would move that
+    skew to `stale` instead.
+
+    **Neither is wrong; the trade was invisible.** The next person reordering
+    two lines for readability changes which lie the product tells under load,
+    and without this nothing fails.
+
+    The order kept is `ps` first, on the reasoning `derive.look` now states: a
+    false `detached` is loud and recoverable, because the row shows a pid and
+    offers a kill, whereas a false `stale` offers Start and a start gives a
+    second agent in the same folder. That is the same argument that rejected
+    #85's narrow fix on the same day, and it is the design's oldest one.
+    """
+    calls: list[str] = []
+
+    def recording_procs() -> ProcTable:
+        calls.append("ps")
+        return procs_from("")()
+
+    tmux = FakeTmux()
+    real_panes = tmux.pane_pids
+
+    def recording_panes() -> dict[str, int]:
+        calls.append("tmux")
+        return real_panes()
+
+    tmux.pane_pids = recording_panes  # type: ignore[method-assign]
+    derive.look(recording_procs, tmux)
+
+    assert calls == ["ps", "tmux"], (
+        "the read order changed, which changes whether a session killed between "
+        "the two reads shows as detached or stale. See derive.look's docstring."
     )
