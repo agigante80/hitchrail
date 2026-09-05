@@ -499,22 +499,7 @@ class Tmux:
         version of this read:
 
             name = self.session_name(project)
-            # **A space disqualifies a name from being ours, and that is not
-            # belt and braces.** `session_name` is `prefix + sanitize(project)`,
-            # `sanitize` introduces no space, and both halves of
-            # `<root-label>~<folder>` go through `NAME_PATTERN`, which forbids
-            # one. So a name with a space is one we could not have created.
-            #
-            # Without this, `rpartition` makes things WORSE than the parser it
-            # replaced for one input: a foreign session called `hr-my project`
-            # used to be dropped as malformed and now classifies as ours, which
-            # puts a foreign pane pid into `owned`, hides the agent underneath
-            # it, and derives `stopped`. `stopped` offers Start, and Start on a
-            # folder that already has an agent is the second agent in one
-            # folder this whole module's derivation exists to prevent. Found in
-            # review, and it is the reverted narrow fix's outcome reached
-            # through the parser.
-            if " " in name or not name.startswith(self.prefix):
+            if not name.startswith(self.prefix):
                 raise NotOurSession(project)
 
         `session_name` builds the name FROM `self.prefix`, so the condition can

@@ -36,7 +36,9 @@ there is an input box at all.
 **What this costs:** Hitchrail now reads the screen of running sessions that
 have no link yet, on the background timer rather than when you load the page, at
 most ten of them a second and never for longer than three seconds at a stretch.
-Nothing you tap waits on it. On a machine with nothing stuck, it reads nothing.
+Nothing you tap waits on it. On a machine with nothing stuck it reads nothing,
+and with nobody looking at the page it does not even check: a Hitchrail sitting
+idle overnight costs exactly what it did before.
 
 **A live agent inside another tool's tmux session was reported as orphaned.**
 If anything else on your machine runs agents in its own tmux sessions, those

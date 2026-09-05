@@ -956,7 +956,7 @@ async def test_the_listing_carries_the_root_it_is_listing(
 
 
 async def test_the_listing_reports_what_the_sweep_found_and_captures_nothing(
-    config: Config, tmux: FakeTmux
+    config: Config,
 ) -> None:
     """#100 through the route, and the assertion that matters is the second one.
 

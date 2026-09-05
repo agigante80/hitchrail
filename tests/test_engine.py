@@ -45,6 +45,7 @@ from hitchrail.engine import (
     StopRefused,
     UnknownProject,
 )
+from hitchrail.events import EventBus
 from hitchrail.procs import ProcTable, snapshot
 from hitchrail.tmux import Panes, Tmux, TmuxUnavailable
 from support import DEFAULT_LABEL, make_config
@@ -2809,3 +2810,160 @@ def test_the_waiting_set_is_built_once_per_listing_not_once_per_row(root: Path) 
         f"the waiting set was built {calls['n']} times for one listing; it "
         "belongs once per listing, not once per row"
     )
+
+
+def test_a_freshly_started_agent_does_not_inherit_the_last_ones_prompt(root: Path) -> None:
+    """Found in review of #100, and the sweep cannot correct it.
+
+    `stop` cleared the standing observation and `kill` and `start` did not, so
+    killing a stuck agent and starting a new one rendered a brand new session
+    as "waiting for an answer". `attention.MIN_UPTIME_S` is what makes it stick:
+    the new row is not a candidate for its first fifteen seconds, so nothing
+    would have taken the claim back.
+
+    The rule is #101's, one site short: a fresh attempt starts from nothing.
+    """
+    engine, tmux = sweeping_engine(root, MODAL_PANE)
+    engine.scan_for_stuck()
+    assert engine.get(proj("vessel")).awaiting_input is True
+
+    # The agent dies and its tmux session survives it: `stale`. Through THAT
+    # state rather than through `stopped`, because a stopped row is reconciled
+    # on read and the clear would then be somebody else's work. `start` kills
+    # the stale session and spawns into a fresh one.
+    #
+    # Scripted, because the table has to be stale when `start` checks and
+    # running once the agent is up, which is what the real one does.
+    tmux.pane_text.pop(proj("vessel"), None)
+    # 1001 is the pane pid `FakeTmux.new_session` hands out, so the agent has
+    # to appear under THAT pane rather than under the stale one.
+    stale = ps_row(PANE, 1)
+    fresh = ps_row(1001, 1) + ps_row(AGENT, 1001, project=proj("vessel"), etime_s=2)
+    engine._procs_fn = ScriptedProcs(stale, stale, stale, fresh)
+    assert state_of(engine, proj("vessel")) is State.STALE
+
+    engine.start(proj("vessel"))
+
+    assert engine.get(proj("vessel")).awaiting_input is False, (
+        "a brand new agent is carrying the last one's prompt"
+    )
+
+
+def test_only_a_running_row_can_carry_the_waiting_flag(root: Path) -> None:
+    """Why the clear has two call sites rather than four.
+
+    Review proposed clearing after a kill and when a row is reconciled to
+    `stopped` as well. Neither is observable: `derive` sets `awaiting_input`
+    only on the RUNNING branch, so a stopped, stale or detached row is built
+    without it whatever the engine remembers. A clear nothing can observe is
+    the same defect as a guard that cannot execute, which this project already
+    refuses in `Tmux.kill_session`.
+
+    This pins the premise, so the day a non running row starts carrying the
+    overlay, the argument for two call sites fails here rather than silently
+    becoming wrong.
+    """
+    engine, tmux = sweeping_engine(root, MODAL_PANE)
+    engine.scan_for_stuck()
+    assert engine.get(proj("vessel")).awaiting_input is True
+
+    # The agent is gone and so is its session: the row derives `stopped`, and
+    # the engine still remembers the observation.
+    engine._procs_fn = procs_from("")
+    tmux.sessions.clear()
+
+    stopped = engine.get(proj("vessel"))
+    assert stopped.state is State.STOPPED
+    assert stopped.awaiting_input is False
+    assert proj("vessel") in engine._needs_a_person(), (
+        "the observation is still held; what makes it invisible is the state"
+    )
+
+
+async def test_the_sweep_announces_a_row_that_started_or_stopped_waiting(root: Path) -> None:
+    """Found in review of #100. Recording it and telling nobody is half a fix.
+
+    Outside a stop wait the page does not poll: `app.js` refreshes on an SSE
+    message, on reconnect, and when the tab comes back. So a flag the sweep
+    sets is invisible until something unrelated happens, to the person holding
+    the phone that this feature exists for.
+
+    `expire_stops` announces for exactly this reason and its docstring says so.
+    The same argument, one method over.
+    """
+    bus = EventBus()
+    engine, tmux = sweeping_engine(root, MODAL_PANE)
+    engine._bus = bus
+    seen: list[dict[str, object]] = []
+    bus.publish = lambda payload: seen.append(payload)  # type: ignore[assignment]
+
+    # A real subscription, because the sweep does nothing while nobody is
+    # watching and that is deliberate. The patched `publish` is how the
+    # payloads are read; the subscription is what opens the gate, exactly as a
+    # connected browser does.
+    with bus.subscribe():
+        engine.scan_for_stuck()
+
+        assert [p["name"] for p in seen] == [proj("vessel")]
+        assert seen[0]["awaiting_input"] is True
+
+        # And again when it stops being true, because a row that quietly stays
+        # flagged after the person answered is the same defect mirrored.
+        seen.clear()
+        tmux.pane_text[proj("vessel")] = CLEAR_INPUT_BOX
+        engine.scan_for_stuck()
+
+    assert [p["name"] for p in seen] == [proj("vessel")]
+    assert seen[0]["awaiting_input"] is False
+
+
+async def test_the_sweep_announces_nothing_when_nothing_changed(root: Path) -> None:
+    """A page that is already right must not redraw itself once a second."""
+    bus = EventBus()
+    engine, _ = sweeping_engine(root, MODAL_PANE)
+    engine._bus = bus
+    with bus.subscribe():
+        engine.scan_for_stuck()
+        seen: list[object] = []
+        bus.publish = lambda payload: seen.append(payload)  # type: ignore[assignment]
+
+        engine.scan_for_stuck()
+
+    assert seen == []
+
+
+def test_the_sweep_costs_nothing_while_nobody_is_watching(root: Path) -> None:
+    """Found in review of #100, and it is a regression this ticket introduced.
+
+    Before it, an idle tick was free: `expire_stops` with no markers runs no
+    subprocess. A look is a `ps`, a `tmux list-panes -a` and a file read, and
+    doing that every second for the life of a user unit with no browser open
+    is a cost this feature has no claim on. It also looked more often than the
+    polling browser whose cost was the argument for moving off the request
+    path.
+    """
+    bus = EventBus()
+    engine, tmux = sweeping_engine(root, MODAL_PANE)
+    engine._bus = bus
+    assert bus.subscriber_count == 0
+
+    assert engine.scan_for_stuck() == []
+
+    assert tmux.panes_calls == 0, "a full machine look happened with nobody watching"
+    assert tmux.capture_calls == 0
+
+
+async def test_the_sweep_looks_again_as_soon_as_somebody_is(root: Path) -> None:
+    """The other half: the gate must not be a way to never run.
+
+    Async because `EventBus.subscribe` needs a running loop, which is the real
+    thing rather than a stub with the right attribute: what is under test is
+    that a REAL subscription flips the gate.
+    """
+    bus = EventBus()
+    engine, tmux = sweeping_engine(root, MODAL_PANE)
+    engine._bus = bus
+    with bus.subscribe():
+        assert engine.scan_for_stuck() == [proj("vessel")]
+
+    assert tmux.panes_calls == 1

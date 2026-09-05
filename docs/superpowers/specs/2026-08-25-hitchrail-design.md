@@ -301,7 +301,13 @@ session link: a `capture-pane` per running row on every listing is what turns a
 fifty row page into fifty subprocess calls. What changed is where the looking
 happens, not whether it is affordable.
 
-It happens on the sweep that already expires stop markers, never on a request.
+It happens on the sweep that already expires stop markers, never on a request,
+and only while somebody is connected to the event stream. Before #100 an idle
+tick cost nothing at all, and a look is a `ps`, a `tmux list-panes -a` and a
+file read: doing that every second for the life of a user unit with no browser
+open is a cost this feature has no claim on, and it would leave the sweep
+looking more often than the polling browser whose cost moved it off the request
+path.
 That bounds the cost by the state of the MACHINE rather than by how often a
 browser polls, which matters because the interface polls the listing every
 700 ms for a whole stop wait, and because the adapter's own call timeout is ten

@@ -997,7 +997,15 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # will inline it back, which is why the reason is at the parameter
         # rather than on the ticket. See #178 for the pre existing half of the
         # same note that the code still contradicts.
-        "engine.py": 954,
+        # 954 to 1037 in review of #100, and all three additions are things
+        # the first cut left out rather than growth. `_forget_attention`, so a
+        # brand new agent does not inherit the last one's prompt, with the
+        # reason there are two call sites and not four. The announce, because
+        # recording a change and telling nobody is half a fix and `expire_stops`
+        # already argues that in its own docstring. And the subscriber gate,
+        # because an idle tick used to cost nothing and this had made it a `ps`
+        # and a `tmux` call every second for the life of a user unit.
+        "engine.py": 1037,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -1050,7 +1058,7 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # accepting a foreign session name with a space in it, and why the
         # foreign half is keyed by pid while ours is keyed by name. Behaviour
         # plus its reason, which the note above permits.
-        # 524 to 554 in review of #85, and every added line is the reason for
+        # 524 to 539 in review of #85, and every added line is the reason for
         # one condition. `rpartition` fixed a foreign name with a space being
         # dropped and, for one input, made the outcome worse: a foreign session
         # called `hr-my project` classified as OURS, hid the agent under its
@@ -1058,7 +1066,13 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # a space disqualifies a name from being ours, because the next reader
         # will see a redundant looking check beside a `startswith` and remove
         # it.
-        "tmux.py": 554,
+        #
+        # It briefly said 554, because a `str.replace` put that same comment
+        # into `kill_session`'s docstring as well, onto the illustrative guard
+        # whose next paragraph explains that the condition can never be true.
+        # The cap was raised for sixteen lines nobody meant to add, which is
+        # how a size guideline stops meaning anything.
+        "tmux.py": 539,
         # 413, and thirteen lines over the guideline is not a second job. #18
         # already took the host vocabulary out of this file, and what is left
         # is one dataclass and its startup refusals, which is one thing. The
