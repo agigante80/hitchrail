@@ -3,10 +3,14 @@
 # last published tag" precondition: enforced on every PR, not only when someone remembers to run
 # a release. No tokens, no recursion, and it only reads.
 #
-# LIMITATION, stated rather than hidden: this project's git convention is to work on `main`
-# directly, so a trunk commit never opens a PR and this gate never fires for it. Until work moves
-# to pull requests, the actual enforcement is the `release` skill's precondition check at the
-# moment somebody cuts a release. Do not read a green checks list as "the version was gated".
+# **This gate is live as of #132.** It spent its whole existence dormant: the convention was to
+# work on `main` directly, a trunk commit opens no pull request, and so it never fired once.
+# Work now happens on `develop` and reaches `main` only by pull request, which is the event this
+# triggers on. `version-bumped` is a required status check on `main`, so a red gate blocks the
+# merge rather than advising it.
+#
+# The paragraph above used to end "do not read a green checks list as the version was gated".
+# You may now read it that way, and that is the entire change.
 #
 # Version source: pyproject.toml project.version (VERSION_SOURCE=python). The forge-kit reference
 # prefers tag-derived versioning (setuptools-scm / hatch-vcs) for a project that builds a wheel.

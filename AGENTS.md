@@ -271,5 +271,14 @@ seam that is already there.
 
 ## Git
 
-Work on `main`. Conventional commit subjects. Say what changed and why it was
+Work on `develop`. `main` is the release branch and is reached only by pull request,
+which is what makes the release gate real: it fires on a PR to `main` and blocks the
+merge unless `pyproject.toml`'s version is ahead of the latest release tag.
+
+**This changed at #132, and the reason is that the gate had never once fired.** It was
+installed, adapted, wired to this project's version source, and permanently dormant,
+because a trunk commit opens no pull request. The machinery existed; the branching model
+was what stopped it running.
+
+Conventional commit subjects. Say what changed and why it was
 not the obvious alternative; the diff already says what.
