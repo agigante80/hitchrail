@@ -547,7 +547,22 @@ account, logs at a URL you can bookmark, and an icon set.
 primary action is reachable at any scroll position, and the page answers "which
 build is this and who is it running as" without an SSH session.
 
-Tickets: #146, #147, #148, #149, #150, #151.
+Tickets: #146, #147, #148, #149, #150, #151, #160.
+
+**#150 was rewritten from twenty icons to seven, and the two icon tickets pull
+in opposite directions on purpose.** #150 is a SET, so it is vendored from an
+existing library and never generated: a set has to agree with itself on grid,
+stroke weight and optical alignment, and that agreement is what generation gets
+wrong. #160 is the application's own MARK, one drawing that has to agree with
+nothing and that no library ships, so drawing it is the right call there.
+
+The seven are the six state badges plus the protected row. The badge is the one
+place a shape does something a word cannot, because a list of fifty is scanned
+rather than read, and because it stops six states being told apart by colour
+alone while #69 is open. Everything else keeps its word: an argument that Stop
+and Clear needed distinct glyphs did not survive reading the code, since Stop
+renders only on a running row and Clear only on a stale one, so the pair never
+appears together.
 
 **One of these closed a question rather than opening one.** #149 was filed as
 "research how to improve the header, iframed?". Measured on `claude.ai`:
