@@ -19,18 +19,23 @@
 # run, so there is no event to be suppressed and no identity to mint. The trap is avoided
 # rather than paid for.
 #
-# **Triggered by CI finishing, not by the push.** Branch protection already requires the
-# checks before a merge, but a rebase changes the commit, so the checks that passed ran on
-# a different sha. Waiting for CI on the merged commit is the difference between "the
-# checks passed somewhere" and "this artefact is green".
+# **Triggered by the push, and it does not wait for anything.** The preconditions are met
+# BEFORE the merge, deliberately: CI green on the pull request from `develop`, and a full
+# local run including the browser tier. A merge to `main` is therefore a decision that has
+# already been made, and re-testing it here would add a step to every release to re-answer
+# a question that was answered.
+#
+# The honest cost, stated rather than hidden: a merge rewrites the commit, so the sha that
+# lands is not the sha CI ran on. The TREE is identical whenever `main` has not moved since
+# the branch was rebased onto it, which is always here, because `main` advances only
+# through these merges. If that ever stops being true, this assumption is the first thing
+# to revisit.
 #
 # Third party actions are pinned to a commit SHA; the trailing comment is documentation.
 name: release
 
 on:
-  workflow_run:
-    workflows: ["ci"]
-    types: [completed]
+  push:
     branches: [main]
 
 # Never two releases at once, and never cancel one half way: a cancelled run can leave a
@@ -44,9 +49,6 @@ permissions:
 
 jobs:
   decide:
-    # A red CI run is not a release. `workflow_run` fires on completion whatever the
-    # outcome, so this is the check that makes the trigger mean what it says.
-    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write     # the tag and the GitHub release, and nothing else
@@ -56,10 +58,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          # The commit CI actually ran on. In a `workflow_run` context `github.sha` is the
-          # default branch head, which is usually but not always the same thing, and
-          # "usually" is how a release gets cut from the wrong tree.
-          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
           fetch-tags: true
 

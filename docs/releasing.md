@@ -163,12 +163,16 @@ Steps 1 to 5 happen ON the pull request. Steps 6 onward happen after it merges.
      && uv run lint-imports && uv run pytest
    ```
 
-6. **Merge the pull request.** That is the release.
+6. **Merge the pull request.** That is the release, and nothing follows it.
 
-   `release.yml` waits for CI to pass on the merged commit, then tags `vX.Y.Z`,
-   publishes a GitHub release whose notes ARE the changelog section you wrote in
-   step 2, and calls `publish.yml` to upload. Nothing else is needed and there is
-   no approval click; the review of the pull request is the human step.
+   `release.yml` fires on the push, tags `vX.Y.Z`, publishes a GitHub release whose
+   notes ARE the changelog section you wrote in step 2, and calls `publish.yml` to
+   upload. No approval click and no second test run.
+
+   **The preconditions are met before the merge, on purpose.** CI green on the pull
+   request from `develop`, and step 5's full local run including the browser tier.
+   The merge is a decision that has already been made; re-answering it after the fact
+   would add a step to every release to learn nothing new.
 
    **It refuses rather than guessing.** No changelog section for the version, a
    version already on PyPI, or an unreadable answer from PyPI each stop the run
