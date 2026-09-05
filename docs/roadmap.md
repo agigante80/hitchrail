@@ -530,11 +530,15 @@ rather than an implementation, and each is now decided on the ticket:
   so a pidfd pins the process the pid was reused from, and the ordering is
   acquire-then-verify.
 
-**Two tickets left for Backlog, both causes rather than defects.** #172 is the
+**Two tickets left for Backlog, both causes rather than defects.** #172 was the
 cgroup owner test, which would see the sockets and terminals the pane map
-cannot, deferred because it is a new external surface that has to degrade and
-because a tmux-spawn scope registration race can make it report a live agent as
-detached. #173 asks whether `NAME_PATTERN` must still refuse a space, which is
+cannot. **It is closed, and the reason is worth reading**: measured twice on a
+real machine, cgroups are inherited across fork, so a tmux server started from
+inside a pane sits in that pane's scope and the proposed rule called a LIVE tmux
+server an orphan. The mechanism also yields a bare UUID, so it could never have
+delivered the session name it promised. #189 carries the question it was asking,
+by ancestry rather than by cgroup, scoped as row wording and explicitly not as a
+gate. #173 asks whether `NAME_PATTERN` must still refuse a space, which is
 what makes the alias in #32 the obvious response to our own error message; it
 also records that `pane_pids` parses `#{session_name} #{pane_pid}` on the first
 space, so widening the pattern is not a one-line change.
@@ -558,11 +562,22 @@ space, so widening the pattern is not a one-line change.
   none, and that bucket holds agents under another socket, under screen, under a
   plain terminal, and another user's, since tmux sockets are per uid and the
   process table is not. Signalling on that basis is the warning #85 just added
-  to the interface, inverted. It needs #172 first, which establishes
-  orphanhood positively, so both are in Phase 14 now.
+  to the interface, inverted. It was moved to Phase 14 behind #172, which was to
+  establish orphanhood positively.
+
+  **That dependency was withdrawn the same evening**, and the correction belongs
+  here rather than only on the ticket. #172's mechanism turned out to be wrong,
+  and it was never the right prerequisite: `pidfd_send_signal` returns `EPERM`
+  across uids, so the case that worried us most is refused by the kernel rather
+  than by us, and #107's real safety property is acquire-then-verify with a
+  pidfd, which does not depend on knowing who owns the process. Requiring a
+  signal with a demonstrated false positive and a measured false negative to
+  AUTHORISE a destructive action is control 7 inverted. What is left is one
+  honest sentence in the confirmation, and #107 is unblocked.
 
 **Six tickets came out of this work rather than being fixed inside it**, which
-is the phase behaving as intended: #172 and #173 from the decisions, #174 from a
+is the phase behaving as intended: #172, now closed, and #173 from the
+decisions, #174 from a
 control count that had drifted across three documents, and #175, #176 and #177
 from the review of #85. Two of those name tests this phase itself added that
 could not fail on what they claimed, which is the failure Phase 10 exists for
@@ -715,8 +730,10 @@ open as untried, and what remains is the real question underneath it.
 **Objective: the operator chooses how this is reached and how it is proved,
 instead of being handed one answer.**
 
-Three tickets, and all three touch a security control, so each is a decision
-before it is work. They are together because they interact: TLS changes what a
+Every ticket here touches a security control, so each is a decision before it is
+work. **No count in this line**: it said "three" while the milestone held four,
+then six, which is the decay `AGENTS.md` already refuses for phases and modules.
+The list at the end of this section is the record. They are together because they interact: TLS changes what a
 sign-in form costs, and both change what the README's stated limitations say.
 
 Delivers: HTTPS from the server itself rather than only from a proxy in front of
@@ -742,7 +759,7 @@ argue it rather than quietly narrowing the scope:
 holding a token can get in without a saved link, and adding a folder does not
 mean editing a systemd unit.
 
-Tickets: #152, #153, #154, #123.
+Tickets: #152, #153, #154, #123, #107.
 
 **#123 moved here from Backlog.** `session_prefix` is a config field with
 validation and no flag, which is the same shape as #154's problem: configuration
