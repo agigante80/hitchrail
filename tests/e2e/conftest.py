@@ -343,15 +343,29 @@ class Harness:
         # production path is wrong, which is the only reason to have one.
         untrusted_names = {e2e_name(n) for n in untrusted or []}
         seeded = (running or []) + (stopped or []) + (detached or []) + (stale or [])
+        # #120: every root, not just the primary one. Built as (root, name)
+        # pairs so a project in an extra root gets the same trust entry. Before
+        # this, projects seeded through `also_in` were absent from the file, so
+        # they derived `awaiting_trust` and rendered as `waiting` while their
+        # counterparts in the primary root rendered as `running`. The rows were
+        # then telling apart by STATE, which is exactly the confusion the root
+        # chip exists to remove, in the one picture meant to prove it does.
+        trusted_paths = [
+            (self.root, n) for n in seeded if e2e_name(n) not in untrusted_names
+        ] + [
+            (self.extra_roots[label], n)
+            for label, names in (also_in or {}).items()
+            for n in names
+            if e2e_name(n) not in untrusted_names
+        ]
         self._agent_config.write_text(
             json.dumps(
                 {
                     "projects": {
-                        str(discovery.project_path(self.root, e2e_name(n))): {
+                        str(discovery.project_path(root, e2e_name(n))): {
                             "hasTrustDialogAccepted": True
                         }
-                        for n in seeded
-                        if e2e_name(n) not in untrusted_names
+                        for root, n in trusted_paths
                     }
                 }
             )

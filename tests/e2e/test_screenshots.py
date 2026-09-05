@@ -142,6 +142,35 @@ async def test_capture_the_phone_list(page: Page, shots_server: Harness) -> None
     await _shoot(page, "phone-list")
 
 
+async def test_capture_two_roots_on_a_phone(page: Page, shots_server: Harness) -> None:
+    """#122's own exit criterion: two identically named rows told apart at a
+    phone width, shown rather than described.
+
+    This is the picture the phase exists for. Before the qualified identifier
+    these were one row, and stopping it stopped the other project's agent.
+    """
+    await page.set_viewport_size(PHONE)
+    shots_server.seed(
+        running=["vessel", "harbour"],
+        stopped=["anchor"],
+        also_in={"personal": ["vessel"]},
+    )
+    await page.goto(shots_server.base)
+    await _settled(page, shots_server)
+    # **Both rows RUNNING**, not merely both present. If one is still settling
+    # the picture shows two rows differing in state as well as in root, and a
+    # reader would reasonably conclude the state is what tells them apart. The
+    # root chip has to be the only difference for the image to make its point.
+    # The BADGE, not `data-state`. #88's `awaiting_input` is an overlay: the
+    # row is `data-state="running"` while the badge reads `waiting`, so waiting
+    # on the attribute passed with the picture still showing two different
+    # badges. What a reader compares is the badge, so that is what to wait on.
+    for label in ("main", "personal"):
+        row = page.locator(f'[data-project="{shots_server.project("vessel", label)}"]')
+        await expect(row.locator(".badge")).to_have_text("running", timeout=15_000)
+    await _shoot(page, "phone-two-roots")
+
+
 async def test_capture_the_phone_list_dark(page: Page, shots_server: Harness) -> None:
     """Dark is a first class requirement in the design, so it gets a picture
     rather than a sentence."""

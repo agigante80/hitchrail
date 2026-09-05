@@ -42,6 +42,14 @@ Four derived states in one listing: `running` with its memory and uptime,
 
 <img src="docs/screenshots/desktop-list.png" alt="The same list at a desktop width" width="620">
 
+**More than one folder of projects**, told apart by the root each row is in:
+
+<img src="docs/screenshots/phone-two-roots.png" alt="Two rows both called hrx-vessel, both running, distinguished by a chip reading main on one and personal on the other" width="300">
+
+Two projects called `vessel` in two roots are two rows, and the chip is the
+only difference between them. Stopping one leaves the other's agent alone,
+which is the thing a browser test asserts on a real tmux rather than a fake.
+
 These are captured from the running application against a scratch root, not
 taken by hand: `uv run pytest -m screenshots` regenerates every one of them.
 
