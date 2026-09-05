@@ -37,7 +37,7 @@ import time
 from collections.abc import Callable
 
 from hitchrail import claude_ipc, derive, discovery, ram
-from hitchrail.config import Config
+from hitchrail.config import TOKEN_ENV, Config
 from hitchrail.derive import Machine
 from hitchrail.events import EventBus
 from hitchrail.procs import ProcTable, snapshot
@@ -77,7 +77,14 @@ class Engine:
         bus: EventBus | None = None,
     ) -> None:
         self.config = config
-        self.tmux = tmux or Tmux(prefix=config.session_prefix, socket=config.tmux_socket)
+        # #113. Named here rather than inside `Tmux`, because which variable
+        # holds the token is this application's vocabulary and tmux knows
+        # nothing about it. An injected adapter is a test's own, untouched.
+        self.tmux = tmux or Tmux(
+            prefix=config.session_prefix,
+            socket=config.tmux_socket,
+            scrub_env=(TOKEN_ENV,),
+        )
         self._procs_fn = procs_fn or snapshot
         self._meminfo_fn = meminfo_fn or ram.read_meminfo
         self._clock = clock

@@ -28,6 +28,7 @@ from conftest import (
 )
 from hitchrail import derive, discovery
 from hitchrail.claude_ipc import GRACEFUL_STOP_KEYS, launch_argv
+from hitchrail.config import TOKEN_ENV
 from hitchrail.engine import (
     AlreadyRunning,
     Engine,
@@ -2332,3 +2333,19 @@ def test_the_settle_seam_has_no_default_to_fall_back_to(root: Path) -> None:
         "request_stop can still default its settle, so a caller that forgets to "
         "pass one sleeps on a real clock and nothing says so"
     )
+
+
+def test_the_default_tmux_adapter_strips_the_token_from_what_it_spawns(root: Path) -> None:
+    """#113. The wiring, which the `tmux` unit tests cannot see.
+
+    They build a `Tmux` with `scrub_env` themselves and prove the argv, so they
+    stay green if this line loses its argument and every spawned agent inherits
+    the token again. This asserts the construction the product actually uses,
+    and it is the only place the two halves meet.
+
+    Built with no `tmux=`, on purpose: an injected adapter is a test's own and
+    must be left as the test built it.
+    """
+    engine = Engine(make_config(root))
+
+    assert engine.tmux.scrub_env == (TOKEN_ENV,)

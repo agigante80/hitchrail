@@ -59,6 +59,14 @@ class TmuxUnavailable(OSError):
 _CALL_TIMEOUT_S = 10.0
 
 
+def _scrub_flags(names: tuple[str, ...]) -> list[str]:
+    """`-u NAME` for each, as separate argv elements. No shell, ever."""
+    flags: list[str] = []
+    for name in names:
+        flags += ["-u", name]
+    return flags
+
+
 def _default_runner(
     argv: list[str], timeout: float = _CALL_TIMEOUT_S
 ) -> subprocess.CompletedProcess[str]:
@@ -90,6 +98,7 @@ class Tmux:
         prefix: str,
         socket: str | None = None,
         run: Runner | None = None,
+        scrub_env: tuple[str, ...] = (),
     ) -> None:
         if not prefix:
             # Refused here, not only in `Config`. Every guard in this class is
@@ -103,6 +112,10 @@ class Tmux:
             )
         self.prefix = prefix
         self.socket = socket
+        # #113. Variable names the spawned agent must NOT inherit. Passed in
+        # rather than named here: which variable holds the API token is
+        # configuration vocabulary, and this module knows about tmux.
+        self.scrub_env = scrub_env
         self._run: Runner = run or _default_runner
 
     def _argv(self, *args: str) -> list[str]:
@@ -284,14 +297,10 @@ class Tmux:
     def new_session(self, project: str, cwd: str, argv: list[str]) -> None:
         """Detached, in the project's directory, running the given argv.
 
-        **The child inherits our whole environment, `HITCHRAIL_TOKEN` with it**
-        (#109). Measured: a session started here can `printenv` it. Accepted,
-        because the agent runs as this user with permissions skipped and could
-        read the operator's `EnvironmentFile` anyway, so the variable grants it
-        nothing. It does make the token easy to stumble into, since an agent
-        told to dump its environment prints it into a pane the log drawer
-        shows. #113 carries stripping it, which is not a one liner: tmux hands
-        panes the SERVER's environment, not one client call's.
+        **The child inherits our whole environment except what `scrub_env`
+        names** (#109, closed by #113). The engine names the token variable
+        there. The mechanism, and why the obvious `env=` on this call is not
+        it, is in the comment on the first statement below.
 
         Created with the plain session NAME. Only targets carry the `=` anchor;
         passing an anchored string to `-s` would create a session whose name
@@ -328,6 +337,33 @@ class Tmux:
         cleanup is the place that already reasons about a start that did not
         come up, and #102 carries it.
         """
+        # #113. The agent must not inherit `HITCHRAIL_TOKEN`. It grants it
+        # nothing: it runs as this user with permissions skipped and could read
+        # the operator's `EnvironmentFile` anyway. What it changes is how easy
+        # the token is to stumble INTO, because "print your environment" is an
+        # ordinary request, the answer lands in a pane, and the log drawer
+        # shows panes.
+        #
+        # **`env=` on this call is the obvious fix and it does nothing.** A new
+        # pane gets the environment of the SERVER, taken when the server
+        # started, so filtering a client invocation changes nothing once one is
+        # running, which is the normal state of a developer's machine.
+        #
+        # Measured on tmux 3.4 against a pre existing server, because the
+        # ticket's warning is that each candidate silently does nothing in the
+        # wrong case:
+        #
+        #   inherited by default     printenv -> the real token
+        #   new-session -e VAR=      printenv -> empty, rc 0. SET, not absent
+        #   env -u VAR in the argv   printenv -> rc 1. Genuinely unset
+        #
+        # `env -u` also touches nothing belonging to tmux, which
+        # `set-environment -g -u` could not say, and it EXECS the agent and is
+        # replaced by it, so the prefix never reaches `ps`. That last part is
+        # not cosmetic: `find_detached` matches on the argv tail.
+        if self.scrub_env:
+            argv = ["env", *_scrub_flags(self.scrub_env), *argv]
+
         self._try(
             self._argv(
                 "new-session",

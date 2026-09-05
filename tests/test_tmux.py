@@ -380,3 +380,66 @@ def test_a_tmux_that_never_answers_becomes_an_honest_refusal() -> None:
 
     with pytest.raises(TmuxUnavailable):
         Tmux(prefix="hr-", run=wedged).pane_pids()
+
+
+def test_the_spawn_does_not_hand_the_agent_the_api_token() -> None:
+    """#113. An agent Hitchrail starts inherited `HITCHRAIL_TOKEN`.
+
+    The agent runs as the same user with `--dangerously-skip-permissions`, so it
+    could read the operator's `EnvironmentFile` anyway and the variable grants no
+    capability it did not have. What it changes is how easy the token is to
+    stumble INTO: "print your environment" is an ordinary thing to ask an agent,
+    prompt injection from a repository it reads is an ordinary thing to worry
+    about, the result lands in a pane, and the log drawer shows panes.
+
+    Measured on tmux 3.4 rather than chosen from the manual, because the ticket
+    warns each option "silently does nothing" in the wrong case:
+
+    - a pane inherits the variable from the SERVER, which took it when the
+      server started, so filtering one client invocation changes nothing;
+    - `new-session -e HITCHRAIL_TOKEN=` works even on a pre existing server, and
+      leaves the variable SET AND EMPTY rather than absent;
+    - `env -u` in the argv we already control leaves it genuinely UNSET
+      (`printenv` exits 1), works whatever the server's state, mutates nothing
+      belonging to tmux or to anybody else's sessions, and does not survive into
+      `ps`, so argv tail matching is untouched.
+    """
+    run = FakeRunner()
+    tmux = Tmux(prefix="hr-", run=run, scrub_env=("HITCHRAIL_TOKEN",))
+    tmux.new_session("vessel", "/srv/vessel", ["claude", "--remote-control", "vessel"])
+
+    spawn = next(c for c in run.calls if "new-session" in c)
+    assert "env" in spawn and "-u" in spawn and "HITCHRAIL_TOKEN" in spawn
+    assert spawn.index("env") < spawn.index("claude"), "the scrub must come before the agent"
+
+
+def test_the_scrub_does_not_disturb_the_argv_tail_detection_matches_on() -> None:
+    """`env` execs the agent and is replaced by it, so the prefix never reaches
+    `ps`, verified on a real machine. The tail is what `find_detached` matches,
+    and it is unchanged.
+
+    The tail is read up to the `;` rather than off the end of the list, because
+    #66 chains `set-option ... remain-on-exit on` after the agent's argv: the
+    command does not END with what the agent runs, and asserting on `[-3:]`
+    tests the chaining instead. Reading to the separator is also what makes
+    this a real guard: the scrub goes in FRONT, so any implementation that put
+    it behind, or that split an argument, moves these three elements.
+    """
+    run = FakeRunner()
+    tmux = Tmux(prefix="hr-", run=run, scrub_env=("HITCHRAIL_TOKEN",))
+    tmux.new_session("vessel", "/srv/vessel", ["claude", "--remote-control", "vessel"])
+
+    spawn = next(c for c in run.calls if "new-session" in c)
+    chained = spawn.index(";")
+    assert spawn[chained - 3 : chained] == ["claude", "--remote-control", "vessel"]
+
+
+def test_nothing_is_scrubbed_when_nothing_is_named() -> None:
+    """The default. A `Tmux` built without the list spawns exactly what it was
+    given, so this cannot quietly change what an unrelated caller runs."""
+    run = FakeRunner()
+    tmux = Tmux(prefix="hr-", run=run)
+    tmux.new_session("vessel", "/srv/vessel", ["claude", "--remote-control", "vessel"])
+
+    spawn = next(c for c in run.calls if "new-session" in c)
+    assert "env" not in spawn

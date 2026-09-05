@@ -201,7 +201,7 @@ match and when.
 
 ## Batch 5: the token an agent inherits, task 40
 
-- [ ] **Task 40, #113.** An agent Hitchrail starts inherits `HITCHRAIL_TOKEN`,
+- [x] **Task 40, #113.** An agent Hitchrail starts inherits `HITCHRAIL_TOKEN`,
       measured rather than assumed. "Print your environment" is a thing people
       ask agents, and the token is the only thing between a stranger and a shell.
 
@@ -210,9 +210,29 @@ match and when.
       control rather than a truthfulness fix, and it should not be rushed
       alongside a refactor.
 
+      **Done with `env -u`, which is none of the three options the ticket
+      listed.** Measured on tmux 3.4 against a pre existing server, because the
+      ticket's own warning is that each candidate silently does nothing in the
+      wrong case: a pane inherits from the SERVER, so filtering the client call
+      changes nothing; `new-session -e VAR=` leaves the variable set and empty
+      rather than absent; `env -u VAR` in the argv we already build leaves it
+      genuinely unset, mutates nothing belonging to tmux or to anyone else's
+      sessions, and `execs` away before `ps` sees it, so the argv tail
+      `find_detached` matches is untouched. `TOKEN_ENV` moved to `config` so the
+      engine can name it without importing `cli`, which the import contract
+      forbids.
+
 ## Batch 6: ending a detached agent, task 41
 
-- [ ] **Task 41, #107.** A detached agent cannot be ended from a phone, and doing
+- [ ] **Task 41, #107. SKIPPED, and this is the recorded reason.** It depends on
+      #85, and #85 was escalated rather than implemented: it asks for a decision
+      about the state model that is not mine to make. Building the project's
+      first unscoped destructive path on top of an identification that is still
+      under review is exactly the ordering the ticket itself argues against, so
+      the dependency is honoured by not starting rather than by starting
+      carefully.
+
+      A detached agent cannot be ended from a phone, and doing
       so needs the first UNSCOPED destructive path in the project: signalling a
       pid that no tmux session of ours owns.
 
@@ -233,7 +253,10 @@ Ticked only with evidence.
 - [ ] The two derivation directions follow one stated rule, or their asymmetry is
       documented with its reason and tested.
 - [ ] The read order in `_look()` names the race it prefers.
-- [ ] A spawned agent does not inherit the token.
+- [x] A spawned agent does not inherit the token. `env -u HITCHRAIL_TOKEN`
+      prefixes the spawn; `tests/test_tmux.py` pins the argv and that the tail
+      is unchanged, and `tests/test_engine.py` pins the wiring, which the tmux
+      tests structurally cannot see.
 - [ ] `tmux.py` no longer holds the name vocabulary, and the dependency direction
       is asserted.
 

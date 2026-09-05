@@ -95,6 +95,7 @@ _PROMPT = "\u276f"
 # draft without it, which is the only thing that tells the two apart.
 _DIM = "\x1b[2m"
 
+
 # CSI and OSC sequences, for deciding whether what is left is only padding.
 #
 # **Narrower than it looks like it should be, on purpose.** Round 2 of #89's
@@ -182,6 +183,7 @@ def _without_escapes(text: str) -> str:
         else:
             i += 1
     return "".join(out)
+
 
 # A keystroke reaches the pty at once and the agent repaints when it gets
 # round to it, and nothing tells us when that was. So the box is read after a

@@ -935,7 +935,12 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # mostly the reason: two regexes failed in OPPOSITE directions, one
         # refusing every stop and one eating a draft character, and a third
         # regex would have been the same bet a third time.
-        "claude_ipc.py": 649,
+        # 649 to 651, and neither line is prose: `ruff format` 0.16.4 wants two
+        # blank lines before the two module level comments that follow an
+        # assignment, and HEAD was committed without the formatter having run.
+        # Recorded so the next reader does not go looking for the behaviour that
+        # grew the file. It did not; the gate did.
+        "claude_ipc.py": 651,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.
@@ -950,7 +955,12 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # and the one a future reader would otherwise re-litigate: assuming the
         # session exists kills something that may not, assuming it does not
         # leaves the defect.
-        "engine.py": 826,
+        # 826 to 833 for #113. The default `Tmux` is now built with the variable
+        # names a spawned agent must not inherit, and the comment says why the
+        # name is passed from here rather than known by the adapter: which
+        # variable holds the token is this application's vocabulary, and tmux
+        # knows nothing about it.
+        "engine.py": 833,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -982,7 +992,16 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # not available. Recorded rather than silently reset, because the
         # previous entries argued in good faith from a premise that a split
         # removed.
-        "tmux.py": 439,
+        # 439 to 475 for #113, and the growth is the measurement rather than the
+        # code. Two lines prefix `env -u VAR` to the spawn; the rest records what
+        # was measured on tmux 3.4 against a pre existing server, because the two
+        # options that read as correct in the manual are the ones that silently
+        # do nothing: a pane inherits from the SERVER, so `env=` on the client
+        # call changes nothing, and `new-session -e VAR=` leaves the variable set
+        # and empty rather than absent. Deleting that table would leave a
+        # workaround that looks like a longer way to write the option somebody
+        # will "simplify" it back to. Same argument as every entry above it.
+        "tmux.py": 475,
         # 413, and thirteen lines over the guideline is not a second job. #18
         # already took the host vocabulary out of this file, and what is left
         # is one dataclass and its startup refusals, which is one thing. The
@@ -1000,7 +1019,14 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # the root that label names, and refuses if there is none. Three
         # refusals where there was one, because with several roots there are
         # three ways to name a folder that is not there.
-        "config.py": 488,
+        # 488 to 507 for #113. `TOKEN_ENV` moved here from `cli`, which was its
+        # only reader until the engine gained a second one: the engine has to
+        # name the variable to strip it out of what it spawns, and the import
+        # contract forbids the engine layer importing `cli`. The move is the
+        # whole growth, comment included, and the comment is what stops it
+        # drifting back: two literals of one variable name in two layers is how a
+        # scrub stops scrubbing without anything going red.
+        "config.py": 507,
         # 409, nine lines over, down from 542. #115 deleted the `?token=`
         # carrier: 135 lines once the two blocks inside `TokenMiddleware`
         # that only served it are counted.
