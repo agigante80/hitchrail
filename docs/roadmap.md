@@ -591,6 +591,57 @@ mean editing a systemd unit.
 
 Tickets: #152, #153, #154.
 
+## Phase 15: The package as strangers meet it
+
+**Objective: somebody who has never seen this project can install it, tell what
+it is, and see that it is maintained, without reading the source.**
+
+Everything here came from looking at the published PyPI page beside our own
+README and finding they disagree, or say nothing.
+
+Delivers: `pip` acknowledged as an install route, the deprecated licence
+classifier removed and the licence made clickable, a badge row on the first
+screen, and a bot that keeps the dependencies and the pinned actions honest.
+
+**#155 is P0 and the only P0 open.** Every third party action here is pinned to a
+commit SHA on purpose, because a tag is a mutable pointer. That pin is correct
+and it cannot update itself, so today nothing tells anybody a newer version
+exists. A supply chain that only updates when somebody remembers is not a
+control, and this package is installed with `uvx` on other people's machines.
+
+**Done when:** the PyPI page and the README agree, the licence is one clickable
+statement rather than four scattered ones, and a direct dependency going stale
+arrives as a pull request against `develop`.
+
+Tickets: #155, #156, #157, #158.
+
+## Phase 16: What survives a reboot
+
+**Objective: decide whether Hitchrail remembers anything, and if so what.**
+
+One ticket, and it is a phase rather than a Backlog entry because of what it
+changes rather than how big it is.
+
+**Hitchrail holds no state.** The security argument says so in as many words:
+no database, no session registry, every answer derived from the operating
+system on demand. That is why nothing can get out of sync, nothing needs
+migrating, and no file's contents decide what runs.
+
+Remembering which sessions were running is the first persistent state in the
+product, and it is specifically a file that decides what gets spawned. The
+ticket is written for the requested default of ON, and it lists the six things
+that have to be true for that default to be defensible: the memory guard
+re-evaluated between each restored start, a cap, never doubling an agent that
+survived, a command line kill switch, protection against a restart loop
+multiplying it, and restored rows being visibly restored. If any of the six is
+not built, the default is off and the feature still ships.
+
+**Done when:** a reboot brings back what was running, exactly once each, without
+a person tapping anything, and the security argument has been rewritten rather
+than quietly outgrown.
+
+Tickets: #159.
+
 ## Deliberately later
 
 Not scheduled, and not to be smuggled into an earlier phase:
@@ -604,7 +655,8 @@ Not scheduled, and not to be smuggled into an earlier phase:
 - Streaming logs. A tail on demand is enough until it demonstrably is not. #151
   gives the tail its own URL and deliberately does not stream it.
 - Sending input to a session. Hitchrail starts and stops agents; it is not a
-  terminal, and making it one is a different product.
+  terminal, and making it one is a different product. #159 restores sessions
+  and deliberately does not reach into an agent's own conversation state.
 
 ## Deliberate additions to the design
 
