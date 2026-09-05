@@ -141,10 +141,17 @@ Steps 1 to 5 happen ON the pull request. Steps 6 onward happen after it merges.
    not what changed. A security fix says plainly what was reachable and by
    whom, including the parts that are embarrassing.
 
-3. **Bump `version` in `pyproject.toml`.** `release-gate.yml` checks on every pull
-   request that it is ahead of the latest release tag, and since #132 it is a REQUIRED
-   check, so forgetting this blocks the merge rather than producing a release that
-   quietly reuses a number.
+3. **Bump `version` in `pyproject.toml`, then run `uv lock`.** `release-gate.yml`
+   checks on every pull request that it is ahead of the latest release tag, and since
+   #132 it is a REQUIRED check, so forgetting this blocks the merge rather than
+   producing a release that quietly reuses a number.
+
+   **`uv lock` is not optional and the gate will not tell you.** `uv.lock` records
+   this project's OWN version, CI runs `uv sync --locked`, and a stale lock fails
+   every leg of the matrix on the first step with `the lockfile at uv.lock needs to
+   be updated`. `version-bumped` passes while that happens, because it reads
+   `pyproject.toml` and nothing else. Written down because the failure names the
+   lockfile and not the bump that invalidated it: 0.3.0 lost a CI round to it.
 
 4. **Regenerate the screenshots** if the interface changed:
 
