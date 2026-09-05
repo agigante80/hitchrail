@@ -6,6 +6,8 @@ it is a sequence over time, not a status code.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from playwright.async_api import Page, expect
 
@@ -86,7 +88,8 @@ async def test_a_box_that_will_not_clear_refuses_the_stop(page: Page, server: Ha
     Deliberately NOT "nothing was sent". Round 1 of review caught that wording
     as false: `C-u` goes out before the first check and `Escape` before the
     second, so keys have been sent and a turn may have been interrupted by the
-    time this dialog appears. The negative assertion below is the guard.
+    time this dialog appears. The test keeps Close safe and makes Kill it an
+    explicit second choice.
     """
     server.seed(running=["vessel"], box_will_not_clear=True)
     await _open_stop(page, server)
@@ -98,10 +101,32 @@ async def test_a_box_that_will_not_clear_refuses_the_stop(page: Page, server: Ha
     assert "Nothing was sent" not in (await dialog.inner_text()), (
         "the dialog claims the session was untouched, and keys were sent"
     )
-    # The session is still there, and still running.
+    # The session is still there, and still running after choosing the safe
+    # action. The refusal is not a dead end: the operator can choose the
+    # existing kill route when the gentle route cannot be sent.
     assert server.is_running("vessel"), "a refused stop stopped something"
-    # And it is not showing a spinner for a request nobody made.
-    await expect(dialog.get_by_role("button", name="Do not wait, kill it now")).to_have_count(0)
+    await expect(dialog.get_by_role("button", name="Close")).to_be_visible()
+    kill = dialog.get_by_role("button", name="Kill it")
+    await expect(kill).to_be_visible()
+    await expect(kill).to_have_class(re.compile(r"\bdanger\b"))
+    await expect(dialog).to_contain_text("anything it has not written to disk is lost")
+
+    buttons = dialog.get_by_role("button")
+    assert await buttons.nth(0).inner_text() == "Close"
+    assert await buttons.nth(1).inner_text() == "Kill it"
+
+    await buttons.nth(0).click()
+    await expect(dialog).to_be_hidden()
+    assert server.is_running("vessel"), "the safe refusal action killed the session"
+
+    await _open_stop(page, server)
+    await page.locator("[data-dialog]").get_by_role("button", name="Stop", exact=True).click()
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Kill it").click()
+    await expect(
+        page.locator(f'[data-project="{server.project("vessel")}"]')
+    ).to_have_attribute("data-state", "stopped", timeout=15_000)
+    assert not server.is_running("vessel")
 
 
 async def test_kill_appears_once_the_wait_is_under_way_and_stays(

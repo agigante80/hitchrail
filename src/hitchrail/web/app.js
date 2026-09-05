@@ -668,7 +668,7 @@ async function beginStop(project) {
     method: "DELETE",
   });
   if (!result.ok) {
-    showRefusal(result);
+    showRefusal(result, project);
     return;
   }
   await refresh();
@@ -819,7 +819,7 @@ async function killNow(project) {
   });
   closeDialog();
   if (!result.ok) {
-    showRefusal(result);
+    showRefusal(result, project);
     return;
   }
   await refresh();
@@ -843,7 +843,7 @@ export function setStopPatience(ms) {
   stopPatienceMs = ms;
 }
 
-function showRefusal(result) {
+function showRefusal(result, project) {
   const { code, message } = result.body;
   if (result.status === 401) {
     // The token is the whole auth model, so an expired or revoked one is a
@@ -899,14 +899,20 @@ function showRefusal(result) {
     // over. The exit command is the thing that was not sent, and that is what
     // the title says.
     //
-    // No Kill button here. The person asked to stop gently and got an honest
-    // "not from here"; putting the destructive path in front of them as the
-    // answer to that is the escalation-by-default section 7 forbids. Kill is
-    // still on the row, which is where they chose it deliberately.
+    // The refusal is not a dead end. The safe action remains first, while the
+    // existing scoped kill route stays available as an explicit second choice.
+    // Kill is not on the row: it is offered here because the gentle route was
+    // refused and the operator has to choose whether to end the session.
     showDialog({
       title: "It was not asked to exit",
-      body: message,
-      actions: [["Close", "ghost", () => closeDialog()]],
+      body:
+        message +
+        "\n\nKilling it now ends the process immediately, and anything it has " +
+        "not written to disk is lost.",
+      actions: [
+        ["Close", "ghost", () => closeDialog()],
+        ["Kill it", "danger", () => killNow(project)],
+      ],
     });
     return;
   }
