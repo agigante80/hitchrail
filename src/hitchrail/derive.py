@@ -21,7 +21,8 @@ from hitchrail import claude_ipc, discovery
 from hitchrail.config import Config
 from hitchrail.procs import ProcTable
 from hitchrail.sessions import MachineUnreadable, Session, State
-from hitchrail.tmux import Tmux, TmuxUnavailable, is_tmux_argv
+from hitchrail.tmux import Tmux, TmuxUnavailable
+from hitchrail.tmuxnames import is_tmux_argv
 
 
 @dataclass(frozen=True)

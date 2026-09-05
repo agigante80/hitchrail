@@ -1,5 +1,10 @@
 """A thin tmux adapter, carrying the target addressing footguns.
 
+**The adapter only.** What a valid tmux name IS, and what a tmux invocation
+looks like, moved to `tmuxnames.py` at #93: pure functions over strings do not
+belong in the module that spawns processes as the user. `lint-imports` asserts
+the direction, so the vocabulary cannot grow a subprocess later.
+
 Everything here exists because a tmux target spec does not mean what it looks
 like. Each behaviour below was verified against a real tmux 3.4 on a private
 socket rather than recalled, and #27 keeps that honest with a live tier: the
@@ -14,53 +19,13 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Callable
-from pathlib import PurePosixPath
+
+from hitchrail.tmuxnames import BINARY, sanitize
 
 # What a subprocess call looks like from here. Injected so the whole engine can
 # be tested without a machine, which is the single seam the architecture rests
 # on. `procs` consumes this alias too.
 Runner = Callable[[list[str]], "subprocess.CompletedProcess[str]"]
-
-# tmux reads both of these as target separators, so neither may appear in a
-# session name. `-` is the escape character, which is why it is escaped too.
-_SEPARATORS = (".", ":")
-
-# Marks a name that went through the encoding below. A name that would
-# otherwise start with it is encoded as well, which is what keeps the encoded
-# and unencoded forms disjoint and therefore the whole mapping injective.
-_ENCODED_PREFIX = "e-"
-
-# The binary every call in this class invokes. Named once so `is_tmux_argv`
-# below and `_argv` cannot disagree about what tmux is called.
-BINARY = "tmux"
-
-
-def is_tmux_argv(args: str) -> bool:
-    """Whether a command line is an invocation of tmux itself.
-
-    A tmux server keeps the argv of the invocation that started it, for life,
-    and that invocation ends with the command the first session was asked to
-    run. So a scan looking for a program by its argv tail finds the server too.
-    #84, and `derive.find_detached` is where that costs something.
-
-    Two mechanics, both checked against `ps -eww -o args` output on 2026-09-02
-    rather than assumed.
-
-    **argv[0], not a substring anywhere.** The argument after `-c` is a path we
-    do not control, so a search of the whole line refuses anything running
-    under a directory called tmux.
-
-    **Its basename, because argv[0] is however the caller spelled it.** A
-    leading `env -u TMUX` does not survive into the process: env execs tmux and
-    is replaced by it, so argv[0] arrives as `tmux` under the private socket
-    tiers exactly as it does elsewhere.
-
-    Deliberately NOT a check for `new-session`. `-S <socket>` sits between the
-    binary and the subcommand, so anything anchored on those two as one string
-    stops working under the invocation our own live tiers make.
-    """
-    head = args.split(maxsplit=1)
-    return bool(head) and PurePosixPath(head[0]).name == BINARY
 
 
 class NotOurSession(ValueError):
@@ -79,54 +44,6 @@ class TmuxUnavailable(OSError):
     #28's preflight refuses to start at all when tmux is missing. This is what
     happens if it disappears while running.
     """
-
-
-def sanitize(name: str) -> str:
-    """Make a project name addressable as a tmux session, ONE TO ONE.
-
-    tmux reads '.' and ':' as window and pane separators in a target spec.
-    Verified on 3.4: a session created as `hr-dotted.site` is stored as
-    `hr-dotted_site`, so it exists under a name nobody looked for and
-    `has-session -t =hr-dotted.site` fails while the agent is running, which
-    presents as the session having vanished. Emitting neither character
-    sidesteps the rewrite rather than trying to predict it.
-
-    Injectivity is the hard requirement here, not a nicety. If two project
-    names collide onto one session name, one project reads as running because
-    the other is, and stopping one kills the other's agent. That is the "two
-    agents in one folder" outcome #11 fixed from the discovery side, reached
-    from this one.
-
-    **A digest suffix does not deliver it, which is why this is an escape
-    encoding.** An earlier version returned `a-b-<6 hex of blake2b>` for `a.b`
-    and returned already safe names unchanged. A project named literally
-    `a-b-28b8f5` is already safe, so it came back unchanged and collided with
-    `a.b`, and the colliding name is trivially computable by anyone who can
-    create a folder. Widening the digest only raises the price: 6 hex is 24
-    bits, so distinct names also birthday collide by accident somewhere around
-    four thousand projects. Injective by construction beats injective by hash.
-
-    The encoding is the usual escape and escape-the-escape:
-
-        -  ->  --      .  ->  -d      :  ->  -c
-
-    and the whole thing gets an `e-` prefix so encoded and unencoded names
-    occupy disjoint spaces. A name that already starts with `e-` is encoded for
-    the same reason. Names with neither separator are returned untouched, so
-    the common case still reads plainly in `tmux ls`, and readability is the
-    right thing to trade away here anyway: the project already keeps the
-    display name apart from the tmux name.
-    """
-    if not _needs_encoding(name):
-        return name
-    body = name.replace("-", "--").replace(".", "-d").replace(":", "-c")
-    return f"{_ENCODED_PREFIX}{body}"
-
-
-def _needs_encoding(name: str) -> bool:
-    """A name is encoded if it holds a separator, or could be mistaken for one
-    that was. The second half is what keeps the two spaces disjoint."""
-    return any(sep in name for sep in _SEPARATORS) or name.startswith(_ENCODED_PREFIX)
 
 
 # How long any single tmux call may take before it is abandoned (#67).

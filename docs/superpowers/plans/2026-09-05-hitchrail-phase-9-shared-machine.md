@@ -27,7 +27,7 @@ respectively. The roadmap is corrected in the same change as this plan.
 
 The mechanical batch, and first because it clears the ground for the rest.
 
-- [ ] **Task 30, #93.** Split the name vocabulary out of `tmux.py`. `sanitize`,
+- [x] **Task 30, #93.** Split the name vocabulary out of `tmux.py`. `sanitize`,
       `_needs_encoding`, `_SEPARATORS`, `_ENCODED_PREFIX`, `BINARY` and
       `is_tmux_argv` are pure functions over strings living inside the module
       that spawns processes. The seam is the same one `hostnames.py` took beside
@@ -41,6 +41,15 @@ The mechanical batch, and first because it clears the ground for the rest.
 
       No behaviour change. A pure move with a test asserting the dependency runs
       one way, as `test_projectnames_does_not_import_config` already does.
+
+      **Done 2026-09-05.** `tmuxnames.py`, matching `hostnames` and
+      `projectnames` rather than the ticket's `tmux_names`: a third spelling of
+      the same idea is a tax on everyone who later has to remember which one
+      this was. `tmux.py` 522 to 439, and its four cap notes are replaced by one
+      recording that they argued in good faith from a premise the split removed.
+      `is_tmux_argv` had NO test at all and now has five, one of which asserts
+      #96's defect so it fails the day #96 is fixed. Sweep: 852 killed to 856,
+      survivors 233 to 229.
 
 - [ ] **Task 31, #96.** `is_tmux_argv` compares `argv[0]`'s basename to the
       literal `"tmux"`, so a tmux installed as `tmux3`, or invoked through a

@@ -961,19 +961,15 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # name vocabulary, pure and subprocess free, sitting beside an adapter
         # that spawns things. That is the same split #18 already made when it
         # took the host vocabulary out of config.py into hostnames.py.
-        # Raised from 505 for #109, and NOT for behaviour, which is the only
-        # reason the note above sanctions. The exception is deliberate and this
-        # entry is where it is argued: the addition records that a spawned
-        # agent inherits HITCHRAIL_TOKEN, measured rather than assumed, and a
-        # decision about what the spawn hands a child has to be readable at the
-        # spawn. That is the same argument this entry already makes for its
-        # length, which is that the explanations are the value.
-        # 514 to 523 for #91, documentation again rather than behaviour, and
-        # again argued here rather than waved through: `send_keys` writes to a
-        # pty and what it writes is attributed to the operator, so the one
-        # module allowed to call it is recorded at the method a future caller
-        # would read first.
-        "tmux.py": 522,
+        # **#93 landed and this entry loses its argument with it.** Every note
+        # here defended a length caused by a module doing two jobs: the name
+        # vocabulary and the adapter that spawns processes. The vocabulary is
+        # `tmuxnames.py` now, and 522 became 438 without a line of explanation
+        # being deleted, which is the outcome the old notes kept insisting was
+        # not available. Recorded rather than silently reset, because the
+        # previous entries argued in good faith from a premise that a split
+        # removed.
+        "tmux.py": 439,
         # 413, and thirteen lines over the guideline is not a second job. #18
         # already took the host vocabulary out of this file, and what is left
         # is one dataclass and its startup refusals, which is one thing. The
@@ -1166,6 +1162,40 @@ def test_the_refusal_names_the_flag_and_the_root(tmp_path: Path) -> None:
         Config(roots=_r(tmp_path), self_project="main~typo")
     message = str(exc.value)
     assert "--self-project" in message and "typo" in message and str(tmp_path) in message
+
+
+def test_tmuxnames_does_not_import_the_adapter() -> None:
+    """#93. The dependency runs one way, the third time this seam is cut.
+
+    `tmux` imports `tmuxnames` for `sanitize` and `BINARY`. If the vocabulary
+    ever imports the adapter back, the split stops being a seam and becomes a
+    cut through a cycle, and the next person to tidy up will reasonably merge
+    them again.
+
+    **The point is not tidiness.** `tmuxnames` holds pure functions over strings
+    and `lint-imports` cannot express "and no subprocess", so this is what stops
+    the vocabulary acquiring one: a module that cannot import the adapter cannot
+    borrow its runner.
+    """
+    import ast
+
+    source = (Path(__file__).parent.parent / "src" / "hitchrail" / "tmuxnames.py").read_text()
+    # **Parsed imports, never the file text.** The first version of this asserted
+    # `"subprocess" not in source` and failed on the module docstring, which says
+    # "No subprocess, no state, no server". That is the fourth time in this
+    # repository that a guard has matched the sentence explaining the thing it
+    # forbids, and the only way to make the text version pass is to delete the
+    # explanation. Read what the module IMPORTS.
+    imported = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            imported |= {a.name.split(".")[0] for a in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module.split(".")[-1] if node.level == 0 else node.module)
+    assert "tmux" not in imported, "the vocabulary imports the adapter, so the seam is a cycle"
+    assert "subprocess" not in imported, (
+        "the name vocabulary imports subprocess, which is the thing the split exists to prevent"
+    )
 
 
 def test_projectnames_does_not_import_config() -> None:

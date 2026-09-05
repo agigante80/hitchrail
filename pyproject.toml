@@ -143,6 +143,7 @@ source_modules = [
   "hitchrail.projectnames",
   "hitchrail.roots",
   "hitchrail.tmux",
+  "hitchrail.tmuxnames",
   "hitchrail.procs",
   "hitchrail.claude_ipc",
   "hitchrail.ram",
@@ -222,6 +223,11 @@ source_paths = [
   # The first run with it reported 48 mutants with NO covering test, which is
   # a coverage gap this module was hiding by not being here.
   "src/hitchrail/tmux.py",
+  # #93 split the name vocabulary out of the adapter. It stays mutated for the
+  # reason it was mutated inside `tmux.py`: `sanitize`'s injectivity is what
+  # stops two projects reaching one session, and since #119 that carries the
+  # multi root guarantee.
+  "src/hitchrail/tmuxnames.py",
 ]
 # The tests that actually exercise those five. The full suite takes 34 seconds
 # and would make a single run hours; these 441 take 1.5, which is what makes
@@ -290,4 +296,5 @@ pytest_add_cli_args_test_selection = [
   # runner injected, so nothing here spawns a real tmux and no mutant can
   # leak a process group.
   "tests/test_tmux.py",
+  "tests/test_tmuxnames.py",
 ]

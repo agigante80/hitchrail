@@ -126,6 +126,8 @@ src/hitchrail/
                    IS: `<root-label>~<folder>`, injective by allowlist
   config.py        the dataclass, its refusals, and the derived allowlists
   discovery.py     root scanning, folder creation, path safety
+  tmuxnames.py     what a valid tmux name IS, and what a tmux invocation
+                   looks like: pure strings, no server
   tmux.py          the tmux adapter and its footguns
   procs.py         process table snapshot
   claude_ipc.py    everything that knows Claude Code internals
