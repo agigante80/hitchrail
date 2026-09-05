@@ -98,6 +98,18 @@ match and when.
       something new, and write the decision down: `detached` currently means "no
       pane owns it", and it must not quietly come to mean "no pane we can see".
 
+      **SKIPPED 2026-09-05, attempted and reverted, and the plan understated
+      it.** The narrow fix works and costs no extra call, and then the row says
+      `stopped`, which offers Start. Starting gives a second agent in the same
+      folder, which is the outcome the design names as the reason derivation
+      exists at all. So it trades a label that invites a wrong DESTRUCTIVE
+      action for one that invites a wrong CREATIVE one, and the second is what
+      the whole mechanism was built to prevent.
+
+      It needs a decision about the state model, which is design section 4.1.
+      Four options are written on the ticket, which now carries `needs-human`.
+      Tasks 34 and 35 do not depend on it; task 41 does, by its own body.
+
 - [ ] **Task 34, #46.** The two directions match with different strictness and
       neither behaviour is written down or tested. The pane direction accepts any
       marked process anywhere in the pane's tree regardless of which project its
