@@ -32,6 +32,26 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+### Fixed
+
+**A misconfigured service restarted forever instead of stopping.** If you run
+Hitchrail as a systemd user unit and it refuses to start, because
+`HITCHRAIL_TOKEN` is set to an empty value, a root is not a directory, or the
+`ExecStart` line has a typo, the unit retried it every five seconds for as long
+as the machine was up. Measured: 37 restarts and 38 copies of the same message,
+and systemd's own rate limit never fired, because the five second gap keeps the
+attempts outside its default window.
+
+The refusal now stays stopped, which is what the template always claimed it
+did. **A port already in use still retries**, since that is usually a previous
+instance shutting down.
+
+**If you copied the template before this,** the two lines to add are
+`RestartPreventExitStatus=2` under `[Service]`, and `StartLimitIntervalSec=60`
+with `StartLimitBurst=5` under `[Unit]`. The second pair bounds anything the
+first cannot name, and they belong in `[Unit]`: systemd has ignored them in
+`[Service]` since version 230.
+
 ## 0.4.0 - 2026-09-05
 
 ### Fixed

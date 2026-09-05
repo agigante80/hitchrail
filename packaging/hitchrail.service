@@ -30,6 +30,24 @@ Description=Hitchrail
 Documentation=https://github.com/agigante80/hitchrail
 After=network.target
 
+# **The backstop for everything the exit code list below cannot name** (#170).
+# `RestartPreventExitStatus=2` stops the deliberate refusals looping. It bounds
+# ONE status, and an unhandled exception exits 1, which would loop by exactly
+# the mechanism that ticket measured.
+#
+# These two are what make the default limit actually fire. systemd's default is
+# five starts in ten seconds, and `RestartSec=5` spaces attempts far enough
+# apart that the window never fills: 37 restarts in a row, none of them rate
+# limited. Widening the window to a minute makes five attempts at five second
+# intervals trip it, after which the unit enters `failed` and stays there, with
+# its own explanation still the newest thing in the journal.
+#
+# **In `[Unit]`, not `[Service]`.** They lived in `[Service]` until systemd 230
+# and are silently ignored there now, which is the worst possible failure for a
+# limit: it reads as configured and does nothing.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
 [Service]
 # `uv tool install hitchrail`, not `uvx`. uvx resolves and runs out of a cache
 # it is free to evict, so it is deliberately ephemeral and the path is not
@@ -54,11 +72,30 @@ EnvironmentFile=%h/.config/hitchrail/env
 # missing message.
 Environment=PYTHONUNBUFFERED=1
 
-# **on-failure, never always.** Hitchrail refuses to start on a configuration
-# it judges unsafe: no token where one is required, an unreachable root, a
-# host it will not bind. Those refusals are deliberate stops and must stay
-# stopped. `Restart=always` would turn each one into a boot loop that buries
-# its own explanation under a thousand repetitions of itself in the journal.
+# **What restarts, what stays stopped, and what is merely bounded.** #170, and
+# the comment that used to sit here got the middle one wrong.
+#
+# It said `on-failure, never always`, on the reasoning that a configuration
+# refusal is a deliberate stop and must stay stopped. The reasoning is right
+# and `on-failure` does not deliver it: it restarts on ANY non zero exit, and
+# a refusal exits 2. Measured with an `EnvironmentFile` holding a blank token:
+# 37 restarts and 38 copies of the same message, never rate limited, because
+# `RestartSec=5` keeps the attempts outside systemd's default 5-in-10s window.
+#
+# Exit 2 is every deliberate stop, and it is not a number this file chose.
+# `argparse` exits 2 on a usage error, which is what a typo in the ExecStart
+# above produces, and `cli.main` returns 2 for a configuration it refuses.
+# Changing it would let a mistyped flag loop forever on the one line these
+# instructions tell you to edit.
+RestartPreventExitStatus=2
+
+# Exit 3 is uvicorn's startup failure, which is the port already being in use.
+# That one is worth retrying: it is usually a previous instance still shutting
+# down. It is NOT in the list above, deliberately.
+#
+# The old comment listed "a host it will not bind" among the refusals that must
+# stay stopped. That was wrong twice: a wildcard bind is accepted rather than
+# refused, and a bind that fails is exit 3, which this unit retries on purpose.
 Restart=on-failure
 RestartSec=5
 

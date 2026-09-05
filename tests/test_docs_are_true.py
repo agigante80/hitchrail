@@ -792,20 +792,119 @@ def test_the_unit_template_names_flags_the_cli_accepts() -> None:
     parse_args(argv[1:])  # SystemExit here is the failure
 
 
+def _unit_sections() -> dict[str, list[str]]:
+    """The unit's directives, by section, comments dropped.
+
+    Read as DIRECTIVES rather than as text. A substring check over the file
+    matches the comment above a directive that explains why the other value is
+    wrong, so the guard fails on its own explanation and the only way to make
+    it pass is to delete the reasoning. Same trap as the private name hook.
+    """
+    sections: dict[str, list[str]] = {}
+    current = ""
+    for raw in UNIT.read_text().splitlines():
+        line = raw.strip()
+        if line.startswith("[") and line.endswith("]"):
+            current = line[1:-1]
+            sections.setdefault(current, [])
+        elif line and not line.startswith("#"):
+            sections.setdefault(current, []).append(line)
+    return sections
+
+
 def test_the_unit_never_restarts_a_refusal_forever() -> None:
-    """`Restart=always` would turn every Phase 7 config refusal into a boot
-    loop that buries its own message in the journal. The refusals are
-    deliberate stops and must stay stopped."""
-    # Read the DIRECTIVES, not the file. A substring check here matches the
-    # comment above the directive that explains why `always` is wrong, so the
-    # guard fails on its own explanation and the only way to make it pass is
-    # to delete the reasoning. Same trap as the private name hook.
-    directives = [
-        line.strip()
-        for line in UNIT.read_text().splitlines()
-        if line.strip().startswith("Restart=")
-    ]
-    assert directives == ["Restart=on-failure"], directives
+    """#170, and this test is the reason that defect survived a phase.
+
+    It asserted `directives == ["Restart=on-failure"]`, which is exactly the
+    state that produces the loop it is named for. Its docstring's reasoning was
+    right and applied to the value it was pinning: `on-failure` restarts on ANY
+    non zero exit, a configuration refusal exits 2, and an `EnvironmentFile`
+    with a blank token produced 37 restarts and 38 copies of one message.
+
+    **It also could not have noticed the fix**, which is the sharper half:
+    `"RestartPreventExitStatus="` does not `startswith("Restart=")`, the `=`
+    falling at index 7 against the `P`. So the old assertion stays green either
+    way, and a new test beside it would have left one certifying nothing.
+
+    The list assertion is what made it blind: it pinned the directives present
+    and could not see the one that was missing.
+    """
+    service = _unit_sections()["Service"]
+    assert "Restart=always" not in service, (
+        "every deliberate refusal would become a boot loop that buries its own "
+        "explanation in the journal"
+    )
+    assert "Restart=on-failure" in service
+    assert "RestartPreventExitStatus=2" in service, (
+        "on-failure alone restarts a configuration refusal forever, which is the "
+        "loop this test is named for"
+    )
+
+
+def test_the_unit_prevents_the_exit_code_the_cli_actually_returns() -> None:
+    """The unit's number and the program's, checked against each other.
+
+    A unit saying 2 while the CLI returns something else is two copies of one
+    rule, drifting, which is the shape #185 hit on the release path the same
+    evening. So the number is not restated here: it is read out of the unit and
+    driven through a real refusal.
+
+    A root that is not a directory, because it refuses in `main` before
+    anything binds. `argparse` reaches the same 2 by its own route for a usage
+    error, which is what a typo in the unit's `ExecStart` produces, and that is
+    why the value is not free to choose.
+    """
+    from hitchrail.cli import main
+
+    prevented = {
+        int(value)
+        for line in _unit_sections()["Service"]
+        if line.startswith("RestartPreventExitStatus=")
+        for value in line.split("=", 1)[1].split()
+    }
+    assert prevented, "the unit prevents no exit status, so every refusal loops"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        code = main(["--root", f"main={Path(tmp) / 'not-a-directory'}"])
+
+    assert code in prevented, (
+        f"the CLI refuses with exit {code} and the unit only prevents "
+        f"{sorted(prevented)}, so that refusal restarts every {UNIT.name} tick"
+    )
+
+
+def test_the_units_start_limit_is_where_systemd_reads_it() -> None:
+    """The backstop for everything `RestartPreventExitStatus` cannot name.
+
+    That directive bounds ONE status. An unhandled exception exits 1 and would
+    loop by the same mechanism, so the limit is what makes any loop terminate.
+
+    **It has to be in `[Unit]`.** These moved out of `[Service]` at systemd 230
+    and are silently ignored there now, which is the worst failure available to
+    a limit: it reads as configured and does nothing.
+
+    The window is checked too, because the default one cannot fire here.
+    systemd allows five starts in ten seconds and `RestartSec` spaces attempts
+    further apart than that, which is why 37 restarts in a row were never rate
+    limited.
+    """
+    sections = _unit_sections()
+    limits = [d for d in sections["Unit"] if d.startswith("StartLimit")]
+    assert limits, "the unit has no start limit, so a loop this cannot name runs forever"
+    assert not [d for d in sections["Service"] if d.startswith("StartLimit")], (
+        "a StartLimit directive in [Service] is ignored since systemd 230"
+    )
+    window = next(
+        int(d.split("=", 1)[1]) for d in limits if d.startswith("StartLimitIntervalSec")
+    )
+    burst = next(int(d.split("=", 1)[1]) for d in limits if d.startswith("StartLimitBurst"))
+    gap = next(
+        int(d.split("=", 1)[1]) for d in sections["Service"] if d.startswith("RestartSec=")
+    )
+    assert burst * gap < window, (
+        f"{burst} restarts {gap}s apart span {burst * gap}s, which is outside the "
+        f"{window}s window, so the limit can never fire and the loop is unbounded"
+    )
 
 
 def test_the_phone_doc_does_not_recommend_a_wildcard_bind() -> None:
