@@ -152,11 +152,27 @@ cd hitchrail
 uv run hitchrail --root main=~/projects
 ```
 
-`--root` is the folder holding your projects. Every directory directly inside it
-becomes a row. **Point it at a scratch folder the first time**: Hitchrail only
-recognises the tmux sessions it started itself, so starting a project that
-already has a session from another tool gives you a second agent in the same
-directory.
+`--root` is `label=path`: a folder holding your projects, and a name for it.
+Every directory directly inside becomes a row. **Point it at a scratch folder
+the first time**: Hitchrail only recognises the tmux sessions it started
+itself, so starting a project that already has a session from another tool
+gives you a second agent in the same directory.
+
+**The flag repeats, which is what the label is for.** Keep work and personal
+trees apart and see both at once:
+
+```sh
+uv run hitchrail --root work=~/work --root personal=~/personal
+```
+
+The label becomes part of every project's name, `work~vessel` and
+`personal~vessel`, so two folders called `vessel` are two projects rather than
+one ambiguous row. That is why the label is required even with a single root:
+if one root were unlabelled, adding a second would rename everything you had
+saved a link to.
+
+A root inside another root is refused at startup, naming both, because one
+folder reachable under two names is the problem this is here to prevent.
 
 On loopback that is all.
 

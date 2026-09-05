@@ -587,3 +587,21 @@ def test_the_banner_is_unchanged_in_a_terminal(
     monkeypatch.delenv(JOURNAL_ENV, raising=False)
     text = banner(build_config(parse_args(["--root", f"main={tmp_path}", "--host", "0.0.0.0"])))
     assert "/grant#token=abc123" in text
+
+
+def test_a_bare_root_says_what_to_do_instead_of_naming_a_function(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#120. `--root` now needs a label, so a person upgrading from 0.1.0 meets
+    this refusal first, and it has to tell them what to type.
+
+    argparse renders a `ValueError` from a `type=` callable as
+    `invalid <function name> value`, which leaks `parse_root_argument` at the
+    operator and hides the sentence explaining the change. Found by running the
+    documented command rather than by reading the code.
+    """
+    with pytest.raises(SystemExit):
+        parse_args(["--root", str(tmp_path)])
+    err = capsys.readouterr().err
+    assert "parse_root_argument" not in err, "the operator was shown a function name"
+    assert "label=path" in err, "the refusal does not say what to type instead"

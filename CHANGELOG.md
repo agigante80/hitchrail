@@ -20,7 +20,47 @@ the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
-Nothing yet.
+### Changed, and it renames every project you have
+
+- **A project is now `<root-label>~<folder>`**, so `--root` takes `label=path`
+  and is repeatable. One folder of projects was the only shape Hitchrail
+  supported; now several are, and a project has to say which root it is in.
+
+  ```sh
+  hitchrail --root work=~/work --root personal=~/personal
+  ```
+
+  **What you must do.** Add a label to `--root`: `--root main=~/projects`
+  rather than `--root ~/projects`. A bare path is refused at startup rather
+  than given a label guessed from the directory name, because a guessed label
+  would change if you ever moved the directory and rename every project again.
+
+  **Every link saved on your phone stops working**, and so does anything
+  driving the API. `POST /api/sessions/vessel` becomes
+  `POST /api/sessions/main~vessel`. Load the `/grant` link the program prints
+  on startup and re-save it.
+
+  **A qualified name even with one root**, and that is the point rather than an
+  oversight. Had one root stayed bare, adding a second would have renamed
+  everything on that day instead of this one, and an identifier that changes
+  because of unrelated configuration is not one you can save a link to.
+
+  **What was reachable and by whom:** nothing new, and this is the fix rather
+  than the exposure. Before it, two roots were not possible at all, and the
+  workaround, running two Hitchrails, was silently destructive: the tmux
+  session name came from the folder name alone, so `~/work/vessel` and
+  `~/personal/vessel` both derived `hr-vessel`. The second read as `running` on
+  the first one's session, and tapping Stop on it stopped the other one's
+  agent. The same collision applied to detached agent detection, which matches
+  on the agent's own argument.
+
+- **`--self-project` takes a qualified identifier**, for the same reason. It
+  names the one project that must never be stopped, and a bare name would be
+  ambiguous exactly where being wrong is worst.
+
+- **`GET /api/projects` reports `roots`**, a list of `{label, path}`, in place
+  of the single `root` string. It is a list even with one root, so a client
+  that special cased "one root" would be wrong the day a second was added.
 
 ## 0.1.0 - 2026-09-04
 

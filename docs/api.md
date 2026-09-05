@@ -34,11 +34,39 @@ an unauthenticated caller cannot enumerate the origin allowlist by watching a
 The origin check applies to mutating requests only. `GET` is exempt, because
 `EventSource` cannot set headers.
 
+## What `{name}` is
+
+**A project is `<root-label>~<folder>`**, always, including when only one root
+is configured. `--root` takes `label=path` and is repeatable, and the label is
+the first half of every identifier below.
+
+```
+hitchrail --root work=~/work --root personal=~/personal
+
+POST /api/sessions/work~vessel
+POST /api/sessions/personal~vessel
+```
+
+Both halves are held to the same allowlist, `[A-Za-z0-9][A-Za-z0-9._-]*`, so
+neither can contain `~`. The identifier therefore has exactly one split point
+and two project directories can never produce one name. A bare `vessel` is not
+an identifier and is refused: with more than one root it would name two things,
+and choosing one for the caller at a destructive route is the ambiguity this
+replaced.
+
+`~` rather than `/` because a slash does not survive the route table below:
+`work%2Fvessel` is a 404, and a converter wide enough to match it would swallow
+the `/kill`, `/logs` and `/url` sub-routes. `~` is unreserved in RFC 3986, so it
+needs no encoding.
+
+**This changed after 0.1.0.** Every identifier from that release gains a prefix.
+See `CHANGELOG.md`.
+
 ## Routes
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/api/projects` | every folder under the root, with its state |
+| `GET` | `/api/projects` | every folder under every configured root, with its state |
 | `POST` | `/api/projects` | create a folder |
 | `POST` | `/api/sessions/{name}` | start a session |
 | `DELETE` | `/api/sessions/{name}` | begin a graceful stop, returns immediately |

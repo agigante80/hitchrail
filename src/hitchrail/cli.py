@@ -23,8 +23,26 @@ from hitchrail.config import (
 )
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
-from hitchrail.roots import parse_root_argument
+from hitchrail.roots import Root, RootError, parse_root_argument
 from hitchrail.server import create_app
+
+
+def _root_argument(raw: str) -> Root:
+    """`parse_root_argument`, with argparse's error rendering fixed.
+
+    argparse renders a `ValueError` from a `type=` callable as
+    `invalid <function name> value: '...'`, which shows the operator
+    `parse_root_argument` and swallows the sentence saying what to type. An
+    `ArgumentTypeError` is printed verbatim instead.
+
+    The wrapper lives HERE rather than in `roots.py` because knowing about
+    argparse is the command line's job, and `roots` is engine layer vocabulary
+    that stays testable without one.
+    """
+    try:
+        return parse_root_argument(raw)
+    except RootError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -43,7 +61,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         dest="roots",
         action="append",
         default=[],
-        type=parse_root_argument,
+        type=_root_argument,
         metavar="LABEL=PATH",
         help="a labelled folder holding projects, as label=path; repeatable",
     )
