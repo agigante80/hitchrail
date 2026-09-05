@@ -1,0 +1,141 @@
+# Publish on a merge to main. Lane C, adapted, and the adaptation is the point.
+#
+# **The human still picks the version; this only ships what they picked.**
+# forge-kit's Lane C auto-patches every green merge, which contradicts
+# `docs/versioning.md` outright: semver here is an operator contract and a machine cannot
+# decide what a change costs somebody. #132's gate already refuses a merge whose version
+# was not bumped, so by the time this runs a person has chosen the number deliberately.
+# This workflow tags and releases that number and never invents one. Do not add a bump
+# step here; that is the whole disagreement with the upstream lane.
+#
+# **No credential, and that constraint chose the design.** The obvious build is: push a tag,
+# let `publish.yml` fire on it. It does not work. GitHub refuses to start a workflow from an
+# event caused by the default `GITHUB_TOKEN`, to stop workflows triggering themselves, so
+# the tag would land and nothing would publish: a silent half release. forge-kit's fix is a
+# GitHub App token or a PAT, and both are a stored secret in a repository whose entire
+# publishing argument is that it holds none (`test_no_workflow_holds_a_publish_credential`).
+#
+# So `publish.yml` is CALLED rather than triggered. A reusable workflow runs inside this
+# run, so there is no event to be suppressed and no identity to mint. The trap is avoided
+# rather than paid for.
+#
+# **Triggered by CI finishing, not by the push.** Branch protection already requires the
+# checks before a merge, but a rebase changes the commit, so the checks that passed ran on
+# a different sha. Waiting for CI on the merged commit is the difference between "the
+# checks passed somewhere" and "this artefact is green".
+#
+# Third party actions are pinned to a commit SHA; the trailing comment is documentation.
+name: release
+
+on:
+  workflow_run:
+    workflows: ["ci"]
+    types: [completed]
+    branches: [main]
+
+# Never two releases at once, and never cancel one half way: a cancelled run can leave a
+# tag with no release behind it.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  decide:
+    # A red CI run is not a release. `workflow_run` fires on completion whatever the
+    # outcome, so this is the check that makes the trigger mean what it says.
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write     # the tag and the GitHub release, and nothing else
+    outputs:
+      version: ${{ steps.decide.outputs.version }}
+      release: ${{ steps.decide.outputs.release }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # The commit CI actually ran on. In a `workflow_run` context `github.sha` is the
+          # default branch head, which is usually but not always the same thing, and
+          # "usually" is how a release gets cut from the wrong tree.
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: decide whether this merge is a release
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(python3 -c "
+          import re,pathlib
+          m = re.search(r'^version = \"([^\"]+)\"', pathlib.Path('pyproject.toml').read_text(), re.M)
+          print(m.group(1) if m else '')
+          ")"
+          if [ -z "$version" ]; then
+            echo "::error::release: pyproject.toml has no project.version to read."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          # Idempotent. A re-run of this workflow on an already released commit must do
+          # nothing rather than fail: failing would make every re-run red forever.
+          if git rev-parse "v$version" >/dev/null 2>&1; then
+            echo "::notice::release: v$version is already tagged, so there is nothing to release."
+            echo "release=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+
+          # **Refuse rather than discover it inside twine.** A version on PyPI cannot be
+          # reused, only yanked, so a collision has to stop here with a message naming it.
+          code="$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/hitchrail/$version/json")"
+          if [ "$code" = "200" ]; then
+            echo "::error::release: hitchrail $version is ALREADY on PyPI. A version number cannot be reused, only yanked. Bump past it."
+            exit 1
+          fi
+          if [ "$code" != "404" ]; then
+            # Cannot determine, so do not assume it is new. Guessing here publishes over
+            # somebody's release or fails obscurely later.
+            echo "::error::release: could not determine whether $version is on PyPI (HTTP $code). Refusing rather than assuming it is new."
+            exit 1
+          fi
+
+          # The release notes ARE the changelog section, which makes the changelog
+          # mandatory without a second guard to enforce it. `docs/releasing.md` keeps
+          # writing it a deliberate human step; this is what that step buys.
+          notes="$(python3 -c "
+          import re,pathlib,sys
+          text = pathlib.Path('CHANGELOG.md').read_text()
+          m = re.search(r'^## $version[^\n]*\n(.*?)(?=^## |\Z)', text, re.M | re.S)
+          sys.stdout.write(m.group(1).strip() if m else '')
+          ")"
+          if [ -z "$notes" ]; then
+            echo "::error::release: CHANGELOG.md has no '## $version' section. Write what an operator must DO before releasing; a release with no notes is a version number and nothing else."
+            exit 1
+          fi
+          printf '%s\n' "$notes" > /tmp/notes.md
+          echo "release=true" >> "$GITHUB_OUTPUT"
+
+      - name: tag and publish the GitHub release
+        if: steps.decide.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          v="v${{ steps.decide.outputs.version }}"
+          git tag -a "$v" -m "hitchrail ${{ steps.decide.outputs.version }}"
+          git push origin "$v"
+          gh release create "$v" --title "hitchrail ${{ steps.decide.outputs.version }}" --notes-file /tmp/notes.md
+
+  publish:
+    needs: decide
+    if: needs.decide.outputs.release == 'true'
+    # CALLED, not triggered. See the header: a tag pushed with the default token starts no
+    # workflow, and the alternative is a stored credential this project refuses to hold.
+    uses: ./.github/workflows/publish.yml
+    with:
+      index: pypi
+    permissions:
+      id-token: write
+      contents: read

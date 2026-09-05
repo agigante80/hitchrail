@@ -76,6 +76,17 @@ onward and never falls.
 **1.0 cannot be cut until this has landed**, not merely until it has been decided. A decision
 recorded and not implemented leaves the interface exactly as unwilling to keep as it was.
 
+## The machine ships the level; it never picks one
+
+#133 automated the release: a merge to `main` tags, releases and publishes, with no
+approval click. **What it did not automate is the number.** `release.yml` reads
+`pyproject.toml` and ships what it finds; it has no bump step, and adding one would
+contradict the section below rather than extend it.
+
+The upstream component this was adapted from auto-patches every green merge. That suits a
+trunk where merges are commits. Here a merge to `main` is a reviewed batch that already
+carries a deliberate version, because the release gate refuses one that does not.
+
 ## Deciding the level
 
 Conventional Commit prefixes are a **hint, never the authority**. A mistyped prefix mis-bumps
