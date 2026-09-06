@@ -932,25 +932,52 @@ def test_the_units_start_limit_is_where_systemd_reads_it() -> None:
     assert not [d for d in sections["Service"] if d.startswith("StartLimit")], (
         "a StartLimit directive in [Service] is ignored since systemd 230"
     )
-    window = next(
-        int(d.split("=", 1)[1]) for d in limits if d.startswith("StartLimitIntervalSec")
+
+    def _value(directives: list[str], name: str) -> int | None:
+        """The value of `name`, or `None` if it is absent.
+
+        `next()` without a default RAISES, and a `StopIteration` out of a test
+        is a bare traceback where the operator needed the sentence saying what
+        they broke. Absence is a real case: `StartLimitIntervalSec=0` is written
+        without a burst.
+        """
+        return next((int(d.split("=", 1)[1]) for d in directives if d.startswith(name)), None)
+
+    window = _value(limits, "StartLimitIntervalSec")
+    burst = _value(limits, "StartLimitBurst")
+    gap = _value(sections["Service"], "RestartSec=")
+    assert window is not None and burst is not None and gap is not None, (
+        f"a limit needs StartLimitIntervalSec, StartLimitBurst and RestartSec to "
+        f"mean anything, and this unit has window={window} burst={burst} gap={gap}"
     )
-    burst = next(int(d.split("=", 1)[1]) for d in limits if d.startswith("StartLimitBurst"))
-    gap = next(
-        int(d.split("=", 1)[1]) for d in sections["Service"] if d.startswith("RestartSec=")
+    # The presence check above is not enough on its own: `StartLimitIntervalSec=0`
+    # IS a StartLimit directive, so it passes while naming the exact condition it
+    # failed to detect. Zero disables rate limiting outright.
+    assert window > 0, (
+        "StartLimitIntervalSec=0 disables rate limiting, so nothing bounds the "
+        "exit 1 loop this limit exists for, and the unit sits in `activating "
+        "(auto-restart)` forever instead of reaching `failed`, which means it "
+        "never appears in `systemctl --user --failed` again"
     )
     assert burst * gap < window, (
         f"{burst} restarts {gap}s apart span {burst * gap}s, which is outside the "
         f"{window}s window, so the limit can never fire and the loop is unbounded"
     )
-    # #201. The budget also has to be long enough to outlast the network, or a
-    # unit binding a named address dies at boot on the interface it is racing.
-    # Measured: the address arrived after the 21s that 5 attempts bought.
+    # #201. The budget still has to outlast a real network bring up, and the
+    # margin is thinner than it looks.
+    #
+    # **What #201 withdrew is the CAUSE, not this floor.** It used to say here
+    # that a race with `After=network.target` killed the service. It did not:
+    # every observed outage was missing hardware, and `After=network.target` is
+    # inert in a user unit anyway, because the user manager has no such unit.
+    #
+    # The race is real and tight. Boot -3 of 2026-09-06 had the adapter
+    # connected, took its DHCP lease 15s into the boot, and this unit's first
+    # start came 7s later. Seven seconds of margin is the reason for a floor.
     assert burst * gap >= 60, (
-        f"{burst} restarts {gap}s apart give up after {burst * gap}s. "
-        f"`After=network.target` does not wait for an interface to have an "
-        f"address, so a named bind needs a budget that outlasts network bring "
-        f"up. See #201, where 21s was not enough on a real boot."
+        f"{burst} restarts {gap}s apart give up after {burst * gap}s. A boot that "
+        f"has to acquire a DHCP lease took 15s to do it and this unit won by 7s, "
+        f"so a named bind needs more margin than a couple of attempts. See #201."
     )
 
 

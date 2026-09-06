@@ -28,7 +28,21 @@
 [Unit]
 Description=Hitchrail
 Documentation=https://github.com/agigante80/hitchrail
-After=network.target
+
+# **There is deliberately no `After=network.target` here, and adding one does
+# nothing.** This is a USER unit, and the user manager has no such unit:
+#
+#     $ systemctl --user show network.target -p LoadState
+#     LoadState=not-found
+#
+# So the directive that stood here until 2026-09-06 was ordering against a unit
+# that does not exist, and two rounds of reasoning in this file argued from what
+# it "means". `server.py` records the rule this breaks: a guard that cannot
+# execute is worse than none, because it reads as configured.
+#
+# The same is true of `network-online.target`, for the same reason. A user unit
+# cannot order against a system target at all. If you need the network before
+# this starts, the answer is #201 (socket activation), not an ordering directive.
 
 # **The backstop for everything the exit code list below cannot name** (#170).
 # `RestartPreventExitStatus=2` stops the deliberate refusals looping. It bounds
@@ -52,17 +66,24 @@ After=network.target
 # restarted at all, so it never consumes an attempt. What this limit bounds is
 # an unhandled exception, which exits 1, and a bind failure, which exits 3.
 #
-# **The widening was justified by a race that does not exist. Withdrawn
-# 2026-09-06.** The claim here used to be that `After=network.target` means the
-# stack is up but no interface has an address, so a unit binding a NAMED address
-# races the interface coming up.
+# **The widening was justified by a race that is real but was not the cause.
+# Corrected 2026-09-06.** The claim here used to be that a unit binding a NAMED
+# address races the interface coming up, and that this is what killed the
+# service. The second half is false and the first half is thinner than it reads.
 #
-# The boot that was measured says otherwise. The adapter holding that address
-# enumerated in under a second and then produced no carrier, no DHCP transaction
-# and no lease for the remaining six minutes: it was plugged into the machine
-# with nothing plugged into it. Three later boots on the same machine had the
-# adapter physically absent or attached by hand minutes in. There was no bring
-# up to race, on any of them.
+# The boot that was measured did not race anything. The adapter holding that
+# address enumerated in under a second and then produced no carrier, no DHCP
+# transaction and no lease for the remaining six minutes: it was plugged into
+# the machine with nothing plugged into it. Two later boots had the adapter
+# physically absent, and a third had it attached by hand 2m12s in. Every
+# observed outage was missing hardware.
+#
+# **But one boot does show a real race, and it is worth knowing how tight it
+# is.** Boot -3 of 2026-09-06 had the adapter connected: carrier and DHCP lease
+# at 11:48:18, fifteen seconds into the boot, and this unit's first start at
+# 11:48:25. It won by SEVEN SECONDS. So a budget still has to outlast a lease,
+# which is why the test below asserts a floor. What it does not have to do is
+# outlast absent hardware, which is what the withdrawn reasoning claimed.
 #
 # So 12 and 120 are arbitrary rather than derived. They are left alone because
 # no measurement argues for another pair, and because the shipped `ExecStart`
@@ -70,10 +91,14 @@ After=network.target
 # default install.
 #
 # **What is actually broken is #201:** a unit whose address appears AFTER the
-# budget is spent stays dead next to a working address. A larger budget does not
-# fix that, and `network-online.target` cannot help: it is a system target, and
-# a user unit cannot order against it. The fix under discussion there is socket
-# activation with `FreeBind=yes`, which binds an address that is not there yet.
+# budget is spent stays dead, and on 2026-09-06 that was 3m25s of a working
+# address with no service on it. A larger budget does not fix that. The fix
+# under discussion there is socket activation with `FreeBind=yes`, which binds
+# an address that is not there yet.
+#
+# **`FreeBind=yes` is not free**, and #201 carries the warning: it removes the
+# `ip_nonlocal_bind=0` property that is currently the only reason this unit
+# cannot bind an address that is not on this machine. It needs its own review.
 #
 # Raise the window with the burst if you raise either: the test asserts
 # `burst * RestartSec` stays inside the window, or the limit can never fire and
