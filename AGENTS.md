@@ -92,7 +92,9 @@ uv run pytest -m integration      # the real app through ASGITransport, no socke
 uv run pytest -m live             # binds a real loopback socket
 uv run pytest -m live_tmux        # drives a real tmux on a private socket
 uv run pytest -m e2e              # a real browser; needs `playwright install chromium`
-uv run pytest -m "not integration and not live and not live_tmux and not e2e"
+uv run pytest -m cli              # runs the installed console script as a subprocess
+uv run pytest -m device           # a real Android over adb; OPT IN, see below
+uv run pytest -m "not integration and not live and not live_tmux and not e2e and not cli"
 uv run pytest -m "not live_tmux"  # skip it, on a machine without tmux
 uv run pytest tests/test_properties.py   # the invariants, via hypothesis
 uv run pytest -k detached
@@ -102,7 +104,22 @@ The `live_tmux` tier needs tmux installed. It skips without it, and CI installs
 tmux and fails if the tier skipped, because a tier that skips everywhere looks
 like coverage while proving less than none.
 
-Three tiers, and the choice is not a matter of taste. Unit is hermetic with
+The `cli` tier runs the installed **console script** as a subprocess and reads
+what it prints. Not folded into `e2e`, which means "a browser": no page is
+involved. It exists because every other tier builds the app object directly, so
+argument parsing, `build_config`, the preflight and the uvicorn launch were
+covered by unit tests and by nothing that ran them together. #120's `--root`
+change shipped a refusal reading `invalid parse_root_argument value`, showing an
+operator a Python function name, and the suite could not have caught it.
+
+The `device` tier drives a real Android over adb and is **opt in**: `-m device`
+selects it and nothing else does, enforced in its own collection hook rather
+than by configuration, because `addopts` deselection is REPLACED by any `-m` on
+the command line rather than extended. That is not theoretical: it is how a
+per-run prefix reached six published screenshots.
+
+Unit, integration and end to end are the original three, and choosing between
+them is not a matter of taste. Unit is hermetic with
 every external surface faked. Integration drives the real Starlette app through
 `httpx.ASGITransport` with a faked engine, and opens no socket. End to end
 launches the real server against a temporary root, and is the only tier that

@@ -27,7 +27,13 @@ the machine actually does. That means a test project called `hitchrail` or
 `_find_detached` matches on the argv tail, so a real `claude ... --remote-control
 forge-kit` is indistinguishable from a seeded one. Verified on this machine:
 eight real sessions were running, three of them sharing a name with a name
-these tests used. `e2e_names` below is the guard.
+these tests used. The guard is
+`test_docs_are_true.py::test_no_e2e_test_hardcodes_the_run_prefix`, which is in
+that file rather than here because it reads these test bodies as text.
+
+This line named an `e2e_names` that was never written. a1c0acb announced it had
+removed the false pointer and only added the guard, so for one commit there were
+two sources telling a reader not to look.
 
 **A private tmux server**, on a short socket path, invoked through
 `env -u TMUX`. A bare `tmux` honours `$TMUX` over `$TMUX_TMPDIR`, so a suite
@@ -228,7 +234,50 @@ sys.exit(3)
 
 # Prefixed so a seeded project can never be a real one. `hr` is short because
 # the name reaches a tmux session name and a filesystem path.
-E2E_PREFIX = "hrx-"
+#
+# **Unique per RUN, not a constant (#177).** This tier isolates the two things
+# anybody would think of, a private tmux server and a temporary root, and it
+# cannot isolate the third thing derivation reads: `ps -eww` is machine wide, by
+# design, because reading every process is what makes `detached` findable at
+# all. So with a constant prefix, another run's shim agent carries the same
+# `--remote-control main~hrx-vessel` tail as this one's, the two are
+# indistinguishable, and one run's session is attributed to the other's project.
+#
+# Observed during review of #85: a clean worktree produced 13 e2e failures, all
+# `AlreadyRunning`, caused entirely by a second run of this suite. The failure
+# is the worst kind, plausible and red and about something else. Two agents
+# working this repository at once is now normal, and this is also what closed
+# off running the tiers concurrently in CI.
+#
+# The pid rather than a random token, deliberately: two concurrent runs cannot
+# share one, which is the only case that matters, and it names the run in a way
+# a person can chase. `os.getpid()` is read once at import, so every name in one
+# run agrees even though each pytest process gets its own.
+E2E_PREFIX = f"hrx{os.getpid()}-"
+
+# **The one tier that must NOT carry run identity.** `test_screenshots.py`
+# publishes its output to `docs/screenshots/`, which the README embeds, so a pid
+# in a project name reaches strangers on GitHub and PyPI. That is the same rule
+# `SHOT_ROOT` already follows and states: neutral BY CONSTRUCTION rather than by
+# whoever looked at the image.
+#
+# Safe to pin there because #177 is about two CONCURRENT runs sharing a machine
+# wide process table, and the shots tier photographs a FIXED path
+# (`/tmp/hitchrail-demo`) which it deletes at setup, so it was already
+# single-instance by construction before this. The pin adds no new constraint.
+#
+# **Not because it "only runs at a release".** That reason was written here once
+# and is false: `AGENTS.md` documents `uv run pytest -m e2e` as the command for
+# the browser tier, and `-m e2e` OVERRIDES the `-m "not screenshots"` in addopts.
+# So an ordinary developer running the browser tier captures these images, which
+# is precisely how the pid reached them. #214 carries the concurrency question
+# that leaves open.
+#
+# It escaped once, in a1c0acb: `pytest -m e2e` overrides the default
+# `-m "not screenshots"`, so an ordinary e2e run recaptured all six images with
+# `hrx1078723-` in every name, and they were committed. `test_docs_are_true.py`
+# asserts the neutrality now, so it cannot happen quietly again.
+SHOT_PREFIX = "hrx-"
 
 
 def e2e_name(name: str) -> str:
@@ -245,6 +294,47 @@ def e2e_id(name: str, label: str = DEFAULT_LABEL) -> str:
     routes, so the two names are used within lines of each other.
     """
     return f"{label}~{e2e_name(name)}"
+
+
+async def grant_and_land(page: Page, base: str, token: str) -> None:
+    """Trade a token for the cookie, and wait for the page to STOP moving (#114).
+
+    `grant.html` ends with `window.location.replace("./")`, so the navigation
+    `page.goto` returns from is not the last one. A test that navigates again
+    immediately races that replace to the SAME url, and Playwright refuses with
+
+        Navigation to "http://127.0.0.1:PORT/" is interrupted by
+        another navigation to "http://127.0.0.1:PORT/"
+
+    Seen in CI on 2026-09-03, passed on rerun, and it took a while to place
+    because the two urls in the message are identical.
+
+    Most tests do not need this: they await a locator next, and that waits
+    through the redirect on its own. It is only a hazard when the next thing is
+    another `goto`.
+
+    Deliberately NOT used for a bad token, which is the case that does not
+    redirect at all: `grant.html` renders an alert and stays where it is, so
+    waiting for a landing would hang until the timeout.
+
+    **This fix is reasoned, not proven, and that distinction is worth keeping.**
+    Removing the wait below does NOT fail the suite on an idle machine: the race
+    needs the replace to still be in flight when the next `goto` starts, and
+    locally it never is. So there is no test here that would catch its removal,
+    which is the same weakness this phase is otherwise about.
+
+    What IS established: `grant.html` ends with `window.location.replace("./")`
+    (line 197), the failing call was a `goto` to the url that replace targets,
+    and Playwright's message named that url twice. The mechanism is not in
+    doubt; only a local reproduction is missing.
+
+    A deterministic version would have to remove the second navigation rather
+    than sequence it, which means `_stop_and_hold` not re-navigating when the
+    page is already where it wants to be. That is a bigger change to a helper
+    several tests share, and it is worth doing only if this recurs.
+    """
+    await page.goto(f"{base}/grant#token={token}")
+    await page.wait_for_url(lambda url: "/grant" not in url)
 
 
 def free_port() -> int:
@@ -729,7 +819,7 @@ class Harness:
             # RECORDED, not raised. This is the first thing the fixture's
             # finalizer calls, and raising here would skip `reap_orphans`, the
             # scoped `kill-server` and the wait for the agents, leaking a tmux
-            # server and processes under the shared `hrx-` prefix onto the
+            # server and processes under the shared run prefix onto the
             # machine and poisoning every test after this one. The fixture
             # raises once it has cleaned up.
             self.stopped_cleanly = not self._thread.is_alive()
@@ -766,7 +856,7 @@ class Harness:
 
         `tmux kill-server` returns as soon as the server is told, and the
         agents it owned are then leaving rather than gone. Every browser test
-        seeds under the same `hrx-` prefix, so an agent still exiting is seen
+        seeds under the same run prefix, so an agent still exiting is seen
         by the NEXT test's derivation and reported as `running`, which fails
         its seed with `AlreadyRunning`. This was invisible while teardown
         stalled for ten seconds on the join: the stall was doing this job by
@@ -823,7 +913,7 @@ class Harness:
         is cleared once one succeeds.
         """
         # EXACT, on argv's last element. A substring test would match
-        # `hrx-vessel-social` for `vessel`, which is the same prefix footgun
+        # `<prefix>vessel-social` for `vessel`, which is the same prefix footgun
         # `.claude/CLAUDE.md` documents for tmux target specs, reintroduced in
         # the harness against a different tool. `claude_ipc.launch_argv` puts
         # the project last, so the comparison has somewhere exact to stand.

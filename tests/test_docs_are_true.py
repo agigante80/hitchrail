@@ -1119,3 +1119,89 @@ def test_no_free_text_field_reaches_the_answer_path() -> None:
         "answerPad builds a text input, which turns one keypress from a fixed "
         "set into arbitrary input to a shell. See #204."
     )
+
+
+def test_no_e2e_test_hardcodes_the_run_prefix() -> None:
+    r"""#177. The prefix is per RUN now, so a literal in a test body is a bug.
+
+    Two runs of this suite on one machine used to contaminate each other. The
+    tier isolates a private tmux server and a temporary root, and cannot isolate
+    the third thing derivation reads: `ps -eww` is machine wide by design. With
+    a constant prefix, one run's shim agent carried the same argv tail as
+    another's, and a session was attributed to the wrong run.
+
+    **Reads the parsed strings, not the lines**, and matches `hrx\d*-` rather
+    than `hrx-`. Both corrections came from review of the first version, and
+    both were the failure this file exists to catch:
+
+    - A line scan tripped on a COMMENT explaining why not to hardcode the
+      prefix. `test_the_capture_never_photographs_a_real_root` already learned
+      that: "a guard that cannot tell a use from an explanation of itself is one
+      somebody deletes."
+    - `hrx-` alone missed `hrx1078723-`, which is the only shape a developer can
+      now copy, because since the prefix carries the pid no failure ever prints
+      the bare form again. The guard was blind to the single realistic route
+      back in.
+
+    **An earlier version of this docstring named the wrong hole**, and said an
+    implicitly concatenated literal (`"main~hrx" "-vessel"`) evades this. It does
+    not: CPython folds implicit concatenation at parse time, so `ast` presents
+    one `Constant` reading `main~hrx-vessel` and the guard catches it. Verified.
+
+    What does evade it is EXPLICIT concatenation, `"hrx" + "-vessel"`, which is a
+    `BinOp` over two constants neither of which matches. Tracked rather than
+    defended against: nobody writes that by accident, and seeing it would mean
+    constant-folding the tree. `%` and `.format` are both caught, because the
+    pattern survives in the format string.
+
+    Recorded at length because the wrong version pointed a reader away from the
+    real gap, in the file whose whole purpose is that documentation is true.
+    """
+    import ast
+
+    pattern = re.compile(r"hrx\d*-")
+    offenders: dict[str, list[int]] = {}
+    for path in sorted((ROOT / "tests" / "e2e").glob("test_*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        hits = [
+            node.lineno
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and pattern.search(node.value)
+        ]
+        if hits:
+            offenders[path.name] = hits
+    assert not offenders, (
+        f"these e2e tests hardcode the run prefix: {offenders}. It carries the "
+        f"pid now, so a literal cannot match what the harness creates. Use "
+        f"`server.project(name)` for an identifier or `e2e_name(name)` for a "
+        f"folder, which is the one place the prefix lives. See #177."
+    )
+
+
+def test_the_photographed_prefix_carries_no_run_identity() -> None:
+    """#177's isolation must not reach the images the README publishes.
+
+    `SHOT_PREFIX` is pinned for `test_screenshots.py` alone, because those six
+    PNGs are content this project ships to strangers on GitHub and PyPI. It is
+    the same rule `SHOT_ROOT` states for the path, applied to the names.
+
+    This is a regression test for something that already happened: `pytest -m
+    e2e` overrides the default `-m "not screenshots"`, so an ordinary e2e run
+    recaptured all six with `hrx1078723-` in every project name and they were
+    committed. `README.md`'s alt text says "Two rows both called hrx-vessel",
+    which the pid made false, and the seven extra characters wrapped a row in
+    the phone shot that had fitted on one line.
+
+    Asserts the property rather than the value, so pinning a different neutral
+    prefix stays allowed and a run-identity one does not.
+    """
+    conftest = (ROOT / "tests" / "e2e" / "conftest.py").read_text(encoding="utf-8")
+    match = re.search(r'^SHOT_PREFIX = "([^"]+)"', conftest, re.M)
+    assert match, "tests/e2e/conftest.py no longer defines SHOT_PREFIX"
+    shot_prefix = match.group(1)
+    assert not any(c.isdigit() for c in shot_prefix), (
+        f"SHOT_PREFIX is {shot_prefix!r} and carries digits, so the published "
+        f"screenshots would show run identity. See #177 and README.md's alt text."
+    )

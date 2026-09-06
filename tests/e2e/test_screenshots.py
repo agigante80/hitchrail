@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -55,7 +56,8 @@ from collections.abc import Iterator
 import pytest
 from playwright.async_api import Page, ViewportSize, expect
 
-from .conftest import Harness
+from . import conftest as e2e_conftest
+from .conftest import SHOT_PREFIX, Harness
 
 pytestmark = [pytest.mark.e2e, pytest.mark.screenshots]
 
@@ -84,7 +86,7 @@ def _seed_the_world(harness: Harness) -> None:
 
 
 @pytest.fixture
-def shots_server() -> Iterator[Harness]:
+def shots_server(monkeypatch: pytest.MonkeyPatch) -> Iterator[Harness]:
     """The `server` fixture with a root that is safe to photograph.
 
     Identical otherwise, including the private tmux socket and the scoped
@@ -93,6 +95,16 @@ def shots_server() -> Iterator[Harness]:
     """
     if shutil.which("tmux") is None:  # pragma: no cover - CI installs tmux
         pytest.skip("the browser tier drives a real tmux")
+
+    # Pinned for the duration, so the published images carry no run identity.
+    #
+    # `monkeypatch` rather than a manual save and restore. The manual version
+    # rebound the global BEFORE its `try`, and three statements that can raise
+    # sat between them: `SHOT_ROOT` is a fixed shared path, `rmtree` swallows
+    # its errors, and the `mkdir` after it can raise. The override would then
+    # outlive the fixture and every later e2e test in that session would run
+    # under a constant prefix, which is #177's contamination re-armed.
+    monkeypatch.setattr(e2e_conftest, "E2E_PREFIX", SHOT_PREFIX)
 
     shutil.rmtree(SHOT_ROOT.parent, ignore_errors=True)
     SHOT_ROOT.mkdir(parents=True)
@@ -129,6 +141,27 @@ async def _settled(page: Page, harness: Harness) -> None:
 async def _shoot(page: Page, name: str) -> None:
     SHOTS.mkdir(parents=True, exist_ok=True)
     path = SHOTS / f"{name}.png"
+
+    # **Checked on the surface being photographed, immediately before the
+    # shutter.** A test asserting `SHOT_PREFIX` has no digits pins the CONSTANT
+    # and not its USE: review proved that deleting the pin from `shots_server`
+    # left the whole suite green while every image came back reading
+    # `hrx1569650-anchor`, which is the exact regression the constant check was
+    # written for.
+    #
+    # This cannot be true and the image still wrong, because it reads what the
+    # page actually rendered. It fails the capture rather than publishing a bad
+    # one, which is the only moment that matters: these six PNGs are what the
+    # README shows to strangers.
+    rendered = await page.locator("[data-project]").evaluate_all(
+        "els => els.map(e => e.getAttribute('data-project'))"
+    )
+    carrying_identity = [value for value in rendered if re.search(r"hrx\d", value or "")]
+    assert not carrying_identity, (
+        f"{name}.png would publish run identity in {carrying_identity}. The shots "
+        f"tier must pin SHOT_PREFIX; see #177 and README.md's alt text."
+    )
+
     await page.screenshot(path=str(path), full_page=False)
     assert path.stat().st_size > 5_000, f"{name}.png is too small to be a rendered page"
 

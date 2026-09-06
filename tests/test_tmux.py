@@ -8,6 +8,7 @@ tmux; this tier pins that the adapter builds what it believes it builds.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -102,6 +103,8 @@ def drive_every_method(tmux: Tmux) -> None:
     tmux.capture_pane("p")
     tmux.new_session("p", "/srv/p", ["claude"])
     tmux.send_keys("p", "C-c")
+    tmux.keep_pane_on_exit("p", True)
+    tmux.pane_is_dead("p")
     tmux.kill_session("p")
 
 
@@ -221,12 +224,30 @@ def test_the_first_pane_wins_for_a_multi_pane_session() -> None:
     assert Tmux(prefix="hr-", run=runner).panes().ours == {"hr-a": 10}
 
 
-def test_the_first_pane_wins_for_a_multi_pane_foreign_session() -> None:
-    """The same rule on the other half. Two panes in one foreign session must
-    not make the second one overwrite the first, or which pid maps to which
-    name depends on tmux's output order."""
+def test_both_panes_of_one_foreign_session_survive_because_the_map_is_pid_keyed() -> None:
+    """What this actually pins, renamed at #176.
+
+    It used to be called "the first pane wins", which is the rule for `ours` and
+    cannot apply here. `ours` is keyed by session NAME, so a second pane in one
+    session would overwrite the first and change which pid a project reports;
+    `setdefault` there is real. `foreign` is keyed by pane PID, and two panes
+    cannot share one, so no collision rule is reachable and `setdefault` and
+    plain assignment were indistinguishable through the public method. The test
+    certified a hazard that was not there.
+
+    The property that IS worth pinning is the keying itself. Both panes of one
+    foreign session appear, because the question asked of this half is "who owns
+    this process". A later change to name keying would silently lose one of two
+    panes and answer that question wrongly for the survivor.
+    """
     runner = FakeRunner(stdout={"list-panes": "cc-a 10\ncc-a 11\n"})
-    assert Tmux(prefix="hr-", run=runner).panes().foreign == {10: "cc-a", 11: "cc-a"}
+    foreign = Tmux(prefix="hr-", run=runner).panes().foreign
+    # The length FIRST and with the message, because that is the assertion whose
+    # failure explains itself: under name keying one pane is lost and the reader
+    # needs to be told which property broke. A dict equality above it would fail
+    # first and print two dicts.
+    assert len(foreign) == 2, f"a name keyed map keeps one of these, got {foreign}"
+    assert foreign == {10: "cc-a", 11: "cc-a"}
 
 
 def test_pane_pid_uses_the_colon_terminated_target() -> None:
@@ -280,6 +301,99 @@ def test_no_method_can_reach_kill_server() -> None:
     drive_every_method(Tmux(prefix="hr-", run=runner))
     assert runner.calls, "the sweep drove nothing, so it proves nothing"
     assert not any("kill-server" in argv for argv in runner.calls)
+
+
+def test_every_target_this_adapter_names_carries_our_prefix() -> None:
+    """#85's second Done when, pinned where it can actually fail (#176).
+
+    The test this replaces lived in `test_engine.py` and asserted that a
+    detached row left `killed`, `started` and `sent` empty. Every one of those
+    assertions passed against the code as it was BEFORE #85, because `stop` and
+    `kill` refuse on `DETACHED` before touching tmux at all. It measured the
+    refusal, not the scoping, and its last assertion could not fail under any
+    implementation.
+
+    **Every target, not a list of write verbs.** The first version of this test
+    checked an allowlist of `new-session`, `kill-session` and `send-keys`, and
+    review found the hole immediately: `set-option` is a write, `new_session`
+    chains one, and `keep_pane_on_exit` is a whole public method the sweep never
+    drove. An allowlist has to be kept in sync with the adapter by hand, and the
+    thing it is guarding against is precisely somebody adding a call.
+
+    Asserting on the SHAPE instead needs no list: whatever verb it belongs to,
+    a `-t` or `-s` argument names a session, and every one of them must carry
+    the prefix. Reads pick it up as a bonus, which is right: a read on somebody
+    else's session is a smaller fault than a write, and still not ours to make.
+
+    Lowercase `-t` and `-s` only. Capital `-S` is two different flags in tmux,
+    the socket path before the verb and the history start in
+    `capture-pane -S -40`, and neither names a session.
+
+    **Stripping `=` and `:` is not laundering invariant 3.** Both decorations
+    are load bearing and have their own named regression tests,
+    `test_has_session_uses_the_anchored_target` and
+    `test_pane_pid_uses_the_colon_terminated_target`. What this asserts is the
+    part underneath them, and that pointer is here so nobody "simplifies" the
+    anchoring on the strength of seeing it discarded.
+    """
+    runner = FakeRunner()
+    drive_every_method(Tmux(prefix="hr-", run=runner))
+    assert runner.calls, "the sweep drove nothing, so it proves nothing"
+
+    targets: list[tuple[str, str]] = []
+    for argv in runner.calls:
+        verb = next((a for a in argv if a in _VERBS or a == "set-option"), "?")
+        for i, arg in enumerate(argv[:-1]):
+            if arg in {"-t", "-s"}:
+                targets.append((verb, argv[i + 1]))
+
+    # Coverage is asserted STRUCTURALLY, next door in
+    # `test_the_sweep_drives_every_public_method`, not by a number here. A
+    # threshold was tried and was two below the real count, so deleting the two
+    # calls this test was written to add left it green: the count had exactly
+    # enough slack to hide the defect it was fixing.
+    assert targets, "the sweep produced no targets at all, so it proves nothing"
+    for verb, target in targets:
+        assert target.lstrip("=").rstrip(":").startswith("hr-"), (
+            f"`{verb}` named `{target}`, which is outside the configured prefix, "
+            f"so this adapter can reach a session that is not ours"
+        )
+
+
+def test_the_sweep_drives_every_public_method() -> None:
+    """The sweeps above are only as good as what `drive_every_method` calls.
+
+    Two sweeps in this file assert properties of `runner.calls`, and both are
+    silently narrowed by a method the driver forgets. That already happened:
+    `keep_pane_on_exit` and `pane_is_dead` were absent, so a `keep_pane_on_exit`
+    that dropped the prefix passed every hermetic test in the project.
+
+    Asserted by introspection rather than by a count or a list, because the
+    failure mode is a method being ADDED to the adapter, and a hand maintained
+    list is exactly what does not notice that.
+    """
+    import inspect
+
+    # The methods that ISSUE A CALL, not every public one. `session_name`,
+    # `session_target` and `pane_target` are pure builders: they return a string
+    # and touch no runner, so driving them adds nothing to a sweep over
+    # `runner.calls`, and their shapes have named tests of their own.
+    #
+    # Derived from the source rather than listed, for the same reason the sweep
+    # itself stopped using an allowlist: a list is what fails to notice an
+    # addition, which is the whole failure mode here.
+    spawns = {
+        name
+        for name, value in vars(Tmux).items()
+        if not name.startswith("_") and callable(value) and "_argv(" in inspect.getsource(value)
+    }
+    driven = set(re.findall(r"tmux\.(\w+)\(", inspect.getsource(drive_every_method)))
+    missing = spawns - driven
+    assert not missing, (
+        f"`drive_every_method` never calls {sorted(missing)}, and each of those "
+        f"builds an argv, so every sweep in this file is blind to what they send. "
+        f"Add them to the driver."
+    )
 
 
 def test_the_socket_is_carried_on_every_call() -> None:
@@ -526,3 +640,26 @@ def test_nothing_is_scrubbed_when_nothing_is_named() -> None:
 
     spawn = next(c for c in run.calls if "new-session" in c)
     assert "env" not in spawn
+
+
+def test_a_line_with_no_name_is_dropped_rather_than_named_empty_string() -> None:
+    """#175. `docs/api.md` promises a name or null, and `""` is neither.
+
+    `rpartition(" ")` on a line with no space returns an empty name and the
+    whole line as the pid, so `1234` alone became `foreign = {1234: ""}`. This
+    interface degrades correctly because `app.js` treats it as falsy; a client
+    that does not renders "in tmux session " with nothing after it.
+
+    **Not reachable from tmux 3.4**, which refuses an empty session name at
+    creation, verified against a real server on a private socket. The guard
+    stays because a parser should be true of its input rather than of one
+    version's output, and the check costs one comparison.
+    """
+    runner = FakeRunner(stdout={"list-panes": "1234\ncc-real 5678\n"})
+    panes = Tmux(prefix="hr-", run=runner).panes()
+
+    assert panes.foreign == {5678: "cc-real"}, (
+        f"a line with no name produced {panes.foreign}, and an empty owner name "
+        f"is not what docs/api.md promises. See #175."
+    )
+    assert panes.ours == {}

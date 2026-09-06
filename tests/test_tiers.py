@@ -18,7 +18,16 @@ from pathlib import Path
 import pytest
 
 TESTS = Path(__file__).parent
-TIERS = {"integration", "live", "live_tmux", "e2e"}
+# **Every marker that names a tier, or this file guards a shrinking subset.**
+# `cli` and `device` were added without being registered here, which is the case
+# this module's own premise was written for: a tier is a DECLARATION only while
+# something checks it.
+#
+# The glob below is non-recursive, so `tests/e2e/`, `tests/cli_tier/` and
+# `tests/device/` are not scanned at all. That is pre-existing and wider than
+# this list; #216 carries it. Registering the names is the half that belongs
+# with the commits that added them.
+TIERS = {"integration", "live", "live_tmux", "e2e", "cli", "device"}
 # Unambiguous: a module that names one of these is talking to an ASGI app.
 TRANSPORTS = {"ASGITransport", "AsyncClient"}
 # Ambiguous on their own, and only consulted INSIDE a module that already names

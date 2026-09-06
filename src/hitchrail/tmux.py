@@ -277,6 +277,16 @@ class Tmux:
             except ValueError:
                 # One malformed line must not lose the well formed ones.
                 continue
+            if not name:
+                # A line with no space. `rpartition` gives it an empty name, and
+                # `docs/api.md` promises a name or `null`: `""` is neither.
+                #
+                # **A guard against a format change, not a defect anybody has
+                # seen (#175).** tmux 3.4 refuses an empty session name at
+                # creation, so this line cannot arrive from it. Kept because a
+                # parser should be true of its input rather than of one
+                # version's output, at the cost of one comparison.
+                continue
             # **A space disqualifies a name from being ours, and that is not
             # belt and braces.** `session_name` is `prefix + sanitize(project)`,
             # `sanitize` introduces no space, and both halves of
@@ -300,7 +310,11 @@ class Tmux:
                 # Escaped and bounded by `foreign_name`, which is where the
                 # reasons are. This is the only string the interface renders
                 # that no allowlist of ours constrains.
-                foreign.setdefault(pid, foreign_name(name))
+                #
+                # Assignment, not `setdefault` (#176): two panes cannot share a
+                # pane pid, so it announced a collision rule that is the one
+                # `ours` needs below and this map cannot reach.
+                foreign[pid] = foreign_name(name)
                 continue
             # A session already seen keeps its FIRST pane: a window split must
             # not change which pid a project reports.

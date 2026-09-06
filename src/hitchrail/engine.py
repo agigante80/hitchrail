@@ -153,6 +153,12 @@ class Engine:
         # about a screen nobody has looked at since. A restart loses it and the
         # next sweep re establishes it within a second.
         self._stuck: dict[str, float] = {}
+        # #182. Bumped by every `_forget_attention`, read by `scan_for_stuck`
+        # around its capture. A sweep decides what is stuck OUTSIDE the lock,
+        # deliberately, because capturing panes under it would hold it across a
+        # subprocess. That leaves a window where a stop clears a project and
+        # then an observation made BEFORE the clear puts it straight back.
+        self._attention_epoch = 0
         # Guarded for the same reason `_starting` is: stop, kill and the
         # expiry ticker all run on worker threads. Without it, iterating in
         # `expire_stops` while `stop` adds raises "dictionary changed size
@@ -208,7 +214,23 @@ class Engine:
         session = derive.derive(
             name, machine, self.config, self.tmux, self._stopping, needs_a_person
         )
-        if session.state is State.STOPPED:
+        # **The membership test comes first, and it is not a micro optimisation
+        # (#178).** The note on `_stopping_guard` says `_derive` reads
+        # `self._stopping` WITHOUT the lock, deliberately, because taking it
+        # here would put it on the path of every derived row. This method then
+        # took it on every STOPPED row, which on an ordinary machine is most of
+        # them: measured at 18 acquisitions for one listing of a 16 project
+        # root, where the note describes one.
+        #
+        # The cost was never the point. A comment that states a rule about the
+        # method twenty lines below it, and is contradicted by that method, is a
+        # defect in the record: the next reader either trusts the note and is
+        # wrong about the code, or trusts the code and deletes the note.
+        #
+        # The test uses the note's own reasoning. A membership check is atomic
+        # under the GIL and cannot see a torn dict, so it is safe unguarded, and
+        # the lock is taken only when there is something to remove.
+        if session.state is State.STOPPED and name in self._stopping:
             # Reconciled on read, which is the only place the transition is
             # visible: nothing calls us when an agent exits. Without this the
             # marker survives a stop that WORKED, and `expire_stops` reports it
@@ -847,6 +869,10 @@ class Engine:
         with self._stopping_guard:
             self._awaiting_input.discard(name)
             self._stuck.pop(name, None)
+            # #182. Tells an in flight sweep that its evidence predates this
+            # clear. Under the same lock as the clear itself, so a sweep can
+            # never read the counter and the map in disagreement.
+            self._attention_epoch += 1
 
     def _needs_a_person(self) -> frozenset[str]:
         """Every name the `awaiting_input` overlay is true for, from both sources.
@@ -911,11 +937,34 @@ class Engine:
         # rather than a property of iteration order.
         waiting = self._needs_a_person()
         rows = [self._derive(name, machine, waiting) for name in sorted(names)]
+        # #182. Read BEFORE the capture, compared after it. Everything between
+        # these two lines happens without the lock, which is the whole point:
+        # `attention.scan` runs a subprocess per row.
+        epoch = self._attention_epoch
         stuck, clear = attention.scan(
             attention.candidates(rows), self._pane_needs_a_person, self._clock
         )
         now = self._clock()
         with self._stopping_guard:
+            discarded = self._attention_epoch != epoch
+            if discarded:
+                # A stop or a start cleared this overlay while we were looking
+                # at screens, so every `stuck` here is evidence from before an
+                # action the person has already taken. #101's rule is that a
+                # fresh attempt starts from nothing, and writing these would
+                # undo that with an observation older than the clear.
+                #
+                # **The whole batch, not the cleared name.** Knowing WHICH
+                # project was cleared would need a per project record, and this
+                # is one integer. The cost of the coarse version is that an
+                # unrelated stop delays a true "waiting for an answer" by one
+                # sweep interval, which the next scan corrects because it reads
+                # the pane again.
+                #
+                # The `clear` half is still applied below: dropping a claim on
+                # stale evidence is the safe direction, and refusing to drop it
+                # would leave a person told they are needed when they are not.
+                stuck = []
             # What CHANGED, computed under the lock beside the write, because
             # announcing what did not change is how a page that is already
             # right redraws itself once a second.
@@ -923,7 +972,21 @@ class Engine:
             changed += [name for name in clear if name in self._stuck]
             for name in stuck:
                 self._stuck[name] = now
-            for name in clear + attention.expired(self._stuck, now):
+            # **After the renewal, and that ordering is the whole of it.**
+            # Computed before it, a name that is both past `TTL_S` and
+            # re-confirmed by THIS sweep is written with `now` and then popped
+            # by the same block, and `changed` cannot announce the loss because
+            # the name was already in `_stuck`. Reachable whenever scanning
+            # pauses for longer than the TTL: no SSE subscriber, or a truncated
+            # budget. Introduced by round 1 of #182 and caught by round 2.
+            #
+            # **Empty on a discarded sweep**, which is round 1's own point: a
+            # standing observation stays alive by being rewritten, so aging an
+            # entry this scan declined to renew drops a row on evidence the
+            # sweep does not trust. It drops silently, because `changed` is
+            # empty when `stuck` is.
+            aging = [] if discarded else attention.expired(self._stuck, now)
+            for name in clear + aging:
                 self._stuck.pop(name, None)
         # Announced, OUTSIDE the lock, exactly as `expire_stops` does it and
         # for the reason its docstring gives: outside a stop wait the page does

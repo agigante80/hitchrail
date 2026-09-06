@@ -1027,7 +1027,17 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # hazard bought for something. The length is the argument for why the
         # ADAPTER cannot make that call, which is the thing a later reader would
         # otherwise "simplify" by moving the check next to the pane read.
-        "engine.py": 1122,
+        # 1122 to 1154 for #182: the attention epoch, and why a sweep discards
+        # a whole batch of evidence gathered before a clear rather than tracking
+        # which project was cleared.
+        # 1154 to 1170 for #178: the membership test before the stop lock, and
+        # why a note contradicted by the method twenty lines below it is a
+        # defect in the record rather than a style point.
+        # 1170 to 1185. #182 round 1 stopped a discarded sweep AGEING what it
+        # declined to renew; round 2 found that hoisting the expiry above the
+        # renewal loop popped a claim the same sweep had just written, so the
+        # ordering is now spelled out where it can be read.
+        "engine.py": 1185,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -1094,7 +1104,14 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # whose next paragraph explains that the condition can never be true.
         # The cap was raised for sixteen lines nobody meant to add, which is
         # how a size guideline stops meaning anything.
-        "tmux.py": 539,
+        # 539 to 543 for #176: four lines saying why the foreign half assigns
+        # rather than `setdefault`s. The word it replaced announced a collision
+        # rule that map cannot reach, and a test was written certifying that
+        # hazard, so the note is what stops the word coming back.
+        # 543 to 553 for #175: the empty-name guard and the note saying it
+        # defends a format change rather than a defect, measured against tmux
+        # 3.4, so nobody goes looking for a bug that is not there.
+        "tmux.py": 553,
         # 413, and thirteen lines over the guideline is not a second job. #18
         # already took the host vocabulary out of this file, and what is left
         # is one dataclass and its startup refusals, which is one thing. The
@@ -1160,7 +1177,16 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # diff, and the security review of the new route is worth more than the
         # tidiness. Tracked as its own ticket rather than left as a silent
         # overrun.
-        "server.py": 574,
+        # 574 to 615 for #180: the attention scan is started rather than
+        # awaited, so an overrunning capture cannot delay a stop expiry. The
+        # length is the done-callback (a task nobody awaits swallows its
+        # exception) plus its teardown, and the paragraph saying which timer
+        # was losing to which. Splitting this file is #205.
+        # 615 to 631 for #180 round 1: the teardown comment claimed the cancel
+        # stops the scan. It cancels the AWAIT; `in_thread` is run_in_executor
+        # and a thread cannot be cancelled, so the worker runs to the call
+        # timeout and the process waits for it at executor shutdown. Measured.
+        "server.py": 631,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

@@ -2474,12 +2474,32 @@ def test_reading_a_foreign_session_costs_no_extra_call(root: Path) -> None:
     assert tmux.capture_calls == 0
 
 
-def test_a_foreign_session_is_never_created_signalled_or_killed(root: Path) -> None:
-    """#85's second Done when, asserted apart from anything about the display.
+def test_a_detached_row_refuses_before_it_reaches_tmux(root: Path) -> None:
+    """Renamed at #176, because it never checked what its name claimed.
 
-    Learning who owns an agent is a read. Every write path builds its target
-    from `session_name`, so it can only ever name a session carrying our own
-    prefix, and this asserts that the new knowledge did not leak into one.
+    It was called `test_a_foreign_session_is_never_created_signalled_or_killed`
+    and read as #85's second Done when. It is not that. Every assertion below
+    passes against the code as it was BEFORE #85: `stop` refuses on `DETACHED`
+    before touching tmux at all, so these lists are empty because of the
+    refusal, not because of anything about foreign sessions.
+
+    That is still worth pinning, under the name it earns: a row whose agent
+    Hitchrail cannot address must reach no write path, and the refusal is what
+    guarantees it rather than any downstream scoping.
+
+    **The invariant it used to claim is pinned in
+    `tests/test_tmux.py::test_no_write_verb_can_name_a_session_outside_our_prefix`,**
+    which drives the real adapter and reads the argv. Verified: with
+    `kill_session` mutated to drop the prefix, that test fails and this one
+    passes, which is exactly the gap #176 reported.
+
+    A fourth assertion was deleted rather than kept:
+
+        assert f"cc-{proj('vessel')}" not in tmux.sessions
+
+    `FakeTmux.sessions` is keyed by project name and only `new_session` writes
+    to it, so a `cc-` prefixed key cannot appear under any implementation. It
+    could not fail, which is worse than absent: it read as coverage.
     """
     foreign, table = foreign_machine(proj("vessel"))
     engine, tmux = engine_for(root, foreign=foreign, table=table)
@@ -2492,7 +2512,6 @@ def test_a_foreign_session_is_never_created_signalled_or_killed(root: Path) -> N
     assert tmux.killed == []
     assert tmux.started == []
     assert tmux.sent == []
-    assert f"cc-{proj('vessel')}" not in tmux.sessions
 
 
 def test_a_stop_on_a_foreign_owned_agent_refuses_the_same_way(root: Path) -> None:
@@ -2967,3 +2986,272 @@ async def test_the_sweep_looks_again_as_soon_as_somebody_is(root: Path) -> None:
         assert engine.scan_for_stuck() == [proj("vessel")]
 
     assert tmux.panes_calls == 1
+
+
+def test_a_clear_during_a_sweep_is_not_undone_by_evidence_older_than_it(
+    root: Path,
+) -> None:
+    """#182. The sweep decides what is stuck OUTSIDE the lock, on purpose.
+
+    Capturing panes under the lock would hold it across a subprocess, so
+    `attention.scan` runs unguarded and only the write is guarded. That leaves
+    a window: a stop lands, `_forget_attention` clears the project, and then the
+    sweep takes the lock and writes back an observation it made BEFORE the
+    clear. The row goes on reporting a prompt the person has just acted on,
+    until the next sweep corrects it.
+
+    The design says the overlay describes ONE attempt, so a fresh action starts
+    from nothing. That property held only in the absence of this race.
+
+    Reproduced by clearing from inside the capture, which is exactly where the
+    real window is: `capture_pane` is the subprocess the lock is not held
+    across. Without the epoch check this test finds `vessel` flagged.
+    """
+    engine, tmux = sweeping_engine(root, MODAL_PANE)
+    name = proj("vessel")
+
+    cleared: list[str] = []
+    original = tmux.capture_pane
+
+    def clear_midway(project: str, lines: int = 40, escapes: bool = False) -> str:
+        # Flag set BEFORE the clear, not after. `engine.stop` captures the pane
+        # itself to check the input box, so clearing through the public route
+        # re-enters this hook and recurses forever. Setting it first is what
+        # makes the guard hold.
+        if not cleared:
+            cleared.append(project)
+            # `_forget_attention` rather than `stop`, and the difference is
+            # only speed: it is the seam `stop` and `start` both call, so this
+            # is the same clear the race is about, without a graceful stop's
+            # wait or its own pane reads inside a pane read.
+            engine._forget_attention(name)
+        return original(project, lines, escapes)
+
+    tmux.capture_pane = clear_midway  # type: ignore[method-assign]
+
+    engine.scan_for_stuck()
+
+    assert cleared, "the capture never ran, so the race was never entered"
+    assert not engine.get(name).awaiting_input, (
+        "a stop cleared the standing claim and the sweep put it back from "
+        "evidence gathered before the clear. See #182."
+    )
+
+
+def test_a_listing_takes_the_stop_lock_once_per_marker_not_once_per_row(
+    root: Path,
+) -> None:
+    """#178. The note on `_stopping_guard` said this, and the code did not.
+
+    That note explains why `_derive` reads `self._stopping` unguarded: taking
+    the lock there would put it on the path of every derived row, once per
+    project per listing. The reconciliation twenty lines below took it on every
+    STOPPED row, which on an ordinary machine is most of them.
+
+    Counted rather than reasoned about, and asserted against the number of
+    MARKERS rather than a constant, so the property survives a root of any size.
+    """
+    engine, _ = engine_for(root, sessions={}, table="")
+    rows = engine.list()
+    stopped = [row for row in rows if row.state is State.STOPPED]
+    assert len(stopped) > 1, "this root has too few stopped rows to show the difference"
+
+    acquisitions = 0
+    real_guard = engine._stopping_guard
+
+    class Counting:
+        def __enter__(self) -> None:
+            nonlocal acquisitions
+            acquisitions += 1
+            real_guard.acquire()
+
+        def __exit__(self, *exc: object) -> None:
+            real_guard.release()
+
+    engine._stopping_guard = Counting()  # type: ignore[assignment]
+    engine.list()
+    with_no_markers = acquisitions
+
+    # ONE, not zero: `_needs_a_person` builds the waiting set once per listing
+    # under the lock, which is #100's own decision and is pinned separately by
+    # `test_the_waiting_set_is_built_once_per_listing_not_once_per_row`.
+    #
+    # The property here is that the count does not SCALE with the rows. Before
+    # #178 this listing took it six times, one per stopped row plus that one.
+    assert with_no_markers == 1, (
+        f"a listing of {len(stopped)} stopped rows with NO stop markers took the "
+        f"lock {acquisitions} times, where only `_needs_a_person`'s single "
+        f"per-listing acquisition should appear. `_derive` is meant to read "
+        f"`_stopping` unguarded and take the lock only when there is a marker to "
+        f"remove. See #178 and the note on `_stopping_guard`."
+    )
+
+    # **And with markers present, which the first half cannot see.** Review
+    # found that `and self._stopping` (dict truthiness) in place of
+    # `and name in self._stopping` restores per-row locking the moment ANY stop
+    # is in flight, and passed the whole suite: the fixture above has no markers
+    # at all, so the true branch was never entered and the test's own name
+    # promised a property it did not reach.
+    # **The LAST stopped rows, not the first**, and that is the whole of
+    # whether this test works. A marker is popped as its row is derived, so
+    # marking the first rows empties `_stopping` before the others are reached,
+    # and a truthiness test then reads falsy for them and takes no lock: the
+    # mutation passes. Marking the last rows keeps the dict non-empty across
+    # every earlier row, which is where the extra acquisitions appear.
+    marked = [row.name for row in stopped[-2:]]
+    for name in marked:
+        engine._stopping[name] = 0.0
+    acquisitions = 0
+    engine.list()
+
+    assert acquisitions == 1 + len(marked), (
+        f"a listing with {len(marked)} stop markers over {len(stopped)} stopped "
+        f"rows took the lock {acquisitions} times, where it should take it once "
+        f"per marker plus `_needs_a_person`'s single acquisition. A membership "
+        f"test that is really a truthiness test scales with ROWS again. See #178."
+    )
+
+
+def test_a_discarded_sweep_still_drops_a_claim_it_can_no_longer_support(
+    root: Path,
+) -> None:
+    """#182 argues this explicitly, and nothing pinned it.
+
+    When the epoch moves, `stuck` is discarded because that evidence predates a
+    clear. `clear` is NOT discarded, and the asymmetry is the argument: dropping
+    a claim on stale evidence leaves a person told nothing, while keeping one
+    leaves them told they are needed by a prompt that is gone.
+
+    **The epoch is bumped by a DIFFERENT project**, and the first version of
+    this test got that wrong. Clearing the project under test pops its own entry
+    directly, so the claim went away whatever `clear` did and the mutation
+    `stuck, clear = [], []` survived. `vessel` is the row whose claim must be
+    dropped by the sweep; `koala` is the unrelated stop that moves the epoch.
+    """
+    other = proj("koala")
+    engine, tmux = engine_for(
+        root,
+        sessions={proj("vessel"): PANE, other: PANE + 1},
+        table=(
+            ps_row(PANE, 1)
+            + ps_row(AGENT, PANE, project=proj("vessel"), etime_s=60)
+            + ps_row(PANE + 1, 1)
+            + ps_row(AGENT + 1, PANE + 1, project=other, etime_s=60)
+        ),
+    )
+    name = proj("vessel")
+    tmux.pane_text[name] = MODAL_PANE
+    tmux.pane_text[other] = CLEAR_INPUT_BOX
+
+    assert name in engine.scan_for_stuck(), "the claim was never established"
+    assert engine.get(name).awaiting_input is True
+
+    # The prompt is answered, so this sweep sees a clear box. An unrelated stop
+    # lands mid capture and moves the epoch, which discards `stuck` only.
+    tmux.pane_text[name] = CLEAR_INPUT_BOX
+    bumped: list[str] = []
+    original = tmux.capture_pane
+
+    def bump_midway(project: str, lines: int = 40, escapes: bool = False) -> str:
+        if not bumped:
+            bumped.append(project)
+            engine._forget_attention(other)
+        return original(project, lines, escapes)
+
+    tmux.capture_pane = bump_midway  # type: ignore[method-assign]
+    engine.scan_for_stuck()
+
+    assert bumped, "the capture never ran, so the discard path was not entered"
+    assert engine.get(name).awaiting_input is False, (
+        "a sweep that discarded its `stuck` batch also discarded `clear`, so a "
+        "person is still being told they are needed by a prompt that is gone. "
+        "See #182."
+    )
+
+
+def test_a_claim_reconfirmed_after_the_ttl_is_kept_not_expired(root: Path) -> None:
+    """Round 2 of #182 found this as a regression in round 1's own fix.
+
+    A standing claim is kept alive by being REWRITTEN each sweep. Round 1 hoisted
+    `attention.expired` above the renewal loop so a discarded sweep would not age
+    what it declined to renew, and in doing so made a name that is both past
+    `TTL_S` and re-confirmed by THIS sweep get written with `now` and popped by
+    the same block. `changed` cannot announce the loss either, because the name
+    was already in `_stuck`.
+
+    Reachable whenever scanning pauses for longer than the TTL and then resumes:
+    `scan_for_stuck` returns early with no SSE subscriber, so closing the phone
+    page for half a minute and reopening it is enough. The row then drops
+    instead of being re-flagged, which is the harm #182 exists to remove.
+    """
+    clock = FakeClock()
+    engine, tmux = engine_for(
+        root,
+        sessions={proj("vessel"): PANE},
+        table=running_table(etime_s=60),
+        clock=clock,
+    )
+    name = proj("vessel")
+    tmux.pane_text[name] = MODAL_PANE
+
+    assert engine.scan_for_stuck() == [name], "the claim was never established"
+
+    # Longer than the TTL, which is what a closed page or a truncated budget
+    # produces. The pane still shows the prompt, so this sweep re-confirms it.
+    clock.now += attention.TTL_S + 1
+
+    engine.scan_for_stuck()
+    assert engine.get(name).awaiting_input is True, (
+        "a claim past the TTL that this very sweep re-confirmed was expired by "
+        "the same block that renewed it, and silently: `changed` is empty "
+        "because the name was already there. See #182 round 2."
+    )
+
+
+def test_a_discarded_sweep_ages_nothing(root: Path) -> None:
+    """The other half, which round 2 found had no test at all.
+
+    A sweep whose epoch moved discards its evidence. It must not then age an
+    entry it declined to renew, or a row is dropped on evidence the sweep does
+    not trust. Replacing `aging = [] if discarded else ...` with an
+    unconditional expiry passes 325 tests without this one.
+    """
+    clock = FakeClock()
+    engine, tmux = engine_for(
+        root,
+        sessions={proj("vessel"): PANE},
+        table=running_table(etime_s=60),
+        clock=clock,
+    )
+    name = proj("vessel")
+    tmux.pane_text[name] = MODAL_PANE
+    assert engine.scan_for_stuck() == [name]
+
+    clock.now += attention.TTL_S + 1
+    bumped: list[str] = []
+    original = tmux.capture_pane
+
+    def bump_midway(project: str, lines: int = 40, escapes: bool = False) -> str:
+        if not bumped:
+            bumped.append(project)
+            # An unrelated project, so the claim under test is not popped
+            # directly: only the EPOCH moves.
+            engine._forget_attention(proj("koala"))
+        return original(project, lines, escapes)
+
+    tmux.capture_pane = bump_midway  # type: ignore[method-assign]
+    before = engine._attention_epoch
+    engine.scan_for_stuck()
+
+    assert engine._attention_epoch != before, "the epoch never moved"
+    # **Asserted on `_stuck`, not on `awaiting_input`.** Past the TTL,
+    # `attention.standing` already excludes the entry, so the row reads False
+    # either way and the first version of this test failed for a reason that had
+    # nothing to do with aging. What the fix protects is the ENTRY: a discarded
+    # sweep must leave it there, so the next trusted scan can renew it rather
+    # than having to rediscover it.
+    assert name in engine._stuck, (
+        "a sweep that discarded its evidence still aged a claim it declined to "
+        "renew, so the next scan has to rediscover it instead of renewing it. "
+        "See #182."
+    )

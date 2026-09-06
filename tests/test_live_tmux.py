@@ -308,9 +308,23 @@ def test_a_dead_pane_keeps_what_it_printed(server: PrivateTmux) -> None:
     adapter = Tmux(prefix="hr-", socket=server.socket)
     adapter.new_session("dying", str(server._dir), [str(script)])
     server.created.append("hr-dying")
-    time.sleep(0.6)
 
+    # **Polled, not slept (#114).** This was `time.sleep(0.6)` and one capture.
+    # It failed in CI on 2026-09-03 with the pane's own output present and
+    # tmux's status line missing, then passed on rerun: on a loaded runner tmux
+    # writes that line later than a fixed sleep allows. A fixed sleep is a guess
+    # about somebody else's scheduler, and it fails in the direction that trains
+    # everyone to rerun.
+    #
+    # Waits on the LAST thing to appear rather than on a duration. The script's
+    # own two lines are written first and tmux's `Pane is dead` line after, so a
+    # capture taken between them satisfies the first two assertions and not the
+    # third, which is exactly the failure that was seen.
+    deadline = time.monotonic() + TIMEOUT
     whole = adapter.capture_pane("dying", lines=0)
+    while "status 3" not in whole and time.monotonic() < deadline:
+        time.sleep(0.02)
+        whole = adapter.capture_pane("dying", lines=0)
 
     assert "missing credential" in whole, f"the output was lost: {whole!r}"
     assert "goodbye" in whole
