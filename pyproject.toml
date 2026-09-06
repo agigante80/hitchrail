@@ -114,6 +114,12 @@ markers = [
   "e2e: drives a real browser against a real server; needs `playwright install chromium`",
   "live: binds a real loopback socket on an ephemeral port",
   "live_tmux: drives a real tmux server on a private socket",
+  # #128. Runs the installed CONSOLE SCRIPT as a subprocess and reads what it
+  # prints. Not folded into `e2e`, which means "a browser": no page is involved
+  # here, and widening that word is how a tier stops describing anything.
+  # Selected by default, because the path every user takes first should not be
+  # opt in.
+  "cli: runs the installed console script as a subprocess and reads its output",
   # Not a tier that runs anywhere. It drives a REAL Android over wireless adb,
   # so it needs hardware that is not in CI and is not always on the desk, and it
   # is deselected below for the same reason the screenshot marker is. AGENTS.md:
