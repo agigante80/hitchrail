@@ -32,12 +32,25 @@ from hitchrail.sessions import Session, State
 # no rows at all.
 MAX_CAPTURES = 10
 
-# How long one sweep may spend capturing before abandoning the rest.
+# How long one sweep may spend STARTING captures before abandoning the rest.
 #
 # The COUNT is not the bound that matters. Ten captures against a wedged tmux
 # is a hundred seconds at the adapter's own call timeout, and a sweep that long
 # overlaps the next one. This bounds the wall clock instead, and the rows it
 # does not reach keep whatever the last sweep found.
+#
+# **It bounds when a capture may BEGIN, not when the scan ends (#180.)** The
+# deadline is checked before each capture, so one starting a millisecond inside
+# it still runs to `tmux._CALL_TIMEOUT_S`. The real worst case for a scan is
+# `BUDGET_S + _CALL_TIMEOUT_S`, about 13 seconds, and for a whole sweep tick
+# about 33 once `Engine._look`'s two calls are added.
+#
+# Not tightened to make the number true, because a shorter per capture timeout
+# here would be the first place in this project to disagree with
+# `_CALL_TIMEOUT_S`, whose own comment argues ten seconds is far beyond
+# anything a working tmux does. The CONSEQUENCE is fixed instead, in
+# `server.sweep`: the scan is started rather than awaited, so an overrun can no
+# longer delay a stop expiry.
 BUDGET_S = 3.0
 
 # How long an observation stands without being renewed. A row the sweep did not

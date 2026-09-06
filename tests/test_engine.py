@@ -2986,3 +2986,101 @@ async def test_the_sweep_looks_again_as_soon_as_somebody_is(root: Path) -> None:
         assert engine.scan_for_stuck() == [proj("vessel")]
 
     assert tmux.panes_calls == 1
+
+
+def test_a_clear_during_a_sweep_is_not_undone_by_evidence_older_than_it(
+    root: Path,
+) -> None:
+    """#182. The sweep decides what is stuck OUTSIDE the lock, on purpose.
+
+    Capturing panes under the lock would hold it across a subprocess, so
+    `attention.scan` runs unguarded and only the write is guarded. That leaves
+    a window: a stop lands, `_forget_attention` clears the project, and then the
+    sweep takes the lock and writes back an observation it made BEFORE the
+    clear. The row goes on reporting a prompt the person has just acted on,
+    until the next sweep corrects it.
+
+    The design says the overlay describes ONE attempt, so a fresh action starts
+    from nothing. That property held only in the absence of this race.
+
+    Reproduced by clearing from inside the capture, which is exactly where the
+    real window is: `capture_pane` is the subprocess the lock is not held
+    across. Without the epoch check this test finds `vessel` flagged.
+    """
+    engine, tmux = sweeping_engine(root, MODAL_PANE)
+    name = proj("vessel")
+
+    cleared: list[str] = []
+    original = tmux.capture_pane
+
+    def clear_midway(project: str, lines: int = 40, escapes: bool = False) -> str:
+        # Flag set BEFORE the clear, not after. `engine.stop` captures the pane
+        # itself to check the input box, so clearing through the public route
+        # re-enters this hook and recurses forever. Setting it first is what
+        # makes the guard hold.
+        if not cleared:
+            cleared.append(project)
+            # `_forget_attention` rather than `stop`, and the difference is
+            # only speed: it is the seam `stop` and `start` both call, so this
+            # is the same clear the race is about, without a graceful stop's
+            # wait or its own pane reads inside a pane read.
+            engine._forget_attention(name)
+        return original(project, lines, escapes)
+
+    tmux.capture_pane = clear_midway  # type: ignore[method-assign]
+
+    engine.scan_for_stuck()
+
+    assert cleared, "the capture never ran, so the race was never entered"
+    assert not engine.get(name).awaiting_input, (
+        "a stop cleared the standing claim and the sweep put it back from "
+        "evidence gathered before the clear. See #182."
+    )
+
+
+def test_a_listing_takes_the_stop_lock_once_per_marker_not_once_per_row(
+    root: Path,
+) -> None:
+    """#178. The note on `_stopping_guard` said this, and the code did not.
+
+    That note explains why `_derive` reads `self._stopping` unguarded: taking
+    the lock there would put it on the path of every derived row, once per
+    project per listing. The reconciliation twenty lines below took it on every
+    STOPPED row, which on an ordinary machine is most of them.
+
+    Counted rather than reasoned about, and asserted against the number of
+    MARKERS rather than a constant, so the property survives a root of any size.
+    """
+    engine, _ = engine_for(root, sessions={}, table="")
+    rows = engine.list()
+    stopped = [row for row in rows if row.state is State.STOPPED]
+    assert len(stopped) > 1, "this root has too few stopped rows to show the difference"
+
+    acquisitions = 0
+    real_guard = engine._stopping_guard
+
+    class Counting:
+        def __enter__(self) -> None:
+            nonlocal acquisitions
+            acquisitions += 1
+            real_guard.acquire()
+
+        def __exit__(self, *exc: object) -> None:
+            real_guard.release()
+
+    engine._stopping_guard = Counting()  # type: ignore[assignment]
+    engine.list()
+
+    # ONE, not zero: `_needs_a_person` builds the waiting set once per listing
+    # under the lock, which is #100's own decision and is pinned separately by
+    # `test_the_waiting_set_is_built_once_per_listing_not_once_per_row`.
+    #
+    # The property here is that the count does not SCALE with the rows. Before
+    # #178 this listing took it six times, one per stopped row plus that one.
+    assert acquisitions == 1, (
+        f"a listing of {len(stopped)} stopped rows with NO stop markers took the "
+        f"lock {acquisitions} times, where only `_needs_a_person`'s single "
+        f"per-listing acquisition should appear. `_derive` is meant to read "
+        f"`_stopping` unguarded and take the lock only when there is a marker to "
+        f"remove. See #178 and the note on `_stopping_guard`."
+    )

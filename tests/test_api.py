@@ -6,6 +6,7 @@ import logging
 import pathlib
 import re
 import shutil
+import threading
 from collections.abc import AsyncIterator, Callable
 
 import httpx
@@ -24,6 +25,7 @@ from conftest import (
     procs_from,
 )
 from hitchrail import claude_ipc, pages, server
+from hitchrail import server as srv
 from hitchrail.config import Config
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
@@ -1598,3 +1600,64 @@ def test_the_stale_fixture_really_does_look_like_a_question() -> None:
     assert claude_ipc.awaits_answer(SHELL_PROMPT_STALE) is True
     # And the prompt the older stale test uses does NOT, which is the contrast.
     assert claude_ipc.awaits_answer("user@host:/tmp$ ") is None
+
+
+async def test_a_slow_attention_scan_does_not_delay_a_stop_expiry(
+    config: Config, tmux: FakeTmux, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#180. The sweep awaited both in sequence, so an overrun pushed the next.
+
+    `attention.BUDGET_S` bounds when a capture may BEGIN, and one starting just
+    inside it still runs to the adapter's ten second call timeout, so a tick's
+    worst case is about 33 seconds against a wedged tmux. `stop_timeout`
+    defaults to 30, so the browser's own timer wins and says "it has not
+    finished" while the server has not yet noticed its own expiry.
+
+    Driven through the REAL lifespan, with a scan that blocks the way a wedged
+    capture does. The sweep interval is shortened so this costs a fraction of a
+    second rather than the tens of seconds a real overrun takes; what is being
+    asserted is the ordering, and that does not depend on the durations.
+    """
+    monkeypatch.setattr(srv, "SWEEP_INTERVAL_S", 0.02)
+
+    expiries = 0
+    scanning = threading.Event()
+    release = threading.Event()
+
+    class Wedged(Engine):
+        def expire_stops(self) -> list[str]:
+            nonlocal expiries
+            expiries += 1
+            return []
+
+        def scan_for_stuck(self) -> list[str]:
+            # Blocks like a capture against a tmux that will not answer.
+            scanning.set()
+            release.wait(timeout=5)
+            return []
+
+    clock = FakeClock()
+    # The lifespan is driven directly, because `httpx.ASGITransport` does not
+    # run it and the sweep task lives there. This is the only test that needs
+    # the loop itself rather than what it calls.
+    engine = Wedged(
+        config=config,
+        tmux=tmux,
+        procs_fn=procs_from(""),
+        meminfo_fn=lambda: PLENTY,
+        clock=clock,
+        sleep=clock.sleep,
+    )
+    app = create_app(engine=engine, config=config, bus=EventBus())
+    async with app.router.lifespan_context(app):
+        assert await asyncio.to_thread(scanning.wait, 5), "the scan never started"
+        before = expiries
+        await asyncio.sleep(0.2)
+        during = expiries
+        release.set()
+
+    assert during > before + 1, (
+        f"only {during - before} stop expiries ran while one scan was stuck. The "
+        f"scan is being awaited in the sweep loop again, so an overrunning "
+        f"capture delays every expiry behind it. See #180."
+    )

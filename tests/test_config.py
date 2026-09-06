@@ -1027,7 +1027,13 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # hazard bought for something. The length is the argument for why the
         # ADAPTER cannot make that call, which is the thing a later reader would
         # otherwise "simplify" by moving the check next to the pane read.
-        "engine.py": 1122,
+        # 1122 to 1154 for #182: the attention epoch, and why a sweep discards
+        # a whole batch of evidence gathered before a clear rather than tracking
+        # which project was cleared.
+        # 1154 to 1170 for #178: the membership test before the stop lock, and
+        # why a note contradicted by the method twenty lines below it is a
+        # defect in the record rather than a style point.
+        "engine.py": 1170,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -1164,7 +1170,12 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # diff, and the security review of the new route is worth more than the
         # tidiness. Tracked as its own ticket rather than left as a silent
         # overrun.
-        "server.py": 574,
+        # 574 to 615 for #180: the attention scan is started rather than
+        # awaited, so an overrunning capture cannot delay a stop expiry. The
+        # length is the done-callback (a task nobody awaits swallows its
+        # exception) plus its teardown, and the paragraph saying which timer
+        # was losing to which. Splitting this file is #205.
+        "server.py": 615,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

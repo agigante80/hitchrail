@@ -510,6 +510,23 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
         app.state.events = events
         app.state.engine = engine
 
+        # #180. At most one scan in flight, tracked so the expiry loop never
+        # waits behind it and so teardown can cancel it.
+        scanning: asyncio.Task[list[str]] | None = None
+
+        def scan_finished(task: asyncio.Task[list[str]]) -> None:
+            """A task nobody awaits swallows its exception, and this one is the
+            reason the interface can say a person is needed. Logged with the
+            same argument `sweep` makes for not suppressing silently: "the scan
+            stopped working" must not be unfalsifiable."""
+            if task.cancelled():
+                return
+            if task.exception() is not None:
+                logger.error(
+                    "attention scan failed; the sweep continues",
+                    exc_info=task.exception(),
+                )
+
         async def sweep() -> None:
             """Expire stop markers on a timer, so a timeout the user is
             watching resolves without waiting for the next poll.
@@ -523,6 +540,7 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
             operational case (a machine it cannot read); this catches the
             unexpected one and says so.
             """
+            nonlocal scanning
             while True:
                 await asyncio.sleep(SWEEP_INTERVAL_S)
                 try:
@@ -532,7 +550,22 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
                     # with the state of the machine rather than with how often
                     # a browser polls, and no capture lands on the executor that
                     # serves the operator's stop.
-                    await in_thread(engine.scan_for_stuck)
+                    #
+                    # **Started, not awaited (#180).** `attention.BUDGET_S`
+                    # bounds when a capture may BEGIN; one starting a
+                    # millisecond inside it still runs to `_CALL_TIMEOUT_S`, so
+                    # a tick's worst case is about 33 seconds. Awaited in
+                    # sequence that delayed the next EXPIRY by as much, and
+                    # `stop_timeout` defaults to 30, so the browser's own timer
+                    # won and said "it has not finished" before the server had
+                    # noticed its own expiry.
+                    #
+                    # At most one in flight: a second would put two captures on
+                    # the executor serving the operator's stop, which is the
+                    # cost this scan moved off the request path to avoid.
+                    if scanning is None or scanning.done():
+                        scanning = asyncio.create_task(in_thread(engine.scan_for_stuck))
+                        scanning.add_done_callback(scan_finished)
                 except Exception:
                     logger.exception("stop sweep failed; the timer continues")
 
@@ -543,6 +576,14 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+            # #180. The scan outlives the loop that started it, so it is
+            # cancelled here too. Without this a shutdown during an overrunning
+            # capture leaves a task running against an engine the lifespan has
+            # finished with.
+            if scanning is not None:
+                scanning.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await scanning
 
     return Starlette(
         routes=[
