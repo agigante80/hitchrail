@@ -52,18 +52,32 @@ After=network.target
 # restarted at all, so it never consumes an attempt. What this limit bounds is
 # an unhandled exception, which exits 1, and a bind failure, which exits 3.
 #
-# The bind failure is why it had to move. `After=network.target` means the
-# networking stack is up, not that any interface has an address, so a unit
-# binding a NAMED address races the interface coming up. Measured on a real
-# boot: five `could not bind on any address` errors five seconds apart, the
-# budget spent in 21 seconds, and the unit dead until the machine was rebooted
-# again. The next boot started first time, so it is intermittent, which is the
-# worst shape for something that is supposed to survive a reboot.
+# **The widening was justified by a race that does not exist. Withdrawn
+# 2026-09-06.** The claim here used to be that `After=network.target` means the
+# stack is up but no interface has an address, so a unit binding a NAMED address
+# races the interface coming up.
 #
-# 12 attempts at `RestartSec=5` covers a minute of network bring up and still
-# terminates. Raise the window with the burst if you raise either: the test
-# asserts `burst * RestartSec` stays inside the window, or the limit can never
-# fire and the loop is unbounded again.
+# The boot that was measured says otherwise. The adapter holding that address
+# enumerated in under a second and then produced no carrier, no DHCP transaction
+# and no lease for the remaining six minutes: it was plugged into the machine
+# with nothing plugged into it. Three later boots on the same machine had the
+# adapter physically absent or attached by hand minutes in. There was no bring
+# up to race, on any of them.
+#
+# So 12 and 120 are arbitrary rather than derived. They are left alone because
+# no measurement argues for another pair, and because the shipped `ExecStart`
+# below binds loopback, which always exists, so none of this can reach the
+# default install.
+#
+# **What is actually broken is #201:** a unit whose address appears AFTER the
+# budget is spent stays dead next to a working address. A larger budget does not
+# fix that, and `network-online.target` cannot help: it is a system target, and
+# a user unit cannot order against it. The fix under discussion there is socket
+# activation with `FreeBind=yes`, which binds an address that is not there yet.
+#
+# Raise the window with the burst if you raise either: the test asserts
+# `burst * RestartSec` stays inside the window, or the limit can never fire and
+# the loop is unbounded again.
 StartLimitIntervalSec=120
 StartLimitBurst=12
 
