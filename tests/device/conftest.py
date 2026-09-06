@@ -56,10 +56,23 @@ from playwright.async_api import Browser, Page, async_playwright
 
 from e2e.conftest import Harness
 
-# The Pixel 2 on LineageOS. **The port is NOT stable**: Android picks a new one
-# every time wireless debugging is toggled, so a failure to connect is more
-# likely a stale port than a missing phone.
-DEFAULT_SERIAL = os.environ.get("HITCHRAIL_DEVICE", "192.168.33.22:40321")
+# **No device is hard coded, because every way of reaching one is fragile.**
+# Wireless debugging picks a NEW port every time it is toggled, a phone gets
+# taken off the desk, USB gets unplugged, and an emulator is not always up. So
+# this looks for a device rather than assuming one, in the order that costs
+# least, and says what it tried when it finds none.
+#
+# `HITCHRAIL_DEVICE` overrides everything, for a device this cannot discover.
+EXPLICIT_SERIAL = os.environ.get("HITCHRAIL_DEVICE", "")
+
+# Last known wireless address of the Pixel 2 on LineageOS. Tried only after
+# anything already attached, and its PORT is the part that goes stale: it is a
+# hint, not a configuration.
+KNOWN_WIRELESS = ("192.168.33.22:40321", "192.168.33.22:5555")
+
+# Chrome, explicitly, because assertions come through its DevTools socket. The
+# device's default browser is DuckDuckGo, which has no such socket.
+CHROME_PACKAGE = "com.android.chrome"
 
 ADB_TIMEOUT_S = 20.0
 
@@ -93,25 +106,119 @@ def _connected(serial: str) -> bool:
     )
 
 
-@pytest.fixture(scope="session")
-def device_serial() -> str:
-    if not _connected(DEFAULT_SERIAL):
+# A connect attempt to an address with nothing on it BLOCKS. `adb connect` to a
+# routable-but-dead host sits there until its own timeout, and one that raises
+# out of a fixture is a stack trace where the operator needed the sentence
+# saying which device to plug in. Short, because this runs once per candidate
+# and the whole point is to reach the message quickly.
+CONNECT_TIMEOUT_S = 5.0
+
+
+def _try_connect(serial: str) -> bool:
+    """Attempt a connection and report reachability, never raise.
+
+    Returns False for every way this can fail: refused, unroutable, or hung
+    past the timeout. The caller is walking a list of candidates and a dead one
+    is ordinary, not exceptional.
+    """
+    try:
         subprocess.run(
-            ["adb", "connect", DEFAULT_SERIAL],
+            ["adb", "connect", serial],
             capture_output=True,
-            timeout=ADB_TIMEOUT_S,
+            timeout=CONNECT_TIMEOUT_S,
             check=False,
         )
-    if not _connected(DEFAULT_SERIAL):
+    except subprocess.TimeoutExpired:
+        return False
+    return _connected(serial)
+
+
+def _attached() -> list[str]:
+    """Every device adb already has, in the order it reports them.
+
+    Covers USB, an already paired wireless device, and a running emulator
+    without caring which: all three answer the same protocol.
+    """
+    listed = subprocess.run(
+        ["adb", "devices"], capture_output=True, text=True, timeout=ADB_TIMEOUT_S, check=False
+    ).stdout
+    return [
+        line.split()[0]
+        for line in listed.splitlines()[1:]
+        if line.strip() and line.rstrip().endswith("device")
+    ]
+
+
+def _has_chrome(serial: str) -> bool:
+    packages = _adb(serial, "shell", "pm", "list", "packages", check=False)
+    return CHROME_PACKAGE in packages
+
+
+@pytest.fixture(scope="session")
+def device_serial() -> str:
+    """Whatever Android this machine can reach, preferring what costs least.
+
+    Order, and each step is cheaper and more reliable than the next:
+
+    1. `HITCHRAIL_DEVICE`, when somebody names one.
+    2. Anything already attached. A USB cable needs no port at all and is the
+       one path that cannot go stale, so a plugged in phone or a running
+       emulator wins without any network.
+    3. The last known wireless addresses, including `:5555`, which is what
+       `adb tcpip 5555` gives and is stable where the wireless-debugging port
+       is not.
+
+    Fails rather than skips, and this tier is opt in so that is right: being
+    selected means somebody asked for it, and a silent skip is the coverage lie
+    `AGENTS.md` names. The message is long on purpose, because the usual cause
+    is a port that moved and the fix is four taps on the phone.
+    """
+    tried: list[str] = []
+
+    if EXPLICIT_SERIAL:
+        if _connected(EXPLICIT_SERIAL) or _try_connect(EXPLICIT_SERIAL):
+            return _require_chrome(EXPLICIT_SERIAL)
+        tried.append(f"HITCHRAIL_DEVICE={EXPLICIT_SERIAL}")
+
+    for serial in _attached():
+        return _require_chrome(serial)
+    tried.append("nothing already attached (no USB, no emulator, nothing paired)")
+
+    for candidate in KNOWN_WIRELESS:
+        if _try_connect(candidate):
+            return _require_chrome(candidate)
+        tried.append(candidate)
+
+    pytest.fail(
+        "no Android this tier can drive. Tried, in order: "
+        + "; ".join(tried)
+        + ".\n\nAny ONE of these fixes it:\n"
+        "  - plug the phone in over USB, which needs no port and cannot go stale\n"
+        "  - re-read the wireless debugging port, which Android changes every time "
+        "that switch is toggled, and pass it: HITCHRAIL_DEVICE=IP:PORT\n"
+        "  - start any emulator with Chrome on it; an attached emulator is found "
+        "automatically\n\n"
+        "Failing rather than skipping because this tier is opt in: `-m device` "
+        "means somebody asked for it."
+    )
+
+
+def _require_chrome(serial: str) -> str:
+    """A device without Chrome cannot answer, and should say so as itself.
+
+    Assertions come through Chrome's DevTools socket. A device whose only
+    browser is DuckDuckGo or a bare AOSP WebView will connect over adb, launch
+    nothing useful, and then time out looking for a page, which reads as a
+    broken test rather than a missing browser.
+    """
+    if not _has_chrome(serial):
         pytest.fail(
-            f"no device at {DEFAULT_SERIAL}. Wireless debugging picks a NEW port every "
-            f"time it is toggled, so check Settings > Developer options > Wireless "
-            f"debugging for the current one and pass it as HITCHRAIL_DEVICE. Failing "
-            f"rather than skipping, because this tier is opt in: being selected means "
-            f"somebody asked for it, and a silent skip would be the coverage lie "
-            f"AGENTS.md names."
+            f"{serial} is reachable but has no {CHROME_PACKAGE}. This tier drives "
+            f"Chrome's DevTools socket, so a device without it cannot be asserted "
+            f"against. Use a device or an emulator image that ships Chrome, such as "
+            f"a `google_apis_playstore` system image."
         )
-    return DEFAULT_SERIAL
+    return serial
 
 
 @pytest.fixture
