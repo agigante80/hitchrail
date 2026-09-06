@@ -78,12 +78,19 @@ Documentation=https://github.com/agigante80/hitchrail
 # physically absent, and a third had it attached by hand 2m12s in. Every
 # observed outage was missing hardware.
 #
-# **But one boot does show a real race, and it is worth knowing how tight it
-# is.** Boot -3 of 2026-09-06 had the adapter connected: carrier and DHCP lease
-# at 11:48:18, fifteen seconds into the boot, and this unit's first start at
-# 11:48:25. It won by SEVEN SECONDS. So a budget still has to outlast a lease,
-# which is why the test below asserts a floor. What it does not have to do is
-# outlast absent hardware, which is what the withdrawn reasoning claimed.
+# **But one boot does show a real race, and it is tighter than that boot makes
+# it look.** Boot -3 of 2026-09-06 had the adapter connected: carrier and DHCP
+# lease 15.1s into the boot, and this unit's first start 7.4s later.
+#
+# Seven seconds of margin is the FAVOURABLE reading, and it is worth not
+# quoting it on its own. Boot -3 is also the boot where this unit started
+# unusually late, at 22.7s; the other four boots started it at 14.1s to 14.6s.
+# Against the same 15.1s lease, an ordinary boot reaches the bind about a
+# second BEFORE the address exists and needs a retry to get there.
+#
+# So the floor the test below asserts is better supported than "seven seconds"
+# suggests. What a budget does not have to outlast is absent hardware, which is
+# what the withdrawn reasoning claimed it did.
 #
 # So 12 and 120 are arbitrary rather than derived. They are left alone because
 # no measurement argues for another pair, and because the shipped `ExecStart`

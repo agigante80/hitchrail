@@ -935,21 +935,47 @@ def test_the_units_start_limit_is_where_systemd_reads_it() -> None:
     )
 
     def _value(directives: list[str], name: str) -> int | None:
-        """The value of `name`, or `None` if it is absent.
+        """The EFFECTIVE value of `name`, or `None` if absent or unparseable.
 
-        `next()` without a default RAISES, and a `StopIteration` out of a test
-        is a bare traceback where the operator needed the sentence saying what
-        they broke. Absence is a real case: `StartLimitIntervalSec=0` is written
-        without a burst.
+        **Last match, not first, because systemd is last-assignment-wins.** A
+        hand-edited unit acquires a bad value by having a line APPENDED, not by
+        having one rewritten, and reading the first match let exactly that pass:
+        `StartLimitIntervalSec=0` added under a good pair satisfied every
+        assertion here while systemd saw rate limiting switched off.
+
+        **`None` rather than a raise on a value this cannot parse.** systemd
+        accepts `30s`, `2min` and `infinity`; a bare `int()` turns each into a
+        `ValueError` traceback where the caller needed the sentence. That is the
+        same crash-instead-of-failure this helper was written to remove, and it
+        matters: `RestartSec=1min` with burst 12 in a 120s window can never
+        fire, which is the defect the last assertion here exists to catch.
+
+        Parsing systemd's time spans properly is not this test's job. Refusing
+        to guess is.
         """
-        return next((int(d.split("=", 1)[1]) for d in directives if d.startswith(name)), None)
+        found = [d.split("=", 1)[1].strip() for d in directives if d.startswith(name)]
+        if not found:
+            return None
+        effective = found[-1]
+        return int(effective) if effective.isdigit() else None
 
+    # A repeated directive is how this goes wrong in practice, and systemd takes
+    # the LAST one. Checked separately from the values so the message says "you
+    # have two of these" rather than silently reporting whichever survived.
+    keys = [d.split("=", 1)[0] for d in limits]
+    repeated = sorted({key for key in keys if keys.count(key) > 1})
+    assert not repeated, (
+        f"{repeated} appears more than once, and systemd takes the LAST "
+        f"assignment, so what a reader sees here and what systemd does differ"
+    )
     window = _value(limits, "StartLimitIntervalSec")
     burst = _value(limits, "StartLimitBurst")
     gap = _value(sections["Service"], "RestartSec=")
     assert window is not None and burst is not None and gap is not None, (
         f"a limit needs StartLimitIntervalSec, StartLimitBurst and RestartSec to "
-        f"mean anything, and this unit has window={window} burst={burst} gap={gap}"
+        f"mean anything, and this unit has window={window} burst={burst} gap={gap}. "
+        f"`None` means absent OR a value this test will not parse, such as `30s` "
+        f"or `infinity`; write plain seconds so the check stays honest"
     )
     # The presence check above is not enough on its own: `StartLimitIntervalSec=0`
     # IS a StartLimit directive, so it passes while naming the exact condition it
