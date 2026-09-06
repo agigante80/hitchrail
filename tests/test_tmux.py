@@ -640,3 +640,26 @@ def test_nothing_is_scrubbed_when_nothing_is_named() -> None:
 
     spawn = next(c for c in run.calls if "new-session" in c)
     assert "env" not in spawn
+
+
+def test_a_line_with_no_name_is_dropped_rather_than_named_empty_string() -> None:
+    """#175. `docs/api.md` promises a name or null, and `""` is neither.
+
+    `rpartition(" ")` on a line with no space returns an empty name and the
+    whole line as the pid, so `1234` alone became `foreign = {1234: ""}`. This
+    interface degrades correctly because `app.js` treats it as falsy; a client
+    that does not renders "in tmux session " with nothing after it.
+
+    **Not reachable from tmux 3.4**, which refuses an empty session name at
+    creation, verified against a real server on a private socket. The guard
+    stays because a parser should be true of its input rather than of one
+    version's output, and the check costs one comparison.
+    """
+    runner = FakeRunner(stdout={"list-panes": "1234\ncc-real 5678\n"})
+    panes = Tmux(prefix="hr-", run=runner).panes()
+
+    assert panes.foreign == {5678: "cc-real"}, (
+        f"a line with no name produced {panes.foreign}, and an empty owner name "
+        f"is not what docs/api.md promises. See #175."
+    )
+    assert panes.ours == {}
