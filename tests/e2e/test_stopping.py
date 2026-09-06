@@ -100,8 +100,76 @@ async def test_a_box_that_will_not_clear_refuses_the_stop(page: Page, server: Ha
     )
     # The session is still there, and still running.
     assert server.is_running("vessel"), "a refused stop stopped something"
-    # And it is not showing a spinner for a request nobody made.
+    # And it is not showing a spinner for a request nobody made. Kept through
+    # #169, which put a DIFFERENT kill on this screen: this names the wait
+    # dialog's control, so it still asserts that no wait was entered.
     await expect(dialog.get_by_role("button", name="Do not wait, kill it now")).to_have_count(0)
+
+
+async def test_the_refused_stop_is_not_a_dead_end(page: Page, server: Harness) -> None:
+    """#169. The refusal above is correct and used to be terminal: one Close,
+    and no way to end the session from Hitchrail at all.
+
+    The comment that justified it said "Kill is still on the row", and no row
+    has ever rendered one. Section 7 forbids escalation by DEFAULT, not
+    availability, so the kill is here, second, and `danger`, in the shape the
+    two `showTimedOut` dialogs already use for the same situation reached by a
+    different road.
+
+    `exact=True` throughout. Playwright matches an accessible name by
+    case-insensitive SUBSTRING, so a bare `name="Kill it"` also matches "Do not
+    wait, kill it now", and this test would keep passing against the wrong
+    control.
+    """
+    server.seed(running=["vessel"], box_will_not_clear=True)
+    await _open_stop(page, server)
+
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop", exact=True).click()
+    await expect(dialog).to_contain_text("It was not asked to exit")
+
+    # Safest first, which is topmost and furthest from the thumb. Asserted as
+    # ORDER rather than as presence: both buttons existing in either order
+    # satisfies a presence check and is the arrangement section 7 forbids.
+    buttons = dialog.get_by_role("button")
+    assert await buttons.nth(0).inner_text() == "Close"
+    assert await buttons.nth(1).inner_text() == "Kill it"
+    assert await buttons.count() == 2, "a third control appeared on the refusal"
+
+    kill = dialog.get_by_role("button", name="Kill it", exact=True)
+    await expect(kill).to_have_class("danger")
+    # The risk BEFORE the kill is offered, the same sentence `showTimedOut`
+    # carries. One paragraph: `.dialog-body` sets no `white-space`, so a
+    # newline here would collapse and this assertion would pass either way.
+    await expect(dialog).to_contain_text("anything it has not written to disk is lost")
+
+    # The safe action stays safe. This is the half that proves the fix did not
+    # overshoot into escalating by default.
+    await buttons.nth(0).click()
+    await expect(dialog).to_be_hidden()
+    assert server.is_running("vessel"), "Close killed the session"
+
+
+async def test_the_kill_offered_by_a_refused_stop_ends_the_session(
+    page: Page, server: Harness
+) -> None:
+    """The other half of #169: the control works, rather than merely being
+    visible.
+
+    That distinction is #83's defect, where a button existed with no route
+    behind it and the browser test asserted only that it was rendered.
+    """
+    server.seed(running=["vessel"], box_will_not_clear=True)
+    await _open_stop(page, server)
+
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop", exact=True).click()
+    await expect(dialog).to_contain_text("It was not asked to exit")
+    await dialog.get_by_role("button", name="Kill it", exact=True).click()
+
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row).to_have_attribute("data-state", "stopped", timeout=15_000)
+    assert not server.is_running("vessel"), "the kill reported success and left it running"
 
 
 async def test_kill_appears_once_the_wait_is_under_way_and_stays(

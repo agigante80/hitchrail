@@ -683,7 +683,9 @@ async function beginStop(project) {
     method: "DELETE",
   });
   if (!result.ok) {
-    showRefusal(result);
+    // The row goes with it: `stop_unsafe` is refused here and nowhere else,
+    // and the dialog that reports it offers a kill that has to name a session.
+    showRefusal(result, project);
     return;
   }
   await refresh();
@@ -834,7 +836,7 @@ async function killNow(project) {
   });
   closeDialog();
   if (!result.ok) {
-    showRefusal(result);
+    showRefusal(result, project);
     return;
   }
   await refresh();
@@ -858,7 +860,7 @@ export function setStopPatience(ms) {
   stopPatienceMs = ms;
 }
 
-function showRefusal(result) {
+function showRefusal(result, project) {
   const { code, message } = result.body;
   if (result.status === 401) {
     // The token is the whole auth model, so an expired or revoked one is a
@@ -914,14 +916,49 @@ function showRefusal(result) {
     // over. The exit command is the thing that was not sent, and that is what
     // the title says.
     //
-    // No Kill button here. The person asked to stop gently and got an honest
-    // "not from here"; putting the destructive path in front of them as the
-    // answer to that is the escalation-by-default section 7 forbids. Kill is
-    // still on the row, which is where they chose it deliberately.
+    // #169 put the kill here, and the comment this replaces is why the ticket
+    // was filed. It read "Kill is still on the row, which is where they chose
+    // it deliberately", and that was false: `renderRow` renders Open, Get
+    // link, Start, Stop and Clear, and no kill at all. `killNow` was reachable
+    // from three places and all three sit downstream of a `DELETE` that
+    // SUCCEEDED, so a refusal here ended the flow before any of them. The
+    // session could not be ended from Hitchrail at all.
+    //
+    // Section 7 forbids escalation by DEFAULT, not availability. Close is
+    // first, the kill is second and `danger`, and the warning is the same one
+    // `showTimedOut` carries: that is the shape the two timeout dialogs
+    // already use for the identical situation reached by a different road.
+    // Offering it stays ours; choosing it stays the operator's.
+    //
+    // Still NOT on the row. A kill control on every running row is the
+    // escalation by default the rule does forbid, and it is deliberately a
+    // separate question.
+    // `stop_unsafe` comes back from the stop route alone, and that route
+    // passes the row it acted on, so every path that reaches here has one.
+    // The guard is for the other five call sites `showRefusal` serves, which
+    // have no row to give: a Kill that cannot name a session is a tap that
+    // refuses, and `showHardMemory` builds its own second action this way for
+    // the same reason.
+    //
+    // No `forProject`. That key exists so a background stop finishing can
+    // close its OWN waiting dialog and nothing else, and setting it here would
+    // let a stop still running on this row shut this refusal out from under
+    // the person reading it.
+    const actions = [["Close", "ghost", () => closeDialog()]];
+    if (project !== undefined) {
+      actions.push(["Kill it", "danger", () => killNow(project)]);
+    }
     showDialog({
+      // One paragraph, concatenated. `showDialog` assigns `textContent` and
+      // `.dialog-body` sets no `white-space`, so a `\n\n` here would render as
+      // a single space: a paragraph break to whoever wrote it and to nobody
+      // reading the page.
       title: "It was not asked to exit",
-      body: message,
-      actions: [["Close", "ghost", () => closeDialog()]],
+      body:
+        message
+        + " Killing it now ends the process immediately, and anything it has "
+        + "not written to disk is lost.",
+      actions,
     });
     return;
   }
