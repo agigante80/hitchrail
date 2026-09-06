@@ -1143,9 +1143,19 @@ def test_no_e2e_test_hardcodes_the_run_prefix() -> None:
       the bare form again. The guard was blind to the single realistic route
       back in.
 
-    A split literal (`"main~hrx" "-vessel"`) still evades this and is tracked
-    rather than defended against: nobody writes that by accident, and the parse
-    would have to reassemble adjacent constants to see it.
+    **An earlier version of this docstring named the wrong hole**, and said an
+    implicitly concatenated literal (`"main~hrx" "-vessel"`) evades this. It does
+    not: CPython folds implicit concatenation at parse time, so `ast` presents
+    one `Constant` reading `main~hrx-vessel` and the guard catches it. Verified.
+
+    What does evade it is EXPLICIT concatenation, `"hrx" + "-vessel"`, which is a
+    `BinOp` over two constants neither of which matches. Tracked rather than
+    defended against: nobody writes that by accident, and seeing it would mean
+    constant-folding the tree. `%` and `.format` are both caught, because the
+    pattern survives in the format string.
+
+    Recorded at length because the wrong version pointed a reader away from the
+    real gap, in the file whose whole purpose is that documentation is true.
     """
     import ast
 

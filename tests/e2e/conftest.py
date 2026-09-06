@@ -261,9 +261,17 @@ E2E_PREFIX = f"hrx{os.getpid()}-"
 # `SHOT_ROOT` already follows and states: neutral BY CONSTRUCTION rather than by
 # whoever looked at the image.
 #
-# Safe to pin there for the reason the isolation exists at all. #177 is about
-# two CONCURRENT runs sharing a machine wide process table; the shots tier is
-# deselected by default and run deliberately at a release, never twice at once.
+# Safe to pin there because #177 is about two CONCURRENT runs sharing a machine
+# wide process table, and the shots tier photographs a FIXED path
+# (`/tmp/hitchrail-demo`) which it deletes at setup, so it was already
+# single-instance by construction before this. The pin adds no new constraint.
+#
+# **Not because it "only runs at a release".** That reason was written here once
+# and is false: `AGENTS.md` documents `uv run pytest -m e2e` as the command for
+# the browser tier, and `-m e2e` OVERRIDES the `-m "not screenshots"` in addopts.
+# So an ordinary developer running the browser tier captures these images, which
+# is precisely how the pid reached them. #214 carries the concurrency question
+# that leaves open.
 #
 # It escaped once, in a1c0acb: `pytest -m e2e` overrides the default
 # `-m "not screenshots"`, so an ordinary e2e run recaptured all six images with

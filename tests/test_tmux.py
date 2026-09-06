@@ -8,6 +8,7 @@ tmux; this tier pins that the adapter builds what it believes it builds.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -327,6 +328,13 @@ def test_every_target_this_adapter_names_carries_our_prefix() -> None:
     Lowercase `-t` and `-s` only. Capital `-S` is two different flags in tmux,
     the socket path before the verb and the history start in
     `capture-pane -S -40`, and neither names a session.
+
+    **Stripping `=` and `:` is not laundering invariant 3.** Both decorations
+    are load bearing and have their own named regression tests,
+    `test_has_session_uses_the_anchored_target` and
+    `test_pane_pid_uses_the_colon_terminated_target`. What this asserts is the
+    part underneath them, and that pointer is here so nobody "simplifies" the
+    anchoring on the strength of seeing it discarded.
     """
     runner = FakeRunner()
     drive_every_method(Tmux(prefix="hr-", run=runner))
@@ -339,16 +347,53 @@ def test_every_target_this_adapter_names_carries_our_prefix() -> None:
             if arg in {"-t", "-s"}:
                 targets.append((verb, argv[i + 1]))
 
-    assert len(targets) >= 7, (
-        f"only {len(targets)} targets were seen across {len(runner.calls)} calls, "
-        f"so a path that names a session is not being driven and this test is "
-        f"proving less than it claims"
-    )
+    # Coverage is asserted STRUCTURALLY, next door in
+    # `test_the_sweep_drives_every_public_method`, not by a number here. A
+    # threshold was tried and was two below the real count, so deleting the two
+    # calls this test was written to add left it green: the count had exactly
+    # enough slack to hide the defect it was fixing.
+    assert targets, "the sweep produced no targets at all, so it proves nothing"
     for verb, target in targets:
         assert target.lstrip("=").rstrip(":").startswith("hr-"), (
             f"`{verb}` named `{target}`, which is outside the configured prefix, "
             f"so this adapter can reach a session that is not ours"
         )
+
+
+def test_the_sweep_drives_every_public_method() -> None:
+    """The sweeps above are only as good as what `drive_every_method` calls.
+
+    Two sweeps in this file assert properties of `runner.calls`, and both are
+    silently narrowed by a method the driver forgets. That already happened:
+    `keep_pane_on_exit` and `pane_is_dead` were absent, so a `keep_pane_on_exit`
+    that dropped the prefix passed every hermetic test in the project.
+
+    Asserted by introspection rather than by a count or a list, because the
+    failure mode is a method being ADDED to the adapter, and a hand maintained
+    list is exactly what does not notice that.
+    """
+    import inspect
+
+    # The methods that ISSUE A CALL, not every public one. `session_name`,
+    # `session_target` and `pane_target` are pure builders: they return a string
+    # and touch no runner, so driving them adds nothing to a sweep over
+    # `runner.calls`, and their shapes have named tests of their own.
+    #
+    # Derived from the source rather than listed, for the same reason the sweep
+    # itself stopped using an allowlist: a list is what fails to notice an
+    # addition, which is the whole failure mode here.
+    spawns = {
+        name
+        for name, value in vars(Tmux).items()
+        if not name.startswith("_") and callable(value) and "_argv(" in inspect.getsource(value)
+    }
+    driven = set(re.findall(r"tmux\.(\w+)\(", inspect.getsource(drive_every_method)))
+    missing = spawns - driven
+    assert not missing, (
+        f"`drive_every_method` never calls {sorted(missing)}, and each of those "
+        f"builds an argv, so every sweep in this file is blind to what they send. "
+        f"Add them to the driver."
+    )
 
 
 def test_the_socket_is_carried_on_every_call() -> None:
