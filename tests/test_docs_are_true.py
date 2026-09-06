@@ -943,6 +943,41 @@ def test_the_units_start_limit_is_where_systemd_reads_it() -> None:
         f"{burst} restarts {gap}s apart span {burst * gap}s, which is outside the "
         f"{window}s window, so the limit can never fire and the loop is unbounded"
     )
+    # #201. The budget also has to be long enough to outlast the network, or a
+    # unit binding a named address dies at boot on the interface it is racing.
+    # Measured: the address arrived after the 21s that 5 attempts bought.
+    assert burst * gap >= 60, (
+        f"{burst} restarts {gap}s apart give up after {burst * gap}s. "
+        f"`After=network.target` does not wait for an interface to have an "
+        f"address, so a named bind needs a budget that outlasts network bring "
+        f"up. See #201, where 21s was not enough on a real boot."
+    )
+
+
+def test_the_start_limit_is_not_what_keeps_a_refusal_stopped() -> None:
+    """#201 widened the start limit, and this is the property that made that
+    safe rather than a weakening of #170.
+
+    A deliberate refusal exits 2, and `RestartPreventExitStatus=2` means it is
+    never restarted at all, so it never spends an attempt from the budget. The
+    budget bounds an unhandled exception (exit 1) and a bind failure (exit 3).
+
+    If the prevented status is ever dropped, widening the burst turns every
+    refusal into a longer boot loop, which is exactly what #170 measured at 37
+    restarts. The two directives are therefore asserted together rather than
+    apart, because it is the PAIR that is correct.
+    """
+    sections = _unit_sections()
+    prevented = [d for d in sections["Service"] if d.startswith("RestartPreventExitStatus=")]
+    assert prevented == ["RestartPreventExitStatus=2"], (
+        "the unit no longer prevents restarting exit 2, so a deliberate "
+        "refusal now consumes the start limit and loops for as long as the "
+        "budget allows. #201 widened that budget on the strength of this line"
+    )
+    assert "Restart=on-failure" in sections["Service"], (
+        "Restart=always restarts a refusal whatever its exit code, which is "
+        "the boot loop #170 measured"
+    )
 
 
 def test_the_phone_doc_does_not_recommend_a_wildcard_bind() -> None:

@@ -19,11 +19,11 @@ from hitchrail.config import (
     TOKEN_ENV,
     Config,
     ConfigError,
-    is_wildcard_host,
     remote_reach,
 )
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
+from hitchrail.hostnames import reachable_hosts
 from hitchrail.roots import Root, RootError, parse_root_argument
 from hitchrail.server import create_app
 
@@ -192,7 +192,7 @@ def banner(config: Config) -> str:
     if not config.token:
         return ""
 
-    reachable = [h for h in config.allowed_hosts if not is_wildcard_host(h)]
+    reachable = reachable_hosts(config.host, config.allowed_hosts, config.extra_hosts)
     # #110, decided with the unit in hand. Under a service stdout IS journald,
     # so every line here lands in a persistent log readable by root and by the
     # `systemd-journal` group. A token printed to a terminal scrolls away with

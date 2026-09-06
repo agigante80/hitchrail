@@ -45,8 +45,27 @@ After=network.target
 # **In `[Unit]`, not `[Service]`.** They lived in `[Service]` until systemd 230
 # and are silently ignored there now, which is the worst possible failure for a
 # limit: it reads as configured and does nothing.
-StartLimitIntervalSec=60
-StartLimitBurst=5
+#
+# **#201 widened these from 5 in 60s, and the reason it is safe to widen is not
+# obvious from here.** The budget does NOT keep a deliberate refusal stopped:
+# a refusal exits 2 and `RestartPreventExitStatus=2` below means it is never
+# restarted at all, so it never consumes an attempt. What this limit bounds is
+# an unhandled exception, which exits 1, and a bind failure, which exits 3.
+#
+# The bind failure is why it had to move. `After=network.target` means the
+# networking stack is up, not that any interface has an address, so a unit
+# binding a NAMED address races the interface coming up. Measured on a real
+# boot: five `could not bind on any address` errors five seconds apart, the
+# budget spent in 21 seconds, and the unit dead until the machine was rebooted
+# again. The next boot started first time, so it is intermittent, which is the
+# worst shape for something that is supposed to survive a reboot.
+#
+# 12 attempts at `RestartSec=5` covers a minute of network bring up and still
+# terminates. Raise the window with the burst if you raise either: the test
+# asserts `burst * RestartSec` stays inside the window, or the limit can never
+# fire and the loop is unbounded again.
+StartLimitIntervalSec=120
+StartLimitBurst=12
 
 [Service]
 # `uv tool install hitchrail`, not `uvx`. uvx resolves and runs out of a cache

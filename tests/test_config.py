@@ -7,6 +7,7 @@ socket.
 
 from __future__ import annotations
 
+import ast
 import tomllib
 from collections.abc import Callable
 from pathlib import Path
@@ -1215,6 +1216,60 @@ def test_the_import_contract_covers_every_engine_layer_module() -> None:
         f"engine layer modules outside the import contract: {sorted(missing)}. "
         "Add them to `source_modules` in pyproject.toml, or to `web` here if "
         "they are genuinely part of the web layer."
+    )
+
+
+def test_every_environment_variable_the_product_reads_is_scrubbed() -> None:
+    """#203. The fixtures describe an empty machine, and the environment was
+    the one surface that rule was not applied to.
+
+    `JOURNAL_STREAM` was scrubbed at #110 and `HITCHRAIL_TOKEN` was not, so
+    four `test_cli.py` tests failed on every machine that runs Hitchrail and
+    passed in CI. Scrubbing the second one fixes today. This is what stops the
+    third: a new read of the environment fails here until somebody decides
+    whether the suite should inherit it.
+
+    `ast`, not a grep. A grep for `os.environ` matches this docstring, which is
+    the failure mode `test_the_engine_never_iterates_the_stop_keys` already
+    documents about greps that describe what they forbid.
+    """
+    src = Path(__file__).resolve().parents[1] / "src" / "hitchrail"
+    read: dict[str, str] = {}
+    for path in src.glob("*.py"):
+        tree = ast.parse(path.read_text())
+        # `ast.walk`, not `tree.body`: these live inside functions.
+        for node in ast.walk(tree):
+            # os.environ.get("X") and os.getenv("X")
+            if isinstance(node, ast.Call) and node.args:
+                target = ast.unparse(node.func)
+                if target in {"os.environ.get", "os.getenv"}:
+                    first = node.args[0]
+                    read[ast.unparse(first)] = path.name
+            # "X" in os.environ
+            if (
+                isinstance(node, ast.Compare)
+                and isinstance(node.ops[0], ast.In)
+                and ast.unparse(node.comparators[0]) == "os.environ"
+            ):
+                read[ast.unparse(node.left)] = path.name
+
+    # Guard the guard. If the parser stops matching, every assertion below is
+    # vacuously true and the next variable walks straight past it.
+    assert read, (
+        "the parser found no environment reads at all, which means it has "
+        "stopped matching rather than that the product stopped reading"
+    )
+
+    # The names as they appear in the source, which is how they are written in
+    # `conftest.AMBIENT_ENV` too. A literal string here would pass while the
+    # constant it duplicates drifted.
+    scrubbed = {"TOKEN_ENV", "JOURNAL_ENV"}
+    unscrubbed = {name: where for name, where in read.items() if name not in scrubbed}
+    assert not unscrubbed, (
+        f"environment variables read by the product and not scrubbed by "
+        f"`conftest.no_ambient_environment`: {unscrubbed}. Add them to "
+        f"`AMBIENT_ENV`, or to `scrubbed` here with the reason the suite "
+        f"should inherit the developer's value."
     )
 
 
