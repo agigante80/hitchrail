@@ -149,9 +149,15 @@ does not vendor or install any of them.
 | Needed | Why | Checked |
 |---|---|---|
 | **tmux** | every session Hitchrail starts lives in a tmux session; this is the whole mechanism, not an option | `tmux -V` |
-| **Claude Code on `PATH`** | it is what Hitchrail runs. Configurable with `--agent-binary` | `claude --version` |
+| **Claude Code on `PATH`** | it is what Hitchrail runs. Configurable with `--agent-binary`. The binary is self contained: no node, no npm, whichever installer you used, because the npm package ships the same native executable | `claude --version` |
 | **Linux** | memory pressure is read from `/proc/meminfo`, and the process table from `ps`. macOS has neither in this form, which is why the package declares `Operating System :: POSIX :: Linux` | |
 | **Python 3.11+** | `uvx` and `pipx` handle this for you | `python3 --version` |
+
+**Hitchrail installs no runtime and checks no version of one.** That table is
+the whole list, and the agent needs nothing beyond itself. Your own PROJECTS are
+a separate question: if an agent works in a node project it needs node on its
+PATH, and under a systemd unit that PATH is the unit's `Environment=PATH`, not
+your login's. That is your line to set, not something Hitchrail can know.
 
 Installing Hitchrail with `uvx` will succeed on a machine with no tmux and no
 Claude Code, because neither is a Python dependency. It will then fail at the
@@ -211,6 +217,17 @@ loginctl enable-linger "$USER"
 cat ~/.config/hitchrail/env
 #   http://192.168.1.10:8787/grant#token=<the value from that file>
 ```
+
+**`enable-linger` is what makes the PATH in that unit matter.** It starts the
+user manager at boot, before any login, when the manager's PATH is systemd's
+fallback and does not include `~/.local/bin`. The template sets its own PATH so
+it can still find the agent. An interactive test will pass either way, because
+starting the unit by hand happens after a login has already fixed the PATH,
+which is what makes this show up only after a reboot.
+
+If your agent needs something outside those directories, add it to that line,
+and prefer a stable path over a version pinned one: a pinned one goes stale at
+the next upgrade and fails at the next boot rather than at the upgrade.
 
 `journalctl --user -u hitchrail` shows the startup banner, which lists every
 address the server will answer to. It prints the links without the `#token=`

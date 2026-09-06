@@ -132,3 +132,74 @@ def test_the_publishing_job_asks_for_no_more_than_it_needs() -> None:
     assert "environment:" in text, (
         "the publish job has no environment, so nothing gates it on a human"
     )
+
+
+# -- #155: what keeps those pins from going stale ---------------------------
+
+DEPENDABOT = Path(__file__).resolve().parents[1] / ".github" / "dependabot.yml"
+
+# Line based, like the pinning check above, and for the same reason: this
+# project has three runtime dependencies and a YAML parser is not one of them.
+_ECOSYSTEM = re.compile(r"^\s*-\s*package-ecosystem:\s*\"?([\w-]+)", re.M)
+_TARGET = re.compile(r"^\s*target-branch:\s*\"?([\w/-]+)", re.M)
+
+
+def test_the_pins_have_something_that_updates_them() -> None:
+    """A SHA pin is correct and it cannot update itself.
+
+    The test above asserts every action is pinned. Nothing asserted that
+    anybody would ever learn a newer version exists, which is the other half of
+    the same control: a person reading `# v4.2.1` cannot see that v4.3.0
+    shipped.
+    """
+    assert DEPENDABOT.exists(), (
+        "nothing updates the pinned actions, so the pin above degrades from a "
+        "control into a snapshot of whatever was current when it was written"
+    )
+    assert "github-actions" in _ECOSYSTEM.findall(DEPENDABOT.read_text())
+
+
+def test_every_ecosystem_sends_its_version_updates_where_they_can_merge() -> None:
+    """#155. `main` requires the `version-bumped` check, which fails unless
+    `pyproject.toml`'s version is ahead of the latest release tag, and a
+    dependency bump does not bump the project version.
+
+    So a version update opened against `main` is red on a required check by
+    construction. An ecosystem added later without a `target-branch` inherits
+    the default branch, which is `main`, and produces exactly that: a pull
+    request nobody can act on rather than a visible failure.
+
+    **A SECURITY update ignores this and goes to the default branch**, which is
+    deliberate and accepted: it is read as a notification, and the fix is
+    implemented on `develop` like every other change. Nothing here can affect
+    that, which is why this test is about version updates only.
+    """
+    text = DEPENDABOT.read_text()
+    ecosystems = _ECOSYSTEM.findall(text)
+    targets = _TARGET.findall(text)
+    assert len(targets) == len(ecosystems), (
+        f"{len(ecosystems)} ecosystems and {len(targets)} target-branch lines: one "
+        "of them opens its version updates against the release branch, where the "
+        "release gate fails them by construction"
+    )
+    assert set(targets) == {"develop"}, targets
+
+
+def test_the_python_ecosystem_updates_only_what_this_project_declares() -> None:
+    """Direct dependencies only, and transitive ones left alone.
+
+    A vulnerability reached through a transitive package is fixed by moving the
+    direct dependency that pulls it in, not by pinning something this project
+    does not declare. A pull request against the transitive package is one
+    nobody would merge, and a queue of those is how the one that matters gets
+    skimmed past.
+
+    Asserted for `uv` only. Every action a workflow names is direct, so the
+    same filter on `github-actions` would express nothing.
+    """
+    text = DEPENDABOT.read_text()
+    uv_stanza = text.split('package-ecosystem: "uv"', 1)[1].split("package-ecosystem:", 1)[0]
+    assert 'dependency-type: "direct"' in uv_stanza, (
+        "the Python ecosystem would open pull requests for transitive packages, "
+        "which are fixed by moving a direct dependency rather than by pinning them"
+    )

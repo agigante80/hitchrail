@@ -13,14 +13,17 @@ import pytest
 from starlette.responses import Response
 
 from conftest import (
+    CLEAR_INPUT_BOX,
     DIRTY_INPUT_BOX,
+    SHELL_PROMPT_STALE,
+    TRUST_MODAL,
     FakeClock,
     FakeTmux,
     ScriptedProcs,
     failing_procs,
     procs_from,
 )
-from hitchrail import pages, server
+from hitchrail import claude_ipc, pages, server
 from hitchrail.config import Config
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
@@ -1450,3 +1453,148 @@ async def test_every_font_the_stylesheet_names_is_actually_served(
         r = await client.get(f"/{url}", headers=HEADERS)
         assert r.status_code == 200, f"{url} is named by app.css and 404s"
         assert r.headers["content-type"] == "font/woff2"
+
+
+# #204. Answering a prompt the agent is blocked on.
+
+
+async def test_a_key_reaches_the_pane_when_the_screen_is_asking(
+    client: httpx.AsyncClient, engine: Engine, tmux: FakeTmux
+) -> None:
+    tmux.pane_text[proj("vessel")] = TRUST_MODAL
+    r = await client.post(
+        f"/api/sessions/{proj('vessel')}/answer", headers=HEADERS, json={"key": "Enter"}
+    )
+    assert r.status_code == 200
+    assert (proj("vessel"), ("Enter",)) in tmux.sent
+
+
+async def test_an_ordinary_input_box_is_not_a_question_to_answer(
+    client: httpx.AsyncClient, engine: Engine, tmux: FakeTmux
+) -> None:
+    """409, and nothing sent.
+
+    This is the race the re-read closes, arriving through the real route: the
+    operator saw a modal, the agent answered it, and `Enter` would now submit
+    whatever the box holds.
+    """
+    tmux.pane_text[proj("vessel")] = CLEAR_INPUT_BOX
+    r = await client.post(
+        f"/api/sessions/{proj('vessel')}/answer", headers=HEADERS, json={"key": "Enter"}
+    )
+    assert r.status_code == 409
+    assert r.json()["code"] == "not_asking"
+    assert tmux.sent == [], "a key was sent to a session that was not asking"
+
+
+async def test_a_key_outside_the_set_is_400_and_reads_no_pane(
+    client: httpx.AsyncClient, engine: Engine, tmux: FakeTmux
+) -> None:
+    """400 rather than 409, because no screen would make it acceptable.
+
+    A client given 409 for this would reasonably retry it forever. The pane is
+    not read either, so an unsendable key cannot be used to probe what is on a
+    session's screen.
+    """
+    tmux.pane_text[proj("vessel")] = TRUST_MODAL
+    before = tmux.capture_calls
+    r = await client.post(
+        f"/api/sessions/{proj('vessel')}/answer",
+        headers=HEADERS,
+        json={"key": "C-c"},
+    )
+    assert r.status_code == 400
+    assert r.json()["code"] == "invalid_key"
+    assert tmux.sent == []
+    assert tmux.capture_calls == before, "a pane was read for a key we would never send"
+
+
+async def test_a_body_without_a_key_is_refused(
+    client: httpx.AsyncClient, engine: Engine, tmux: FakeTmux
+) -> None:
+    tmux.pane_text[proj("vessel")] = TRUST_MODAL
+    r = await client.post(
+        f"/api/sessions/{proj('vessel')}/answer", headers=HEADERS, json={"nope": 1}
+    )
+    assert r.status_code == 400
+    assert r.json()["code"] == "invalid_body"
+    assert tmux.sent == []
+
+
+async def test_answering_the_self_project_is_refused(
+    root: pathlib.Path,
+) -> None:
+    """Hitchrail typing into the session that is serving the request."""
+    config = make_config(
+        root,
+        sessions_dir=root / ".sessions",
+        agent_config_path=NO_AGENT_CONFIG,
+        self_project=proj("vessel"),
+    )
+    engine = make_engine(config, FakeTmux(), procs_from(""))
+    async with client_for(engine, config) as c:
+        r = await c.post(
+            f"/api/sessions/{proj('vessel')}/answer", headers=HEADERS, json={"key": "Enter"}
+        )
+    assert r.status_code == 423
+    assert r.json()["code"] == "self_protected"
+
+
+async def test_answering_a_stale_session_does_not_type_at_its_shell(
+    config: Config, tmux: FakeTmux
+) -> None:
+    """#204 must refuse `stale` for the reason `stop` already refuses it.
+
+    A stale tmux session is a pane whose agent has gone, so it holds a shell.
+    `stop` recorded that typing there is the #91 authority hazard bought for
+    nothing, because bash shrugged at `/exit`.
+
+    It is not bought for nothing here. `Up` recalls that shell's previous
+    history entry and `Enter` runs it, and repeated calls walk back through the
+    history as far as it goes.
+
+    **The pane check cannot catch this**, which is why the guard is in the
+    engine. `SHELL_PROMPT_STALE` is the ornament followed by an ordinary space,
+    exactly like the trust modal, because U+276F is the default prompt
+    character of Starship, Pure and Powerlevel10k. `awaits_answer` says True
+    about it, correctly by its own definition, and is talking about a shell.
+
+    **The fixture is the assertion here.** The older stale test uses
+    `user@host:/tmp$ `, which carries no ornament, so the adapter refuses on its
+    own and a test written that way passes against an engine with no stale
+    guard at all. `test_the_stale_fixture_really_does_look_like_a_question`
+    keeps this one honest.
+    """
+    tmux.pane_text[proj("vessel")] = SHELL_PROMPT_STALE
+    stale = make_engine(config, tmux, procs_from(STALE_PS))
+    async with client_for(stale, config) as c:
+        listed = (await c.get("/api/projects", headers=HEADERS)).json()["projects"]
+        row = next(p for p in listed if p["name"] == proj("vessel"))
+        assert row["state"] == "stale", "the machine under this test is not stale"
+
+        first = await c.post(
+            f"/api/sessions/{proj('vessel')}/answer", headers=HEADERS, json={"key": "Up"}
+        )
+        second = await c.post(
+            f"/api/sessions/{proj('vessel')}/answer",
+            headers=HEADERS,
+            json={"key": "Enter"},
+        )
+
+    assert first.status_code == 409
+    assert first.json()["code"] == "no_agent"
+    assert second.status_code == 409
+    assert tmux.sent == [], f"keys reached a stale session's shell: {tmux.sent}"
+
+
+def test_the_stale_fixture_really_does_look_like_a_question() -> None:
+    """The fixture above is only meaningful if the predicate is fooled by it.
+
+    Without this, a later edit could make `SHELL_PROMPT_STALE` something
+    `awaits_answer` rejects on its own, and the stale test would keep passing
+    while proving nothing about the engine's guard. That is exactly how the
+    defect this pair was written for went unnoticed.
+    """
+    assert claude_ipc.awaits_answer(SHELL_PROMPT_STALE) is True
+    # And the prompt the older stale test uses does NOT, which is the contrast.
+    assert claude_ipc.awaits_answer("user@host:/tmp$ ") is None

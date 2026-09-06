@@ -137,7 +137,13 @@ Steps 1 to 5 happen ON the pull request. Steps 6 onward happen after it merges.
    as a MINOR, and both changes carried by the first release are breaking.
 
 2. **Move the `Unreleased` section of `CHANGELOG.md`** under the new version
-   heading, and write anything missing. Entries say what an operator must DO,
+   heading, written as `## 0.4.0 - 2026-09-05`: the number, a space, a hyphen,
+   the date, and **no brackets**. Keep a Changelog puts brackets round the
+   number and `release.yml` cannot parse that form, so a bracketed heading
+   publishes no notes and stops the release after the merge. That is checked
+   locally now, and the check exists because it was not.
+
+   Write anything missing. Entries say what an operator must DO,
    not what changed. A security fix says plainly what was reachable and by
    whom, including the parts that are embarrassing.
 

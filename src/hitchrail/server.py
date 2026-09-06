@@ -40,8 +40,9 @@ ROUTING_404_MESSAGE = str(HTTPException(status_code=404).detail)
 
 SWEEP_INTERVAL_S = 1.0
 
-# The only route that reads a body takes {"name": <a project name>}, and a
-# project name is capped at 64 characters, so this is three orders of magnitude
+# Two routes read a body: create takes {"name": <a project name>} and answer
+# takes {"key": <one of ANSWER_KEYS>}. A project name is capped at 64 characters
+# and a key is shorter still, so this is three orders of magnitude
 # more than the contract needs.
 #
 # **413 is the one failure that is not the documented envelope**, and that is a
@@ -320,6 +321,55 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
             return _error(503, "machine_unreadable", str(exc))
         return JSONResponse(session.as_dict(), status_code=202)
 
+    async def answer(request: Request) -> Response:
+        """Carry one keypress to a prompt the operator read (#204).
+
+        POST, not PUT, and not on the session path itself: this is not an
+        update to the session, it is an event delivered to it. Same shape as
+        `/kill` for the same reason.
+
+        **The key is never taken from the path or the query string.** A body
+        keeps it out of the journal, out of `Referer`, and out of any proxy log
+        between a phone and this process. It is one keypress into a shell; it
+        does not belong in a URL.
+
+        409 rather than 400 when the screen no longer asks. The request was
+        well formed and would have been honoured a moment earlier, which is a
+        state conflict and not a client mistake, and the interface tells the
+        operator to look again rather than to fix their request.
+        """
+        name = request.path_params["name"]
+        try:
+            body = await request.json()
+            key = body["key"]
+        except (ValueError, TypeError, KeyError):
+            return _error(400, "invalid_body", "a JSON body with a 'key' is required")
+        if not isinstance(key, str):
+            return _error(400, "invalid_body", "a JSON body with a 'key' is required")
+        # 400 and not 409. A key outside the set is refused whatever the screen
+        # is doing, so it is a malformed request rather than a state conflict,
+        # and a client that gets 409 would reasonably retry it forever.
+        #
+        # The adapter checks this again before it reads any pane. Two guards on
+        # purpose: this one is for the status code, that one is the guard.
+        if key not in eng.ANSWER_KEYS:
+            return _error(400, "invalid_key", f"{key!r} is not a key Hitchrail will send")
+        try:
+            session = await in_thread(engine.answer, name, key)
+        except eng.UnknownProject as exc:
+            return _error(404, "unknown_project", str(exc))
+        except eng.Protected as exc:
+            return _error(423, "self_protected", str(exc))
+        except eng.NotRunning as exc:
+            return _error(409, "not_running", str(exc))
+        except eng.NoAgent as exc:
+            return _error(409, "no_agent", str(exc))
+        except eng.NotAsking as exc:
+            return _error(409, "not_asking", str(exc))
+        except eng.MachineUnreadable as exc:
+            return _error(503, "machine_unreadable", str(exc))
+        return JSONResponse(session.as_dict(), status_code=200)
+
     async def kill(request: Request) -> Response:
         """The destructive one, on its own path and its own method.
 
@@ -501,6 +551,7 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
             Route("/api/sessions/{name}", start, methods=["POST"]),
             Route("/api/sessions/{name}", stop, methods=["DELETE"]),
             # Its own route, deliberately. #52 and the design's section 6.
+            Route("/api/sessions/{name}/answer", answer, methods=["POST"]),
             Route("/api/sessions/{name}/kill", kill, methods=["POST"]),
             Route("/api/sessions/{name}/logs", logs, methods=["GET"]),
             Route("/api/sessions/{name}/url", session_url, methods=["GET"]),

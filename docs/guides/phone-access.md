@@ -130,6 +130,13 @@ every start, so a service that restarts invalidates the link saved on your
 phone. Put `HITCHRAIL_TOKEN` in the unit's `EnvironmentFile` and `chmod 600`
 it, because anyone who can read that file can run code as you.
 
+**A refusal stays stopped, and a bind failure retries.** The unit prevents a
+restart on exit 2, which is every deliberate refusal: a blank `HITCHRAIL_TOKEN`,
+a root that is not a directory, a typo in the `ExecStart`. Without that it
+retried them every five seconds forever, and the journal filled with copies of
+the message telling you what was wrong. A port already in use is exit 3 and is
+still retried, because that is usually a previous instance still shutting down.
+
 **The unit sets `PYTHONUNBUFFERED=1`, and the banner below is why.** Python
 block buffers stdout when it is not a terminal, and under a unit stdout is the
 journal. Hitchrail flushes the banner itself since #145, so the template's line

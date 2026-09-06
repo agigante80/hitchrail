@@ -7,6 +7,7 @@ socket.
 
 from __future__ import annotations
 
+import ast
 import tomllib
 from collections.abc import Callable
 from pathlib import Path
@@ -947,7 +948,18 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # escapes are deliberately NOT stripped here: the stripper eats one
         # printable character after a two character escape (#97), and the
         # character it would eat is the U+00A0 this predicate reads.
-        "claude_ipc.py": 692,
+        # 692 to 781 for #204: ANSWER_KEYS, `awaits_answer` and `send_answer`.
+        # The behaviour is about fifteen lines; the rest is why each narrowing
+        # is a security property and not a preference, which is the whole of
+        # this feature's safety case. A literal key set, `None` not collapsing
+        # into answerable, and the re-read living INSIDE the send are each one
+        # edit away from becoming the terminal the roadmap defers, and a reader
+        # who does not know that will make that edit and think it a tidy-up.
+        # 781 to 800 for #208: the known gap in `awaits_answer`, recorded at the
+        # predicate rather than only in the ticket. A stale modal reads as live,
+        # which is cosmetic for #100's badge and a keystroke for #204, and the
+        # next reader of this function is the one who needs to know that.
+        "claude_ipc.py": 800,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.
@@ -1005,7 +1017,17 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # already argues that in its own docstring. And the subscriber gate,
         # because an idle tick used to cost nothing and this had made it a `ps`
         # and a `tmux` call every second for the life of a user unit.
-        "engine.py": 1037,
+        # 1037 to 1078 for #204: `Engine.answer`, one keypress from a person
+        # to a prompt they read. Mostly the argument for why this is not the
+        # deferred terminal, kept at the method rather than only in the ticket,
+        # because the ticket is not what the next editor is looking at.
+        # 1086 to 1122: the stale refusal on `answer`, found by the security
+        # audit of #204 before release. A stale session is a terminal holding a
+        # shell, and relaying a person's chosen answer to a shell is the #91
+        # hazard bought for something. The length is the argument for why the
+        # ADAPTER cannot make that call, which is the thing a later reader would
+        # otherwise "simplify" by moving the check next to the pane read.
+        "engine.py": 1122,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -1130,7 +1152,15 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 517 to 523 for #100. Six lines: the sweep now calls a second engine
         # method, and the comment says why that call is here rather than on the
         # listing route, which is the whole decision the ticket turned on.
-        "server.py": 523,
+        # 523 to 565 for #204: POST /api/sessions/{name}/answer.
+        #
+        # **This is past the 550 the note above names as the point to look for
+        # a seam with fresh eyes.** Not split here, because doing it inside a
+        # feature commit would mean moving routes and adding one in the same
+        # diff, and the security review of the new route is worth more than the
+        # tidiness. Tracked as its own ticket rather than left as a silent
+        # overrun.
+        "server.py": 574,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"
@@ -1215,6 +1245,60 @@ def test_the_import_contract_covers_every_engine_layer_module() -> None:
         f"engine layer modules outside the import contract: {sorted(missing)}. "
         "Add them to `source_modules` in pyproject.toml, or to `web` here if "
         "they are genuinely part of the web layer."
+    )
+
+
+def test_every_environment_variable_the_product_reads_is_scrubbed() -> None:
+    """#203. The fixtures describe an empty machine, and the environment was
+    the one surface that rule was not applied to.
+
+    `JOURNAL_STREAM` was scrubbed at #110 and `HITCHRAIL_TOKEN` was not, so
+    four `test_cli.py` tests failed on every machine that runs Hitchrail and
+    passed in CI. Scrubbing the second one fixes today. This is what stops the
+    third: a new read of the environment fails here until somebody decides
+    whether the suite should inherit it.
+
+    `ast`, not a grep. A grep for `os.environ` matches this docstring, which is
+    the failure mode `test_the_engine_never_iterates_the_stop_keys` already
+    documents about greps that describe what they forbid.
+    """
+    src = Path(__file__).resolve().parents[1] / "src" / "hitchrail"
+    read: dict[str, str] = {}
+    for path in src.glob("*.py"):
+        tree = ast.parse(path.read_text())
+        # `ast.walk`, not `tree.body`: these live inside functions.
+        for node in ast.walk(tree):
+            # os.environ.get("X") and os.getenv("X")
+            if isinstance(node, ast.Call) and node.args:
+                target = ast.unparse(node.func)
+                if target in {"os.environ.get", "os.getenv"}:
+                    first = node.args[0]
+                    read[ast.unparse(first)] = path.name
+            # "X" in os.environ
+            if (
+                isinstance(node, ast.Compare)
+                and isinstance(node.ops[0], ast.In)
+                and ast.unparse(node.comparators[0]) == "os.environ"
+            ):
+                read[ast.unparse(node.left)] = path.name
+
+    # Guard the guard. If the parser stops matching, every assertion below is
+    # vacuously true and the next variable walks straight past it.
+    assert read, (
+        "the parser found no environment reads at all, which means it has "
+        "stopped matching rather than that the product stopped reading"
+    )
+
+    # The names as they appear in the source, which is how they are written in
+    # `conftest.AMBIENT_ENV` too. A literal string here would pass while the
+    # constant it duplicates drifted.
+    scrubbed = {"TOKEN_ENV", "JOURNAL_ENV"}
+    unscrubbed = {name: where for name, where in read.items() if name not in scrubbed}
+    assert not unscrubbed, (
+        f"environment variables read by the product and not scrubbed by "
+        f"`conftest.no_ambient_environment`: {unscrubbed}. Add them to "
+        f"`AMBIENT_ENV`, or to `scrubbed` here with the reason the suite "
+        f"should inherit the developer's value."
     )
 
 

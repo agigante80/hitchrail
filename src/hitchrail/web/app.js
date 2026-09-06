@@ -231,11 +231,11 @@ function metaFor(project) {
   // that prompt on the operator's behalf: that would be agreeing to trust a
   // folder for them, silently, which needs its own argument and does not have
   // one (#88).
-  if (project.awaiting_trust) return "waiting to be trusted  ·  open it once in a terminal";
+  if (project.awaiting_trust) return "waiting to be trusted  ·  open the pane to answer";
   // #101. Set when a stop's wait ended with the agent on a prompt. The row has
   // to carry it too: the dialog can be dismissed, and the session is still
   // sitting there waiting for somebody.
-  if (project.awaiting_input) return "waiting for an answer  ·  open it in a terminal";
+  if (project.awaiting_input) return "waiting for an answer  ·  open the pane to answer";
   if (project.pid === null) return "";
   return `${formatMb(project.ram_mb)}  ·  up ${formatUptime(project.uptime_s)}`;
 }
@@ -683,7 +683,9 @@ async function beginStop(project) {
     method: "DELETE",
   });
   if (!result.ok) {
-    showRefusal(result);
+    // The row goes with it: `stop_unsafe` is refused here and nowhere else,
+    // and the dialog that reports it offers a kill that has to name a session.
+    showRefusal(result, project);
     return;
   }
   await refresh();
@@ -834,7 +836,7 @@ async function killNow(project) {
   });
   closeDialog();
   if (!result.ok) {
-    showRefusal(result);
+    showRefusal(result, project);
     return;
   }
   await refresh();
@@ -858,7 +860,7 @@ export function setStopPatience(ms) {
   stopPatienceMs = ms;
 }
 
-function showRefusal(result) {
+function showRefusal(result, project) {
   const { code, message } = result.body;
   if (result.status === 401) {
     // The token is the whole auth model, so an expired or revoked one is a
@@ -914,14 +916,49 @@ function showRefusal(result) {
     // over. The exit command is the thing that was not sent, and that is what
     // the title says.
     //
-    // No Kill button here. The person asked to stop gently and got an honest
-    // "not from here"; putting the destructive path in front of them as the
-    // answer to that is the escalation-by-default section 7 forbids. Kill is
-    // still on the row, which is where they chose it deliberately.
+    // #169 put the kill here, and the comment this replaces is why the ticket
+    // was filed. It read "Kill is still on the row, which is where they chose
+    // it deliberately", and that was false: `renderRow` renders Open, Get
+    // link, Start, Stop and Clear, and no kill at all. `killNow` was reachable
+    // from three places and all three sit downstream of a `DELETE` that
+    // SUCCEEDED, so a refusal here ended the flow before any of them. The
+    // session could not be ended from Hitchrail at all.
+    //
+    // Section 7 forbids escalation by DEFAULT, not availability. Close is
+    // first, the kill is second and `danger`, and the warning is the same one
+    // `showTimedOut` carries: that is the shape the two timeout dialogs
+    // already use for the identical situation reached by a different road.
+    // Offering it stays ours; choosing it stays the operator's.
+    //
+    // Still NOT on the row. A kill control on every running row is the
+    // escalation by default the rule does forbid, and it is deliberately a
+    // separate question.
+    // `stop_unsafe` comes back from the stop route alone, and that route
+    // passes the row it acted on, so every path that reaches here has one.
+    // The guard is for the other five call sites `showRefusal` serves, which
+    // have no row to give: a Kill that cannot name a session is a tap that
+    // refuses, and `showHardMemory` builds its own second action this way for
+    // the same reason.
+    //
+    // No `forProject`. That key exists so a background stop finishing can
+    // close its OWN waiting dialog and nothing else, and setting it here would
+    // let a stop still running on this row shut this refusal out from under
+    // the person reading it.
+    const actions = [["Close", "ghost", () => closeDialog()]];
+    if (project !== undefined) {
+      actions.push(["Kill it", "danger", () => killNow(project)]);
+    }
     showDialog({
+      // One paragraph, concatenated. `showDialog` assigns `textContent` and
+      // `.dialog-body` sets no `white-space`, so a `\n\n` here would render as
+      // a single space: a paragraph break to whoever wrote it and to nobody
+      // reading the page.
       title: "It was not asked to exit",
-      body: message,
-      actions: [["Close", "ghost", () => closeDialog()]],
+      body:
+        message
+        + " Killing it now ends the process immediately, and anything it has "
+        + "not written to disk is lost.",
+      actions,
     });
     return;
   }
@@ -1031,6 +1068,88 @@ function showDeadStart(project, body) {
   });
 }
 
+/* -- answering a prompt the agent is blocked on (#204) ------------------ */
+
+// The keys this interface offers, and the only ones the server will carry.
+// Mirrors `ANSWER_KEYS` in `claude_ipc.py`, and a test asserts the two lists
+// are the same, because a key offered here and refused there is a button that
+// does nothing.
+//
+// **There is deliberately no text field, and adding one is the line.** The
+// safety of this whole path is that the operator reads Claude Code's own words
+// in the pane above and presses the key those words name. A field would let
+// Hitchrail carry an instruction the pane never offered, which is the terminal
+// `docs/roadmap.md` defers.
+//
+// The digits are shown WITHOUT reading the prompt to see which it names.
+// Parsing the options is the version-volatile thing this project has got wrong
+// three times, and offering a wrong list means a keypress that means something
+// other than its label.
+export const ANSWER_KEYS = [
+  "Up", "Down", "Enter", "Escape",
+  "1", "2", "3", "4", "5", "6", "7", "8", "9",
+];
+
+// One send at a time. A phone double-tap would otherwise queue two POSTs, and
+// while the server's re-read refuses the second in the ordinary case, "the
+// second one is usually refused" is not a thing to rely on for a keystroke into
+// a shell. Module scoped rather than per-button: the hazard is two KEYS, not
+// one button twice.
+let answerInFlight = false;
+
+async function sendAnswer(project, key, pane) {
+  if (answerInFlight) return;
+  answerInFlight = true;
+  try {
+    await sendAnswerOnce(project, key, pane);
+  } finally {
+    answerInFlight = false;
+  }
+}
+
+async function sendAnswerOnce(project, key, pane) {
+  const result = await api(`/api/sessions/${encodeURIComponent(project.name)}/answer`, {
+    method: "POST",
+    body: JSON.stringify({ key }),
+  });
+  if (!result.ok) {
+    // Includes `not_asking`, which is the ordinary case rather than an error:
+    // the screen moved on between the capture and the press.
+    showRefusal(result);
+    return;
+  }
+  // Re-read rather than assuming. The operator pressed a key at a screen and
+  // the only honest confirmation is the screen afterwards.
+  const fresh = await api(`/api/sessions/${encodeURIComponent(project.name)}/logs?lines=40`);
+  if (fresh.ok) {
+    pane.textContent = fresh.body.text || "The pane has printed nothing yet.";
+  }
+}
+
+function answerPad(project, pane) {
+  const pad = document.createElement("div");
+  pad.className = "answer-pad";
+
+  const note = document.createElement("p");
+  note.className = "meta";
+  note.textContent = "Read the question above, then press the key it names.";
+  pad.appendChild(note);
+
+  const keys = document.createElement("div");
+  keys.className = "answer-keys";
+  for (const key of ANSWER_KEYS) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "answer-key";
+    button.textContent = key;
+    button.setAttribute("aria-label", `Send ${key}`);
+    button.addEventListener("click", () => sendAnswer(project, key, pane));
+    keys.appendChild(button);
+  }
+  pad.appendChild(keys);
+  return pad;
+}
+
 /* -- the log drawer ---------------------------------------------------- */
 
 async function openLogs(project) {
@@ -1044,10 +1163,24 @@ async function openLogs(project) {
   const pane = document.createElement("pre");
   pane.className = "log-pane";
   pane.textContent = result.body.text || "The pane has printed nothing yet.";
+  // #204. The keypad appears only for a row the sweep has already flagged as
+  // waiting on a person. Not on every log view: a keypad under a healthy
+  // session invites a keystroke into a working agent, and the flag is the same
+  // one the row badge uses, so what the list says and what this offers agree.
+  //
+  // The flag is a hint, never the guard. It is up to 30s old by `attention.TTL_S`,
+  // and the server re-reads the pane inside the send regardless.
+  const waiting = project.awaiting_trust || project.awaiting_input;
+  const extra = document.createElement("div");
+  extra.appendChild(pane);
+  if (waiting) extra.appendChild(answerPad(project, pane));
+
   showDialog({
     title: project.name,
-    body: "last 40 lines of the pane",
-    extra: pane,
+    body: waiting
+      ? "this session is waiting for an answer"
+      : "last 40 lines of the pane",
+    extra,
     actions: [["Close", "ghost", () => closeDialog()]],
   });
 }

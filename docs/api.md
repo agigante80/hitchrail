@@ -71,6 +71,7 @@ See `CHANGELOG.md`.
 | `POST` | `/api/sessions/{name}` | start a session |
 | `DELETE` | `/api/sessions/{name}` | begin a graceful stop, returns immediately |
 | `POST` | `/api/sessions/{name}/kill` | kill now, valid at any point |
+| `POST` | `/api/sessions/{name}/answer` | send one key to a prompt the agent is blocked on |
 | `GET` | `/api/sessions/{name}/logs` | tail of the pane |
 | `GET` | `/api/sessions/{name}/url` | the session's link, once it has one |
 | `GET` | `/api/events` | SSE stream of state changes |
@@ -79,6 +80,41 @@ See `CHANGELOG.md`.
 client that meant to be gentle is never one query parameter away from a kill.
 The graceful call returns as soon as the request is sent and reports progress
 over the event stream like every other state change.
+
+### `POST /api/sessions/{name}/answer`
+
+Body: `{"key": "Enter"}`. One key, from a fixed set, delivered to a session that
+is sitting on a question it cannot answer itself.
+
+```
+Up  Down  Enter  Escape  1 2 3 4 5 6 7 8 9
+```
+
+**That set is the whole of what this route will send, and it is a literal in
+the code rather than a pattern.** There is no free text member. This is not the
+"send input to a session" that `docs/roadmap.md` defers: that is an input box
+carrying arbitrary text on demand, and it stays deferred. This carries one
+keypress in reply to words the operator read on screen.
+
+The key travels in the body and never in the path or query string, so it stays
+out of journals, `Referer` headers and any proxy log between a phone and this
+process.
+
+The pane is re-read immediately before the key is sent. A screen that no longer
+holds a question is `not_asking` (409) and nothing is sent, including when the
+pane cannot be read at all. Refusing on "cannot tell" is deliberate: a key not
+sent costs another look, and one sent wrongly cannot be recalled.
+
+Refused for the self project (`self_protected`, 423) like every other mutating
+route, and `no_agent` (409) for both states that hold no agent to answer:
+
+- **detached**, which has no terminal to answer in at all
+- **stale**, which is a tmux session whose agent has gone, so the pane holds a
+  shell. Sending a key there types at a shell rather than an agent, and `Up`
+  followed by `Enter` would re-run whatever that shell last ran. The pane check
+  cannot catch it, because U+276F is the default prompt character of Starship,
+  Pure and Powerlevel10k, so a stale pane on a developer's machine looks exactly
+  like a prompt awaiting an answer.
 
 ## Session states
 
@@ -136,6 +172,8 @@ than by position.
 | `already_running` | 409 | that project already has a live session |
 | `locked` | 409 | a start is already in flight for that project |
 | `no_agent` | 409 | there is no agent to act on, so the request cannot be honoured |
+| `invalid_key` | 400 | the key asked for is not one of the keys Hitchrail will send |
+| `not_asking` | 409 | a key was sent but the screen is not showing a question to answer |
 | `not_running` | 409 | a stop or kill was asked for something that is not running |
 | `ram_soft` | 409 | memory is tight; retry with acknowledgement to start anyway |
 | `stop_unsafe` | 409 | the pane is not in a state where a stop can be requested safely |

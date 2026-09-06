@@ -292,9 +292,19 @@ seam that is already there.
 
 ## Git
 
-Work on `develop`. `main` is the release branch and is reached only by pull request,
-which is what makes the release gate real: it fires on a PR to `main` and blocks the
-merge unless `pyproject.toml`'s version is ahead of the latest release tag.
+Work on `develop`. `main` is the default branch and the release branch, reached
+only by pull request, which is what makes the release gate real: it fires on a PR
+to `main` and blocks the merge unless `pyproject.toml`'s version is ahead of the
+latest release tag.
+
+**`main` stays the default deliberately, and #155 is where that was weighed.**
+The default branch is what a stranger gets from `git clone` and what the project
+page renders, and this is a published package, so it points at released code.
+The cost is that Dependabot always opens a SECURITY update against the default
+branch, whatever `dependabot.yml` says, so those land on `main` and fail the
+release gate. That is accepted: such a pull request is read as a NOTIFICATION,
+and the fix is implemented on `develop` like every other change. Version updates
+carry `target-branch: develop` and merge normally.
 
 **This changed at #132, and the reason is that the gate had never once fired.** It was
 installed, adapted, wired to this project's version source, and permanently dormant,

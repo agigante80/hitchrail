@@ -51,6 +51,7 @@ from hitchrail.sessions import (
     MemoryNeedsAck,
     MemoryRefused,
     NoAgent,
+    NotAsking,
     NotRunning,
     Protected,
     Session,
@@ -92,6 +93,13 @@ def _no_session_here(session: Session, consequence: str) -> str:
         f"address, so there is {consequence}; its process, {session.pid}, has "
         "to be ended directly"
     )
+
+
+# Re-exported so the HTTP layer can check membership without importing the
+# quarantine directly. **Membership only.** The rule this project keeps is that
+# nothing outside `claude_ipc` ITERATES a key constant, because iterating is
+# what encodes a sequence; asking whether one key is allowed encodes nothing.
+ANSWER_KEYS = claude_ipc.ANSWER_KEYS
 
 
 class Engine:
@@ -662,6 +670,81 @@ class Engine:
         self._announce(updated)
         return updated
 
+    def answer(self, name: str, key: str) -> Session:
+        """Carry ONE keypress from a person to a prompt they read (#204).
+
+        The narrowest mutating operation in this project, and every narrowing
+        is a security property rather than a design preference:
+
+        - **Only a key from `ANSWER_KEYS`.** The adapter checks, before it
+          reads any pane, and there is no free text path to here at all.
+        - **Only while the screen still asks.** The adapter re-reads the pane
+          inside the send. The engine deliberately does NOT pre-check and pass
+          the result down: two reads with a gap is the race this exists to
+          close.
+        - **Never chosen.** Nothing here picks a key, defaults one, or presses
+          one on a timer. The operator read the question.
+
+        Refused for the self project like every other mutating call. Hitchrail
+        answering a prompt in its own session could type into the process
+        serving the request.
+
+        **The bound is "a session Hitchrail started", NOT "a folder inside a
+        root".** Those coincide, because the only thing that creates a prefixed
+        session is `start`, which resolves through the root boundary. But the
+        looser wording is what let the `stale` case above through review: a
+        stale pane satisfies "inside a configured root" and is not Claude Code.
+        Reason about what is IN the pane, not about where the folder is.
+
+        **Why this is not the deferred terminal.** `docs/roadmap.md` defers
+        sending input to a session. That is an input box carrying arbitrary
+        text on demand. This carries one key from a fixed set, only when the
+        screen holds a question, in reply to words the operator read. The
+        distinction lives in `ANSWER_KEYS` and in the adapter's re-read, and
+        both have tests that fail if either is widened.
+        """
+        session = self._require_live(name)
+        # **`stale` is refused for the same reason `stop` refuses it, and the
+        # reason is stronger here.** A stale session is a terminal whose agent
+        # has gone, so what is left in it is a shell. `stop` recorded that
+        # relaying to it is the #91 authority hazard bought for nothing, because
+        # what it relayed meant nothing to a shell.
+        #
+        # It is bought for something here: what this relays is chosen by a
+        # person to be acted on, and a shell will act on it.
+        #
+        # **The adapter cannot make this decision**, which is why it is here.
+        # Whether a screen is showing a question is answered by looking at the
+        # screen, and a shell's own prompt can be indistinguishable from an
+        # agent's. Only the engine knows there is no agent, and it knows it by
+        # derivation rather than by looking. That asymmetry is the same one
+        # `stop` names twenty lines above: a refusal built on a capture cannot
+        # tell an empty screen from a failed read.
+        #
+        # A stale session can also be one whose terminal is dead rather than
+        # shelled (#67). Then the relay goes nowhere and this route would answer
+        # 200 for something that did not happen, which is what #83 fixed on
+        # `kill` and #98 on `stop`.
+        #
+        # `docs/api.md` carries the mechanism, and #204 the measurement.
+        if session.state is State.STALE:
+            raise NoAgent(
+                f"the tmux session for {name} holds no agent, so there is "
+                "nothing there to answer; killing the session clears it and "
+                "no agent is lost, though the pane may still hold a shell"
+            )
+        if session.state is State.DETACHED:
+            raise NoAgent(_no_session_here(session, "no terminal to answer in"))
+        # One call, like the stop. The engine does not learn that answering is
+        # a keystroke, nor that the check is a pane read.
+        try:
+            claude_ipc.send_answer(self.tmux, name, key)
+        except TmuxUnavailable as exc:
+            raise MachineUnreadable(str(exc)) from exc
+        except claude_ipc.AnswerNotSafe as exc:
+            raise NotAsking(str(exc)) from exc
+        return session
+
     def kill(self, name: str) -> Session:
         """The backstop, reachable at any point during a graceful wait.
 
@@ -1019,6 +1102,7 @@ class Engine:
 
 
 __all__ = [
+    "ANSWER_KEYS",
     "AlreadyRunning",
     "Engine",
     "EngineError",
@@ -1027,6 +1111,7 @@ __all__ = [
     "MemoryNeedsAck",
     "MemoryRefused",
     "NoAgent",
+    "NotAsking",
     "NotRunning",
     "Protected",
     "Session",

@@ -1,0 +1,84 @@
+# Keep the dependencies and the pinned actions honest, because a pin cannot
+# update itself.
+#
+# **The actions half is the reason this file exists** (#155). Every third party
+# action here is pinned to a commit SHA on purpose, because a tag is a mutable
+# pointer and whoever owns that repository can move it;
+# `tests/test_workflows_are_pinned.py` enforces it. The cost of a pin is that
+# nothing tells you a newer version exists: a person reading `# v4.2.1` cannot
+# see that v4.3.0 shipped. This closes that without giving up the pin, because
+# Dependabot rewrites the SHA and its trailing comment together.
+#
+# Two ecosystems and no others. There is no Docker image and no npm package
+# here, and a stanza for something that does not exist reads as a claim that it
+# does.
+
+version: 2
+updates:
+  # `uv`, not `pip`. The build backend is `uv_build`, the dependencies are
+  # declared in `pyproject.toml` and `uv.lock` is committed, which is the shape
+  # this ecosystem is for.
+  - package-ecosystem: "uv"
+    directory: "/"
+
+    # **VERSION updates go to `develop`, because `main` cannot take them.**
+    # `main` requires the `version-bumped` check, which fails unless
+    # `pyproject.toml`'s version is ahead of the latest release tag. A
+    # dependency bump does not bump the project version, so a pull request
+    # against `main` is red on a required check by construction.
+    target-branch: "develop"
+    # **A SECURITY update ignores the line above and always targets the DEFAULT
+    # branch, which is `main`. That is accepted rather than worked around.**
+    #
+    # It cannot be configured: the default branch is where GitHub sends them,
+    # full stop. The alternatives were making `develop` the default, which
+    # points a published project's front door at unreleased code, or exempting
+    # the bot from the release gate, which puts a hole in the one check between
+    # a merge and an irreversible publish.
+    #
+    # So such a pull request lands on `main` and fails the gate, and that is
+    # fine, because it is read as a NOTIFICATION rather than as something to
+    # merge. The fix is implemented on `develop` like every other change and
+    # reaches `main` as a release. The pull request is the alert and the diff.
+    #
+    # **The consequence to know about:** GitHub's options reference says that
+    # once `target-branch` is set, the options in this stanza stop applying to
+    # security updates, and `allow` is one of them. So the direct-only rule
+    # below governs version updates, and a transitive advisory can still open a
+    # security pull request. Under the reading above that is a notification
+    # too, and the fix for a transitive vulnerability is still to move the
+    # direct dependency that pulls it in.
+
+    # **Direct dependencies only, for version updates.**
+    # `direct` is "all explicitly defined dependencies", which here is the three
+    # runtime dependencies plus the declared groups. A vulnerability reached
+    # through a transitive package is fixed by moving the direct dependency that
+    # pulls it in, not by pinning something this project does not declare, so a
+    # version pull request against a transitive package is one nobody would
+    # merge.
+    #
+    # This does NOT hide transitive vulnerabilities: Dependabot ALERTS come from
+    # the alert system rather than from this file, and they still fire.
+    allow:
+      - dependency-type: "direct"
+
+    schedule:
+      interval: "weekly"
+    # Three at a time. The runtime budget is three dependencies, so a wider
+    # limit would only ever be filled by the dev group, and a queue of tooling
+    # bumps is how the interesting one gets skimmed past.
+    open-pull-requests-limit: 3
+    labels: ["infrastructure"]
+    commit-message:
+      prefix: "chore(deps)"
+
+  # No `allow` here, deliberately: every action a workflow names is direct, so
+  # the filter would express nothing.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+    labels: ["infrastructure"]
+    commit-message:
+      prefix: "ci"

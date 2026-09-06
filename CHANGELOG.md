@@ -15,10 +15,99 @@ wrong register for somebody deciding whether to upgrade.
 **Security fixes say plainly what was reachable and by whom**, including the
 parts that are embarrassing. `docs/versioning.md` requires it.
 
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). While
-the version is `0.y.z`, a breaking change may ship as a MINOR.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), with
+one deliberate departure: **a version heading is `## 0.4.0 - 2026-09-05`,
+without the brackets that standard puts round the number.**
+
+That is not cosmetic and it is not free to get wrong. `release.yml` builds the
+GitHub release notes by finding `^## <version>`, so a bracketed heading matches
+nothing, the notes come back empty and the release refuses after the merge to
+`main`. It happened on 0.4.0, and the bracketed form is what a careful author
+writes precisely BECAUSE this line names that standard. The departure is
+written down here rather than left as a trap, and
+`test_every_released_version_has_notes_the_release_job_can_extract` runs the
+workflow's own script so it fails locally instead.
+
+While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
+
+## 0.5.0 - 2026-09-06
+
+### Added
+
+**You can answer a prompt an agent is stuck on, from the phone.** Before this,
+a session sitting on a question showed you the question and offered `Close`.
+The only other control was `Kill it`, so the interface offered the destructive
+answer and withheld the safe one, in a situation it had created.
+
+The commonest case is the one Claude Code asks on a folder it has not seen:
+
+```
+ Quick safety check: Is this a project you created or one you trust?
+ > No, exit
+   Yes, I trust this folder
+```
+
+Open the pane on a row that says it is waiting, and a keypad appears under the
+screen: arrows, Enter, Escape and the digits. Read what the agent asked, press
+the key its own words name.
+
+**What this is not.** It sends ONE key from that fixed list, and only while the
+screen is showing a question. There is no text box anywhere in it, and there is
+not going to be one: sending arbitrary input to an agent is a different product
+and stays out. Nothing is ever chosen for you, there is no default and no
+timeout that presses anything.
+
+**Worth knowing before you use it on a folder you have not reviewed.**
+Answering "Yes, I trust this folder" is the one permission Hitchrail's
+`--dangerously-skip-permissions` does not already grant: it lets the agent read,
+edit and execute in that folder. You can only reach prompts in folders under a
+root you configured, so the question is never about somewhere unexpected, but it
+is a real grant and you are making it from a phone. Read the pane, not just the
+row.
+
+### Fixed
+
+**A misconfigured service restarted forever instead of stopping.** If you run
+Hitchrail as a systemd user unit and it refuses to start, because
+`HITCHRAIL_TOKEN` is set to an empty value, a root is not a directory, or the
+`ExecStart` line has a typo, the unit retried it every five seconds for as long
+as the machine was up. Measured: 37 restarts and 38 copies of the same message,
+and systemd's own rate limit never fired, because the five second gap keeps the
+attempts outside its default window.
+
+The refusal now stays stopped, which is what the template always claimed it
+did. **A port already in use still retries**, since that is usually a previous
+instance shutting down.
+
+**The message you get when the agent cannot be found no longer assumes you
+never installed it.** It said "Install it", which is the wrong first thing to
+read when the binary is installed and merely unreachable, which is the case it
+fires in most: a unit at boot, with no terminal attached to ask anything of.
+
+**A lingering install was dead after its first reboot.** The unit template set
+no PATH. `loginctl enable-linger` starts the user manager at boot before any
+login, when its PATH is systemd's fallback, so `~/.local/bin/claude` could not
+be resolved: the service refused with "'claude' is not on PATH" and stayed
+stopped. Starting it by hand always worked, because that happens after a login
+has fixed the PATH, so nothing showed it until a reboot.
+
+**If you copied the template, add this line** under `[Service]`:
+
+```
+Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+```
+
+If your agent needs something outside those directories, add it to that line,
+and prefer a stable path to a version pinned one: a pinned one goes stale at the
+next upgrade and fails at the next boot rather than at the upgrade.
+
+**If you copied the template before this,** the two lines to add are
+`RestartPreventExitStatus=2` under `[Service]`, and `StartLimitIntervalSec=60`
+with `StartLimitBurst=5` under `[Unit]`. The second pair bounds anything the
+first cannot name, and they belong in `[Unit]`: systemd has ignored them in
+`[Service]` since version 230.
 
 ## 0.4.0 - 2026-09-05
 

@@ -19,13 +19,19 @@ in a document.**
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
+import subprocess
+import sys
+import tempfile
+import textwrap
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
+from hitchrail import claude_ipc
 from hitchrail.cli import parse_args
 from support import make_config
 
@@ -486,6 +492,145 @@ def test_a_released_version_heading_matches_a_real_tag() -> None:
     assert not unreleased, f"changelog versions with no tag: {unreleased}"
 
 
+# -- #185, #188: the release notes the workflow can actually extract --------
+#
+# The changelog heading is described in three places and they disagreed. This
+# file's own `test_a_released_version_heading_matches_a_real_tag` accepts
+# `## [v0.4.0]`, brackets and prefix included; its `^## Unreleased$` check
+# accepts neither; and `release.yml` accepts neither. So the bracketed form
+# that `CHANGELOG.md`'s preamble tells an author to write passed every local
+# gate and failed AFTER a merge to `main`, which is the most expensive place to
+# find out. That happened, on 0.4.0.
+#
+# The rule is enforced here by RUNNING the workflow's own script rather than by
+# restating its pattern, because a restatement is a fourth copy of the thing
+# that drifted.
+
+RELEASE_YML = ROOT / ".github" / "workflows" / "release.yml"
+
+
+def _notes_script() -> str:
+    """The python `release.yml` runs to turn CHANGELOG.md into release notes.
+
+    Recovered from the workflow rather than copied, which is the whole point:
+    a copy is a second source of truth and this exists because there were
+    three. `tests/test_workflows_are_pinned.py` reads these files the same way,
+    and for the same reason PyYAML is not used: the runtime dependency budget
+    is three and full, so the parsing is stdlib.
+
+    **Fails rather than skips when it cannot find the block.** A guard that
+    quietly finds nothing to guard is the shape this whole test exists to
+    remove.
+    """
+    blocks = re.findall(r'python3 -c "\n(.*?)\n\s*"\)"', RELEASE_YML.read_text(), re.S)
+    notes = [b for b in blocks if "CHANGELOG.md" in b]
+    assert len(notes) == 1, (
+        f"expected exactly one CHANGELOG extraction in release.yml, found {len(notes)}; "
+        "this test can no longer tell what the release will publish"
+    )
+    script = textwrap.dedent(notes[0])
+    assert "VERSION" in script, (
+        "the extraction no longer reads a VERSION from the environment, so this "
+        "test cannot drive it for a given version"
+    )
+    return script
+
+
+def _extract_notes(version: str, changelog: str) -> str:
+    """What the release job would publish for `version`, given that changelog."""
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "CHANGELOG.md").write_text(changelog)
+        result = subprocess.run(
+            [sys.executable, "-c", _notes_script()],
+            cwd=tmp,
+            env={**os.environ, "VERSION": version},
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    return result.stdout.strip()
+
+
+def _released_versions() -> set[str]:
+    """Versions a release has to be able to publish notes for.
+
+    The tags, plus the one `pyproject.toml` names, which is the version in
+    flight and has no tag until the merge that creates it. VERSIONS rather than
+    headings, deliberately: enumerating headings would need a regex for what a
+    heading looks like, which is a fourth copy of the rule this test exists to
+    deduplicate, and it would drag in `## Unreleased`, whose section is empty by
+    design.
+    """
+    tags = subprocess.run(
+        ["git", "tag"], cwd=ROOT, capture_output=True, text=True, check=False
+    ).stdout.split()
+    versions = {t.lstrip("v") for t in tags}
+    preparing = re.search(
+        r'^version = "(\d+\.\d+\.\d+)"', (ROOT / "pyproject.toml").read_text(), re.M
+    )
+    if preparing:
+        versions.add(preparing.group(1))
+    return versions
+
+
+def test_every_released_version_has_notes_the_release_job_can_extract() -> None:
+    """#185, and it is the failure that produced this test.
+
+    0.4.0 was written as `## [0.4.0] - 2026-09-05`, which is what
+    [Keep a Changelog] specifies and what this file's preamble says it follows.
+    The release job refused, because its pattern is anchored on `^## $version`.
+    Nothing was tagged and nothing reached PyPI, which is the gate working, but
+    the failure landed after a merge to `main` when it could have landed here.
+    """
+    changelog = CHANGELOG.read_text()
+    missing = [v for v in sorted(_released_versions()) if not _extract_notes(v, changelog)]
+    assert not missing, (
+        f"the release job would find no notes for {missing}. Its pattern is "
+        "anchored on `^## <version>`, so a heading in any other shape, brackets "
+        "included, publishes nothing and stops the release after the merge"
+    )
+
+
+def test_a_bracketed_heading_still_extracts_nothing() -> None:
+    """The guardrail, and it is an assertion rather than a promise.
+
+    The fix for #185 must make the LOCAL check stricter, never the release
+    check looser. Widening what the workflow matches would let a release
+    publish under a heading nobody reviewed, and a version on PyPI cannot be
+    reused. This fails the day somebody relaxes the pattern to accept the
+    bracketed form instead of teaching the changelog to avoid it.
+    """
+    assert _extract_notes("9.9.9", "## [9.9.9] - 2026-01-01\n\nnotes\n") == ""
+
+
+def test_a_version_that_prefixes_another_gets_its_own_notes() -> None:
+    """#188. `^## 0.4.1` matched the heading `## 0.4.10`, so a patch release
+    would have published a later version's notes under its own number.
+
+    Synthetic rather than the real changelog, because the real one must not
+    have to grow a tenth patch release to keep this covered.
+    """
+    changelog = (
+        "# Changelog\n\n"
+        "## 0.4.10 - 2026-01-02\n\nnotes for four ten\n\n"
+        "## 0.4.1 - 2026-01-01\n\nnotes for four one\n"
+    )
+    assert _extract_notes("0.4.1", changelog) == "notes for four one"
+    assert _extract_notes("0.4.10", changelog) == "notes for four ten"
+
+
+def test_a_version_missing_from_the_changelog_extracts_nothing() -> None:
+    """The half that keeps the refusal meaningful: a release with no notes must
+    find none, rather than borrowing the nearest section."""
+    assert _extract_notes("0.4.1", "## 0.4.10 - 2026-01-02\n\nnotes\n") == ""
+
+
+def test_the_version_is_escaped_rather_than_read_as_a_pattern() -> None:
+    """#188's other half. Interpolated raw, a version's dots matched any
+    character, so `## 0x4x0` satisfied a lookup for `0.4.0`."""
+    assert _extract_notes("0.4.0", "## 0x4x0 - 2026-01-01\n\nnotes\n") == ""
+
+
 # -- #105: the images, which are published claims about the interface -------
 
 SCREENSHOTS = ROOT / "docs" / "screenshots"
@@ -648,20 +793,245 @@ def test_the_unit_template_names_flags_the_cli_accepts() -> None:
     parse_args(argv[1:])  # SystemExit here is the failure
 
 
+def _unit_sections() -> dict[str, list[str]]:
+    """The unit's directives, by section, comments dropped.
+
+    Read as DIRECTIVES rather than as text. A substring check over the file
+    matches the comment above a directive that explains why the other value is
+    wrong, so the guard fails on its own explanation and the only way to make
+    it pass is to delete the reasoning. Same trap as the private name hook.
+    """
+    sections: dict[str, list[str]] = {}
+    current = ""
+    for raw in UNIT.read_text().splitlines():
+        line = raw.strip()
+        if line.startswith("[") and line.endswith("]"):
+            current = line[1:-1]
+            sections.setdefault(current, [])
+        elif line and not line.startswith("#"):
+            sections.setdefault(current, []).append(line)
+    return sections
+
+
 def test_the_unit_never_restarts_a_refusal_forever() -> None:
-    """`Restart=always` would turn every Phase 7 config refusal into a boot
-    loop that buries its own message in the journal. The refusals are
-    deliberate stops and must stay stopped."""
-    # Read the DIRECTIVES, not the file. A substring check here matches the
-    # comment above the directive that explains why `always` is wrong, so the
-    # guard fails on its own explanation and the only way to make it pass is
-    # to delete the reasoning. Same trap as the private name hook.
-    directives = [
-        line.strip()
-        for line in UNIT.read_text().splitlines()
-        if line.strip().startswith("Restart=")
+    """#170, and this test is the reason that defect survived a phase.
+
+    It asserted `directives == ["Restart=on-failure"]`, which is exactly the
+    state that produces the loop it is named for. Its docstring's reasoning was
+    right and applied to the value it was pinning: `on-failure` restarts on ANY
+    non zero exit, a configuration refusal exits 2, and an `EnvironmentFile`
+    with a blank token produced 37 restarts and 38 copies of one message.
+
+    **It also could not have noticed the fix**, which is the sharper half:
+    `"RestartPreventExitStatus="` does not `startswith("Restart=")`, the `=`
+    falling at index 7 against the `P`. So the old assertion stays green either
+    way, and a new test beside it would have left one certifying nothing.
+
+    The list assertion is what made it blind: it pinned the directives present
+    and could not see the one that was missing.
+    """
+    service = _unit_sections()["Service"]
+    assert "Restart=always" not in service, (
+        "every deliberate refusal would become a boot loop that buries its own "
+        "explanation in the journal"
+    )
+    assert "Restart=on-failure" in service
+    assert "RestartPreventExitStatus=2" in service, (
+        "on-failure alone restarts a configuration refusal forever, which is the "
+        "loop this test is named for"
+    )
+
+
+def test_the_unit_carries_a_path_that_can_find_the_agent() -> None:
+    """#195, and the failure it prevents is invisible until a reboot.
+
+    `loginctl enable-linger` starts the user manager BEFORE any login, when its
+    PATH is systemd's fallback `/usr/local/bin:/usr/bin:/bin`. The agent lives
+    in `~/.local/bin`, so preflight cannot resolve it, the unit refuses with
+    exit 2, and it correctly stays stopped. Measured on a real boot.
+
+    It hides because every interactive test of the unit happens AFTER a login
+    has pushed the full PATH into the manager, so the environment looks healthy
+    while the boot environment never was.
+
+    Asserted on the DIRECTIVE rather than on the file, through
+    `_unit_sections()`, and the reason is sharper than the usual one. A
+    substring search for `%h/.local/bin` over this file passes with no PATH
+    line at all, because `ExecStart=%h/.local/bin/hitchrail` already carries
+    that literal. Such a guard would have been green against the exact unit
+    that died at boot.
+    """
+    paths = [
+        directive.split("=", 1)[1]
+        for directive in _unit_sections()["Service"]
+        if directive.startswith("Environment=PATH=")
     ]
-    assert directives == ["Restart=on-failure"], directives
+    assert paths, (
+        "the unit sets no PATH, so a lingering install cannot find its agent at "
+        "boot and is dead until somebody starts it by hand"
+    )
+    assert "%h/.local/bin" in paths[0], (
+        f"the PATH is {paths[0]!r}, which does not carry the user's local bin "
+        "directory, which is where the agent binary is installed"
+    )
+    assert "%h" in paths[0] and "/home/" not in paths[0], (
+        "the template hardcodes a home directory, so it is one machine's unit "
+        "rather than a template"
+    )
+
+
+def test_the_unit_prevents_the_exit_code_the_cli_actually_returns() -> None:
+    """The unit's number and the program's, checked against each other.
+
+    A unit saying 2 while the CLI returns something else is two copies of one
+    rule, drifting, which is the shape #185 hit on the release path the same
+    evening. So the number is not restated here: it is read out of the unit and
+    driven through a real refusal.
+
+    A root that is not a directory, because it refuses in `main` before
+    anything binds. `argparse` reaches the same 2 by its own route for a usage
+    error, which is what a typo in the unit's `ExecStart` produces, and that is
+    why the value is not free to choose.
+    """
+    from hitchrail.cli import main
+
+    prevented = {
+        int(value)
+        for line in _unit_sections()["Service"]
+        if line.startswith("RestartPreventExitStatus=")
+        for value in line.split("=", 1)[1].split()
+    }
+    assert prevented, "the unit prevents no exit status, so every refusal loops"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        code = main(["--root", f"main={Path(tmp) / 'not-a-directory'}"])
+
+    assert code in prevented, (
+        f"the CLI refuses with exit {code} and the unit only prevents "
+        f"{sorted(prevented)}, so that refusal restarts every {UNIT.name} tick"
+    )
+
+
+def test_the_units_start_limit_is_where_systemd_reads_it() -> None:
+    """The backstop for everything `RestartPreventExitStatus` cannot name.
+
+    That directive bounds ONE status. An unhandled exception exits 1 and would
+    loop by the same mechanism, so the limit is what makes any loop terminate.
+
+    **It has to be in `[Unit]`.** These moved out of `[Service]` at systemd 230
+    and are silently ignored there now, which is the worst failure available to
+    a limit: it reads as configured and does nothing.
+
+    The window is checked too, because the default one cannot fire here.
+    systemd allows five starts in ten seconds and `RestartSec` spaces attempts
+    further apart than that, which is why 37 restarts in a row were never rate
+    limited.
+    """
+    sections = _unit_sections()
+    limits = [d for d in sections["Unit"] if d.startswith("StartLimit")]
+    assert limits, "the unit has no start limit, so a loop this cannot name runs forever"
+    assert not [d for d in sections["Service"] if d.startswith("StartLimit")], (
+        "a StartLimit directive in [Service] is ignored since systemd 230"
+    )
+
+    def _value(directives: list[str], name: str) -> int | None:
+        """The EFFECTIVE value of `name`, or `None` if absent or unparseable.
+
+        **Last match, not first, because systemd is last-assignment-wins.** A
+        hand-edited unit acquires a bad value by having a line APPENDED, not by
+        having one rewritten, and reading the first match let exactly that pass:
+        `StartLimitIntervalSec=0` added under a good pair satisfied every
+        assertion here while systemd saw rate limiting switched off.
+
+        **`None` rather than a raise on a value this cannot parse.** systemd
+        accepts `30s`, `2min` and `infinity`; a bare `int()` turns each into a
+        `ValueError` traceback where the caller needed the sentence. That is the
+        same crash-instead-of-failure this helper was written to remove, and it
+        matters: `RestartSec=1min` with burst 12 in a 120s window can never
+        fire, which is the defect the last assertion here exists to catch.
+
+        Parsing systemd's time spans properly is not this test's job. Refusing
+        to guess is.
+        """
+        found = [d.split("=", 1)[1].strip() for d in directives if d.startswith(name)]
+        if not found:
+            return None
+        effective = found[-1]
+        return int(effective) if effective.isdigit() else None
+
+    # A repeated directive is how this goes wrong in practice, and systemd takes
+    # the LAST one. Checked separately from the values so the message says "you
+    # have two of these" rather than silently reporting whichever survived.
+    keys = [d.split("=", 1)[0] for d in limits]
+    repeated = sorted({key for key in keys if keys.count(key) > 1})
+    assert not repeated, (
+        f"{repeated} appears more than once, and systemd takes the LAST "
+        f"assignment, so what a reader sees here and what systemd does differ"
+    )
+    window = _value(limits, "StartLimitIntervalSec")
+    burst = _value(limits, "StartLimitBurst")
+    gap = _value(sections["Service"], "RestartSec=")
+    assert window is not None and burst is not None and gap is not None, (
+        f"a limit needs StartLimitIntervalSec, StartLimitBurst and RestartSec to "
+        f"mean anything, and this unit has window={window} burst={burst} gap={gap}. "
+        f"`None` means absent OR a value this test will not parse, such as `30s` "
+        f"or `infinity`; write plain seconds so the check stays honest"
+    )
+    # The presence check above is not enough on its own: `StartLimitIntervalSec=0`
+    # IS a StartLimit directive, so it passes while naming the exact condition it
+    # failed to detect. Zero disables rate limiting outright.
+    assert window > 0, (
+        "StartLimitIntervalSec=0 disables rate limiting, so nothing bounds the "
+        "exit 1 loop this limit exists for, and the unit sits in `activating "
+        "(auto-restart)` forever instead of reaching `failed`, which means it "
+        "never appears in `systemctl --user --failed` again"
+    )
+    assert burst * gap < window, (
+        f"{burst} restarts {gap}s apart span {burst * gap}s, which is outside the "
+        f"{window}s window, so the limit can never fire and the loop is unbounded"
+    )
+    # #201. The budget still has to outlast a real network bring up, and the
+    # margin is thinner than it looks.
+    #
+    # **What #201 withdrew is the CAUSE, not this floor.** It used to say here
+    # that a race with `After=network.target` killed the service. It did not:
+    # every observed outage was missing hardware, and `After=network.target` is
+    # inert in a user unit anyway, because the user manager has no such unit.
+    #
+    # The race is real and tight. Boot -3 of 2026-09-06 had the adapter
+    # connected, took its DHCP lease 15s into the boot, and this unit's first
+    # start came 7s later. Seven seconds of margin is the reason for a floor.
+    assert burst * gap >= 60, (
+        f"{burst} restarts {gap}s apart give up after {burst * gap}s. A boot that "
+        f"has to acquire a DHCP lease took 15s to do it and this unit won by 7s, "
+        f"so a named bind needs more margin than a couple of attempts. See #201."
+    )
+
+
+def test_the_start_limit_is_not_what_keeps_a_refusal_stopped() -> None:
+    """#201 widened the start limit, and this is the property that made that
+    safe rather than a weakening of #170.
+
+    A deliberate refusal exits 2, and `RestartPreventExitStatus=2` means it is
+    never restarted at all, so it never spends an attempt from the budget. The
+    budget bounds an unhandled exception (exit 1) and a bind failure (exit 3).
+
+    If the prevented status is ever dropped, widening the burst turns every
+    refusal into a longer boot loop, which is exactly what #170 measured at 37
+    restarts. The two directives are therefore asserted together rather than
+    apart, because it is the PAIR that is correct.
+    """
+    sections = _unit_sections()
+    prevented = [d for d in sections["Service"] if d.startswith("RestartPreventExitStatus=")]
+    assert prevented == ["RestartPreventExitStatus=2"], (
+        "the unit no longer prevents restarting exit 2, so a deliberate "
+        "refusal now consumes the start limit and loops for as long as the "
+        "budget allows. #201 widened that budget on the strength of this line"
+    )
+    assert "Restart=on-failure" in sections["Service"], (
+        "Restart=always restarts a refusal whatever its exit code, which is "
+        "the boot loop #170 measured"
+    )
 
 
 def test_the_phone_doc_does_not_recommend_a_wildcard_bind() -> None:
@@ -707,3 +1077,45 @@ def test_the_phone_doc_requires_both_allowlist_flags_for_a_proxy() -> None:
     overlay = PHONE_DOC.read_text().split(_NAMED_HEADING)[0]
     for flag in ("--allow-host", "--allow-origin"):
         assert flag in overlay, f"the overlay route does not mention {flag}"
+
+
+def test_the_keypad_offers_exactly_the_keys_the_server_will_send() -> None:
+    """#204. `app.js` and `claude_ipc.py` name the same keys, or a button lies.
+
+    Two lists rather than one because they are in two languages, and the copy
+    in the browser is an AFFORDANCE while the copy on the server is the GUARD.
+    That asymmetry is deliberate and is why this test exists rather than a
+    generated file: a key added only to the browser is a button that does
+    nothing, and a key added only to the server is a widening nobody reviewed
+    against the interface.
+
+    Reads the literal out of `app.js` as text, the way this module reads every
+    other cross-file claim, because parsing the module would need a JS runtime
+    to assert something a regex can see.
+    """
+    js = (SRC / "web" / "app.js").read_text(encoding="utf-8")
+    block = re.search(r"export const ANSWER_KEYS = \[(.*?)\];", js, re.DOTALL)
+    assert block, "app.js no longer declares ANSWER_KEYS where this test can read it"
+    in_browser = set(re.findall(r'"([^"]+)"', block.group(1)))
+    assert in_browser == set(claude_ipc.ANSWER_KEYS), (
+        f"the keypad offers {sorted(in_browser)} and the server will send "
+        f"{sorted(claude_ipc.ANSWER_KEYS)}, so a button either does nothing or "
+        f"a key reachable on the server is not reviewed against the interface"
+    )
+
+
+def test_no_free_text_field_reaches_the_answer_path() -> None:
+    """#204's line, asserted rather than trusted to review.
+
+    The whole safety argument is that the operator presses a key named by words
+    they read. An `<input>` built inside the answer pad would carry an
+    instruction the pane never offered, which is the product the roadmap
+    defers, and it would arrive as a small, plausible diff.
+    """
+    js = (SRC / "web" / "app.js").read_text(encoding="utf-8")
+    pad = re.search(r"function answerPad\(.*?\n}", js, re.DOTALL)
+    assert pad, "answerPad is no longer where this test can read it"
+    assert 'createElement("input")' not in pad.group(0), (
+        "answerPad builds a text input, which turns one keypress from a fixed "
+        "set into arbitrary input to a shell. See #204."
+    )

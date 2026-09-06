@@ -12,6 +12,8 @@ from collections.abc import Callable
 import pytest
 
 from hitchrail.claude_ipc import launch_argv
+from hitchrail.cli import JOURNAL_ENV
+from hitchrail.config import TOKEN_ENV
 from hitchrail.procs import ProcTable, parse_ps
 from hitchrail.tmux import Panes, Tmux
 
@@ -47,9 +49,20 @@ def no_real_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPa
     )
 
 
+#: Every variable `src/hitchrail/` reads from the environment. The autouse
+#: fixture below removes all of them, and
+#: `test_every_environment_variable_the_product_reads_is_scrubbed` fails if a
+#: new read appears that is not named here.
+#:
+#: Naming the CONSTANTS rather than the strings, so a rename moves both ends at
+#: once instead of leaving a scrub for a variable nothing reads any more.
+AMBIENT_ENV = (JOURNAL_ENV, TOKEN_ENV)
+
+
 @pytest.fixture(autouse=True)
-def no_ambient_journal(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The suite must not care whether the developer runs it under systemd.
+def no_ambient_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The suite must not care whether the developer runs it under systemd, or
+    runs Hitchrail at all.
 
     #110 made `banner()` degrade when `JOURNAL_STREAM` is set, which systemd
     puts in the environment of any service whose stdout it connected to the
@@ -57,11 +70,24 @@ def no_ambient_journal(monkeypatch: pytest.MonkeyPatch) -> None:
     has it, and three banner tests written years before #110 went red on a
     machine where nothing about them had changed.
 
+    #203 is the same failure one variable over, and it is the one that showed
+    what a partial scrub costs. `HITCHRAIL_TOKEN` is what an operator sets to
+    keep a phone's saved link working across restarts, so it is exported on
+    exactly the machines where this project is developed. Four `test_cli.py`
+    tests asserting the generated-nothing default failed there and passed in
+    CI, which is the wrong way round: the control was tested where nobody was
+    looking and untested where the work happens.
+
+    It did not fail the person who introduced it. It failed a first time
+    contributor on PR #187, who met a red suite, could not tell whether it was
+    their change, and deselected six tests to get a clean run.
+
     This is the same rule as `no_real_network` above and the same rule the
     tiers already follow: the fixtures describe an EMPTY machine, and a test
-    that wants the journal case sets the variable itself.
+    that wants one of these set sets it itself.
     """
-    monkeypatch.delenv("JOURNAL_STREAM", raising=False)
+    for name in AMBIENT_ENV:
+        monkeypatch.delenv(name, raising=False)
 
 
 # -- Phase 4 fakes ---------------------------------------------------------
@@ -269,6 +295,25 @@ CLEAR_INPUT_BOX = "\x1b[39m\u276f\xa0                     \n"
 # The same row with something a person typed in it. Bright, which is the only
 # thing that distinguishes it from the agent's own dim suggestion.
 DIRTY_INPUT_BOX = "\x1b[39m\u276f\xa0half a sentence\n"
+
+# #88's trust modal, the state #204 exists to answer. The ornament is the same
+# U+276F, and what follows it is a colour reset and an ORDINARY space where the
+# input box has U+00A0. That one character is the whole distinction, which is
+# why this is a captured row rather than a description of one.
+# A STALE pane, on a developer's machine. The agent is gone and a shell has the
+# terminal, and that shell's prompt is U+276F because Starship, Pure and
+# Powerlevel10k all use it by default.
+#
+# **Byte for byte the modal shape**: the ornament followed by an ordinary space.
+# So `claude_ipc.awaits_answer` returns True about a SHELL, correctly by its own
+# definition, and the refusal for this case has to live in the engine where the
+# state is known. A fixture using `user@host:/tmp$ ` cannot show that, which is
+# why the older stale test passed against code that would type here.
+SHELL_PROMPT_STALE = "\x1b[39m\u276f\x1b[39m \n"
+
+TRUST_MODAL = (
+    "\x1b[39m \x1b[38;5;153m\u276f\x1b[39m \x1b[38;5;153mNo,\x1b[39m \x1b[38;5;153mexit\n"
+)
 
 
 def ps_row(

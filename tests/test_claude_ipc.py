@@ -7,18 +7,23 @@ literal or a usage pattern.
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 import pytest
 
 from hitchrail import claude_ipc
 from hitchrail.claude_ipc import (
+    ANSWER_KEYS,
     GRACEFUL_STOP_KEYS,
     REMOTE_CONTROL_MARKER,
+    AnswerNotSafe,
     StopNotSafe,
+    awaits_answer,
     input_is_clear,
     launch_argv,
     request_stop,
+    send_answer,
     shows_input_box,
     trusted_folders,
 )
@@ -805,3 +810,103 @@ def test_the_two_predicates_disagree_only_on_a_draft() -> None:
     ):
         assert input_is_clear(pane_text(row)) is clear, row
         assert shows_input_box(pane_text(row)) is box, row
+
+
+# #204. Answering a prompt the agent is blocked on.
+
+
+def test_answer_keys_are_a_literal_set_and_hold_no_free_text() -> None:
+    """The set spelled out, member by member, on purpose.
+
+    A test that asserted a property instead ("all members are short", "all are
+    printable") would pass after somebody added a text field, and that addition
+    is the one change #204's whole security argument rules out. Widening the
+    set has to break this, so that widening it is a decision rather than a
+    diff nobody read.
+    """
+    assert (
+        frozenset(
+            {"Up", "Down", "Enter", "Escape", "1", "2", "3", "4", "5", "6", "7", "8", "9"}
+        )
+        == ANSWER_KEYS
+    )
+
+
+def test_a_modal_awaits_an_answer_and_an_input_box_does_not() -> None:
+    """Against the captured rows, not against a description of them."""
+    assert awaits_answer(pane_text(MODAL_BOX)) is True
+    assert awaits_answer(pane_text(CLEAR_BOX)) is False
+
+
+def test_an_unreadable_pane_is_not_answerable() -> None:
+    """`None`, and specifically NOT False and specifically not True.
+
+    `not shows_input_box(...)` would turn "cannot tell" into "yes, answerable"
+    because `not None` is True, which would send a keystroke into a screen
+    nobody has read. The three-valued answer is the guard.
+    """
+    assert awaits_answer("building the thing\nstill building\n") is None
+
+
+def test_a_key_outside_the_set_is_refused_before_the_pane_is_read() -> None:
+    """No subprocess for a key we would never send.
+
+    The order matters beyond cost: reading the pane for a rejected key would
+    let a caller probe whether a session exists and what is on its screen using
+    a key that can never be delivered.
+    """
+    pane = FakePane([pane_text(MODAL_BOX)])
+    with pytest.raises(AnswerNotSafe):
+        send_answer(pane, "proj", "rm -rf /")
+    assert pane.captured == [], "the pane was read for a key that is not sendable"
+    assert pane.sent == []
+
+
+def test_the_key_reaches_the_pane_when_the_screen_still_asks() -> None:
+    pane = FakePane([pane_text(MODAL_BOX)])
+    send_answer(pane, "proj", "Enter")
+    assert pane.sent == [("proj", "Enter")]
+
+
+def test_exactly_one_key_is_sent_never_a_sequence() -> None:
+    """A stop is a sequence; an answer is one keypress by a person who read it.
+
+    A second key here would be Hitchrail composing an instruction rather than
+    carrying one, which is the distinction #204 rests on.
+    """
+    pane = FakePane([pane_text(MODAL_BOX)])
+    send_answer(pane, "proj", "2")
+    assert len(pane.sent) == 1
+    assert len(pane.sent[0]) == 2, "project plus exactly one key"
+
+
+def test_a_screen_that_moved_on_refuses_and_sends_nothing() -> None:
+    """The race this exists to close.
+
+    The operator read a capture, then pressed. In between the agent answered
+    its own prompt and came back to an ordinary input box, where `Enter` would
+    submit whatever the box holds.
+    """
+    pane = FakePane([pane_text(CLEAR_BOX)])
+    with pytest.raises(AnswerNotSafe):
+        send_answer(pane, "proj", "Enter")
+    assert pane.sent == [], "a key was sent to a screen that was no longer asking"
+
+
+def test_an_unreadable_screen_refuses_rather_than_guessing() -> None:
+    pane = FakePane(["building the thing\nstill building\n"])
+    with pytest.raises(AnswerNotSafe):
+        send_answer(pane, "proj", "Enter")
+    assert pane.sent == []
+
+
+def test_the_pane_is_read_inside_the_send_not_handed_in() -> None:
+    """There is no parameter carrying an earlier capture, and that is the point.
+
+    A signature that accepted one would let a caller pre-authorise a keystroke
+    against a screen read at any earlier moment, which is exactly the staleness
+    the re-read removes. Asserted on the signature so that adding such a
+    parameter fails here rather than in review.
+    """
+    params = list(inspect.signature(send_answer).parameters)
+    assert params == ["pane", "project", "key"]

@@ -125,6 +125,97 @@ def test_the_banner_never_offers_a_wildcard_as_a_link(tmp_path: Path) -> None:
     assert "0.0.0.0" not in banner(cfg)
 
 
+# -- #202: the banner offers what the socket answers on, not the allowlist ---
+
+
+def test_a_named_bind_does_not_offer_loopback_links(tmp_path: Path) -> None:
+    """The defect, and it was found on a running service rather than reasoned
+    about: `curl 127.0.0.1:8787` returned nothing while the journal recorded a
+    401 answered on the bound address in the same second.
+
+    `allowed_hosts` carries the loopback names by construction, because they
+    are what a `Host:` header may legitimately say. Nothing is listening there
+    when `--host` names one address, so offering them sends the operator to a
+    connection refused and reads as "the service is down".
+    """
+    cfg = build_config(
+        parse_args(["--root", f"main={tmp_path}", "--host", "192.0.2.10", "--token", "t"])
+    )
+    printed = banner(cfg)
+    assert "http://192.0.2.10:8787/grant" in printed
+    assert "127.0.0.1:8787/grant" not in printed
+    assert "localhost:8787/grant" not in printed
+    # The allowlist itself is unchanged: a Host header saying localhost is
+    # still accepted, and this ticket did not touch that.
+    assert "127.0.0.1" in cfg.allowed_hosts
+
+
+def test_a_named_bind_still_offers_a_declared_allow_host(tmp_path: Path) -> None:
+    """`--allow-host` exists for no purpose except making a name work here, so
+    an entry in it is the operator declaring that this name arrives.
+
+    `remote_reach` already reads the allowlist as a declaration rather than a
+    hint, and this follows it rather than resolving the name. A DNS lookup in
+    the line that tells you the server started is a network call that can hang.
+    """
+    cfg = build_config(
+        parse_args(
+            [
+                "--root",
+                f"main={tmp_path}",
+                "--host",
+                "192.0.2.10",
+                "--allow-host",
+                "box.lan",
+                "--token",
+                "t",
+            ]
+        )
+    )
+    printed = banner(cfg)
+    assert "http://box.lan:8787/grant" in printed
+    assert "http://192.0.2.10:8787/grant" in printed
+    assert "localhost:8787/grant" not in printed
+
+
+def test_a_wildcard_bind_still_offers_the_whole_allowlist(tmp_path: Path) -> None:
+    """The case the old code was right about, kept as a regression.
+
+    On every interface, anything the allowlist accepts is genuinely reachable,
+    so narrowing here would hide working links. That is the direction that
+    matters: a wrong link is visibly wrong, a missing one is invisible.
+    """
+    cfg = build_config(
+        parse_args(
+            [
+                "--root",
+                f"main={tmp_path}",
+                "--host",
+                "0.0.0.0",
+                "--allow-host",
+                "box.lan",
+                "--token",
+                "t",
+            ]
+        )
+    )
+    printed = banner(cfg)
+    assert "http://box.lan:8787/grant" in printed
+    assert "http://127.0.0.1:8787/grant" in printed
+
+
+def test_a_loopback_bind_still_offers_both_loopback_spellings(tmp_path: Path) -> None:
+    """A token on a loopback bind is unusual and legal, and both names do reach
+    it, so neither is dropped. The default bind generates no token and prints
+    nothing at all, which `test_the_banner_is_silent_on_loopback` covers."""
+    cfg = build_config(
+        parse_args(["--root", f"main={tmp_path}", "--host", "127.0.0.1", "--token", "t"])
+    )
+    printed = banner(cfg)
+    assert "http://127.0.0.1:8787/grant" in printed
+    assert "http://localhost:8787/grant" in printed
+
+
 def test_the_token_is_printed_once_on_a_network_bind(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -212,6 +303,29 @@ def test_a_missing_agent_binary_names_the_binary_that_was_looked_for(
     assert len(found) == 1
     assert "my-agent" in found[0]
     assert "--agent-binary" in found[0]
+
+
+def test_the_missing_agent_message_does_not_assume_it_is_uninstalled(
+    tmp_path: Path,
+) -> None:
+    """#195. The case this refusal actually fires in is one where it IS installed.
+
+    A lingering unit starts before any login, so the manager's PATH is
+    systemd's fallback and `~/.local/bin` is not in it. Measured on a real
+    boot. Telling that operator to install what they already installed sends
+    them looking in the wrong place, and the message is all they get: there is
+    no terminal attached to ask a follow up question of.
+    """
+    found = preflight(
+        make_config(tmp_path, agent_binary="my-agent"),
+        which=lambda n: None if n == "my-agent" else "/usr/bin/x",
+        meminfo=tmp_path,
+    )
+    assert "if it is installed" in found[0], (
+        "the message offers installing as the only remedy, and the failure it "
+        "fires on most is one where the binary is installed and unreachable"
+    )
+    assert "PATH" in found[0]
 
 
 def test_an_unreadable_meminfo_refuses_rather_than_running_unguarded(

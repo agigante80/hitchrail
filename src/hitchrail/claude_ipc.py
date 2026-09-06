@@ -78,6 +78,29 @@ GRACEFUL_STOP_KEYS: tuple[tuple[str, ...], ...] = (
     ("/exit", "Enter"),
 )
 
+
+# The keys an operator may send in answer to a prompt (#204).
+#
+# **A literal set, asserted literally by a test.** Not a pattern, not a range,
+# not "any single character". A pattern is exactly how this becomes the product
+# the roadmap deferred, one commit at a time: `[0-9]` widens to `\w` widens to
+# a text field, and every step of that reads like a small refactor. Widening
+# this needs an edit here AND an edit to a test that spells the members out,
+# which is the friction the security argument in #204 depends on.
+#
+# **There is no free text member, and adding one is the line.** #204 is only
+# safe because the operator reads Claude Code's own words in the pane and
+# presses the key those words name. A text field would let Hitchrail carry an
+# instruction the pane never offered, which is a terminal, which is a different
+# product.
+#
+# Arrows, Enter and Escape because a prompt is navigated as well as chosen. The
+# digits because Claude Code numbers its options. Nothing else has a use that
+# an operator reading the screen could justify.
+ANSWER_KEYS: frozenset[str] = frozenset(
+    {"Up", "Down", "Enter", "Escape", "1", "2", "3", "4", "5", "6", "7", "8", "9"}
+)
+
 # The prompt ornament, captured from a real session rather than described.
 # Written as an escape rather than pasted: U+276F is confusable with a plain
 # `>` in every editor.
@@ -208,6 +231,15 @@ _LOOK_YOURSELF = "Open the session in a terminal to see what it is waiting on."
 _NOT_SENT = "it was never asked to exit"
 
 
+class AnswerNotSafe(RuntimeError):
+    """The screen does not hold a question, so no key was sent (#204).
+
+    A sibling of `StopNotSafe` and refused for the same reason: this module
+    would rather do nothing than act on a screen it cannot read. The engine
+    translates it, because nothing outside here may catch a type defined here.
+    """
+
+
 class StopNotSafe(RuntimeError):
     """The graceful stop was abandoned before anything was typed.
 
@@ -299,6 +331,51 @@ def shows_input_box(pane: str) -> bool | None:
     if row is None:
         return None
     return row.split(_PROMPT, 1)[1].startswith("\xa0")
+
+
+def awaits_answer(pane: str) -> bool | None:
+    """Whether the pane holds a question a person could answer (#204).
+
+    Built on `shows_input_box`, and deliberately NOT its plain negation. That
+    function has three answers and only one of them means a keystroke would
+    help:
+
+        True   an ordinary input box. Nothing is being asked. NOT answerable.
+        False  the ornament is there and the box is not. A modal. Answerable.
+        None   no ornament row at all. Cannot tell, so NOT answerable.
+
+    **`None` must not collapse into answerable**, which is what `not box` would
+    do. A capture that failed, or an agent mid turn that has printed over its
+    own prompt, is not evidence of a question. Sending a key on no evidence is
+    a key into whatever happens to be on the screen, and for `Enter` on a
+    returned input box that means submitting whatever it holds.
+
+    So this returns the same three-valued answer and the caller must test
+    `is True`. Control 7: refuse rather than guess.
+
+    **KNOWN GAP, #208: a modal still in the scrollback reads as live.** The row
+    is found by scanning backwards for the ornament, so a modal that has been
+    answered and scrolled up still wins while the agent works, if nothing newer
+    has drawn an ornament row:
+
+        awaits_answer(MODAL + "\n" + twelve lines of build output) is True
+
+    Usually self correcting, because Claude Code redraws an input box after a
+    modal and that box carries the ornament LATER in the pane. It is not
+    correcting during the window where the agent is mid turn.
+
+    Inherited from `shows_input_box` and harmless there: #100 uses it to draw a
+    badge, and a badge that lingers a few seconds is a cosmetic fault. #204
+    turns the same answer into a KEYSTROKE, so the same staleness becomes a key
+    delivered to a working agent. Not fixed here, because every fix is a
+    heuristic about how a vendor's screen behaves, which is the class of fact
+    this module exists to quarantine and the class this project has got wrong
+    three times. #208 carries the analysis.
+    """
+    box = shows_input_box(pane)
+    if box is None:
+        return None
+    return not box
 
 
 class Pane(Protocol):
@@ -498,6 +575,37 @@ def request_stop(pane: Pane, project: str, settle: Callable[[float], None]) -> N
         pane, project, wait, f"the input box in {project} filled after the interrupt"
     )
     pane.send_keys(project, *quit_keys)
+
+
+def send_answer(pane: Pane, project: str, key: str) -> None:
+    """Send ONE key, having just re-read the screen that asked for it (#204).
+
+    **The re-read is the security property and not a nicety.** The operator saw
+    a capture taken at some earlier moment and pressed a button. Between those
+    two events the agent may have answered its own prompt, timed out, or moved
+    on to an ordinary input box. A stale screen plus a keystroke is a keystroke
+    into whatever is there NOW.
+
+    So the pane is read again here, immediately before the send, inside the
+    same call. No caller can pre-authorise it and none may pass the earlier
+    capture in: the parameter this function does not take is the point of it.
+
+    The key is checked against `ANSWER_KEYS` FIRST, before the pane is read,
+    so a request for a key this project will not send costs no subprocess and
+    reveals nothing about the session.
+
+    Sends exactly one key. `request_stop` sends groups because a stop is a
+    sequence with checkpoints between; an answer is one keypress by a person
+    who read the question, and a sequence here would be Hitchrail composing an
+    instruction rather than carrying one.
+    """
+    if key not in ANSWER_KEYS:
+        raise AnswerNotSafe(f"{key!r} is not a key Hitchrail will send")
+    if awaits_answer(pane.capture_pane(project, escapes=True)) is not True:
+        raise AnswerNotSafe(
+            f"the pane in {project} is not showing a question, so {_NOT_SENT}. {_LOOK_YOURSELF}"
+        )
+    pane.send_keys(project, key)
 
 
 def _require_clear(pane: Pane, project: str, wait: Callable[[], None], complaint: str) -> None:

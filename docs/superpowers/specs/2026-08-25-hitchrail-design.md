@@ -860,9 +860,25 @@ is shipped as a template, and the design accepts the change on these terms:
   system unit would want a `User=` and would invite running a tool that is
   functionally a shell as root; a user unit inherits the right identity by
   construction.
-- **`Restart=on-failure`, never `always`.** Section 5's refusals are deliberate
-  stops. Restarting one forever converts a clear message into a boot loop that
-  buries it.
+- **`Restart=on-failure` with `RestartPreventExitStatus=2`, and never
+  `always`.** Section 5's refusals are deliberate stops. Restarting one forever
+  converts a clear message into a boot loop that buries it.
+
+  **`on-failure` alone does not deliver that, which is #170.** It restarts on
+  any non zero exit and a refusal exits 2, so a blank token in an
+  `EnvironmentFile` produced 37 restarts and 38 copies of one message, never
+  rate limited because `RestartSec=5` keeps attempts outside systemd's default
+  five-in-ten-seconds window. The reasoning above was right about `always` and
+  wrong about what it was recommending.
+
+  Exit 2 is not a number the unit chose: `argparse` uses it for a usage error,
+  which is what a typo in the `ExecStart` an operator is told to edit produces.
+  A uvicorn bind failure is exit 3 and is deliberately NOT prevented, because a
+  port still held by a previous instance is the case where retrying is right.
+
+  A `StartLimitBurst` in `[Unit]` bounds what an exit code list cannot name, an
+  unhandled exception being exit 1. The window has to be widened past the
+  default for it to fire at all at this restart interval.
 - **The banner degrades when it detects the journal.** Under a unit, stdout is
   journald: persistent, and readable beyond the operator. Section 5.2b's
   reasoning about the grant fragment assumed a terminal a person is watching,

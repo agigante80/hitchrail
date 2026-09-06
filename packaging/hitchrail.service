@@ -28,7 +28,90 @@
 [Unit]
 Description=Hitchrail
 Documentation=https://github.com/agigante80/hitchrail
-After=network.target
+
+# **There is deliberately no `After=network.target` here, and adding one does
+# nothing.** This is a USER unit, and the user manager has no such unit:
+#
+#     $ systemctl --user show network.target -p LoadState
+#     LoadState=not-found
+#
+# So the directive that stood here until 2026-09-06 was ordering against a unit
+# that does not exist, and two rounds of reasoning in this file argued from what
+# it "means". `server.py` records the rule this breaks: a guard that cannot
+# execute is worse than none, because it reads as configured.
+#
+# The same is true of `network-online.target`, for the same reason. A user unit
+# cannot order against a system target at all. If you need the network before
+# this starts, the answer is #201 (socket activation), not an ordering directive.
+
+# **The backstop for everything the exit code list below cannot name** (#170).
+# `RestartPreventExitStatus=2` stops the deliberate refusals looping. It bounds
+# ONE status, and an unhandled exception exits 1, which would loop by exactly
+# the mechanism that ticket measured.
+#
+# These two are what make the default limit actually fire. systemd's default is
+# five starts in ten seconds, and `RestartSec=5` spaces attempts far enough
+# apart that the window never fills: 37 restarts in a row, none of them rate
+# limited. Widening the window to a minute makes five attempts at five second
+# intervals trip it, after which the unit enters `failed` and stays there, with
+# its own explanation still the newest thing in the journal.
+#
+# **In `[Unit]`, not `[Service]`.** They lived in `[Service]` until systemd 230
+# and are silently ignored there now, which is the worst possible failure for a
+# limit: it reads as configured and does nothing.
+#
+# **#201 widened these from 5 in 60s, and the reason it is safe to widen is not
+# obvious from here.** The budget does NOT keep a deliberate refusal stopped:
+# a refusal exits 2 and `RestartPreventExitStatus=2` below means it is never
+# restarted at all, so it never consumes an attempt. What this limit bounds is
+# an unhandled exception, which exits 1, and a bind failure, which exits 3.
+#
+# **The widening was justified by a race that is real but was not the cause.
+# Corrected 2026-09-06.** The claim here used to be that a unit binding a NAMED
+# address races the interface coming up, and that this is what killed the
+# service. The second half is false and the first half is thinner than it reads.
+#
+# The boot that was measured did not race anything. The adapter holding that
+# address enumerated in under a second and then produced no carrier, no DHCP
+# transaction and no lease for the remaining six minutes: it was plugged into
+# the machine with nothing plugged into it. Two later boots had the adapter
+# physically absent, and a third had it attached by hand 2m12s in. Every
+# observed outage was missing hardware.
+#
+# **But one boot does show a real race, and it is tighter than that boot makes
+# it look.** Boot -3 of 2026-09-06 had the adapter connected: carrier and DHCP
+# lease 15.1s into the boot, and this unit's first start 7.4s later.
+#
+# Seven seconds of margin is the FAVOURABLE reading, and it is worth not
+# quoting it on its own. Boot -3 is also the boot where this unit started
+# unusually late, at 22.7s; the other four boots started it at 14.1s to 14.6s.
+# Against the same 15.1s lease, an ordinary boot reaches the bind about a
+# second BEFORE the address exists and needs a retry to get there.
+#
+# So the floor the test below asserts is better supported than "seven seconds"
+# suggests. What a budget does not have to outlast is absent hardware, which is
+# what the withdrawn reasoning claimed it did.
+#
+# So 12 and 120 are arbitrary rather than derived. They are left alone because
+# no measurement argues for another pair, and because the shipped `ExecStart`
+# below binds loopback, which always exists, so none of this can reach the
+# default install.
+#
+# **What is actually broken is #201:** a unit whose address appears AFTER the
+# budget is spent stays dead, and on 2026-09-06 that was 3m25s of a working
+# address with no service on it. A larger budget does not fix that. The fix
+# under discussion there is socket activation with `FreeBind=yes`, which binds
+# an address that is not there yet.
+#
+# **`FreeBind=yes` is not free**, and #201 carries the warning: it removes the
+# `ip_nonlocal_bind=0` property that is currently the only reason this unit
+# cannot bind an address that is not on this machine. It needs its own review.
+#
+# Raise the window with the burst if you raise either: the test asserts
+# `burst * RestartSec` stays inside the window, or the limit can never fire and
+# the loop is unbounded again.
+StartLimitIntervalSec=120
+StartLimitBurst=12
 
 [Service]
 # `uv tool install hitchrail`, not `uvx`. uvx resolves and runs out of a cache
@@ -54,11 +137,78 @@ EnvironmentFile=%h/.config/hitchrail/env
 # missing message.
 Environment=PYTHONUNBUFFERED=1
 
-# **on-failure, never always.** Hitchrail refuses to start on a configuration
-# it judges unsafe: no token where one is required, an unreachable root, a
-# host it will not bind. Those refusals are deliberate stops and must stay
-# stopped. `Restart=always` would turn each one into a boot loop that buries
-# its own explanation under a thousand repetitions of itself in the journal.
+# **Without this line a lingering install is dead after its first reboot**
+# (#195). Measured on a real boot: started at 17:23:06, refused at 17:23:06 with
+# "'claude' is not on PATH", exit 2, and correctly stayed stopped.
+#
+# `loginctl enable-linger`, which step 4 of the README's setup tells you to
+# run, starts the user manager AT BOOT, before any login. Its PATH then is systemd's
+# fallback, `/usr/local/bin:/usr/bin:/bin`, and the agent lives in
+# `~/.local/bin`, which is not in it.
+#
+# It hides in the way that costs the most: starting the unit by hand always
+# happens after a graphical login has pushed the full PATH into the manager, so
+# `systemctl --user show-environment` looks healthy and every interactive test
+# passes. Reproduce the real condition without rebooting:
+#
+#   env -i HOME="$HOME" PATH=/usr/local/bin:/usr/bin:/bin #     ~/.local/bin/hitchrail --root main="$HOME/projects"
+#
+# **What this PATH definitely does is let Hitchrail RESOLVE the agent at
+# startup.** Whether it becomes the agent's OWN path is a separate question with
+# a surprising answer, and it is worth knowing before editing this line.
+#
+# A tmux pane inherits the environment of the SERVER, captured when the server
+# started, not the environment of the client that asked for the pane. That is
+# measured in `tmux.py` at #113, on tmux 3.4 against a pre existing server. So:
+#
+#   - At BOOT there is usually no server yet, Hitchrail starts one, and the
+#     agent gets this line.
+#   - If a server is already running from your login, panes get THAT server's
+#     environment and this line does not reach them.
+#
+# So an agent may see a different PATH depending on who started the tmux server
+# first, which is worth knowing and is not something this file can fix.
+#
+# **You may have to add to it, and probably not for the agent itself.** Claude
+# Code is a self contained native executable however it was installed: the npm
+# package ships the same binary and links it into place, so nothing here needs
+# node or npm on your account. Another agent, set with `--agent-binary`, might
+# be a launcher that needs an interpreter, and then its directory belongs here.
+#
+# **Your own projects are the usual reason to add one.** An agent working in a
+# node project needs node on ITS path, and this line is that path at boot.
+# Prefer a stable directory to a version pinned one: something like
+# `%h/.nvm/versions/node/v22.22.2/bin` goes stale at the next upgrade and fails
+# at the next BOOT rather than at the upgrade.
+# Something like `%h/.nvm/versions/node/v22.22.2/bin` goes stale at the next
+# upgrade and fails at the next BOOT rather than at the upgrade, which is a long
+# way from the change that caused it.
+Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# **What restarts, what stays stopped, and what is merely bounded.** #170, and
+# the comment that used to sit here got the middle one wrong.
+#
+# It said `on-failure, never always`, on the reasoning that a configuration
+# refusal is a deliberate stop and must stay stopped. The reasoning is right
+# and `on-failure` does not deliver it: it restarts on ANY non zero exit, and
+# a refusal exits 2. Measured with an `EnvironmentFile` holding a blank token:
+# 37 restarts and 38 copies of the same message, never rate limited, because
+# `RestartSec=5` keeps the attempts outside systemd's default 5-in-10s window.
+#
+# Exit 2 is every deliberate stop, and it is not a number this file chose.
+# `argparse` exits 2 on a usage error, which is what a typo in the ExecStart
+# above produces, and `cli.main` returns 2 for a configuration it refuses.
+# Changing it would let a mistyped flag loop forever on the one line these
+# instructions tell you to edit.
+RestartPreventExitStatus=2
+
+# Exit 3 is uvicorn's startup failure, which is the port already being in use.
+# That one is worth retrying: it is usually a previous instance still shutting
+# down. It is NOT in the list above, deliberately.
+#
+# The old comment listed "a host it will not bind" among the refusals that must
+# stay stopped. That was wrong twice: a wildcard bind is accepted rather than
+# refused, and a bind that fails is exit 3, which this unit retries on purpose.
 Restart=on-failure
 RestartSec=5
 

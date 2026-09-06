@@ -237,3 +237,39 @@ def local_addresses() -> tuple[str, ...]:
         found.append(str(probe.getsockname()[0]))
 
     return tuple(dict.fromkeys(h for h in found if h and not is_wildcard_host(h)))
+
+
+def reachable_hosts(
+    host: str, allowed: tuple[str, ...], declared: tuple[str, ...]
+) -> list[str]:
+    """Of `allowed`, the hosts a socket bound to `host` actually answers on.
+
+    **This is not the allowlist, and #202 is what happens when they are
+    confused.** An allowlist says whose `Host:` header is accepted, and it
+    carries the loopback names by construction. What a phone can open is a
+    different question. The two coincide under a loopback or a wildcard bind,
+    which is why the banner printed the allowlist for months without anybody
+    noticing; with `--host` naming one address it offered `localhost` and
+    `127.0.0.1` links that answered nothing, which reads as "the service is
+    down" while the service is fine.
+
+    `declared` is `--allow-host`, and its entries are kept WITHOUT resolving
+    them. That flag exists for no purpose except making a name work here, so an
+    entry is the operator saying the name arrives. `remote_reach` reads the
+    allowlist the same way, as a declaration rather than a hint. The
+    alternative is a DNS lookup inside the line that reports the server
+    started, which is a network call that can hang or time out.
+
+    The loopback names are the ones nobody declared, so they go, unless the
+    bind is itself loopback where they do reach it.
+    """
+    if is_wildcard_host(host):
+        # Every interface, so anything the allowlist accepts is reachable.
+        return list(allowed)
+    bound = normalise_host(host)
+    spoken_for = {normalise_host(h) for h in declared}
+    return [
+        h
+        for h in allowed
+        if h == bound or h in spoken_for or (is_loopback_host(h) and is_loopback_host(host))
+    ]
