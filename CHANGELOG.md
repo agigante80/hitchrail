@@ -32,6 +32,41 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+## 0.5.0 - 2026-09-06
+
+### Added
+
+**You can answer a prompt an agent is stuck on, from the phone.** Before this,
+a session sitting on a question showed you the question and offered `Close`.
+The only other control was `Kill it`, so the interface offered the destructive
+answer and withheld the safe one, in a situation it had created.
+
+The commonest case is the one Claude Code asks on a folder it has not seen:
+
+```
+ Quick safety check: Is this a project you created or one you trust?
+ > No, exit
+   Yes, I trust this folder
+```
+
+Open the pane on a row that says it is waiting, and a keypad appears under the
+screen: arrows, Enter, Escape and the digits. Read what the agent asked, press
+the key its own words name.
+
+**What this is not.** It sends ONE key from that fixed list, and only while the
+screen is showing a question. There is no text box anywhere in it, and there is
+not going to be one: sending arbitrary input to an agent is a different product
+and stays out. Nothing is ever chosen for you, there is no default and no
+timeout that presses anything.
+
+**Worth knowing before you use it on a folder you have not reviewed.**
+Answering "Yes, I trust this folder" is the one permission Hitchrail's
+`--dangerously-skip-permissions` does not already grant: it lets the agent read,
+edit and execute in that folder. You can only reach prompts in folders under a
+root you configured, so the question is never about somewhere unexpected, but it
+is a real grant and you are making it from a phone. Read the pane, not just the
+row.
+
 ### Fixed
 
 **A misconfigured service restarted forever instead of stopping.** If you run
