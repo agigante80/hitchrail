@@ -40,8 +40,9 @@ ROUTING_404_MESSAGE = str(HTTPException(status_code=404).detail)
 
 SWEEP_INTERVAL_S = 1.0
 
-# The only route that reads a body takes {"name": <a project name>}, and a
-# project name is capped at 64 characters, so this is three orders of magnitude
+# Two routes read a body: create takes {"name": <a project name>} and answer
+# takes {"key": <one of ANSWER_KEYS>}. A project name is capped at 64 characters
+# and a key is shorter still, so this is three orders of magnitude
 # more than the contract needs.
 #
 # **413 is the one failure that is not the documented envelope**, and that is a

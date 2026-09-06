@@ -300,6 +300,17 @@ DIRTY_INPUT_BOX = "\x1b[39m\u276f\xa0half a sentence\n"
 # U+276F, and what follows it is a colour reset and an ORDINARY space where the
 # input box has U+00A0. That one character is the whole distinction, which is
 # why this is a captured row rather than a description of one.
+# A STALE pane, on a developer's machine. The agent is gone and a shell has the
+# terminal, and that shell's prompt is U+276F because Starship, Pure and
+# Powerlevel10k all use it by default.
+#
+# **Byte for byte the modal shape**: the ornament followed by an ordinary space.
+# So `claude_ipc.awaits_answer` returns True about a SHELL, correctly by its own
+# definition, and the refusal for this case has to live in the engine where the
+# state is known. A fixture using `user@host:/tmp$ ` cannot show that, which is
+# why the older stale test passed against code that would type here.
+SHELL_PROMPT_STALE = "\x1b[39m\u276f\x1b[39m \n"
+
 TRUST_MODAL = (
     "\x1b[39m \x1b[38;5;153m\u276f\x1b[39m \x1b[38;5;153mNo,\x1b[39m \x1b[38;5;153mexit\n"
 )

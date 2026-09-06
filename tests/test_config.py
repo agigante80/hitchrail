@@ -1021,7 +1021,13 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # to a prompt they read. Mostly the argument for why this is not the
         # deferred terminal, kept at the method rather than only in the ticket,
         # because the ticket is not what the next editor is looking at.
-        "engine.py": 1086,
+        # 1086 to 1122: the stale refusal on `answer`, found by the security
+        # audit of #204 before release. A stale session is a terminal holding a
+        # shell, and relaying a person's chosen answer to a shell is the #91
+        # hazard bought for something. The length is the argument for why the
+        # ADAPTER cannot make that call, which is the thing a later reader would
+        # otherwise "simplify" by moving the check next to the pane read.
+        "engine.py": 1122,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -1154,7 +1160,7 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # diff, and the security review of the new route is worth more than the
         # tidiness. Tracked as its own ticket rather than left as a silent
         # overrun.
-        "server.py": 573,
+        "server.py": 574,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

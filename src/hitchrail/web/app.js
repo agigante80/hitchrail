@@ -1090,7 +1090,24 @@ export const ANSWER_KEYS = [
   "1", "2", "3", "4", "5", "6", "7", "8", "9",
 ];
 
+// One send at a time. A phone double-tap would otherwise queue two POSTs, and
+// while the server's re-read refuses the second in the ordinary case, "the
+// second one is usually refused" is not a thing to rely on for a keystroke into
+// a shell. Module scoped rather than per-button: the hazard is two KEYS, not
+// one button twice.
+let answerInFlight = false;
+
 async function sendAnswer(project, key, pane) {
+  if (answerInFlight) return;
+  answerInFlight = true;
+  try {
+    await sendAnswerOnce(project, key, pane);
+  } finally {
+    answerInFlight = false;
+  }
+}
+
+async function sendAnswerOnce(project, key, pane) {
   const result = await api(`/api/sessions/${encodeURIComponent(project.name)}/answer`, {
     method: "POST",
     body: JSON.stringify({ key }),

@@ -15,6 +15,7 @@ from starlette.responses import Response
 from conftest import (
     CLEAR_INPUT_BOX,
     DIRTY_INPUT_BOX,
+    SHELL_PROMPT_STALE,
     TRUST_MODAL,
     FakeClock,
     FakeTmux,
@@ -22,7 +23,7 @@ from conftest import (
     failing_procs,
     procs_from,
 )
-from hitchrail import pages, server
+from hitchrail import claude_ipc, pages, server
 from hitchrail.config import Config
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
@@ -1537,3 +1538,63 @@ async def test_answering_the_self_project_is_refused(
         )
     assert r.status_code == 423
     assert r.json()["code"] == "self_protected"
+
+
+async def test_answering_a_stale_session_does_not_type_at_its_shell(
+    config: Config, tmux: FakeTmux
+) -> None:
+    """#204 must refuse `stale` for the reason `stop` already refuses it.
+
+    A stale tmux session is a pane whose agent has gone, so it holds a shell.
+    `stop` recorded that typing there is the #91 authority hazard bought for
+    nothing, because bash shrugged at `/exit`.
+
+    It is not bought for nothing here. `Up` recalls that shell's previous
+    history entry and `Enter` runs it, and repeated calls walk back through the
+    history as far as it goes.
+
+    **The pane check cannot catch this**, which is why the guard is in the
+    engine. `SHELL_PROMPT_STALE` is the ornament followed by an ordinary space,
+    exactly like the trust modal, because U+276F is the default prompt
+    character of Starship, Pure and Powerlevel10k. `awaits_answer` says True
+    about it, correctly by its own definition, and is talking about a shell.
+
+    **The fixture is the assertion here.** The older stale test uses
+    `user@host:/tmp$ `, which carries no ornament, so the adapter refuses on its
+    own and a test written that way passes against an engine with no stale
+    guard at all. `test_the_stale_fixture_really_does_look_like_a_question`
+    keeps this one honest.
+    """
+    tmux.pane_text[proj("vessel")] = SHELL_PROMPT_STALE
+    stale = make_engine(config, tmux, procs_from(STALE_PS))
+    async with client_for(stale, config) as c:
+        listed = (await c.get("/api/projects", headers=HEADERS)).json()["projects"]
+        row = next(p for p in listed if p["name"] == proj("vessel"))
+        assert row["state"] == "stale", "the machine under this test is not stale"
+
+        first = await c.post(
+            f"/api/sessions/{proj('vessel')}/answer", headers=HEADERS, json={"key": "Up"}
+        )
+        second = await c.post(
+            f"/api/sessions/{proj('vessel')}/answer",
+            headers=HEADERS,
+            json={"key": "Enter"},
+        )
+
+    assert first.status_code == 409
+    assert first.json()["code"] == "no_agent"
+    assert second.status_code == 409
+    assert tmux.sent == [], f"keys reached a stale session's shell: {tmux.sent}"
+
+
+def test_the_stale_fixture_really_does_look_like_a_question() -> None:
+    """The fixture above is only meaningful if the predicate is fooled by it.
+
+    Without this, a later edit could make `SHELL_PROMPT_STALE` something
+    `awaits_answer` rejects on its own, and the stale test would keep passing
+    while proving nothing about the engine's guard. That is exactly how the
+    defect this pair was written for went unnoticed.
+    """
+    assert claude_ipc.awaits_answer(SHELL_PROMPT_STALE) is True
+    # And the prompt the older stale test uses does NOT, which is the contrast.
+    assert claude_ipc.awaits_answer("user@host:/tmp$ ") is None

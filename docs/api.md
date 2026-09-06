@@ -106,8 +106,15 @@ pane cannot be read at all. Refusing on "cannot tell" is deliberate: a key not
 sent costs another look, and one sent wrongly cannot be recalled.
 
 Refused for the self project (`self_protected`, 423) like every other mutating
-route, and for a detached agent (`no_agent`, 409), which has no terminal to
-answer in.
+route, and `no_agent` (409) for both states that hold no agent to answer:
+
+- **detached**, which has no terminal to answer in at all
+- **stale**, which is a tmux session whose agent has gone, so the pane holds a
+  shell. Sending a key there types at a shell rather than an agent, and `Up`
+  followed by `Enter` would re-run whatever that shell last ran. The pane check
+  cannot catch it, because U+276F is the default prompt character of Starship,
+  Pure and Powerlevel10k, so a stale pane on a developer's machine looks exactly
+  like a prompt awaiting an answer.
 
 ## Session states
 

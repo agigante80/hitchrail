@@ -384,7 +384,10 @@ async def test_an_untrusted_folder_does_not_render_as_an_ordinary_running_row(
     # Still running, because it is. The badge is what must not say so alone.
     await expect(row).to_have_attribute("data-state", "running")
     await expect(row).to_contain_text("waiting")
-    await expect(row).to_contain_text("open it once in a terminal")
+    # #204 changed what the hint tells you to do. It used to say "open it once
+    # in a terminal", which from a phone was the end of the road; the pane
+    # dialog now carries a keypad that can answer the prompt.
+    await expect(row).to_contain_text("open the pane to answer")
 
 
 async def test_a_trusted_folder_renders_as_an_ordinary_running_row(
