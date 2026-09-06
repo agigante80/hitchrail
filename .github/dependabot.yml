@@ -21,38 +21,44 @@ updates:
   - package-ecosystem: "uv"
     directory: "/"
 
-    # **There is deliberately no `target-branch` here, and that is the whole
-    # design of this file.**
+    # **VERSION updates go to `develop`, because `main` cannot take them.**
+    # `main` requires the `version-bumped` check, which fails unless
+    # `pyproject.toml`'s version is ahead of the latest release tag. A
+    # dependency bump does not bump the project version, so a pull request
+    # against `main` is red on a required check by construction.
+    target-branch: "develop"
+    # **A SECURITY update ignores the line above and always targets the DEFAULT
+    # branch, which is `main`. That is accepted rather than worked around.**
     #
-    # The obvious configuration sets `target-branch: develop`, because `main`
-    # requires the `version-bumped` check and a dependency bump does not bump
-    # the project version, so a pull request against `main` is red on a required
-    # check by construction.
+    # It cannot be configured: the default branch is where GitHub sends them,
+    # full stop. The alternatives were making `develop` the default, which
+    # points a published project's front door at unreleased code, or exempting
+    # the bot from the release gate, which puts a hole in the one check between
+    # a merge and an irreversible publish.
     #
-    # Setting it costs something that is not obvious. A SECURITY update always
-    # targets the repository's DEFAULT branch whatever this file says, and
-    # GitHub's options reference is explicit that once `target-branch` is set,
-    # the options in this stanza stop applying to security updates. `allow` is
-    # one of those options. So the direct-only rule below would quietly hold for
-    # version updates and not for the security updates it matters most for, and
-    # transitive advisories would arrive as pull requests nobody intends to
-    # merge.
+    # So such a pull request lands on `main` and fails the gate, and that is
+    # fine, because it is read as a NOTIFICATION rather than as something to
+    # merge. The fix is implemented on `develop` like every other change and
+    # reaches `main` as a release. The pull request is the alert and the diff.
     #
-    # `develop` is the default branch instead. Both kinds of update then land
-    # there, `allow` applies to both, and nothing needs saying twice. The
-    # release gate is unaffected: it triggers on pull requests whose base is
-    # `main` explicitly, and a release is still `develop` to `main`.
+    # **The consequence to know about:** GitHub's options reference says that
+    # once `target-branch` is set, the options in this stanza stop applying to
+    # security updates, and `allow` is one of them. So the direct-only rule
+    # below governs version updates, and a transitive advisory can still open a
+    # security pull request. Under the reading above that is a notification
+    # too, and the fix for a transitive vulnerability is still to move the
+    # direct dependency that pulls it in.
 
-    # **Direct dependencies only, and transitive ones left alone.**
+    # **Direct dependencies only, for version updates.**
     # `direct` is "all explicitly defined dependencies", which here is the three
     # runtime dependencies plus the declared groups. A vulnerability reached
     # through a transitive package is fixed by moving the direct dependency that
     # pulls it in, not by pinning something this project does not declare, so a
-    # pull request against the transitive package is one nobody would merge.
+    # version pull request against a transitive package is one nobody would
+    # merge.
     #
     # This does NOT hide transitive vulnerabilities: Dependabot ALERTS come from
-    # the alert system rather than from this file, and they still fire. What it
-    # removes is the pull request.
+    # the alert system rather than from this file, and they still fire.
     allow:
       - dependency-type: "direct"
 
@@ -70,6 +76,7 @@ updates:
   # the filter would express nothing.
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "develop"
     schedule:
       interval: "weekly"
     labels: ["infrastructure"]

@@ -159,37 +159,30 @@ def test_the_pins_have_something_that_updates_them() -> None:
     assert "github-actions" in _ECOSYSTEM.findall(DEPENDABOT.read_text())
 
 
-def test_no_ecosystem_sets_a_target_branch() -> None:
-    """#155, and this is the counterintuitive half.
+def test_every_ecosystem_sends_its_version_updates_where_they_can_merge() -> None:
+    """#155. `main` requires the `version-bumped` check, which fails unless
+    `pyproject.toml`'s version is ahead of the latest release tag, and a
+    dependency bump does not bump the project version.
 
-    Setting `target-branch: develop` reads as obviously right: `main` requires
-    the `version-bumped` check, a dependency bump does not bump the project
-    version, so a pull request against `main` is red on a required check by
-    construction.
+    So a version update opened against `main` is red on a required check by
+    construction. An ecosystem added later without a `target-branch` inherits
+    the default branch, which is `main`, and produces exactly that: a pull
+    request nobody can act on rather than a visible failure.
 
-    It costs the thing that matters most. A SECURITY update always targets the
-    repository's DEFAULT branch whatever this file says, and GitHub's options
-    reference is explicit that once `target-branch` is set, the options in that
-    stanza stop applying to security updates. `allow` is one of them, so the
-    direct-only rule would hold for version updates and silently not for
-    security updates, and transitive advisories would arrive as pull requests
-    nobody intends to merge.
-
-    `develop` is the default branch instead, which lands both kinds there and
-    keeps `allow` applying to both.
-
-    **What this test cannot see is the default branch**, which is a repository
-    setting rather than a file. If it is ever moved back to `main`, every
-    dependency pull request lands on the release gate and this stays green.
-    That is written here rather than left as a surprise; the check that would
-    catch it lives in the GitHub settings, not in the suite.
+    **A SECURITY update ignores this and goes to the default branch**, which is
+    deliberate and accepted: it is read as a notification, and the fix is
+    implemented on `develop` like every other change. Nothing here can affect
+    that, which is why this test is about version updates only.
     """
-    targets = _TARGET.findall(DEPENDABOT.read_text())
-    assert targets == [], (
-        f"target-branch is set to {targets}, which stops `allow` applying to "
-        "security updates, so transitive advisories start arriving as pull "
-        "requests. See the comment in the file."
+    text = DEPENDABOT.read_text()
+    ecosystems = _ECOSYSTEM.findall(text)
+    targets = _TARGET.findall(text)
+    assert len(targets) == len(ecosystems), (
+        f"{len(ecosystems)} ecosystems and {len(targets)} target-branch lines: one "
+        "of them opens its version updates against the release branch, where the "
+        "release gate fails them by construction"
     )
+    assert set(targets) == {"develop"}, targets
 
 
 def test_the_python_ecosystem_updates_only_what_this_project_declares() -> None:
