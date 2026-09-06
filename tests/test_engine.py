@@ -3070,6 +3070,7 @@ def test_a_listing_takes_the_stop_lock_once_per_marker_not_once_per_row(
 
     engine._stopping_guard = Counting()  # type: ignore[assignment]
     engine.list()
+    with_no_markers = acquisitions
 
     # ONE, not zero: `_needs_a_person` builds the waiting set once per listing
     # under the lock, which is #100's own decision and is pinned separately by
@@ -3077,10 +3078,92 @@ def test_a_listing_takes_the_stop_lock_once_per_marker_not_once_per_row(
     #
     # The property here is that the count does not SCALE with the rows. Before
     # #178 this listing took it six times, one per stopped row plus that one.
-    assert acquisitions == 1, (
+    assert with_no_markers == 1, (
         f"a listing of {len(stopped)} stopped rows with NO stop markers took the "
         f"lock {acquisitions} times, where only `_needs_a_person`'s single "
         f"per-listing acquisition should appear. `_derive` is meant to read "
         f"`_stopping` unguarded and take the lock only when there is a marker to "
         f"remove. See #178 and the note on `_stopping_guard`."
+    )
+
+    # **And with markers present, which the first half cannot see.** Review
+    # found that `and self._stopping` (dict truthiness) in place of
+    # `and name in self._stopping` restores per-row locking the moment ANY stop
+    # is in flight, and passed the whole suite: the fixture above has no markers
+    # at all, so the true branch was never entered and the test's own name
+    # promised a property it did not reach.
+    # **The LAST stopped rows, not the first**, and that is the whole of
+    # whether this test works. A marker is popped as its row is derived, so
+    # marking the first rows empties `_stopping` before the others are reached,
+    # and a truthiness test then reads falsy for them and takes no lock: the
+    # mutation passes. Marking the last rows keeps the dict non-empty across
+    # every earlier row, which is where the extra acquisitions appear.
+    marked = [row.name for row in stopped[-2:]]
+    for name in marked:
+        engine._stopping[name] = 0.0
+    acquisitions = 0
+    engine.list()
+
+    assert acquisitions == 1 + len(marked), (
+        f"a listing with {len(marked)} stop markers over {len(stopped)} stopped "
+        f"rows took the lock {acquisitions} times, where it should take it once "
+        f"per marker plus `_needs_a_person`'s single acquisition. A membership "
+        f"test that is really a truthiness test scales with ROWS again. See #178."
+    )
+
+
+def test_a_discarded_sweep_still_drops_a_claim_it_can_no_longer_support(
+    root: Path,
+) -> None:
+    """#182 argues this explicitly, and nothing pinned it.
+
+    When the epoch moves, `stuck` is discarded because that evidence predates a
+    clear. `clear` is NOT discarded, and the asymmetry is the argument: dropping
+    a claim on stale evidence leaves a person told nothing, while keeping one
+    leaves them told they are needed by a prompt that is gone.
+
+    **The epoch is bumped by a DIFFERENT project**, and the first version of
+    this test got that wrong. Clearing the project under test pops its own entry
+    directly, so the claim went away whatever `clear` did and the mutation
+    `stuck, clear = [], []` survived. `vessel` is the row whose claim must be
+    dropped by the sweep; `koala` is the unrelated stop that moves the epoch.
+    """
+    other = proj("koala")
+    engine, tmux = engine_for(
+        root,
+        sessions={proj("vessel"): PANE, other: PANE + 1},
+        table=(
+            ps_row(PANE, 1)
+            + ps_row(AGENT, PANE, project=proj("vessel"), etime_s=60)
+            + ps_row(PANE + 1, 1)
+            + ps_row(AGENT + 1, PANE + 1, project=other, etime_s=60)
+        ),
+    )
+    name = proj("vessel")
+    tmux.pane_text[name] = MODAL_PANE
+    tmux.pane_text[other] = CLEAR_INPUT_BOX
+
+    assert name in engine.scan_for_stuck(), "the claim was never established"
+    assert engine.get(name).awaiting_input is True
+
+    # The prompt is answered, so this sweep sees a clear box. An unrelated stop
+    # lands mid capture and moves the epoch, which discards `stuck` only.
+    tmux.pane_text[name] = CLEAR_INPUT_BOX
+    bumped: list[str] = []
+    original = tmux.capture_pane
+
+    def bump_midway(project: str, lines: int = 40, escapes: bool = False) -> str:
+        if not bumped:
+            bumped.append(project)
+            engine._forget_attention(other)
+        return original(project, lines, escapes)
+
+    tmux.capture_pane = bump_midway  # type: ignore[method-assign]
+    engine.scan_for_stuck()
+
+    assert bumped, "the capture never ran, so the discard path was not entered"
+    assert engine.get(name).awaiting_input is False, (
+        "a sweep that discarded its `stuck` batch also discarded `clear`, so a "
+        "person is still being told they are needed by a prompt that is gone. "
+        "See #182."
     )

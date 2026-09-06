@@ -946,6 +946,7 @@ class Engine:
         )
         now = self._clock()
         with self._stopping_guard:
+            aging = attention.expired(self._stuck, now)
             if self._attention_epoch != epoch:
                 # A stop or a start cleared this overlay while we were looking
                 # at screens, so every `stuck` here is evidence from before an
@@ -964,6 +965,17 @@ class Engine:
                 # stale evidence is the safe direction, and refusing to drop it
                 # would leave a person told they are needed when they are not.
                 stuck = []
+                # **And nothing is aged on this sweep either.** A standing
+                # observation is kept alive by being REWRITTEN every sweep, so
+                # discarding `stuck` without also skipping the expiry ages an
+                # entry this scan declined to renew. Against a wedged tmux each
+                # scan is ~13s, so three stops inside `TTL_S` is enough to drop
+                # a genuinely stuck row, and it drops with no announce because
+                # `changed` is empty when `stuck` is.
+                #
+                # This sweep gathered no evidence it trusts, so it changes
+                # nothing except applying `clear`, which is the safe direction.
+                aging = []
             # What CHANGED, computed under the lock beside the write, because
             # announcing what did not change is how a page that is already
             # right redraws itself once a second.
@@ -971,7 +983,7 @@ class Engine:
             changed += [name for name in clear if name in self._stuck]
             for name in stuck:
                 self._stuck[name] = now
-            for name in clear + attention.expired(self._stuck, now):
+            for name in clear + aging:
                 self._stuck.pop(name, None)
         # Announced, OUTSIDE the lock, exactly as `expire_stops` does it and
         # for the reason its docstring gives: outside a stop wait the page does

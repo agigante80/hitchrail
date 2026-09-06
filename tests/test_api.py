@@ -7,6 +7,7 @@ import pathlib
 import re
 import shutil
 import threading
+import time
 from collections.abc import AsyncIterator, Callable
 
 import httpx
@@ -1660,4 +1661,123 @@ async def test_a_slow_attention_scan_does_not_delay_a_stop_expiry(
         f"only {during - before} stop expiries ran while one scan was stuck. The "
         f"scan is being awaited in the sweep loop again, so an overrunning "
         f"capture delays every expiry behind it. See #180."
+    )
+
+
+async def test_only_one_attention_scan_runs_at_a_time(
+    config: Config, tmux: FakeTmux, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#180's other half, which the ordering test does not reach.
+
+    Removing the `scanning.done()` guard is not a tidiness regression. At a one
+    second interval against a wedged tmux, where a scan is about 13 seconds, you
+    accumulate around 13 concurrent captures on the DEFAULT executor, whose
+    `max_workers` is `min(32, cpu + 4)`: eight on a four core Pi. Every
+    `in_thread(engine.stop, ...)` then queues behind those captures, which is
+    exactly the cost `scan_for_stuck` moved off the request path to avoid.
+    """
+    monkeypatch.setattr(srv, "SWEEP_INTERVAL_S", 0.02)
+
+    started = 0
+    release = threading.Event()
+
+    class Wedged(Engine):
+        def expire_stops(self) -> list[str]:
+            return []
+
+        def scan_for_stuck(self) -> list[str]:
+            nonlocal started
+            started += 1
+            release.wait(timeout=5)
+            return []
+
+    clock = FakeClock()
+    engine = Wedged(
+        config=config,
+        tmux=tmux,
+        procs_fn=procs_from(""),
+        meminfo_fn=lambda: PLENTY,
+        clock=clock,
+        sleep=clock.sleep,
+    )
+
+    app = create_app(engine=engine, config=config, bus=EventBus())
+    async with app.router.lifespan_context(app):
+        # Many sweep intervals, so an unguarded loop would start one per tick.
+        await asyncio.sleep(0.3)
+        concurrent = started
+        release.set()
+
+    assert concurrent == 1, (
+        f"{concurrent} attention scans were started while the first was still "
+        f"running. The sweep must not start another until the last is done, or "
+        f"a wedged tmux fills the executor that also serves the operator's "
+        f"stop. See #180."
+    )
+
+
+async def test_a_scan_still_running_at_shutdown_does_not_hang_the_lifespan(
+    config: Config, tmux: FakeTmux, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#180's teardown, which the ordering test cannot reach.
+
+    That test releases its scan INSIDE the lifespan, so by teardown the task is
+    already done and `cancel()` on a done task is a no-op: the line executes and
+    cannot fail. This one leaves the scan running, which is the state a
+    `systemctl stop` during an overrunning capture actually produces.
+
+    **What is asserted is that the lifespan returns, not that the scan stops.**
+    `in_thread` is `run_in_executor`, and cancelling the task cancels the await
+    and never the thread. The worker runs to the adapter's call timeout and the
+    process waits for it at executor shutdown. Bounded, and not something this
+    cancel can fix.
+    """
+    monkeypatch.setattr(srv, "SWEEP_INTERVAL_S", 0.02)
+
+    scanning = threading.Event()
+    release = threading.Event()
+
+    class Wedged(Engine):
+        def expire_stops(self) -> list[str]:
+            return []
+
+        def scan_for_stuck(self) -> list[str]:
+            scanning.set()
+            release.wait(timeout=5)
+            return []
+
+    clock = FakeClock()
+    engine = Wedged(
+        config=config,
+        tmux=tmux,
+        procs_fn=procs_from(""),
+        meminfo_fn=lambda: PLENTY,
+        clock=clock,
+        sleep=clock.sleep,
+    )
+
+    app = create_app(engine=engine, config=config, bus=EventBus())
+    before = asyncio.all_tasks()
+    started = time.monotonic()
+    try:
+        async with app.router.lifespan_context(app):
+            assert await asyncio.to_thread(scanning.wait, 5), "the scan never started"
+        teardown_took = time.monotonic() - started
+        left_behind = [t for t in asyncio.all_tasks() - before if not t.done()]
+    finally:
+        release.set()
+
+    assert teardown_took < 2.0, (
+        f"the lifespan took {teardown_took:.2f}s to tear down with a scan still "
+        f"running. It must not wait on a capture it cannot cancel. See #180."
+    )
+    # **The assertion that distinguishes the fix from its absence.** Teardown is
+    # fast either way: without the cancel there is no await at all. What the
+    # cancel buys is that nothing is left PENDING against an engine the lifespan
+    # has finished with, which is what the block is for and what a first version
+    # of this test could not see.
+    assert not left_behind, (
+        f"{len(left_behind)} task(s) were still pending after the lifespan "
+        f"returned: {left_behind}. The scan must be cancelled at teardown, or it "
+        f"outlives the engine it runs against. See #180."
     )

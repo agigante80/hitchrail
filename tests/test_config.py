@@ -1033,7 +1033,11 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 1154 to 1170 for #178: the membership test before the stop lock, and
         # why a note contradicted by the method twenty lines below it is a
         # defect in the record rather than a style point.
-        "engine.py": 1170,
+        # 1170 to 1184 for #182 round 1: a discarded sweep no longer AGES what
+        # it declined to renew. Without that, three stops inside TTL_S drop a
+        # genuinely stuck row, with no announce, because `changed` is empty
+        # when `stuck` is.
+        "engine.py": 1182,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -1178,7 +1182,11 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # length is the done-callback (a task nobody awaits swallows its
         # exception) plus its teardown, and the paragraph saying which timer
         # was losing to which. Splitting this file is #205.
-        "server.py": 615,
+        # 615 to 631 for #180 round 1: the teardown comment claimed the cancel
+        # stops the scan. It cancels the AWAIT; `in_thread` is run_in_executor
+        # and a thread cannot be cancelled, so the worker runs to the call
+        # timeout and the process waits for it at executor shutdown. Measured.
+        "server.py": 631,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

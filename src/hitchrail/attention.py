@@ -42,8 +42,12 @@ MAX_CAPTURES = 10
 # **It bounds when a capture may BEGIN, not when the scan ends (#180.)** The
 # deadline is checked before each capture, so one starting a millisecond inside
 # it still runs to `tmux._CALL_TIMEOUT_S`. The real worst case for a scan is
-# `BUDGET_S + _CALL_TIMEOUT_S`, about 13 seconds, and for a whole sweep tick
-# about 33 once `Engine._look`'s two calls are added.
+# `BUDGET_S + _CALL_TIMEOUT_S`, about 13 seconds, and about 33 once
+# `Engine._look`'s two calls are added.
+#
+# That is the worst case for the SCAN, not for a sweep tick. Since #180 the scan
+# is started rather than awaited, so it no longer sits inside the tick at all,
+# and a tick is `expire_stops` alone.
 #
 # Not tightened to make the number true, because a shorter per capture timeout
 # here would be the first place in this project to disagree with

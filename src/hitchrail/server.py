@@ -520,6 +520,11 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
             same argument `sweep` makes for not suppressing silently: "the scan
             stopped working" must not be unfalsifiable."""
             if task.cancelled():
+                # Cancelled at teardown, which is ordinary. But the THREAD may
+                # still have raised: `run_in_executor`'s future is cancelled
+                # from the awaiting side, so an exception in the worker lands
+                # nowhere. Nothing can be done about that here, and pretending
+                # otherwise is what an early return without this note does.
                 return
             if task.exception() is not None:
                 logger.error(
@@ -576,10 +581,21 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
-            # #180. The scan outlives the loop that started it, so it is
-            # cancelled here too. Without this a shutdown during an overrunning
-            # capture leaves a task running against an engine the lifespan has
-            # finished with.
+            # #180. **This cancels the AWAIT, not the thread, and the
+            # difference matters.** `in_thread` is `run_in_executor`, so
+            # `scan_for_stuck` goes on running in its worker whatever happens
+            # here. Measured: teardown returns in about 3ms with the thread
+            # still working, and the process then blocks for the rest of the
+            # capture at `shutdown_default_executor()`.
+            #
+            # So what this buys is that the lifespan does not HANG, not that the
+            # scan stops. An earlier version of this note claimed the second and
+            # was wrong, which is the defect #178 in this same commit is about:
+            # a comment contradicted by its own code.
+            #
+            # A capture bounded at `_CALL_TIMEOUT_S` is the worst case, so the
+            # process waits up to ten seconds on shutdown. That is the cost of
+            # not being able to cancel a thread, and it is bounded.
             if scanning is not None:
                 scanning.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
