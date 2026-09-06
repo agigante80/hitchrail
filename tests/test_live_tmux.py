@@ -627,3 +627,69 @@ def test_a_real_capture_carries_what_the_predicate_reads(
     captured = adapter(server).capture_pane("painted", escapes=True)
 
     assert claude_ipc.shows_input_box(captured) is expected, repr(captured)
+
+
+# -- #204: a key reaching a real pty ---------------------------------------
+
+
+# The trust modal's row, written as the bytes a terminal actually receives.
+# U+276F is \342\235\257 in UTF-8, and what follows it is a colour reset and an
+# ORDINARY space, which is the single character separating a modal from an
+# input box.
+_MODAL_ROW = (
+    "\\033[39m \\033[38;5;153m\\342\\235\\257\\033[39m \\033[38;5;153mNo,"
+    "\\033[39m \\033[38;5;153mexit"
+)
+
+
+_SCRIPT = (
+    f'printf "{_MODAL_ROW}\\n"; read -r answer; printf "ANSWERED:%s\\n" "$answer"; sleep 30'
+)
+
+
+def test_a_key_reaches_a_real_pty_and_the_screen_changes(server: PrivateTmux) -> None:
+    """#204, on the only tier that can prove it.
+
+    Every other test of this path drives a fake whose `send_keys` appends to a
+    list, which proves the adapter was CALLED and can never prove a keystroke
+    arrives in a terminal. `docs/tech-guidelines.md` 7.3 is the rule: a unit
+    test confirms a function does what its author believed.
+
+    The script stands in for Claude Code rather than imitating it. What has to
+    be real here is the pty, the tmux `send-keys`, and `capture-pane` seeing the
+    result. What the agent would have done with the key is quarantine knowledge
+    and belongs in the hermetic tier, against captured bytes.
+    """
+    project = "answerable"
+    name = sanitize(f"{PREFIX}{project}")
+    server.run(
+        "new-session",
+        "-d",
+        "-s",
+        name,
+        "sh",
+        "-c",
+        _SCRIPT,
+    )
+    server.created.append(name)
+    tmux = adapter(server)
+
+    deadline = time.time() + TIMEOUT
+    while time.time() < deadline:
+        if claude_ipc.awaits_answer(tmux.capture_pane(project, escapes=True)) is True:
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail("the pane never showed a question, so the send was never exercised")
+
+    # Two keys, two calls, because `send_answer` sends exactly one. `read` needs
+    # the newline, which is the ordinary shape of answering a prompt.
+    claude_ipc.send_answer(tmux, project, "1")
+    claude_ipc.send_answer(tmux, project, "Enter")
+
+    deadline = time.time() + TIMEOUT
+    while time.time() < deadline:
+        if "ANSWERED:1" in tmux.capture_pane(project):
+            return
+        time.sleep(0.05)
+    pytest.fail(f"the key never reached the pty; pane was:\n{tmux.capture_pane(project)}")

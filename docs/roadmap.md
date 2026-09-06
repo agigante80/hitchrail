@@ -849,14 +849,38 @@ Not scheduled, and not to be smuggled into an earlier phase:
   terminal, and making it one is a different product. #159 restores sessions
   and deliberately does not reach into an agent's own conversation state.
 
-  **#166 asks for one keystroke and is not this**, and the difference is
-  written on that ticket in four conditions: only in reply to a prompt our own
-  stop provoked, only from a set fixed in code, only while the pane still shows
-  that prompt, and never chosen for the operator. The interface today offers
-  `Kill it` for a question whose safe answer is one keypress, which is the
-  destructive option offered and the safe one withheld, in a situation
-  Hitchrail created. If any of the four conditions is dropped it becomes the
-  deferred item and the deferral stands.
+  **#204 shipped one keystroke, and this deferral still stands**, because the
+  two are different things and the line between them is now in code rather than
+  only on a ticket.
+
+  What shipped: `POST /api/sessions/{name}/answer` carries ONE key from
+  `claude_ipc.ANSWER_KEYS`, a literal frozenset, to a session whose pane is
+  showing a question, in reply to words the operator read in that pane. Three
+  conditions hold it there, and each has a test that fails if it is widened:
+
+  - the key set is a literal, asserted member by member, and the browser's copy
+    is asserted equal to the server's. A pattern in place of the literal is how
+    this becomes a terminal one commit at a time.
+  - the pane is re-read INSIDE the send, so a screen that moved on refuses. The
+    function takes no parameter carrying an earlier capture, and a test asserts
+    the signature so that adding one fails there rather than in review.
+  - `answerPad` must not build an `<input>`, asserted as text.
+
+  What is still deferred, unchanged: a box carrying arbitrary text to an agent
+  on demand. That is a client rather than a launcher, and #159 still does not
+  reach into an agent's conversation state.
+
+  **#204 widened exactly one of #166's four conditions** and kept the other
+  three. #166 allowed answering only a prompt Hitchrail's own stop provoked;
+  #204 allows any prompt the pane is showing, because the case that actually
+  stranded an operator was #88's trust modal at session START, which #166
+  excluded by construction. The security argument for that widening is on #204,
+  and its core is that the root boundary already bounds it: Hitchrail starts
+  sessions only inside a configured `--root`, so an answerable prompt is a
+  subset of a trust decision the operator already made on the command line.
+
+  If a free text field, an automatic choice, or a key sent without re-reading
+  the pane ever appears, this becomes the deferred item and the deferral binds.
 
 ## Deliberate additions to the design
 

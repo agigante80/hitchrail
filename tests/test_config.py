@@ -955,7 +955,11 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # into answerable, and the re-read living INSIDE the send are each one
         # edit away from becoming the terminal the roadmap defers, and a reader
         # who does not know that will make that edit and think it a tidy-up.
-        "claude_ipc.py": 781,
+        # 781 to 800 for #208: the known gap in `awaits_answer`, recorded at the
+        # predicate rather than only in the ticket. A stale modal reads as live,
+        # which is cosmetic for #100's badge and a keystroke for #204, and the
+        # next reader of this function is the one who needs to know that.
+        "claude_ipc.py": 800,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.

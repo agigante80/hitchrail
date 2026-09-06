@@ -352,6 +352,25 @@ def awaits_answer(pane: str) -> bool | None:
 
     So this returns the same three-valued answer and the caller must test
     `is True`. Control 7: refuse rather than guess.
+
+    **KNOWN GAP, #208: a modal still in the scrollback reads as live.** The row
+    is found by scanning backwards for the ornament, so a modal that has been
+    answered and scrolled up still wins while the agent works, if nothing newer
+    has drawn an ornament row:
+
+        awaits_answer(MODAL + "\n" + twelve lines of build output) is True
+
+    Usually self correcting, because Claude Code redraws an input box after a
+    modal and that box carries the ornament LATER in the pane. It is not
+    correcting during the window where the agent is mid turn.
+
+    Inherited from `shows_input_box` and harmless there: #100 uses it to draw a
+    badge, and a badge that lingers a few seconds is a cosmetic fault. #204
+    turns the same answer into a KEYSTROKE, so the same staleness becomes a key
+    delivered to a working agent. Not fixed here, because every fix is a
+    heuristic about how a vendor's screen behaves, which is the class of fact
+    this module exists to quarantine and the class this project has got wrong
+    three times. #208 carries the analysis.
     """
     box = shows_input_box(pane)
     if box is None:
