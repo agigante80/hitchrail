@@ -118,7 +118,8 @@ than by configuration, because `addopts` deselection is REPLACED by any `-m` on
 the command line rather than extended. That is not theoretical: it is how a
 per-run prefix reached six published screenshots.
 
-The three ORIGINAL tiers, and the choice between them is not a matter of taste. Unit is hermetic with
+Three of these are the original tiers, and choosing between them is not a
+matter of taste. Unit is hermetic with
 every external surface faked. Integration drives the real Starlette app through
 `httpx.ASGITransport` with a faked engine, and opens no socket. End to end
 launches the real server against a temporary root, and is the only tier that
