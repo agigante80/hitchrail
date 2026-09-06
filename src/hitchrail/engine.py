@@ -946,8 +946,8 @@ class Engine:
         )
         now = self._clock()
         with self._stopping_guard:
-            aging = attention.expired(self._stuck, now)
-            if self._attention_epoch != epoch:
+            discarded = self._attention_epoch != epoch
+            if discarded:
                 # A stop or a start cleared this overlay while we were looking
                 # at screens, so every `stuck` here is evidence from before an
                 # action the person has already taken. #101's rule is that a
@@ -965,17 +965,6 @@ class Engine:
                 # stale evidence is the safe direction, and refusing to drop it
                 # would leave a person told they are needed when they are not.
                 stuck = []
-                # **And nothing is aged on this sweep either.** A standing
-                # observation is kept alive by being REWRITTEN every sweep, so
-                # discarding `stuck` without also skipping the expiry ages an
-                # entry this scan declined to renew. Against a wedged tmux each
-                # scan is ~13s, so three stops inside `TTL_S` is enough to drop
-                # a genuinely stuck row, and it drops with no announce because
-                # `changed` is empty when `stuck` is.
-                #
-                # This sweep gathered no evidence it trusts, so it changes
-                # nothing except applying `clear`, which is the safe direction.
-                aging = []
             # What CHANGED, computed under the lock beside the write, because
             # announcing what did not change is how a page that is already
             # right redraws itself once a second.
@@ -983,6 +972,20 @@ class Engine:
             changed += [name for name in clear if name in self._stuck]
             for name in stuck:
                 self._stuck[name] = now
+            # **After the renewal, and that ordering is the whole of it.**
+            # Computed before it, a name that is both past `TTL_S` and
+            # re-confirmed by THIS sweep is written with `now` and then popped
+            # by the same block, and `changed` cannot announce the loss because
+            # the name was already in `_stuck`. Reachable whenever scanning
+            # pauses for longer than the TTL: no SSE subscriber, or a truncated
+            # budget. Introduced by round 1 of #182 and caught by round 2.
+            #
+            # **Empty on a discarded sweep**, which is round 1's own point: a
+            # standing observation stays alive by being rewritten, so aging an
+            # entry this scan declined to renew drops a row on evidence the
+            # sweep does not trust. It drops silently, because `changed` is
+            # empty when `stuck` is.
+            aging = [] if discarded else attention.expired(self._stuck, now)
             for name in clear + aging:
                 self._stuck.pop(name, None)
         # Announced, OUTSIDE the lock, exactly as `expire_stops` does it and

@@ -48,18 +48,27 @@ def test_a_root_without_a_label_says_what_to_type(roots: Path, agent: Path) -> N
 def test_a_repeated_label_is_refused_and_named(roots: Path, agent: Path) -> None:
     """Two roots under one label make `<label>~<folder>` ambiguous, which is the
     identifier every route and every DOM node is keyed by."""
+    # **A label that is not also a path component.** The first version used
+    # `main`, which is the name of a directory the refusal echoes, so the
+    # assertion was satisfied by the PATH and never by the label: review proved
+    # it passes against a message with `{root.label!r}` removed. Same shape the
+    # first test in this file was already fixed for once.
     result = run_cli(
         "--root",
-        f"main={roots / 'main'}",
+        f"ridgeline={roots / 'main'}",
         "--root",
-        f"main={roots / 'other'}",
+        f"ridgeline={roots / 'other'}",
         "--agent-binary",
         str(agent),
     )
 
     assert result.returncode != 0
     printed = result.stdout + result.stderr
-    assert "main" in printed, f"the refusal does not name the label. Got:\n{printed}"
+    # The QUOTED form, which is what `{root.label!r}` renders, so this cannot be
+    # satisfied by the label turning up incidentally inside a path.
+    assert "'ridgeline'" in printed, (
+        f"the refusal does not name the duplicated label. Got:\n{printed}"
+    )
 
 
 def test_a_missing_agent_binary_is_refused_at_preflight_and_named(roots: Path) -> None:
@@ -106,7 +115,7 @@ def test_two_roots_start_and_both_are_served(roots: Path, agent: Path) -> None:
         str(agent),
     )
     with (
-        serving(*args) as (base, _),
+        serving(*args) as base,
         urllib.request.urlopen(f"{base}/api/projects", timeout=10) as answer,  # noqa: S310
     ):
         body = json.load(answer)

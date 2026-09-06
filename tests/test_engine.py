@@ -3167,3 +3167,91 @@ def test_a_discarded_sweep_still_drops_a_claim_it_can_no_longer_support(
         "person is still being told they are needed by a prompt that is gone. "
         "See #182."
     )
+
+
+def test_a_claim_reconfirmed_after_the_ttl_is_kept_not_expired(root: Path) -> None:
+    """Round 2 of #182 found this as a regression in round 1's own fix.
+
+    A standing claim is kept alive by being REWRITTEN each sweep. Round 1 hoisted
+    `attention.expired` above the renewal loop so a discarded sweep would not age
+    what it declined to renew, and in doing so made a name that is both past
+    `TTL_S` and re-confirmed by THIS sweep get written with `now` and popped by
+    the same block. `changed` cannot announce the loss either, because the name
+    was already in `_stuck`.
+
+    Reachable whenever scanning pauses for longer than the TTL and then resumes:
+    `scan_for_stuck` returns early with no SSE subscriber, so closing the phone
+    page for half a minute and reopening it is enough. The row then drops
+    instead of being re-flagged, which is the harm #182 exists to remove.
+    """
+    clock = FakeClock()
+    engine, tmux = engine_for(
+        root,
+        sessions={proj("vessel"): PANE},
+        table=running_table(etime_s=60),
+        clock=clock,
+    )
+    name = proj("vessel")
+    tmux.pane_text[name] = MODAL_PANE
+
+    assert engine.scan_for_stuck() == [name], "the claim was never established"
+
+    # Longer than the TTL, which is what a closed page or a truncated budget
+    # produces. The pane still shows the prompt, so this sweep re-confirms it.
+    clock.now += attention.TTL_S + 1
+
+    engine.scan_for_stuck()
+    assert engine.get(name).awaiting_input is True, (
+        "a claim past the TTL that this very sweep re-confirmed was expired by "
+        "the same block that renewed it, and silently: `changed` is empty "
+        "because the name was already there. See #182 round 2."
+    )
+
+
+def test_a_discarded_sweep_ages_nothing(root: Path) -> None:
+    """The other half, which round 2 found had no test at all.
+
+    A sweep whose epoch moved discards its evidence. It must not then age an
+    entry it declined to renew, or a row is dropped on evidence the sweep does
+    not trust. Replacing `aging = [] if discarded else ...` with an
+    unconditional expiry passes 325 tests without this one.
+    """
+    clock = FakeClock()
+    engine, tmux = engine_for(
+        root,
+        sessions={proj("vessel"): PANE},
+        table=running_table(etime_s=60),
+        clock=clock,
+    )
+    name = proj("vessel")
+    tmux.pane_text[name] = MODAL_PANE
+    assert engine.scan_for_stuck() == [name]
+
+    clock.now += attention.TTL_S + 1
+    bumped: list[str] = []
+    original = tmux.capture_pane
+
+    def bump_midway(project: str, lines: int = 40, escapes: bool = False) -> str:
+        if not bumped:
+            bumped.append(project)
+            # An unrelated project, so the claim under test is not popped
+            # directly: only the EPOCH moves.
+            engine._forget_attention(proj("koala"))
+        return original(project, lines, escapes)
+
+    tmux.capture_pane = bump_midway  # type: ignore[method-assign]
+    before = engine._attention_epoch
+    engine.scan_for_stuck()
+
+    assert engine._attention_epoch != before, "the epoch never moved"
+    # **Asserted on `_stuck`, not on `awaiting_input`.** Past the TTL,
+    # `attention.standing` already excludes the entry, so the row reads False
+    # either way and the first version of this test failed for a reason that had
+    # nothing to do with aging. What the fix protects is the ENTRY: a discarded
+    # sweep must leave it there, so the next trusted scan can renew it rather
+    # than having to rediscover it.
+    assert name in engine._stuck, (
+        "a sweep that discarded its evidence still aged a claim it declined to "
+        "renew, so the next scan has to rediscover it instead of renewing it. "
+        "See #182."
+    )

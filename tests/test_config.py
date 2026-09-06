@@ -1033,11 +1033,11 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 1154 to 1170 for #178: the membership test before the stop lock, and
         # why a note contradicted by the method twenty lines below it is a
         # defect in the record rather than a style point.
-        # 1170 to 1184 for #182 round 1: a discarded sweep no longer AGES what
-        # it declined to renew. Without that, three stops inside TTL_S drop a
-        # genuinely stuck row, with no announce, because `changed` is empty
-        # when `stuck` is.
-        "engine.py": 1182,
+        # 1170 to 1185. #182 round 1 stopped a discarded sweep AGEING what it
+        # declined to renew; round 2 found that hoisting the expiry above the
+        # renewal loop popped a claim the same sweep had just written, so the
+        # ordering is now spelled out where it can be read.
+        "engine.py": 1185,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -1108,7 +1108,7 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # rather than `setdefault`s. The word it replaced announced a collision
         # rule that map cannot reach, and a test was written certifying that
         # hazard, so the note is what stops the word coming back.
-        # 543 to 552 for #175: the empty-name guard and the note saying it
+        # 543 to 553 for #175: the empty-name guard and the note saying it
         # defends a format change rather than a defect, measured against tmux
         # 3.4, so nobody goes looking for a bug that is not there.
         "tmux.py": 553,

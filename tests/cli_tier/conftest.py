@@ -21,9 +21,24 @@ was not shaped to see.
 - **The installed console script**, not `python -m hitchrail`. The console
   script is what a user runs and what the unit's `ExecStart` names, so it is
   the thing whose behaviour is worth pinning.
-- **A private tmux socket** through `env -u TMUX`, and a temporary root. Same
-  rule as the browser tier: a bare `tmux` honours `$TMUX` over `$TMUX_TMPDIR`,
-  so a suite run from inside tmux would drive the developer's real server.
+- **A temporary root**, always.
+
+- **NOT a private tmux socket, and this file used to claim otherwise.**
+  `env -u TMUX` stops the child inheriting an ambient session; it does not
+  choose a socket. `Config.tmux_socket` is the only thing that does, and the
+  CLI exposes no way to set it: no flag, no environment variable. So the
+  program this tier runs talks to the DEFAULT tmux server, the operator's own.
+
+  Today that contact is read only, one `list-panes -a`, because no case here
+  starts or stops a session. **Do not add one that does** until the CLI can be
+  pointed at a socket: a spawned Hitchrail creates `hr-` sessions on the default
+  server, and its kill paths are scoped to the same `hr-` prefix a real one
+  uses. #216 carries that decision, which changes the operator contract rather
+  than a test.
+
+  The browser tier really is isolated, and can be, because it builds a `Config`
+  in Python and passes `tmux_socket` straight in. The console script has no such
+  path, which is the whole difference.
 - **A fake agent**, never a real Claude. It costs money, needs credentials and
   cannot run in CI.
 - **Its own marker, and NOT folded into `e2e`.** That word means "a browser" and
@@ -34,10 +49,8 @@ from __future__ import annotations
 
 import contextlib
 import os
-import shutil
 import subprocess
 import sys
-import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -97,27 +110,6 @@ def roots(tmp_path: Path) -> Path:
     return parent
 
 
-@pytest.fixture
-def tmux_socket() -> Iterator[str]:
-    """A server of our own, scoped and killed by name.
-
-    Short path: a unix socket path is capped near 108 bytes and a pytest
-    tmp_path can exceed it, which surfaces as a confusing ENOENT from tmux.
-    """
-    directory = Path(tempfile.mkdtemp(prefix="hrcl"))
-    socket = str(directory / "s")
-    try:
-        yield socket
-    finally:
-        subprocess.run(
-            ["tmux", "-S", socket, "kill-server"],
-            capture_output=True,
-            env={k: v for k, v in os.environ.items() if k != "TMUX"},
-            check=False,
-        )
-        shutil.rmtree(directory, ignore_errors=True)
-
-
 def free_port() -> int:
     import socket
 
@@ -127,12 +119,14 @@ def free_port() -> int:
 
 
 @contextlib.contextmanager
-def serving(*args: str, env: dict[str, str] | None = None) -> Iterator[tuple[str, list[str]]]:
+def serving(*args: str, env: dict[str, str] | None = None) -> Iterator[str]:
     """Start the console script for real, wait for it to answer, then stop it.
 
-    Yields the base url and the lines it printed while starting, because the
-    banner is half of what this tier exists to assert: it is the only thing an
-    operator running a unit ever sees.
+    Yields the base url. **Not the banner**: an earlier version of this
+    docstring said it yielded the startup lines "because the banner is half of
+    what this tier exists to assert", and yielded `[]`. Nothing asserted a
+    banner line, so the sentence was the only thing making it look covered.
+    Draining the pipe and asserting on it is worth doing, and is on #216.
 
     Readiness is a POLL on the socket, never a sleep. A fixed wait here would be
     the #114 defect in a new file: how long uvicorn takes to bind is not a
@@ -169,7 +163,7 @@ def serving(*args: str, env: dict[str, str] | None = None) -> Iterator[tuple[str
                 time.sleep(0.05)
         else:
             raise AssertionError(f"{base} never answered within {RUN_TIMEOUT_S}s")
-        yield base, []
+        yield base
     finally:
         process.terminate()
         try:
@@ -187,8 +181,14 @@ def run_cli(*args: str, env: dict[str, str] | None = None) -> subprocess.Complet
     """
     child = {k: v for k, v in os.environ.items() if k != "TMUX"}
     child.update(env or {})
+    # **An ephemeral port even for a refusal.** Every caller expects the program
+    # to refuse before it binds, and that expectation is what a regression
+    # breaks. Without this, a dropped preflight leaves it SERVING on the default
+    # 127.0.0.1:8787, colliding with the operator's real Hitchrail, until
+    # `subprocess.run`'s timeout fires. The test then fails as `TimeoutExpired`
+    # rather than as the refusal test it is.
     return subprocess.run(
-        [str(CONSOLE_SCRIPT), *args],
+        [str(CONSOLE_SCRIPT), "--host", "127.0.0.1", "--port", str(free_port()), *args],
         capture_output=True,
         text=True,
         timeout=RUN_TIMEOUT_S,

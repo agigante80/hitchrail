@@ -94,7 +94,7 @@ uv run pytest -m live_tmux        # drives a real tmux on a private socket
 uv run pytest -m e2e              # a real browser; needs `playwright install chromium`
 uv run pytest -m cli              # runs the installed console script as a subprocess
 uv run pytest -m device           # a real Android over adb; OPT IN, see below
-uv run pytest -m "not integration and not live and not live_tmux and not e2e"
+uv run pytest -m "not integration and not live and not live_tmux and not e2e and not cli"
 uv run pytest -m "not live_tmux"  # skip it, on a machine without tmux
 uv run pytest tests/test_properties.py   # the invariants, via hypothesis
 uv run pytest -k detached
@@ -118,7 +118,7 @@ than by configuration, because `addopts` deselection is REPLACED by any `-m` on
 the command line rather than extended. That is not theoretical: it is how a
 per-run prefix reached six published screenshots.
 
-Three tiers, and the choice is not a matter of taste. Unit is hermetic with
+The three ORIGINAL tiers, and the choice between them is not a matter of taste. Unit is hermetic with
 every external surface faked. Integration drives the real Starlette app through
 `httpx.ASGITransport` with a faked engine, and opens no socket. End to end
 launches the real server against a temporary root, and is the only tier that
