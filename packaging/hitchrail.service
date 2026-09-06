@@ -72,6 +72,34 @@ EnvironmentFile=%h/.config/hitchrail/env
 # missing message.
 Environment=PYTHONUNBUFFERED=1
 
+# **Without this line a lingering install is dead after its first reboot**
+# (#195). Measured on a real boot: started at 17:23:06, refused at 17:23:06 with
+# "'claude' is not on PATH", exit 2, and correctly stayed stopped.
+#
+# `loginctl enable-linger`, which step 4 of the README's setup tells you to
+# run, starts the user manager AT BOOT, before any login. Its PATH then is systemd's
+# fallback, `/usr/local/bin:/usr/bin:/bin`, and the agent lives in
+# `~/.local/bin`, which is not in it.
+#
+# It hides in the way that costs the most: starting the unit by hand always
+# happens after a graphical login has pushed the full PATH into the manager, so
+# `systemctl --user show-environment` looks healthy and every interactive test
+# passes. Reproduce the real condition without rebooting:
+#
+#   env -i HOME="$HOME" PATH=/usr/local/bin:/usr/bin:/bin #     ~/.local/bin/hitchrail --root main="$HOME/projects"
+#
+# **This is also the PATH every agent session inherits**, which is the part to
+# think about before editing it. Two things follow:
+#
+#   - An agent that shells out to something outside these directories will not
+#     find it, where before it inherited whatever your login had.
+#   - Claude Code is a node application. If your node comes from a version
+#     manager rather than from the system, add its bin directory here too, and
+#     know that a version pinned path like
+#     `%h/.nvm/versions/node/v22.22.2/bin` goes stale at the next node upgrade
+#     and fails at the next BOOT rather than at the upgrade.
+Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
 # **What restarts, what stays stopped, and what is merely bounded.** #170, and
 # the comment that used to sit here got the middle one wrong.
 #

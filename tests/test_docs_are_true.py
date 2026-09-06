@@ -841,6 +841,41 @@ def test_the_unit_never_restarts_a_refusal_forever() -> None:
     )
 
 
+def test_the_unit_carries_a_path_that_can_find_the_agent() -> None:
+    """#195, and the failure it prevents is invisible until a reboot.
+
+    `loginctl enable-linger` starts the user manager BEFORE any login, when its
+    PATH is systemd's fallback `/usr/local/bin:/usr/bin:/bin`. The agent lives
+    in `~/.local/bin`, so preflight cannot resolve it, the unit refuses with
+    exit 2, and it correctly stays stopped. Measured on a real boot.
+
+    It hides because every interactive test of the unit happens AFTER a login
+    has pushed the full PATH into the manager, so the environment looks healthy
+    while the boot environment never was.
+
+    Asserted on the directive rather than on the file, like the guards around
+    it: a substring search matches the comment explaining the trap, so the only
+    way to make that version pass is to delete the reasoning.
+    """
+    paths = [
+        directive.split("=", 1)[1]
+        for directive in _unit_sections()["Service"]
+        if directive.startswith("Environment=PATH=")
+    ]
+    assert paths, (
+        "the unit sets no PATH, so a lingering install cannot find its agent at "
+        "boot and is dead until somebody starts it by hand"
+    )
+    assert "%h/.local/bin" in paths[0], (
+        f"the PATH is {paths[0]!r}, which does not carry the user's local bin "
+        "directory, which is where the agent binary is installed"
+    )
+    assert "%h" in paths[0] and "/home/" not in paths[0], (
+        "the template hardcodes a home directory, so it is one machine's unit "
+        "rather than a template"
+    )
+
+
 def test_the_unit_prevents_the_exit_code_the_cli_actually_returns() -> None:
     """The unit's number and the program's, checked against each other.
 

@@ -212,6 +212,14 @@ cat ~/.config/hitchrail/env
 #   http://192.168.1.10:8787/grant#token=<the value from that file>
 ```
 
+**`enable-linger` is what makes the PATH in that unit matter.** It starts the
+user manager at boot, before any login, when the manager's PATH is systemd's
+fallback and does not include `~/.local/bin`. The template sets its own PATH for
+that reason. If your agent needs anything outside those directories, node from a
+version manager being the usual case, add it to that line: an interactive test
+will pass either way, because starting the unit by hand happens after a login
+has already fixed the PATH.
+
 `journalctl --user -u hitchrail` shows the startup banner, which lists every
 address the server will answer to. It prints the links without the `#token=`
 fragment on purpose, because the journal is persistent and readable by root and

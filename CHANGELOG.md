@@ -46,6 +46,24 @@ The refusal now stays stopped, which is what the template always claimed it
 did. **A port already in use still retries**, since that is usually a previous
 instance shutting down.
 
+**A lingering install was dead after its first reboot.** The unit template set
+no PATH. `loginctl enable-linger` starts the user manager at boot before any
+login, when its PATH is systemd's fallback, so `~/.local/bin/claude` could not
+be resolved: the service refused with "'claude' is not on PATH" and stayed
+stopped. Starting it by hand always worked, because that happens after a login
+has fixed the PATH, so nothing showed it until a reboot.
+
+**If you copied the template, add this line** under `[Service]`:
+
+```
+Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+```
+
+It is also the PATH every agent session inherits. If your node comes from a
+version manager, add its bin directory too, and note that a version pinned path
+goes stale at the next node upgrade and fails at the next boot rather than at
+the upgrade.
+
 **If you copied the template before this,** the two lines to add are
 `RestartPreventExitStatus=2` under `[Service]`, and `StartLimitIntervalSec=60`
 with `StartLimitBurst=5` under `[Unit]`. The second pair bounds anything the
