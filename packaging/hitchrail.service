@@ -104,9 +104,17 @@ Environment=PYTHONUNBUFFERED=1
 # So an agent may see a different PATH depending on who started the tmux server
 # first, which is worth knowing and is not something this file can fix.
 #
-# **You may have to add to it.** The agent binary can itself be a launcher that
-# needs an interpreter or a helper on PATH, in which case that directory has to
-# be here too. Prefer a stable path to a version pinned one.
+# **You may have to add to it, and probably not for the agent itself.** Claude
+# Code is a self contained native executable however it was installed: the npm
+# package ships the same binary and links it into place, so nothing here needs
+# node or npm on your account. Another agent, set with `--agent-binary`, might
+# be a launcher that needs an interpreter, and then its directory belongs here.
+#
+# **Your own projects are the usual reason to add one.** An agent working in a
+# node project needs node on ITS path, and this line is that path at boot.
+# Prefer a stable directory to a version pinned one: something like
+# `%h/.nvm/versions/node/v22.22.2/bin` goes stale at the next upgrade and fails
+# at the next BOOT rather than at the upgrade.
 # Something like `%h/.nvm/versions/node/v22.22.2/bin` goes stale at the next
 # upgrade and fails at the next BOOT rather than at the upgrade, which is a long
 # way from the change that caused it.

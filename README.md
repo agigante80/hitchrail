@@ -149,9 +149,15 @@ does not vendor or install any of them.
 | Needed | Why | Checked |
 |---|---|---|
 | **tmux** | every session Hitchrail starts lives in a tmux session; this is the whole mechanism, not an option | `tmux -V` |
-| **Claude Code on `PATH`** | it is what Hitchrail runs. Configurable with `--agent-binary` | `claude --version` |
+| **Claude Code on `PATH`** | it is what Hitchrail runs. Configurable with `--agent-binary`. The binary is self contained: no node, no npm, whichever installer you used, because the npm package ships the same native executable | `claude --version` |
 | **Linux** | memory pressure is read from `/proc/meminfo`, and the process table from `ps`. macOS has neither in this form, which is why the package declares `Operating System :: POSIX :: Linux` | |
 | **Python 3.11+** | `uvx` and `pipx` handle this for you | `python3 --version` |
+
+**Hitchrail installs no runtime and checks no version of one.** That table is
+the whole list, and the agent needs nothing beyond itself. Your own PROJECTS are
+a separate question: if an agent works in a node project it needs node on its
+PATH, and under a systemd unit that PATH is the unit's `Environment=PATH`, not
+your login's. That is your line to set, not something Hitchrail can know.
 
 Installing Hitchrail with `uvx` will succeed on a machine with no tmux and no
 Claude Code, because neither is a Python dependency. It will then fail at the
