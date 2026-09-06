@@ -7,7 +7,7 @@ from playwright.async_api import Page, expect
 
 from support import DEFAULT_LABEL
 
-from .conftest import Harness
+from .conftest import Harness, e2e_name
 
 pytestmark = pytest.mark.e2e
 
@@ -71,7 +71,7 @@ async def test_the_hard_floor_never_offers_to_stop_the_controller(
 
     dialog = page.locator("[data-dialog]")
     await expect(dialog).to_contain_text("Not enough memory")
-    assert await dialog.get_by_role("button", name="Stop hrx-hitchrail").count() == 0
+    assert await dialog.get_by_role("button", name=f"Stop {e2e_name('hitchrail')}").count() == 0
 
 
 async def test_a_start_that_dies_says_so_and_offers_the_output(
@@ -123,7 +123,7 @@ async def test_the_new_folder_sheet_creates(page: Page, server: Harness) -> None
     await page.get_by_role("button", name="New").click()
     await page.get_by_label("Folder name").fill("new-thing")
     await page.get_by_role("button", name="Create").click()
-    # `server.project` would add the `hrx-` collision prefix, and this folder
+    # `server.project` would add the run's collision prefix, and this folder
     # was typed into the interface rather than seeded, so it is literally
     # `new-thing`. What it gains is the ROOT LABEL, which the page supplies on
     # the person's behalf because they typed a folder name, not an identifier.

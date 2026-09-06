@@ -228,7 +228,26 @@ sys.exit(3)
 
 # Prefixed so a seeded project can never be a real one. `hr` is short because
 # the name reaches a tmux session name and a filesystem path.
-E2E_PREFIX = "hrx-"
+#
+# **Unique per RUN, not a constant (#177).** This tier isolates the two things
+# anybody would think of, a private tmux server and a temporary root, and it
+# cannot isolate the third thing derivation reads: `ps -eww` is machine wide, by
+# design, because reading every process is what makes `detached` findable at
+# all. So with a constant prefix, another run's shim agent carries the same
+# `--remote-control main~hrx-vessel` tail as this one's, the two are
+# indistinguishable, and one run's session is attributed to the other's project.
+#
+# Observed during review of #85: a clean worktree produced 13 e2e failures, all
+# `AlreadyRunning`, caused entirely by a second run of this suite. The failure
+# is the worst kind, plausible and red and about something else. Two agents
+# working this repository at once is now normal, and this is also what closed
+# off running the tiers concurrently in CI.
+#
+# The pid rather than a random token, deliberately: two concurrent runs cannot
+# share one, which is the only case that matters, and it names the run in a way
+# a person can chase. `os.getpid()` is read once at import, so every name in one
+# run agrees even though each pytest process gets its own.
+E2E_PREFIX = f"hrx{os.getpid()}-"
 
 
 def e2e_name(name: str) -> str:

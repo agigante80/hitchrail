@@ -1119,3 +1119,40 @@ def test_no_free_text_field_reaches_the_answer_path() -> None:
         "answerPad builds a text input, which turns one keypress from a fixed "
         "set into arbitrary input to a shell. See #204."
     )
+
+
+def test_no_e2e_test_hardcodes_the_run_prefix() -> None:
+    """#177. The prefix is per RUN now, so a literal in a test body is a bug.
+
+    Two runs of this suite on one machine used to contaminate each other. The
+    tier isolates a private tmux server and a temporary root, and cannot isolate
+    the third thing derivation reads: `ps -eww` is machine wide by design. With
+    a constant prefix, one run's shim agent carried the same argv tail as
+    another's, and a session was attributed to the wrong run. Observed as 13
+    plausible, red, unrelated e2e failures.
+
+    `E2E_PREFIX` now carries the pid, so a hardcoded `hrx-` no longer matches
+    what the harness creates and the test fails for a reason that looks nothing
+    like the cause. This catches it at the literal instead.
+
+    **The conftest docstring claimed this guard already existed**, naming an
+    `e2e_names` that was never written. That is the same defect this file exists
+    to catch, in the file describing the tier, so it is worth having the guard
+    actually be here.
+    """
+    e2e = ROOT / "tests" / "e2e"
+    offenders = {
+        path.name: [
+            i
+            for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+            if "hrx-" in line
+        ]
+        for path in sorted(e2e.glob("test_*.py"))
+    }
+    offenders = {name: lines for name, lines in offenders.items() if lines}
+    assert not offenders, (
+        f"these e2e tests hardcode the run prefix: {offenders}. It carries the "
+        f"pid now, so a literal cannot match what the harness creates. Use "
+        f"`server.project(name)` for an identifier or `e2e_name(name)` for a "
+        f"folder, which is the one place the prefix lives. See #177."
+    )
