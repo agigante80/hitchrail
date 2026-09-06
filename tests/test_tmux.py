@@ -102,6 +102,8 @@ def drive_every_method(tmux: Tmux) -> None:
     tmux.capture_pane("p")
     tmux.new_session("p", "/srv/p", ["claude"])
     tmux.send_keys("p", "C-c")
+    tmux.keep_pane_on_exit("p", True)
+    tmux.pane_is_dead("p")
     tmux.kill_session("p")
 
 
@@ -239,8 +241,12 @@ def test_both_panes_of_one_foreign_session_survive_because_the_map_is_pid_keyed(
     """
     runner = FakeRunner(stdout={"list-panes": "cc-a 10\ncc-a 11\n"})
     foreign = Tmux(prefix="hr-", run=runner).panes().foreign
+    # The length FIRST and with the message, because that is the assertion whose
+    # failure explains itself: under name keying one pane is lost and the reader
+    # needs to be told which property broke. A dict equality above it would fail
+    # first and print two dicts.
+    assert len(foreign) == 2, f"a name keyed map keeps one of these, got {foreign}"
     assert foreign == {10: "cc-a", 11: "cc-a"}
-    assert len(foreign) == 2, "a name keyed map would have kept only one of these"
 
 
 def test_pane_pid_uses_the_colon_terminated_target() -> None:
@@ -296,55 +302,52 @@ def test_no_method_can_reach_kill_server() -> None:
     assert not any("kill-server" in argv for argv in runner.calls)
 
 
-# The verbs that CREATE, SIGNAL or KILL. #85's second Done when is about these
-# three and not about the reads: learning who owns an agent is a read, and the
-# invariant is that the new knowledge never leaked into a write.
-_WRITE_VERBS = {"new-session", "kill-session", "send-keys"}
-
-
-def test_no_write_verb_can_name_a_session_outside_our_prefix() -> None:
+def test_every_target_this_adapter_names_carries_our_prefix() -> None:
     """#85's second Done when, pinned where it can actually fail (#176).
 
     The test this replaces lived in `test_engine.py` and asserted that a
     detached row left `killed`, `started` and `sent` empty. Every one of those
     assertions passed against the code as it was BEFORE #85, because `stop` and
-    `kill` refuse on `DETACHED` before touching tmux at all. It was measuring
-    the refusal, not the scoping, and its last assertion could not fail under
-    any implementation: `FakeTmux.sessions` is keyed by project name and only
-    `new_session` writes to it, so a `cc-` prefixed key cannot appear in it.
+    `kill` refuse on `DETACHED` before touching tmux at all. It measured the
+    refusal, not the scoping, and its last assertion could not fail under any
+    implementation.
 
-    This drives the real adapter and reads the argv it built. A write that named
-    something outside the prefix would appear here, which is the property the
-    ticket is actually about: whatever Hitchrail learns about foreign sessions,
-    it still creates, signals and kills only its own.
+    **Every target, not a list of write verbs.** The first version of this test
+    checked an allowlist of `new-session`, `kill-session` and `send-keys`, and
+    review found the hole immediately: `set-option` is a write, `new_session`
+    chains one, and `keep_pane_on_exit` is a whole public method the sweep never
+    drove. An allowlist has to be kept in sync with the adapter by hand, and the
+    thing it is guarding against is precisely somebody adding a call.
 
-    The targets are three different shapes on purpose, and the assertion
-    normalises rather than accepting any of them loosely: `new-session -s` takes
-    a bare name, `kill-session -t` an anchored `=name`, and `send-keys -t` an
-    anchored colon terminated `=name:`. Both decorations are load bearing and
-    have their own tests; what this one asserts is the part underneath.
+    Asserting on the SHAPE instead needs no list: whatever verb it belongs to,
+    a `-t` or `-s` argument names a session, and every one of them must carry
+    the prefix. Reads pick it up as a bonus, which is right: a read on somebody
+    else's session is a smaller fault than a write, and still not ours to make.
+
+    Lowercase `-t` and `-s` only. Capital `-S` is two different flags in tmux,
+    the socket path before the verb and the history start in
+    `capture-pane -S -40`, and neither names a session.
     """
     runner = FakeRunner()
     drive_every_method(Tmux(prefix="hr-", run=runner))
+    assert runner.calls, "the sweep drove nothing, so it proves nothing"
 
-    seen: dict[str, str] = {}
+    targets: list[tuple[str, str]] = []
     for argv in runner.calls:
-        verb = next((a for a in argv if a in _WRITE_VERBS), None)
-        if verb is None:
-            continue
-        flag = "-s" if verb == "new-session" else "-t"
-        target = argv[argv.index(flag) + 1]
-        seen[verb] = target.lstrip("=").rstrip(":")
+        verb = next((a for a in argv if a in _VERBS or a == "set-option"), "?")
+        for i, arg in enumerate(argv[:-1]):
+            if arg in {"-t", "-s"}:
+                targets.append((verb, argv[i + 1]))
 
-    assert set(seen) == _WRITE_VERBS, (
-        f"the sweep saw {sorted(seen)} and the write verbs are "
-        f"{sorted(_WRITE_VERBS)}, so a write path is not being driven and this "
-        f"test is proving less than it claims"
+    assert len(targets) >= 7, (
+        f"only {len(targets)} targets were seen across {len(runner.calls)} calls, "
+        f"so a path that names a session is not being driven and this test is "
+        f"proving less than it claims"
     )
-    for verb, name in seen.items():
-        assert name.startswith("hr-"), (
-            f"`{verb}` named `{name}`, which is outside the configured prefix, "
-            f"so this adapter can write to a session that is not ours"
+    for verb, target in targets:
+        assert target.lstrip("=").rstrip(":").startswith("hr-"), (
+            f"`{verb}` named `{target}`, which is outside the configured prefix, "
+            f"so this adapter can reach a session that is not ours"
         )
 
 

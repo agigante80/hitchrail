@@ -27,7 +27,13 @@ the machine actually does. That means a test project called `hitchrail` or
 `_find_detached` matches on the argv tail, so a real `claude ... --remote-control
 forge-kit` is indistinguishable from a seeded one. Verified on this machine:
 eight real sessions were running, three of them sharing a name with a name
-these tests used. `e2e_names` below is the guard.
+these tests used. The guard is
+`test_docs_are_true.py::test_no_e2e_test_hardcodes_the_run_prefix`, which is in
+that file rather than here because it reads these test bodies as text.
+
+This line named an `e2e_names` that was never written. a1c0acb announced it had
+removed the false pointer and only added the guard, so for one commit there were
+two sources telling a reader not to look.
 
 **A private tmux server**, on a short socket path, invoked through
 `env -u TMUX`. A bare `tmux` honours `$TMUX` over `$TMUX_TMPDIR`, so a suite
@@ -248,6 +254,22 @@ sys.exit(3)
 # a person can chase. `os.getpid()` is read once at import, so every name in one
 # run agrees even though each pytest process gets its own.
 E2E_PREFIX = f"hrx{os.getpid()}-"
+
+# **The one tier that must NOT carry run identity.** `test_screenshots.py`
+# publishes its output to `docs/screenshots/`, which the README embeds, so a pid
+# in a project name reaches strangers on GitHub and PyPI. That is the same rule
+# `SHOT_ROOT` already follows and states: neutral BY CONSTRUCTION rather than by
+# whoever looked at the image.
+#
+# Safe to pin there for the reason the isolation exists at all. #177 is about
+# two CONCURRENT runs sharing a machine wide process table; the shots tier is
+# deselected by default and run deliberately at a release, never twice at once.
+#
+# It escaped once, in a1c0acb: `pytest -m e2e` overrides the default
+# `-m "not screenshots"`, so an ordinary e2e run recaptured all six images with
+# `hrx1078723-` in every name, and they were committed. `test_docs_are_true.py`
+# asserts the neutrality now, so it cannot happen quietly again.
+SHOT_PREFIX = "hrx-"
 
 
 def e2e_name(name: str) -> str:
@@ -789,7 +811,7 @@ class Harness:
             # RECORDED, not raised. This is the first thing the fixture's
             # finalizer calls, and raising here would skip `reap_orphans`, the
             # scoped `kill-server` and the wait for the agents, leaking a tmux
-            # server and processes under the shared `hrx-` prefix onto the
+            # server and processes under the shared run prefix onto the
             # machine and poisoning every test after this one. The fixture
             # raises once it has cleaned up.
             self.stopped_cleanly = not self._thread.is_alive()
@@ -826,7 +848,7 @@ class Harness:
 
         `tmux kill-server` returns as soon as the server is told, and the
         agents it owned are then leaving rather than gone. Every browser test
-        seeds under the same `hrx-` prefix, so an agent still exiting is seen
+        seeds under the same run prefix, so an agent still exiting is seen
         by the NEXT test's derivation and reported as `running`, which fails
         its seed with `AlreadyRunning`. This was invisible while teardown
         stalled for ten seconds on the join: the stall was doing this job by
@@ -883,7 +905,7 @@ class Harness:
         is cleared once one succeeds.
         """
         # EXACT, on argv's last element. A substring test would match
-        # `hrx-vessel-social` for `vessel`, which is the same prefix footgun
+        # `<prefix>vessel-social` for `vessel`, which is the same prefix footgun
         # `.claude/CLAUDE.md` documents for tmux target specs, reintroduced in
         # the harness against a different tool. `claude_ipc.launch_argv` puts
         # the project last, so the comparison has somewhere exact to stand.

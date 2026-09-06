@@ -55,7 +55,8 @@ from collections.abc import Iterator
 import pytest
 from playwright.async_api import Page, ViewportSize, expect
 
-from .conftest import Harness
+from . import conftest as e2e_conftest
+from .conftest import SHOT_PREFIX, Harness
 
 pytestmark = [pytest.mark.e2e, pytest.mark.screenshots]
 
@@ -94,6 +95,12 @@ def shots_server() -> Iterator[Harness]:
     if shutil.which("tmux") is None:  # pragma: no cover - CI installs tmux
         pytest.skip("the browser tier drives a real tmux")
 
+    # Pinned for the duration, so the published images carry no run identity.
+    # Restored in the `finally`, because #177's isolation has to survive for
+    # every other tier in the same process.
+    previous_prefix = e2e_conftest.E2E_PREFIX
+    e2e_conftest.E2E_PREFIX = SHOT_PREFIX
+
     shutil.rmtree(SHOT_ROOT.parent, ignore_errors=True)
     SHOT_ROOT.mkdir(parents=True)
     # Short, for the reason the tier's own fixture gives: a unix socket path is
@@ -115,6 +122,7 @@ def shots_server() -> Iterator[Harness]:
         )
         shutil.rmtree(sock_dir, ignore_errors=True)
         shutil.rmtree(SHOT_ROOT.parent, ignore_errors=True)
+        e2e_conftest.E2E_PREFIX = previous_prefix
 
 
 async def _settled(page: Page, harness: Harness) -> None:
