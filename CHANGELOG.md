@@ -59,10 +59,9 @@ has fixed the PATH, so nothing showed it until a reboot.
 Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ```
 
-It is also the PATH every agent session inherits. If your node comes from a
-version manager, add its bin directory too, and note that a version pinned path
-goes stale at the next node upgrade and fails at the next boot rather than at
-the upgrade.
+If your agent needs something outside those directories, add it to that line,
+and prefer a stable path to a version pinned one: a pinned one goes stale at the
+next upgrade and fails at the next boot rather than at the upgrade.
 
 **If you copied the template before this,** the two lines to add are
 `RestartPreventExitStatus=2` under `[Service]`, and `StartLimitIntervalSec=60`

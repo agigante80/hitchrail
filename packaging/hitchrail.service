@@ -88,16 +88,26 @@ Environment=PYTHONUNBUFFERED=1
 #
 #   env -i HOME="$HOME" PATH=/usr/local/bin:/usr/bin:/bin #     ~/.local/bin/hitchrail --root main="$HOME/projects"
 #
-# **This is also the PATH every agent session inherits**, which is the part to
-# think about before editing it. Two things follow:
+# **What this PATH definitely does is let Hitchrail RESOLVE the agent at
+# startup.** Whether it becomes the agent's OWN path is a separate question with
+# a surprising answer, and it is worth knowing before editing this line.
 #
-#   - An agent that shells out to something outside these directories will not
-#     find it, where before it inherited whatever your login had.
-#   - Claude Code is a node application. If your node comes from a version
-#     manager rather than from the system, add its bin directory here too, and
-#     know that a version pinned path like
-#     `%h/.nvm/versions/node/v22.22.2/bin` goes stale at the next node upgrade
-#     and fails at the next BOOT rather than at the upgrade.
+# A tmux pane inherits the environment of the SERVER, captured when the server
+# started, not the environment of the client that asked for the pane. That is
+# measured in `tmux.py` at #113, on tmux 3.4 against a pre existing server. So:
+#
+#   - At BOOT there is usually no server yet, Hitchrail starts one, and the
+#     agent gets this line.
+#   - If a server is already running from your login, panes get THAT server's
+#     environment and this line does not reach them.
+#
+# So an agent may see a different PATH depending on who started the tmux server
+# first, which is worth knowing and is not something this file can fix.
+#
+# **If you add anything here, prefer a stable path to a version pinned one.**
+# Something like `%h/.nvm/versions/node/v22.22.2/bin` goes stale at the next
+# upgrade and fails at the next BOOT rather than at the upgrade, which is a long
+# way from the change that caused it.
 Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # **What restarts, what stays stopped, and what is merely bounded.** #170, and
