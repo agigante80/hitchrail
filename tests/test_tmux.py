@@ -221,12 +221,26 @@ def test_the_first_pane_wins_for_a_multi_pane_session() -> None:
     assert Tmux(prefix="hr-", run=runner).panes().ours == {"hr-a": 10}
 
 
-def test_the_first_pane_wins_for_a_multi_pane_foreign_session() -> None:
-    """The same rule on the other half. Two panes in one foreign session must
-    not make the second one overwrite the first, or which pid maps to which
-    name depends on tmux's output order."""
+def test_both_panes_of_one_foreign_session_survive_because_the_map_is_pid_keyed() -> None:
+    """What this actually pins, renamed at #176.
+
+    It used to be called "the first pane wins", which is the rule for `ours` and
+    cannot apply here. `ours` is keyed by session NAME, so a second pane in one
+    session would overwrite the first and change which pid a project reports;
+    `setdefault` there is real. `foreign` is keyed by pane PID, and two panes
+    cannot share one, so no collision rule is reachable and `setdefault` and
+    plain assignment were indistinguishable through the public method. The test
+    certified a hazard that was not there.
+
+    The property that IS worth pinning is the keying itself. Both panes of one
+    foreign session appear, because the question asked of this half is "who owns
+    this process". A later change to name keying would silently lose one of two
+    panes and answer that question wrongly for the survivor.
+    """
     runner = FakeRunner(stdout={"list-panes": "cc-a 10\ncc-a 11\n"})
-    assert Tmux(prefix="hr-", run=runner).panes().foreign == {10: "cc-a", 11: "cc-a"}
+    foreign = Tmux(prefix="hr-", run=runner).panes().foreign
+    assert foreign == {10: "cc-a", 11: "cc-a"}
+    assert len(foreign) == 2, "a name keyed map would have kept only one of these"
 
 
 def test_pane_pid_uses_the_colon_terminated_target() -> None:
@@ -280,6 +294,58 @@ def test_no_method_can_reach_kill_server() -> None:
     drive_every_method(Tmux(prefix="hr-", run=runner))
     assert runner.calls, "the sweep drove nothing, so it proves nothing"
     assert not any("kill-server" in argv for argv in runner.calls)
+
+
+# The verbs that CREATE, SIGNAL or KILL. #85's second Done when is about these
+# three and not about the reads: learning who owns an agent is a read, and the
+# invariant is that the new knowledge never leaked into a write.
+_WRITE_VERBS = {"new-session", "kill-session", "send-keys"}
+
+
+def test_no_write_verb_can_name_a_session_outside_our_prefix() -> None:
+    """#85's second Done when, pinned where it can actually fail (#176).
+
+    The test this replaces lived in `test_engine.py` and asserted that a
+    detached row left `killed`, `started` and `sent` empty. Every one of those
+    assertions passed against the code as it was BEFORE #85, because `stop` and
+    `kill` refuse on `DETACHED` before touching tmux at all. It was measuring
+    the refusal, not the scoping, and its last assertion could not fail under
+    any implementation: `FakeTmux.sessions` is keyed by project name and only
+    `new_session` writes to it, so a `cc-` prefixed key cannot appear in it.
+
+    This drives the real adapter and reads the argv it built. A write that named
+    something outside the prefix would appear here, which is the property the
+    ticket is actually about: whatever Hitchrail learns about foreign sessions,
+    it still creates, signals and kills only its own.
+
+    The targets are three different shapes on purpose, and the assertion
+    normalises rather than accepting any of them loosely: `new-session -s` takes
+    a bare name, `kill-session -t` an anchored `=name`, and `send-keys -t` an
+    anchored colon terminated `=name:`. Both decorations are load bearing and
+    have their own tests; what this one asserts is the part underneath.
+    """
+    runner = FakeRunner()
+    drive_every_method(Tmux(prefix="hr-", run=runner))
+
+    seen: dict[str, str] = {}
+    for argv in runner.calls:
+        verb = next((a for a in argv if a in _WRITE_VERBS), None)
+        if verb is None:
+            continue
+        flag = "-s" if verb == "new-session" else "-t"
+        target = argv[argv.index(flag) + 1]
+        seen[verb] = target.lstrip("=").rstrip(":")
+
+    assert set(seen) == _WRITE_VERBS, (
+        f"the sweep saw {sorted(seen)} and the write verbs are "
+        f"{sorted(_WRITE_VERBS)}, so a write path is not being driven and this "
+        f"test is proving less than it claims"
+    )
+    for verb, name in seen.items():
+        assert name.startswith("hr-"), (
+            f"`{verb}` named `{name}`, which is outside the configured prefix, "
+            f"so this adapter can write to a session that is not ours"
+        )
 
 
 def test_the_socket_is_carried_on_every_call() -> None:

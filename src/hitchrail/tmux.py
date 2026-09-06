@@ -300,7 +300,11 @@ class Tmux:
                 # Escaped and bounded by `foreign_name`, which is where the
                 # reasons are. This is the only string the interface renders
                 # that no allowlist of ours constrains.
-                foreign.setdefault(pid, foreign_name(name))
+                #
+                # Assignment, not `setdefault` (#176): two panes cannot share a
+                # pane pid, so it announced a collision rule that is the one
+                # `ours` needs below and this map cannot reach.
+                foreign[pid] = foreign_name(name)
                 continue
             # A session already seen keeps its FIRST pane: a window split must
             # not change which pid a project reports.

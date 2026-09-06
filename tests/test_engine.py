@@ -2474,12 +2474,32 @@ def test_reading_a_foreign_session_costs_no_extra_call(root: Path) -> None:
     assert tmux.capture_calls == 0
 
 
-def test_a_foreign_session_is_never_created_signalled_or_killed(root: Path) -> None:
-    """#85's second Done when, asserted apart from anything about the display.
+def test_a_detached_row_refuses_before_it_reaches_tmux(root: Path) -> None:
+    """Renamed at #176, because it never checked what its name claimed.
 
-    Learning who owns an agent is a read. Every write path builds its target
-    from `session_name`, so it can only ever name a session carrying our own
-    prefix, and this asserts that the new knowledge did not leak into one.
+    It was called `test_a_foreign_session_is_never_created_signalled_or_killed`
+    and read as #85's second Done when. It is not that. Every assertion below
+    passes against the code as it was BEFORE #85: `stop` refuses on `DETACHED`
+    before touching tmux at all, so these lists are empty because of the
+    refusal, not because of anything about foreign sessions.
+
+    That is still worth pinning, under the name it earns: a row whose agent
+    Hitchrail cannot address must reach no write path, and the refusal is what
+    guarantees it rather than any downstream scoping.
+
+    **The invariant it used to claim is pinned in
+    `tests/test_tmux.py::test_no_write_verb_can_name_a_session_outside_our_prefix`,**
+    which drives the real adapter and reads the argv. Verified: with
+    `kill_session` mutated to drop the prefix, that test fails and this one
+    passes, which is exactly the gap #176 reported.
+
+    A fourth assertion was deleted rather than kept:
+
+        assert f"cc-{proj('vessel')}" not in tmux.sessions
+
+    `FakeTmux.sessions` is keyed by project name and only `new_session` writes
+    to it, so a `cc-` prefixed key cannot appear under any implementation. It
+    could not fail, which is worse than absent: it read as coverage.
     """
     foreign, table = foreign_machine(proj("vessel"))
     engine, tmux = engine_for(root, foreign=foreign, table=table)
@@ -2492,7 +2512,6 @@ def test_a_foreign_session_is_never_created_signalled_or_killed(root: Path) -> N
     assert tmux.killed == []
     assert tmux.started == []
     assert tmux.sent == []
-    assert f"cc-{proj('vessel')}" not in tmux.sessions
 
 
 def test_a_stop_on_a_foreign_owned_agent_refuses_the_same_way(root: Path) -> None:

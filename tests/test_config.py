@@ -1094,7 +1094,11 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # whose next paragraph explains that the condition can never be true.
         # The cap was raised for sixteen lines nobody meant to add, which is
         # how a size guideline stops meaning anything.
-        "tmux.py": 539,
+        # 539 to 543 for #176: four lines saying why the foreign half assigns
+        # rather than `setdefault`s. The word it replaced announced a collision
+        # rule that map cannot reach, and a test was written certifying that
+        # hazard, so the note is what stops the word coming back.
+        "tmux.py": 543,
         # 413, and thirteen lines over the guideline is not a second job. #18
         # already took the host vocabulary out of this file, and what is left
         # is one dataclass and its startup refusals, which is one thing. The
