@@ -231,11 +231,11 @@ function metaFor(project) {
   // that prompt on the operator's behalf: that would be agreeing to trust a
   // folder for them, silently, which needs its own argument and does not have
   // one (#88).
-  if (project.awaiting_trust) return "waiting to be trusted  ·  open it once in a terminal";
+  if (project.awaiting_trust) return "waiting to be trusted  ·  open the pane to answer";
   // #101. Set when a stop's wait ended with the agent on a prompt. The row has
   // to carry it too: the dialog can be dismissed, and the session is still
   // sitting there waiting for somebody.
-  if (project.awaiting_input) return "waiting for an answer  ·  open it in a terminal";
+  if (project.awaiting_input) return "waiting for an answer  ·  open the pane to answer";
   if (project.pid === null) return "";
   return `${formatMb(project.ram_mb)}  ·  up ${formatUptime(project.uptime_s)}`;
 }
@@ -1068,6 +1068,71 @@ function showDeadStart(project, body) {
   });
 }
 
+/* -- answering a prompt the agent is blocked on (#204) ------------------ */
+
+// The keys this interface offers, and the only ones the server will carry.
+// Mirrors `ANSWER_KEYS` in `claude_ipc.py`, and a test asserts the two lists
+// are the same, because a key offered here and refused there is a button that
+// does nothing.
+//
+// **There is deliberately no text field, and adding one is the line.** The
+// safety of this whole path is that the operator reads Claude Code's own words
+// in the pane above and presses the key those words name. A field would let
+// Hitchrail carry an instruction the pane never offered, which is the terminal
+// `docs/roadmap.md` defers.
+//
+// The digits are shown WITHOUT reading the prompt to see which it names.
+// Parsing the options is the version-volatile thing this project has got wrong
+// three times, and offering a wrong list means a keypress that means something
+// other than its label.
+export const ANSWER_KEYS = [
+  "Up", "Down", "Enter", "Escape",
+  "1", "2", "3", "4", "5", "6", "7", "8", "9",
+];
+
+async function sendAnswer(project, key, pane) {
+  const result = await api(`/api/sessions/${encodeURIComponent(project.name)}/answer`, {
+    method: "POST",
+    body: JSON.stringify({ key }),
+  });
+  if (!result.ok) {
+    // Includes `not_asking`, which is the ordinary case rather than an error:
+    // the screen moved on between the capture and the press.
+    showRefusal(result);
+    return;
+  }
+  // Re-read rather than assuming. The operator pressed a key at a screen and
+  // the only honest confirmation is the screen afterwards.
+  const fresh = await api(`/api/sessions/${encodeURIComponent(project.name)}/logs?lines=40`);
+  if (fresh.ok) {
+    pane.textContent = fresh.body.text || "The pane has printed nothing yet.";
+  }
+}
+
+function answerPad(project, pane) {
+  const pad = document.createElement("div");
+  pad.className = "answer-pad";
+
+  const note = document.createElement("p");
+  note.className = "meta";
+  note.textContent = "Read the question above, then press the key it names.";
+  pad.appendChild(note);
+
+  const keys = document.createElement("div");
+  keys.className = "answer-keys";
+  for (const key of ANSWER_KEYS) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "answer-key";
+    button.textContent = key;
+    button.setAttribute("aria-label", `Send ${key}`);
+    button.addEventListener("click", () => sendAnswer(project, key, pane));
+    keys.appendChild(button);
+  }
+  pad.appendChild(keys);
+  return pad;
+}
+
 /* -- the log drawer ---------------------------------------------------- */
 
 async function openLogs(project) {
@@ -1081,10 +1146,24 @@ async function openLogs(project) {
   const pane = document.createElement("pre");
   pane.className = "log-pane";
   pane.textContent = result.body.text || "The pane has printed nothing yet.";
+  // #204. The keypad appears only for a row the sweep has already flagged as
+  // waiting on a person. Not on every log view: a keypad under a healthy
+  // session invites a keystroke into a working agent, and the flag is the same
+  // one the row badge uses, so what the list says and what this offers agree.
+  //
+  // The flag is a hint, never the guard. It is up to 30s old by `attention.TTL_S`,
+  // and the server re-reads the pane inside the send regardless.
+  const waiting = project.awaiting_trust || project.awaiting_input;
+  const extra = document.createElement("div");
+  extra.appendChild(pane);
+  if (waiting) extra.appendChild(answerPad(project, pane));
+
   showDialog({
     title: project.name,
-    body: "last 40 lines of the pane",
-    extra: pane,
+    body: waiting
+      ? "this session is waiting for an answer"
+      : "last 40 lines of the pane",
+    extra,
     actions: [["Close", "ghost", () => closeDialog()]],
   });
 }

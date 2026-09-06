@@ -345,6 +345,14 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
             return _error(400, "invalid_body", "a JSON body with a 'key' is required")
         if not isinstance(key, str):
             return _error(400, "invalid_body", "a JSON body with a 'key' is required")
+        # 400 and not 409. A key outside the set is refused whatever the screen
+        # is doing, so it is a malformed request rather than a state conflict,
+        # and a client that gets 409 would reasonably retry it forever.
+        #
+        # The adapter checks this again before it reads any pane. Two guards on
+        # purpose: this one is for the status code, that one is the guard.
+        if key not in eng.ANSWER_KEYS:
+            return _error(400, "invalid_key", f"{key!r} is not a key Hitchrail will send")
         try:
             session = await in_thread(engine.answer, name, key)
         except eng.UnknownProject as exc:

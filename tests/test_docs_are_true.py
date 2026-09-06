@@ -31,6 +31,7 @@ from pathlib import Path
 
 import pytest
 
+from hitchrail import claude_ipc
 from hitchrail.cli import parse_args
 from support import make_config
 
@@ -1050,3 +1051,45 @@ def test_the_phone_doc_requires_both_allowlist_flags_for_a_proxy() -> None:
     overlay = PHONE_DOC.read_text().split(_NAMED_HEADING)[0]
     for flag in ("--allow-host", "--allow-origin"):
         assert flag in overlay, f"the overlay route does not mention {flag}"
+
+
+def test_the_keypad_offers_exactly_the_keys_the_server_will_send() -> None:
+    """#204. `app.js` and `claude_ipc.py` name the same keys, or a button lies.
+
+    Two lists rather than one because they are in two languages, and the copy
+    in the browser is an AFFORDANCE while the copy on the server is the GUARD.
+    That asymmetry is deliberate and is why this test exists rather than a
+    generated file: a key added only to the browser is a button that does
+    nothing, and a key added only to the server is a widening nobody reviewed
+    against the interface.
+
+    Reads the literal out of `app.js` as text, the way this module reads every
+    other cross-file claim, because parsing the module would need a JS runtime
+    to assert something a regex can see.
+    """
+    js = (SRC / "web" / "app.js").read_text(encoding="utf-8")
+    block = re.search(r"export const ANSWER_KEYS = \[(.*?)\];", js, re.DOTALL)
+    assert block, "app.js no longer declares ANSWER_KEYS where this test can read it"
+    in_browser = set(re.findall(r'"([^"]+)"', block.group(1)))
+    assert in_browser == set(claude_ipc.ANSWER_KEYS), (
+        f"the keypad offers {sorted(in_browser)} and the server will send "
+        f"{sorted(claude_ipc.ANSWER_KEYS)}, so a button either does nothing or "
+        f"a key reachable on the server is not reviewed against the interface"
+    )
+
+
+def test_no_free_text_field_reaches_the_answer_path() -> None:
+    """#204's line, asserted rather than trusted to review.
+
+    The whole safety argument is that the operator presses a key named by words
+    they read. An `<input>` built inside the answer pad would carry an
+    instruction the pane never offered, which is the product the roadmap
+    defers, and it would arrive as a small, plausible diff.
+    """
+    js = (SRC / "web" / "app.js").read_text(encoding="utf-8")
+    pad = re.search(r"function answerPad\(.*?\n}", js, re.DOTALL)
+    assert pad, "answerPad is no longer where this test can read it"
+    assert 'createElement("input")' not in pad.group(0), (
+        "answerPad builds a text input, which turns one keypress from a fixed "
+        "set into arbitrary input to a shell. See #204."
+    )

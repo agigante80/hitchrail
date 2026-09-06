@@ -95,6 +95,13 @@ def _no_session_here(session: Session, consequence: str) -> str:
     )
 
 
+# Re-exported so the HTTP layer can check membership without importing the
+# quarantine directly. **Membership only.** The rule this project keeps is that
+# nothing outside `claude_ipc` ITERATES a key constant, because iterating is
+# what encodes a sequence; asking whether one key is allowed encodes nothing.
+ANSWER_KEYS = claude_ipc.ANSWER_KEYS
+
+
 class Engine:
     """Derivation, and in later tickets the session lifecycle."""
 
@@ -1059,6 +1066,7 @@ class Engine:
 
 
 __all__ = [
+    "ANSWER_KEYS",
     "AlreadyRunning",
     "Engine",
     "EngineError",

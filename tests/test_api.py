@@ -13,7 +13,9 @@ import pytest
 from starlette.responses import Response
 
 from conftest import (
+    CLEAR_INPUT_BOX,
     DIRTY_INPUT_BOX,
+    TRUST_MODAL,
     FakeClock,
     FakeTmux,
     ScriptedProcs,
@@ -1450,3 +1452,88 @@ async def test_every_font_the_stylesheet_names_is_actually_served(
         r = await client.get(f"/{url}", headers=HEADERS)
         assert r.status_code == 200, f"{url} is named by app.css and 404s"
         assert r.headers["content-type"] == "font/woff2"
+
+
+# #204. Answering a prompt the agent is blocked on.
+
+
+async def test_a_key_reaches_the_pane_when_the_screen_is_asking(
+    client: httpx.AsyncClient, engine: Engine, tmux: FakeTmux
+) -> None:
+    tmux.pane_text[proj("vessel")] = TRUST_MODAL
+    r = await client.post(
+        f"/api/sessions/{proj('vessel')}/answer", headers=HEADERS, json={"key": "Enter"}
+    )
+    assert r.status_code == 200
+    assert (proj("vessel"), ("Enter",)) in tmux.sent
+
+
+async def test_an_ordinary_input_box_is_not_a_question_to_answer(
+    client: httpx.AsyncClient, engine: Engine, tmux: FakeTmux
+) -> None:
+    """409, and nothing sent.
+
+    This is the race the re-read closes, arriving through the real route: the
+    operator saw a modal, the agent answered it, and `Enter` would now submit
+    whatever the box holds.
+    """
+    tmux.pane_text[proj("vessel")] = CLEAR_INPUT_BOX
+    r = await client.post(
+        f"/api/sessions/{proj('vessel')}/answer", headers=HEADERS, json={"key": "Enter"}
+    )
+    assert r.status_code == 409
+    assert r.json()["code"] == "not_asking"
+    assert tmux.sent == [], "a key was sent to a session that was not asking"
+
+
+async def test_a_key_outside_the_set_is_400_and_reads_no_pane(
+    client: httpx.AsyncClient, engine: Engine, tmux: FakeTmux
+) -> None:
+    """400 rather than 409, because no screen would make it acceptable.
+
+    A client given 409 for this would reasonably retry it forever. The pane is
+    not read either, so an unsendable key cannot be used to probe what is on a
+    session's screen.
+    """
+    tmux.pane_text[proj("vessel")] = TRUST_MODAL
+    before = tmux.capture_calls
+    r = await client.post(
+        f"/api/sessions/{proj('vessel')}/answer",
+        headers=HEADERS,
+        json={"key": "C-c"},
+    )
+    assert r.status_code == 400
+    assert r.json()["code"] == "invalid_key"
+    assert tmux.sent == []
+    assert tmux.capture_calls == before, "a pane was read for a key we would never send"
+
+
+async def test_a_body_without_a_key_is_refused(
+    client: httpx.AsyncClient, engine: Engine, tmux: FakeTmux
+) -> None:
+    tmux.pane_text[proj("vessel")] = TRUST_MODAL
+    r = await client.post(
+        f"/api/sessions/{proj('vessel')}/answer", headers=HEADERS, json={"nope": 1}
+    )
+    assert r.status_code == 400
+    assert r.json()["code"] == "invalid_body"
+    assert tmux.sent == []
+
+
+async def test_answering_the_self_project_is_refused(
+    root: pathlib.Path,
+) -> None:
+    """Hitchrail typing into the session that is serving the request."""
+    config = make_config(
+        root,
+        sessions_dir=root / ".sessions",
+        agent_config_path=NO_AGENT_CONFIG,
+        self_project=proj("vessel"),
+    )
+    engine = make_engine(config, FakeTmux(), procs_from(""))
+    async with client_for(engine, config) as c:
+        r = await c.post(
+            f"/api/sessions/{proj('vessel')}/answer", headers=HEADERS, json={"key": "Enter"}
+        )
+    assert r.status_code == 423
+    assert r.json()["code"] == "self_protected"

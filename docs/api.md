@@ -165,6 +165,7 @@ than by position.
 | `already_running` | 409 | that project already has a live session |
 | `locked` | 409 | a start is already in flight for that project |
 | `no_agent` | 409 | there is no agent to act on, so the request cannot be honoured |
+| `invalid_key` | 400 | the key asked for is not one of the keys Hitchrail will send |
 | `not_asking` | 409 | a key was sent but the screen is not showing a question to answer |
 | `not_running` | 409 | a stop or kill was asked for something that is not running |
 | `ram_soft` | 409 | memory is tight; retry with acknowledgement to start anyway |

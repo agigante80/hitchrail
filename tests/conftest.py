@@ -296,6 +296,14 @@ CLEAR_INPUT_BOX = "\x1b[39m\u276f\xa0                     \n"
 # thing that distinguishes it from the agent's own dim suggestion.
 DIRTY_INPUT_BOX = "\x1b[39m\u276f\xa0half a sentence\n"
 
+# #88's trust modal, the state #204 exists to answer. The ornament is the same
+# U+276F, and what follows it is a colour reset and an ORDINARY space where the
+# input box has U+00A0. That one character is the whole distinction, which is
+# why this is a captured row rather than a description of one.
+TRUST_MODAL = (
+    "\x1b[39m \x1b[38;5;153m\u276f\x1b[39m \x1b[38;5;153mNo,\x1b[39m \x1b[38;5;153mexit\n"
+)
+
 
 def ps_row(
     pid: int,
