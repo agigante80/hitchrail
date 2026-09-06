@@ -948,7 +948,14 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # escapes are deliberately NOT stripped here: the stripper eats one
         # printable character after a two character escape (#97), and the
         # character it would eat is the U+00A0 this predicate reads.
-        "claude_ipc.py": 692,
+        # 692 to 781 for #204: ANSWER_KEYS, `awaits_answer` and `send_answer`.
+        # The behaviour is about fifteen lines; the rest is why each narrowing
+        # is a security property and not a preference, which is the whole of
+        # this feature's safety case. A literal key set, `None` not collapsing
+        # into answerable, and the re-read living INSIDE the send are each one
+        # edit away from becoming the terminal the roadmap defers, and a reader
+        # who does not know that will make that edit and think it a tidy-up.
+        "claude_ipc.py": 781,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.
@@ -1006,7 +1013,11 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # already argues that in its own docstring. And the subscriber gate,
         # because an idle tick used to cost nothing and this had made it a `ps`
         # and a `tmux` call every second for the life of a user unit.
-        "engine.py": 1037,
+        # 1037 to 1078 for #204: `Engine.answer`, one keypress from a person
+        # to a prompt they read. Mostly the argument for why this is not the
+        # deferred terminal, kept at the method rather than only in the ticket,
+        # because the ticket is not what the next editor is looking at.
+        "engine.py": 1078,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -1131,7 +1142,15 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 517 to 523 for #100. Six lines: the sweep now calls a second engine
         # method, and the comment says why that call is here rather than on the
         # listing route, which is the whole decision the ticket turned on.
-        "server.py": 523,
+        # 523 to 565 for #204: POST /api/sessions/{name}/answer.
+        #
+        # **This is past the 550 the note above names as the point to look for
+        # a seam with fresh eyes.** Not split here, because doing it inside a
+        # feature commit would mean moving routes and adding one in the same
+        # diff, and the security review of the new route is worth more than the
+        # tidiness. Tracked as its own ticket rather than left as a silent
+        # overrun.
+        "server.py": 565,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

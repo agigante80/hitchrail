@@ -42,6 +42,21 @@ class Protected(EngineError):
     """
 
 
+class NotAsking(EngineError):
+    """The screen is not showing a question, so no key was sent (#204).
+
+    Distinct from `NoAgent` and from `NotRunning`, and the difference is what
+    the operator does next. Those two are derived from state and no screen
+    would change them. This one means we looked, just now, and the moment had
+    passed: the agent answered its own prompt, or moved on to an ordinary input
+    box. The answer is to look again, not to go to the machine.
+
+    Also covers a key outside `ANSWER_KEYS`, which is not a state at all but a
+    request this project refuses to carry. One refusal rather than two, because
+    the operator-facing answer is identical: nothing was sent.
+    """
+
+
 class Locked(EngineError):
     """A start is already in flight for this folder.
 

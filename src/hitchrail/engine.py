@@ -51,6 +51,7 @@ from hitchrail.sessions import (
     MemoryNeedsAck,
     MemoryRefused,
     NoAgent,
+    NotAsking,
     NotRunning,
     Protected,
     Session,
@@ -662,6 +663,45 @@ class Engine:
         self._announce(updated)
         return updated
 
+    def answer(self, name: str, key: str) -> Session:
+        """Carry ONE keypress from a person to a prompt they read (#204).
+
+        The narrowest mutating operation in this project, and every narrowing
+        is a security property rather than a design preference:
+
+        - **Only a key from `ANSWER_KEYS`.** The adapter checks, before it
+          reads any pane, and there is no free text path to here at all.
+        - **Only while the screen still asks.** The adapter re-reads the pane
+          inside the send. The engine deliberately does NOT pre-check and pass
+          the result down: two reads with a gap is the race this exists to
+          close.
+        - **Never chosen.** Nothing here picks a key, defaults one, or presses
+          one on a timer. The operator read the question.
+
+        Refused for the self project like every other mutating call. Hitchrail
+        answering a prompt in its own session could type into the process
+        serving the request.
+
+        **Why this is not the deferred terminal.** `docs/roadmap.md` defers
+        sending input to a session. That is an input box carrying arbitrary
+        text on demand. This carries one key from a fixed set, only when the
+        screen holds a question, in reply to words the operator read. The
+        distinction lives in `ANSWER_KEYS` and in the adapter's re-read, and
+        both have tests that fail if either is widened.
+        """
+        session = self._require_live(name)
+        if session.state is State.DETACHED:
+            raise NoAgent(_no_session_here(session, "no terminal to answer in"))
+        # One call, like the stop. The engine does not learn that answering is
+        # a keystroke, nor that the check is a pane read.
+        try:
+            claude_ipc.send_answer(self.tmux, name, key)
+        except TmuxUnavailable as exc:
+            raise MachineUnreadable(str(exc)) from exc
+        except claude_ipc.AnswerNotSafe as exc:
+            raise NotAsking(str(exc)) from exc
+        return session
+
     def kill(self, name: str) -> Session:
         """The backstop, reachable at any point during a graceful wait.
 
@@ -1027,6 +1067,7 @@ __all__ = [
     "MemoryNeedsAck",
     "MemoryRefused",
     "NoAgent",
+    "NotAsking",
     "NotRunning",
     "Protected",
     "Session",
