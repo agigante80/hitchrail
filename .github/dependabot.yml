@@ -2,49 +2,74 @@
 # update itself.
 #
 # **The actions half is the reason this file exists** (#155). Every third party
-# action here is pinned to a commit SHA on purpose, with the version only in a
-# trailing comment, because a tag is a mutable pointer and whoever owns the
-# action repository can move it. `tests/test_workflows_are_pinned.py` enforces
-# that. The cost of a pin is that nothing tells you a newer version exists: a
-# person reading `# v4.2.1` cannot see that v4.3.0 shipped. This closes that
-# without giving up the pin, because Dependabot rewrites the SHA and the
-# comment together.
+# action here is pinned to a commit SHA on purpose, because a tag is a mutable
+# pointer and whoever owns that repository can move it;
+# `tests/test_workflows_are_pinned.py` enforces it. The cost of a pin is that
+# nothing tells you a newer version exists: a person reading `# v4.2.1` cannot
+# see that v4.3.0 shipped. This closes that without giving up the pin, because
+# Dependabot rewrites the SHA and its trailing comment together.
 #
 # Two ecosystems and no others. There is no Docker image and no npm package
-# here, and a stanza for something that does not exist is a line somebody later
-# reads as a claim that it does.
+# here, and a stanza for something that does not exist reads as a claim that it
+# does.
 
 version: 2
 updates:
-  # `uv`, not `pip`. The build backend is `uv_build`, dependencies are declared
-  # in `pyproject.toml`, and `uv.lock` is committed, which is the shape the
-  # `uv` ecosystem is for.
+  # `uv`, not `pip`. The build backend is `uv_build`, the dependencies are
+  # declared in `pyproject.toml` and `uv.lock` is committed, which is the shape
+  # this ecosystem is for.
   - package-ecosystem: "uv"
     directory: "/"
-    # **`develop`, and it is not a preference.** `main` requires the
-    # `version-bumped` check, which fails unless `pyproject.toml`'s version is
-    # ahead of the latest release tag. A dependency bump does not bump the
-    # project version, so a pull request opened against `main` is red on a
-    # required check by construction. Work lands on `develop` and reaches
-    # `main` only as a release.
+
+    # **There is deliberately no `target-branch` here, and that is the whole
+    # design of this file.**
     #
-    # This applies to VERSION updates only. A SECURITY update always targets
-    # the repository's default branch, whatever is written here, and that is a
-    # branch setting rather than something this file can reach.
-    target-branch: "develop"
+    # The obvious configuration sets `target-branch: develop`, because `main`
+    # requires the `version-bumped` check and a dependency bump does not bump
+    # the project version, so a pull request against `main` is red on a required
+    # check by construction.
+    #
+    # Setting it costs something that is not obvious. A SECURITY update always
+    # targets the repository's DEFAULT branch whatever this file says, and
+    # GitHub's options reference is explicit that once `target-branch` is set,
+    # the options in this stanza stop applying to security updates. `allow` is
+    # one of those options. So the direct-only rule below would quietly hold for
+    # version updates and not for the security updates it matters most for, and
+    # transitive advisories would arrive as pull requests nobody intends to
+    # merge.
+    #
+    # `develop` is the default branch instead. Both kinds of update then land
+    # there, `allow` applies to both, and nothing needs saying twice. The
+    # release gate is unaffected: it triggers on pull requests whose base is
+    # `main` explicitly, and a release is still `develop` to `main`.
+
+    # **Direct dependencies only, and transitive ones left alone.**
+    # `direct` is "all explicitly defined dependencies", which here is the three
+    # runtime dependencies plus the declared groups. A vulnerability reached
+    # through a transitive package is fixed by moving the direct dependency that
+    # pulls it in, not by pinning something this project does not declare, so a
+    # pull request against the transitive package is one nobody would merge.
+    #
+    # This does NOT hide transitive vulnerabilities: Dependabot ALERTS come from
+    # the alert system rather than from this file, and they still fire. What it
+    # removes is the pull request.
+    allow:
+      - dependency-type: "direct"
+
     schedule:
       interval: "weekly"
     # Three at a time. The runtime budget is three dependencies, so a wider
-    # limit here would only ever be filled by the dev group, and a queue of
-    # tooling bumps is how the interesting one gets skimmed past.
+    # limit would only ever be filled by the dev group, and a queue of tooling
+    # bumps is how the interesting one gets skimmed past.
     open-pull-requests-limit: 3
     labels: ["infrastructure"]
     commit-message:
       prefix: "chore(deps)"
 
+  # No `allow` here, deliberately: every action a workflow names is direct, so
+  # the filter would express nothing.
   - package-ecosystem: "github-actions"
     directory: "/"
-    target-branch: "develop"
     schedule:
       interval: "weekly"
     labels: ["infrastructure"]

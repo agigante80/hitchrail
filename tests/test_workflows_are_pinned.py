@@ -159,23 +159,54 @@ def test_the_pins_have_something_that_updates_them() -> None:
     assert "github-actions" in _ECOSYSTEM.findall(DEPENDABOT.read_text())
 
 
-def test_every_ecosystem_targets_a_branch_its_pull_requests_can_merge_into() -> None:
-    """#155's real constraint, and it is this repository's rather than GitHub's.
+def test_no_ecosystem_sets_a_target_branch() -> None:
+    """#155, and this is the counterintuitive half.
 
-    `main` requires the `version-bumped` check, which fails unless
-    `pyproject.toml`'s version is ahead of the latest release tag. A dependency
-    bump does not bump the project version, so a pull request opened against
-    `main` is red on a required check by construction and cannot be merged.
+    Setting `target-branch: develop` reads as obviously right: `main` requires
+    the `version-bumped` check, a dependency bump does not bump the project
+    version, so a pull request against `main` is red on a required check by
+    construction.
 
-    An ecosystem added later without `target-branch` would inherit the default
-    branch and produce exactly that, which is a pull request nobody can act on
-    rather than a visible failure.
+    It costs the thing that matters most. A SECURITY update always targets the
+    repository's DEFAULT branch whatever this file says, and GitHub's options
+    reference is explicit that once `target-branch` is set, the options in that
+    stanza stop applying to security updates. `allow` is one of them, so the
+    direct-only rule would hold for version updates and silently not for
+    security updates, and transitive advisories would arrive as pull requests
+    nobody intends to merge.
+
+    `develop` is the default branch instead, which lands both kinds there and
+    keeps `allow` applying to both.
+
+    **What this test cannot see is the default branch**, which is a repository
+    setting rather than a file. If it is ever moved back to `main`, every
+    dependency pull request lands on the release gate and this stays green.
+    That is written here rather than left as a surprise; the check that would
+    catch it lives in the GitHub settings, not in the suite.
+    """
+    targets = _TARGET.findall(DEPENDABOT.read_text())
+    assert targets == [], (
+        f"target-branch is set to {targets}, which stops `allow` applying to "
+        "security updates, so transitive advisories start arriving as pull "
+        "requests. See the comment in the file."
+    )
+
+
+def test_the_python_ecosystem_updates_only_what_this_project_declares() -> None:
+    """Direct dependencies only, and transitive ones left alone.
+
+    A vulnerability reached through a transitive package is fixed by moving the
+    direct dependency that pulls it in, not by pinning something this project
+    does not declare. A pull request against the transitive package is one
+    nobody would merge, and a queue of those is how the one that matters gets
+    skimmed past.
+
+    Asserted for `uv` only. Every action a workflow names is direct, so the
+    same filter on `github-actions` would express nothing.
     """
     text = DEPENDABOT.read_text()
-    ecosystems = _ECOSYSTEM.findall(text)
-    targets = _TARGET.findall(text)
-    assert len(targets) == len(ecosystems), (
-        f"{len(ecosystems)} ecosystems and {len(targets)} target-branch lines: one "
-        "of them would open its pull requests against the release branch"
+    uv_stanza = text.split('package-ecosystem: "uv"', 1)[1].split("package-ecosystem:", 1)[0]
+    assert 'dependency-type: "direct"' in uv_stanza, (
+        "the Python ecosystem would open pull requests for transitive packages, "
+        "which are fixed by moving a direct dependency rather than by pinning them"
     )
-    assert set(targets) == {"develop"}, targets
