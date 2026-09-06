@@ -214,6 +214,29 @@ def test_a_missing_agent_binary_names_the_binary_that_was_looked_for(
     assert "--agent-binary" in found[0]
 
 
+def test_the_missing_agent_message_does_not_assume_it_is_uninstalled(
+    tmp_path: Path,
+) -> None:
+    """#195. The case this refusal actually fires in is one where it IS installed.
+
+    A lingering unit starts before any login, so the manager's PATH is
+    systemd's fallback and `~/.local/bin` is not in it. Measured on a real
+    boot. Telling that operator to install what they already installed sends
+    them looking in the wrong place, and the message is all they get: there is
+    no terminal attached to ask a follow up question of.
+    """
+    found = preflight(
+        make_config(tmp_path, agent_binary="my-agent"),
+        which=lambda n: None if n == "my-agent" else "/usr/bin/x",
+        meminfo=tmp_path,
+    )
+    assert "if it is installed" in found[0], (
+        "the message offers installing as the only remedy, and the failure it "
+        "fires on most is one where the binary is installed and unreachable"
+    )
+    assert "PATH" in found[0]
+
+
 def test_an_unreadable_meminfo_refuses_rather_than_running_unguarded(
     tmp_path: Path,
 ) -> None:

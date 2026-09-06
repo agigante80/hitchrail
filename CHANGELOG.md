@@ -46,6 +46,11 @@ The refusal now stays stopped, which is what the template always claimed it
 did. **A port already in use still retries**, since that is usually a previous
 instance shutting down.
 
+**The message you get when the agent cannot be found no longer assumes you
+never installed it.** It said "Install it", which is the wrong first thing to
+read when the binary is installed and merely unreachable, which is the case it
+fires in most: a unit at boot, with no terminal attached to ask anything of.
+
 **A lingering install was dead after its first reboot.** The unit template set
 no PATH. `loginctl enable-linger` starts the user manager at boot before any
 login, when its PATH is systemd's fallback, so `~/.local/bin/claude` could not

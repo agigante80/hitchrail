@@ -853,9 +853,12 @@ def test_the_unit_carries_a_path_that_can_find_the_agent() -> None:
     has pushed the full PATH into the manager, so the environment looks healthy
     while the boot environment never was.
 
-    Asserted on the directive rather than on the file, like the guards around
-    it: a substring search matches the comment explaining the trap, so the only
-    way to make that version pass is to delete the reasoning.
+    Asserted on the DIRECTIVE rather than on the file, through
+    `_unit_sections()`, and the reason is sharper than the usual one. A
+    substring search for `%h/.local/bin` over this file passes with no PATH
+    line at all, because `ExecStart=%h/.local/bin/hitchrail` already carries
+    that literal. Such a guard would have been green against the exact unit
+    that died at boot.
     """
     paths = [
         directive.split("=", 1)[1]

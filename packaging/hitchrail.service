@@ -104,7 +104,9 @@ Environment=PYTHONUNBUFFERED=1
 # So an agent may see a different PATH depending on who started the tmux server
 # first, which is worth knowing and is not something this file can fix.
 #
-# **If you add anything here, prefer a stable path to a version pinned one.**
+# **You may have to add to it.** The agent binary can itself be a launcher that
+# needs an interpreter or a helper on PATH, in which case that directory has to
+# be here too. Prefer a stable path to a version pinned one.
 # Something like `%h/.nvm/versions/node/v22.22.2/bin` goes stale at the next
 # upgrade and fails at the next BOOT rather than at the upgrade, which is a long
 # way from the change that caused it.

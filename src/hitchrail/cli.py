@@ -299,10 +299,19 @@ def preflight(
             "package manager, for example: sudo apt install tmux"
         )
     if look(config.agent_binary) is None:
+        # **"Install it" is the wrong first remedy, and #195 is why.** The case
+        # this actually fires in is a lingering systemd unit at boot: the agent
+        # IS installed, in `~/.local/bin`, and the user manager's PATH before
+        # any login is systemd's fallback, which does not include it. Telling
+        # somebody to install what they already installed sends them looking in
+        # the wrong place, and the message is the only thing they get, because
+        # this refusal happens with no terminal attached.
         problems.append(
             f"{config.agent_binary!r} is not on PATH. That is the agent "
-            "Hitchrail starts. Install it, or point --agent-binary at the "
-            "executable you meant"
+            "Hitchrail starts. Install it, point --agent-binary at the "
+            "executable, or if it is installed, put its directory on the PATH "
+            "THIS process has: under a systemd unit that is the unit's own "
+            "Environment=PATH rather than your login's"
         )
     if not meminfo.exists():
         problems.append(
