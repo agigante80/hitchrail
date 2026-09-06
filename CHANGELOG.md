@@ -32,6 +32,29 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+## 0.5.1 - 2026-09-06
+
+### Fixed
+
+**A row could go on saying an agent is waiting for you after you had already
+answered it.** Stopping a session clears that standing claim, on the rule that a
+fresh attempt starts from nothing. The background sweep decides what is waiting
+by reading screens, which it does without holding its lock, so a stop landing
+while it looked could have its clear undone by an observation made a moment
+BEFORE it. The row then reported a prompt you had just dealt with until the next
+sweep corrected it.
+
+**A stop could say "it has not finished" while the server had not yet noticed it
+had.** The same sweep expires stop timers, and it did that in sequence behind the
+screen reading. A screen read that overruns, which against an unresponsive tmux
+can take half a minute, delayed every expiry behind it, and the browser's own
+timer is 30 seconds. The two timers are independent by design and either may be
+shorter; what this removes is the server's being reliably the longer one under a
+condition nobody chose.
+
+**Neither needs anything from you.** Both self corrected within a sweep or two,
+and both are gone.
+
 ## 0.5.0 - 2026-09-06
 
 ### Added
