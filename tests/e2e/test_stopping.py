@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 from playwright.async_api import Page, expect
 
-from .conftest import Harness
+from .conftest import Harness, grant_and_land
 
 pytestmark = pytest.mark.e2e
 
@@ -494,7 +494,9 @@ async def test_a_wait_whose_listings_are_refused_does_not_claim_it_did_not_finis
     kill offer for a session this browser is no longer authenticated for.
     """
     server.seed(running=["vessel"], ignores_graceful_stop=True, token="s3cret")
-    await page.goto(f"{server.base}/grant#token=s3cret")
+    # `grant_and_land` and not a bare `goto`: `_stop_and_hold` navigates next,
+    # and the grant page's own `location.replace("./")` is still in flight. #114.
+    await grant_and_land(page, server.base, "s3cret")
     await _stop_and_hold(page, server)
     await page.context.clear_cookies()
 

@@ -266,6 +266,47 @@ def e2e_id(name: str, label: str = DEFAULT_LABEL) -> str:
     return f"{label}~{e2e_name(name)}"
 
 
+async def grant_and_land(page: Page, base: str, token: str) -> None:
+    """Trade a token for the cookie, and wait for the page to STOP moving (#114).
+
+    `grant.html` ends with `window.location.replace("./")`, so the navigation
+    `page.goto` returns from is not the last one. A test that navigates again
+    immediately races that replace to the SAME url, and Playwright refuses with
+
+        Navigation to "http://127.0.0.1:PORT/" is interrupted by
+        another navigation to "http://127.0.0.1:PORT/"
+
+    Seen in CI on 2026-09-03, passed on rerun, and it took a while to place
+    because the two urls in the message are identical.
+
+    Most tests do not need this: they await a locator next, and that waits
+    through the redirect on its own. It is only a hazard when the next thing is
+    another `goto`.
+
+    Deliberately NOT used for a bad token, which is the case that does not
+    redirect at all: `grant.html` renders an alert and stays where it is, so
+    waiting for a landing would hang until the timeout.
+
+    **This fix is reasoned, not proven, and that distinction is worth keeping.**
+    Removing the wait below does NOT fail the suite on an idle machine: the race
+    needs the replace to still be in flight when the next `goto` starts, and
+    locally it never is. So there is no test here that would catch its removal,
+    which is the same weakness this phase is otherwise about.
+
+    What IS established: `grant.html` ends with `window.location.replace("./")`
+    (line 197), the failing call was a `goto` to the url that replace targets,
+    and Playwright's message named that url twice. The mechanism is not in
+    doubt; only a local reproduction is missing.
+
+    A deterministic version would have to remove the second navigation rather
+    than sequence it, which means `_stop_and_hold` not re-navigating when the
+    page is already where it wants to be. That is a bigger change to a helper
+    several tests share, and it is worth doing only if this recurs.
+    """
+    await page.goto(f"{base}/grant#token={token}")
+    await page.wait_for_url(lambda url: "/grant" not in url)
+
+
 def free_port() -> int:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
