@@ -1636,20 +1636,35 @@ def _security_rule_paths(rule: Path | None = None) -> list[str]:
     inside = False
     seen_key = False
     for line in block.group("front").split("\n"):
-        if re.match(r"^paths:\s*$", line):
+        key = re.match(r"^paths:(?P<tail>.*)$", line)
+        if key:
             # **A second `paths:` key is refused rather than merged.** The
             # parser used to return the union of both blocks, and a union is a
             # SUPERSET of what loads: YAML is last wins, so an entry from the
             # first block would satisfy this guard while the rule file never
-            # loaded for it. That is the only direction in which this whole
-            # check can pass falsely, which is why it is the one shape that
-            # raises instead of being read generously.
+            # loaded for it. That is the direction in which this whole check
+            # can pass falsely, which is why it raises instead of being read
+            # generously.
+            #
+            # **The key is matched with any tail, and round 2 of review is why.**
+            # The first version required the key alone on its line, so a second
+            # key written flow style (`paths: ["a.py"]`) or with a trailing
+            # comment fell through to the `^\S` branch below, ended the list
+            # silently, and left exactly the union this assertion exists to
+            # refuse. Matching the name and rejecting the tail closes both.
             assert not seen_key, (
                 f"{rule} has more than one top level `paths:` key. YAML keeps the "
                 "last, so reading both would report modules as covered that no "
                 "rule loads for."
             )
             seen_key = True
+            tail = key.group("tail").strip()
+            if tail and not tail.startswith("#"):
+                raise AssertionError(
+                    f"{rule}: `paths:` carries {tail!r} on its own line. This parser "
+                    "reads the block form only, and reading a flow style list wrongly "
+                    "is how a module reports as covered by a rule that never loads."
+                )
             inside = True
             continue
         if not inside:
@@ -1666,6 +1681,17 @@ def _security_rule_paths(rule: Path | None = None) -> list[str]:
         if entry:
             found.append(entry.group("path"))
             continue
+        if re.match(r"^-", line):
+            # A sequence item at column zero under a mapping key is legal YAML
+            # and the `^\S` branch below used to drop it, and everything after
+            # it, in silence. Round 2 found it: the parser's own message says an
+            # entry read as nothing is a module it would stop checking without
+            # saying so, and this was that shape inside the parser saying it.
+            raise AssertionError(
+                f"{rule}: {line!r} is a list entry at column zero. It is legal YAML "
+                "and this parser does not read it, so it must refuse rather than "
+                "truncate the list here and report the rest as covered."
+            )
         if re.match(r"^\S", line):
             inside = False
             continue
@@ -1682,6 +1708,23 @@ def _security_rule_paths(rule: Path | None = None) -> list[str]:
         "a guard that cannot find it must fail rather than pass on nothing."
     )
     return found
+
+
+def _stale_rule_entries(listed: list[str]) -> list[str]:
+    """The entries naming no file, which the subset check cannot see.
+
+    `headers.py`, `server.py` and `cli.py` are in the rule and deliberately not
+    in `[tool.mutmut] source_paths`, so nothing in the subset direction checks
+    them at all: rename or split one and its entry matches no file, the rules
+    stop loading for it, and every guard in this repository stays green. That is
+    #126's asymmetry reappearing inside the guard written to answer it.
+
+    A function rather than a comprehension inline, because round 2 of review
+    pointed out the comprehension could only ever run against the real tree, in
+    its passing direction, on the one machine where `.claude/` exists. Here it
+    can be driven with a list.
+    """
+    return [entry for entry in listed if not (_REPO / entry).exists()]
 
 
 def test_every_mutated_module_loads_the_security_rules_when_it_is_edited() -> None:
@@ -1749,13 +1792,7 @@ def test_every_mutated_module_loads_the_security_rules_when_it_is_edited() -> No
         "which modules load those rules when an agent edits them, and it omits these."
     )
 
-    # **The other direction, which the subset check cannot see.** `headers.py`,
-    # `server.py` and `cli.py` are in the rule and deliberately not mutated, so
-    # nothing above checks them at all: rename or split one and its entry
-    # matches no file, the rules stop loading for it, and every guard in this
-    # repository stays green. That is #126's asymmetry, which this guard exists
-    # to answer, reappearing inside the answer.
-    gone = [entry for entry in listed if not (_REPO / entry).exists()]
+    gone = _stale_rule_entries(listed)
     assert not gone, (
         f"{_SECURITY_RULE} names " + ", ".join(gone) + ", which do not exist. An entry "
         "pointing at nothing loads no rules for anything, and it looks identical to a "
@@ -1825,9 +1862,48 @@ def test_the_rule_parser_refuses_a_second_paths_key(tmp_path: Path) -> None:
 def test_the_rule_parser_returns_entries_verbatim_for_the_caller_to_resolve(
     tmp_path: Path,
 ) -> None:
-    """The existence check belongs to the caller, so the parser must not
-    normalise or drop a path that names no file. A dropped entry is exactly the
-    stale entry the caller exists to catch."""
+    """The parser must not normalise or drop a path that names no file: the
+    existence check belongs to `_stale_rule_entries`, which is tested
+    separately. This asserts only the parser's half, which is that it hands the
+    entry on unchanged rather than quietly filtering it."""
     rule = _rule_file(tmp_path, 'paths:\n  - "src/hitchrail/gone.py"')
     assert _security_rule_paths(rule) == ["src/hitchrail/gone.py"]
     assert not (_REPO / "src/hitchrail/gone.py").exists()
+
+
+def test_a_rule_entry_naming_no_file_is_reported_as_stale() -> None:
+    """The direction the subset check cannot see, driven by a list rather than
+    by the repository. Against the real tree this returns nothing, which is a
+    guard that has never been observed doing its job."""
+    assert _stale_rule_entries(["src/hitchrail/config.py"]) == []
+    assert _stale_rule_entries(
+        ["src/hitchrail/config.py", "src/hitchrail/renamed_away.py"]
+    ) == ["src/hitchrail/renamed_away.py"]
+
+
+def test_the_rule_parser_refuses_a_flow_style_second_paths_key(tmp_path: Path) -> None:
+    """Round 2. The block-form-only key match let this through: the second key
+    fell to the `^\\S` branch, ended the list silently, and returned the first
+    block's entries as the answer. YAML keeps the last key, so those modules
+    would have reported as covered by a rule that never loads for them."""
+    rule = _rule_file(tmp_path, 'paths:\n  - "src/a.py"\npaths: ["src/c.py"]')
+    with pytest.raises(AssertionError, match="more than one top level"):
+        _security_rule_paths(rule)
+
+
+def test_the_rule_parser_refuses_a_flow_style_first_paths_key(tmp_path: Path) -> None:
+    """The same shape with only one key. Reading the name and ignoring the tail
+    would report an empty list, and an empty list makes the subset check
+    vacuously true."""
+    rule = _rule_file(tmp_path, 'paths: ["src/a.py", "src/b.py"]')
+    with pytest.raises(AssertionError, match="carries"):
+        _security_rule_paths(rule)
+
+
+def test_the_rule_parser_refuses_a_list_entry_at_column_zero(tmp_path: Path) -> None:
+    """Legal YAML this parser does not read. It used to truncate the list there
+    and report everything after it as absent, silently, which is the shape the
+    parser's own refusal message forbids."""
+    rule = _rule_file(tmp_path, 'paths:\n  - "src/a.py"\n- "src/b.py"\n  - "src/c.py"')
+    with pytest.raises(AssertionError, match="column zero"):
+        _security_rule_paths(rule)
