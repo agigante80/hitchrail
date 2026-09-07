@@ -793,6 +793,46 @@ class Harness:
             "Without this the tests that depend on it fail as opaque timeouts."
         )
 
+    @contextlib.contextmanager
+    def cut_and_hold(self, every: float = 0.05) -> Iterator[None]:
+        """Keep the stream down until the block exits, instead of racing it.
+
+        #70. `drop_connections` cuts ONCE, and `down` is transient by design:
+        Chromium retries a few seconds after an abort and #57 added a five
+        second reopen on top, so every assertion about `down` had to land inside
+        a window the test did not control. It had not flaked in about thirty
+        local runs and in CI, which makes it a flake risk rather than a live
+        failure, and the reason to fix it now is that widening the window is not
+        the same as removing the race.
+
+        A held cut removes it: anything the page reopens is aborted again, so
+        `down` is a state the test ENTERS and LEAVES rather than one it catches
+        in flight.
+
+        The first cut asserts, exactly as `drop_connections` does and for the
+        same reason: these are uvicorn internals, and a silent no op here turns
+        every dependent test into an opaque timeout. The repeats do not assert,
+        because a moment with no connection open is the normal case once the
+        page has given up reopening, not a failure.
+        """
+        self.drop_connections()
+        release = threading.Event()
+
+        def keep_cutting() -> None:
+            while not release.is_set():
+                # Not `drop_connections`: its assertion is right for the first
+                # cut and wrong for every later one.
+                self._abort_connections()
+                release.wait(every)
+
+        holder = threading.Thread(target=keep_cutting, daemon=True)
+        holder.start()
+        try:
+            yield
+        finally:
+            release.set()
+            holder.join(timeout=5)
+
     def stop_serving(self) -> None:
         """Teardown, and neither exit flag can do it alone.
 

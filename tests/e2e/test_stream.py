@@ -136,12 +136,6 @@ async def test_a_dropped_stream_is_visible_rather_than_silent(
     await page.goto(server.base)
     await expect(page.locator("html")).to_have_attribute("data-stream", "open", timeout=15_000)
 
-    server.drop_connections()
-
-    # ONE wait, not three in sequence. `down` is transient by design, since
-    # Chromium retries a few seconds after the abort, and three `expect` calls
-    # each with their own polling budget must all land inside that window. This
-    # reads the attribute and the strip together in a single poll.
     async def strip() -> dict[str, object]:
         read: dict[str, object] = await page.evaluate(
             """() => {
@@ -156,21 +150,38 @@ async def test_a_dropped_stream_is_visible_rather_than_silent(
         )
         return read
 
-    deadline = time.monotonic() + 15
-    seen: dict[str, object] = {}
-    while time.monotonic() < deadline:
-        seen = await strip()
-        if seen["state"] == "down" and seen["shown"]:
-            break
-        await page.wait_for_timeout(50)
+    # **`down` is HELD, not caught in flight (#70).** It used to be raced: one
+    # cut, then a fifteen second poll hoping to read the strip before Chromium
+    # retried and #57's five second reopen put it back. Anything the page
+    # reopens inside this block is cut again, so the state is entered and left
+    # rather than sampled.
+    with server.cut_and_hold():
+        deadline = time.monotonic() + 15
+        seen: dict[str, object] = {}
+        while time.monotonic() < deadline:
+            seen = await strip()
+            if seen["state"] == "down" and seen["shown"]:
+                break
+            await page.wait_for_timeout(50)
 
-    # The attribute is the mechanism; a person READS the strip. Asserting only
-    # the attribute would pass on a build where nothing renders it, and
-    # `to_be_hidden` would pass on one that deleted it.
-    assert seen["present"], seen
-    assert seen["state"] == "down", seen
-    assert seen["shown"], seen
-    assert "Not live" in str(seen["text"]), seen
+        # The attribute is the mechanism; a person READS the strip. Asserting
+        # only the attribute would pass on a build where nothing renders it,
+        # and `to_be_hidden` would pass on one that deleted it.
+        assert seen["present"], seen
+        assert seen["state"] == "down", seen
+        assert seen["shown"], seen
+        assert "Not live" in str(seen["text"]), seen
+
+        # **The hold is asserted, not assumed.** Eight seconds is past both the
+        # Chromium retry and #57's reopen, so a `cut_and_hold` that only cut
+        # once would have let the strip go back to `open` here. Without this the
+        # block above would still pass on the old single cut and the fix would
+        # be invisible.
+        await page.wait_for_timeout(8_000)
+        held = await strip()
+        assert held["state"] == "down", (
+            f"the stream came back while the cut was supposed to be held: {held}"
+        )
 
 
 async def test_the_stream_reconnects_and_the_list_is_right_again(
@@ -260,7 +271,10 @@ async def test_an_event_beats_a_listing_that_was_asked_for_first(
                 await new Promise((resolve) => { window.__release = resolve; });
                 return response;
             };
-            window.__hitchrail.refresh();
+            // Kept so the test can wait on the listing having been APPLIED
+            // rather than on a clock. `refresh()` resolves after it has patched
+            // the list, which is the event the negative below needs (#70).
+            window.__firstListing = window.__hitchrail.refresh();
         }"""
     )
     await page.wait_for_function("() => window.__release !== null", timeout=10_000)
@@ -528,7 +542,13 @@ async def test_a_listing_that_lands_late_does_not_win(page: Page, server: Harnes
 
     # Now the first one lands, carrying a world that is two events old.
     await page.evaluate("() => window.__release()")
-    await page.wait_for_timeout(300)
+
+    # **Wait for the stale listing to have been APPLIED, not for 300ms (#70).**
+    # The sibling test above argues against exactly this: a sleep shorter than
+    # the damage takes runs the negative before the damage lands and passes
+    # wrongly, and on a loaded runner the same sleep fails for no reason. The
+    # page can say when it is done, so it is asked.
+    await page.evaluate("async () => { await window.__firstListing; }")
     await expect(row).to_have_attribute("data-state", "stopped")
 
 

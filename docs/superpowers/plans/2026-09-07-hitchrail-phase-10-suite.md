@@ -244,10 +244,35 @@ Criterion 1. These are the tests that pass while what they name is broken.
       #71 and #72 are Phase 11 and stay there, but the two-refusal harness they
       were waiting on now exists.
 
-- [ ] **Task 47, #70.** The e2e negatives wait on wall clocks instead of on
+- [x] **Task 47, #70.** The e2e negatives wait on wall clocks instead of on
       events. A negative that waits two seconds and asserts nothing happened
       proves the machine was slow, not that the thing is refused. This is the
       shape that makes a whole tier untrustworthy while it is green.
+
+      **Done 2026-09-07.** `Harness.cut_and_hold()` keeps aborting anything the
+      page reopens, so `down` is a state the test ENTERS and LEAVES rather than
+      catches in flight, and the late-listing negative awaits the page's own
+      `refresh()` promise instead of sleeping 300ms.
+
+      Both falsified, and the first falsification is the interesting one: cut
+      once instead of held, and the strip is back to `open` inside the eight
+      second check. **The race the ticket called a flake risk is real**, and the
+      new assertion that the hold survives past the reconnect timers is what
+      makes the fix visible rather than assumed. Removing the superseded-listing
+      guard still fails the second test, so the event-based wait catches what the
+      sleep was there for.
+
+      **The ticket's Done when is wider than its body, and is NOT met.** It says
+      no negative in the tier may wait on a deadline it does not control; three
+      more live in `test_stopping.py`, on the stop lifecycle, where neither fix
+      applies. Filed as #230 with the three ranked by how much of a guess the
+      number is, rather than widening this task or closing against an unmet
+      criterion.
+
+      Knowingly left: this task's own `wait_for_timeout(8_000)`. It asserts a
+      HELD state survived past a known timer, which is persistence rather than a
+      negative hoping for absence, and #230 records why a blanket guard on
+      `wait_for_timeout` would have to carve it out.
 
 - [ ] **Task 48, #215.** Two published screenshots are wrong, and every capture
       ships a pid. The pid is a privacy leak into a tracked artefact; the wrong
