@@ -76,7 +76,32 @@ DESKTOP = ViewportSize(width=1280, height=860)
 # appear rather than only the happy path. Names are fixtures, not projects.
 def _seed_the_world(harness: Harness) -> None:
     """Spelled out rather than a `**dict`, which defeats `seed`'s typed
-    signature and hides a misspelled state behind a mypy error per call."""
+    signature and hides a misspelled state behind a mypy error per call.
+
+    **`detached` stays, and with it a real pid in the published images (#215).**
+    Decided 2026-09-07 rather than left as an oversight, because every way of
+    removing it is worse:
+
+    - Dropping `detached` loses the state the code itself calls "the one a naive
+      tool gets wrong", and `README.md`'s alt text advertises it: "detached with
+      its pid".
+    - Faking the pid through `Engine`'s `procs_fn` seam corrupts the picture.
+      `derive` walks the process TREE by pid, `descendants`, `first_matching_in_tree`,
+      `by_pid`, while pane pids come from real tmux, so a rewritten table
+      desynchronises the two and changes the STATES rendered.
+    - Masking it at capture time is possible, Playwright takes `mask` and
+      `style`, but `metaFor` returns one string into one `<p class="meta">`, so
+      the mask covers the whole line and not the pid. Masking precisely needs the
+      pid wrapped in its own element, which is a DOM change made for a test's
+      benefit: the move #216 refused when it declined to add `--tmux-socket`.
+
+    So the pid is published, knowingly. It is a uid-space process id from a
+    development machine, it identifies no person, and the ticket calls it
+    harmless in itself. What it costs is a readable diff: four of seven images
+    change on every capture, from the pid and from `up 0s` versus `up 1s`, so a
+    screenshot refresh cannot be reviewed. That is accepted and is why a capture
+    now recaptures only what it is asked for.
+    """
     harness.seed(
         running=["vessel", "harbour"],
         stopped=["anchor"],

@@ -12,6 +12,22 @@ on:
   push:
     branches: [main]
   pull_request:
+  # #232. `develop` is the working branch and neither trigger above reaches it,
+  # so the five gates that are blocking in CI are blocking on nothing until a
+  # release PR opens. This makes the branch verifiable on demand:
+  #
+  #     gh workflow run ci.yml --ref develop
+  #
+  # **It does nothing until this file is on `main`.** GitHub: "This event will
+  # only trigger a workflow run if the workflow file exists on the default
+  # branch." So the button and the command appear one release after this lands,
+  # and the workflow that then runs is the one on the ref you name, not main's.
+  # Not broken, just not arrived yet.
+  #
+  # `push: branches: [develop]` was the alternative and is rejected in #232:
+  # every small commit would cost three interpreter matrix runs, and the value
+  # here is choosing WHEN to verify.
+  workflow_dispatch:
 
 # Least privilege. This workflow only reads the repository, and a write token
 # on a package people install with `uvx` is supply chain surface.

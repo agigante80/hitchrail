@@ -115,6 +115,19 @@ uv run mutmut results      # survivors are READ, never counted
 All five gates are blocking in CI on 3.11, 3.12 and 3.13. Run them before
 committing, not after being asked.
 
+**On `develop` they are blocking on nothing**, because `ci.yml` triggers on a
+push to `main` and on a pull request, and neither reaches the working branch.
+Verify it on a runner on purpose (#232):
+
+```sh
+gh workflow run ci.yml --ref develop     # then: gh run watch
+```
+
+That needs `ci.yml` to be on `main` already, which is GitHub's rule for
+`workflow_dispatch` rather than ours. Until it has ridden a release, the way to
+get a runner to look at `develop` is a pull request into it, which is what
+dependabot already does.
+
 One test, one file, one tier:
 
 ```sh

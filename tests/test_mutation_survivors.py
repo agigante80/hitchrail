@@ -335,3 +335,49 @@ def test_a_circular_symlink_is_explained_by_its_errno(tmp_path: Path) -> None:
     a.symlink_to(b)
     b.symlink_to(a)
     assert discovery._broken_link_reason(a) == "is a symlink loop, so it has no target to open"
+
+
+# -- #135: survivors recorded as EQUIVALENT, so they stop being re-triaged ----
+#
+# The sweep of 2026-09-07 left 177 survivors. 27 of them cannot be killed by any
+# test, and this section is where that is written down: the skill says an
+# equivalent mutant is recorded with the reason so it never resurfaces, and a
+# reason nobody can check is a claim rather than a record.
+#
+# **21 are on `# pragma: no cover` lifespan branches.** Both middlewares open
+# with `if scope["type"] not in ("http", "websocket")`, and every mutant of that
+# guard and of the `await self.app(...)` under it survives because the branch is
+# never taken: an ASGI lifespan message does not arrive through the transports
+# these tests use. The code already declares that line untested. Mutating a line
+# whose own comment says no test reaches it produces a survivor that means
+# nothing, which is what Google's mutation work calls an ARID node and suppresses
+# before generation rather than after.
+#
+# They are not silently dropped. They are the only survivors in this file's scope
+# that no test could kill without inventing a lifespan transport, and that
+# transport would assert nothing about Hitchrail.
+#
+# **6 are codec name case flips**, `latin-1` to `LATIN-1`, and those two are the
+# same codec. That one has a test below rather than a paragraph, because it is
+# checkable.
+
+
+def test_a_codec_name_is_case_insensitive_so_those_mutants_are_equivalent() -> None:
+    """#135. Six survivors flip the case of a codec name and change nothing.
+
+    `header_map` decodes header bytes with `latin-1`, which is what ASGI
+    specifies. Mutants replace it with `LATIN-1`. Python's codec registry
+    normalises the name, so both resolve to the same codec and produce the same
+    string: there is no input that distinguishes them, and no test can kill them.
+
+    **Asserted rather than argued.** The claim "these are equivalent" is exactly
+    the kind that gets written into a triage log, believed, and turns out to be
+    wrong. If a future Python ever made codec lookup case sensitive, this fails
+    and the six mutants become real again.
+    """
+    import codecs
+
+    raw = "Höst".encode("latin-1")
+
+    assert raw.decode("LATIN-1") == raw.decode("latin-1")
+    assert codecs.lookup("LATIN-1").name == codecs.lookup("latin-1").name
