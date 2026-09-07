@@ -37,6 +37,20 @@ milestones are the queryable record and renaming five of them to reorder one is
 churn that breaks every link into them. The order is what this section says,
 not what the numbers imply.
 
+**An open phase links its milestone rather than listing its tickets, since
+2026-09-07.** Every phase used to type its issue numbers into this file, and
+every one of those lists was wrong. Phase 10's was short by seventeen while the
+paragraph directly beneath it said the list had "gained the six tickets filed
+into this milestone since it was written": a sentence about drift, drifting.
+A count typed into a document is a count nobody checks, which is #92, and the
+fix for a count nobody checks is to stop typing it. The milestone is the
+queryable record; the phase section says what done means, which is the part a
+query cannot answer.
+
+A CLOSED phase keeps its list. It cannot drift once no ticket can be added to
+it, and it is then a record of what shipped rather than a claim about what is
+left.
+
 <!--
 Every closed phase carries a `**Status: done**` line directly under its
 heading, with the closing date and the issues. Three phases had their milestone
@@ -587,6 +601,18 @@ and worth noticing in a phase about honest answers.
 
 **Objective: the tests fail when the code is wrong, and only then.**
 
+**Narrowed on 2026-09-07, because this phase had become where everything went.**
+It held a mypy matrix flag, a changelog format, five source comments citing an
+untracked file, a tmux parser and an engine race. Those are all real and none of
+them is a suite that would notice. A phase whose objective is "quality" absorbs
+every finding and therefore never ends: it went from 16 tickets to 39 while six
+were being closed.
+
+What stays here is the machinery that decides whether a test can fail: tiers,
+fixtures, mutation, and the guards that check the guards. Prose contradicted by
+code moved to **Phase 17**. Files doing more than one thing moved to
+**Phase 18**.
+
 The recurring failure this phase exists for: a fixture written to agree with the
 code. It happened three times in one session, and each time the test passed
 while the thing it named was broken.
@@ -595,37 +621,58 @@ Delivers: fixtures that cannot agree with the bug, a tier that reads the real
 machine without depending on it, a device tier that makes the phone flows
 repeatable, and the gates checking what they claim to.
 
-**Done when:** the fixtures are built from the production path rather than
-beside it, no tier's result depends on what the machine running it happens to
-have, and a phase's progress count in prose is checked against the boxes it
-describes.
+**Done when**, and each of these is checkable rather than felt:
 
-Tickets: #94, #104, #70, #73, #92, #67, #30, #10, #86, #5, #114, #118, #128,
-#135, #136, #143.
+1. **A fixture cannot agree with the bug.** Every fixture that stands in for a
+   real thing is built from the production path or from captured bytes, never
+   written from a description of them. The recurring failure this phase exists
+   for is a fixture written to agree with the code.
+2. **No tier's result depends on what the machine happens to have**, with one
+   stated exception: a tier may require hardware if it is opt in and FAILS
+   rather than skips when the hardware is absent. `device` is that exception and
+   is the only one.
+3. **The mutation sweep's survivors have been read**, and each is either killed
+   or recorded with the reason it is not worth killing.
+4. **No tier can be selected by accident.** `addopts` deselection is replaced by
+   any `-m`, so a tier that must not run unasked enforces it in collection.
 
-**#51 left this phase for Backlog.** It corrects two commit messages that
-describe a different change. The trees are right and the gates were green, so
-nothing here would have caught it and nothing is proposed that would: it was in
-a phase whose exit criteria it cannot meet. The list above also gained the six
-tickets filed into this milestone since it was written, which is the drift #92
-is open about.
+The third exit criterion this phase used to carry, "a phase's progress count in
+prose is checked", moved to Phase 17 with the rest of the documents work.
+
+**Tickets: [the Phase 10 milestone](https://github.com/agigante80/hitchrail/milestone/12).**
+
+**#51 moved to Phase 17**, not to Backlog as this said. It corrects two commit
+messages that describe a different change, which is a document contradicted by
+the thing it describes, and that is now a phase.
+
+**And this paragraph used to say the list "gained the six tickets filed into
+this milestone since it was written".** It was twenty three by 2026-09-07. A
+sentence about drift, drifting, inside the phase about claims that are not
+checked. That is where the convention at the top of this file came from: the fix
+for a count nobody checks is to stop writing counts.
 
 ## Phase 11: The interface in every state
 
 **Objective: every state the interface can be in says something true, legibly.**
 
-What is left of the browser work after Phase 6 closed: the states that are rare,
-the wordings that are wrong, and the one module that has grown past the point
-where anybody reads all of it.
+What is left of the browser work after Phase 6 closed: the states that are rare
+and the wordings that are wrong.
 
 Delivers: a stream that reports its own failures honestly, dialogs whose titles
-match what happened, colour that passes AA on its own tints, a memory footer
-with a ceiling, and `app.js` split along the seam it already has.
+match what happened, colour that passes AA on its own tints, and a memory footer
+with a ceiling.
 
-**Done when:** no screen states something it did not read, every token pair
-passes AA, and no file in `web/` does more than one thing.
+**Done when:** no screen states something it did not read, and every token pair
+passes AA.
 
-Tickets: #68, #69, #71, #72, #78, #82, #90, #161, #162, #163, #165, #166, #169.
+**`app.js` left this phase for Phase 18 on 2026-09-07**, and this section used
+to deliver its split and exit on "no file in `web/` does more than one thing".
+The split is still wanted; it is #68, and a module past the size guideline is a
+phase now. Nothing about that split depends on a screen saying something true,
+and keeping it here meant Phase 11 could not close until an unrelated refactor
+did.
+
+**Tickets: [the Phase 11 milestone](https://github.com/agigante80/hitchrail/milestone/13).**
 
 **#169 is the one to read, because it is a dead end and its justification was
 false.** A stop whose input box will not clear refuses to type, correctly, and
@@ -684,7 +731,7 @@ account, logs at a URL you can bookmark, and an icon set.
 primary action is reachable at any scroll position, and the page answers "which
 build is this and who is it running as" without an SSH session.
 
-Tickets: #146, #147, #148, #149, #150, #151, #160, #164, #168, #179.
+**Tickets: [the Phase 13 milestone](https://github.com/agigante80/hitchrail/milestone/15).**
 
 **#179 came from a phone, and it is a rule whose premise moved rather than a
 regression.** A stopped row crushes its name to one or two characters per line:
@@ -759,7 +806,7 @@ argue it rather than quietly narrowing the scope:
 holding a token can get in without a saved link, and adding a folder does not
 mean editing a systemd unit.
 
-Tickets: #152, #153, #154, #123, #107.
+**Tickets: [the Phase 14 milestone](https://github.com/agigante80/hitchrail/milestone/16).**
 
 **#123 moved here from Backlog.** `session_prefix` is a config field with
 validation and no flag, which is the same shape as #154's problem: configuration
@@ -795,7 +842,7 @@ control, and this package is installed with `uvx` on other people's machines.
 statement rather than four scattered ones, and a direct dependency going stale
 arrives as a pull request against `develop`.
 
-Tickets: #155, #156, #157, #158, #167, #141, #17.
+**Tickets: [the Phase 15 milestone](https://github.com/agigante80/hitchrail/milestone/17).**
 
 **#167 came from failing to answer a support question about this machine.** An
 operator asked whether a stop request had actually been sent. The journal held
@@ -831,7 +878,124 @@ not built, the default is off and the feature still ships.
 a person tapping anything, and the security argument has been rewritten rather
 than quietly outgrown.
 
-Tickets: #159.
+**Tickets: [the Phase 16 milestone](https://github.com/agigante80/hitchrail/milestone/18).**
+
+## Phase 17: Documents that are true
+
+**Objective: every claim a document, comment or guard makes is checked against
+the thing it describes, or it is not written. Counts are generated, never
+typed.**
+
+**Cut out of Phase 10 on 2026-09-07.** Eleven of that phase's tickets were not
+about a suite that would notice. They were about a sentence, a comment, a label
+or a count that disagreed with the thing standing next to it: `AGENTS.md` maps
+the modules completely and omits four that exist (#200), section 5 has eight
+controls and two documents that count them say seven (#174), five source
+comments cite the untracked pointer as the authority (#199), the changelog says
+it follows the one format the release cannot parse (#185), and two docstrings
+promise more than the code does (#181). One defect in eleven costumes, and
+inside a phase about tests it looked like eleven unrelated chores.
+
+**The guards are in scope, not only the prose, and they are the harder half.**
+#136 is the one to read: the lockstep guard compares version markers, so the
+templates contradicted the document while the guard stayed green. A check that
+reads a marker it also controls proves that the marker was updated, which is not
+the claim. #118 is the same shape one level up: every hygiene check reads from
+the ticket list, so a deliverable nobody ticketed is invisible to all of them at
+once. #86 is what that costs in practice, a sweep that never checks Priority and
+therefore no agent-filed ticket that has one.
+
+Delivers: counts derived from what they count, comments and docstrings that name
+something which exists and does what they say, and guards whose expectation
+comes from the thing described rather than from a second copy of the answer.
+
+**Done when**, and each of these is checkable rather than felt:
+
+1. **No document states a count a person typed.** Every count of controls,
+   phases, tickets or modules is either generated or checked by a guard against
+   what it counts.
+2. **Every comment or docstring that names a file, a ticket or a behaviour names
+   one that exists and does what it says**, enforced by a guard rather than by
+   somebody reading carefully.
+3. **No guard proves only that its own marker moved.** Where a check compares
+   two copies of an answer, one of them is derived from the thing described.
+
+**Tickets: [the Phase 17 milestone](https://github.com/agigante80/hitchrail/milestone/19).**
+
+**#51 arrived here from Phase 10 by way of Backlog, and it is the ticket that
+had nowhere to go.** It corrects two commit messages that describe a different
+change. The trees are right and the gates were green, so nothing in a suite
+would have caught it and nothing proposed would: that was a correct argument for
+removing it from Phase 10 and a wrong one for shelving it. A commit message
+contradicted by its own diff is precisely this phase, which is why the phase had
+to exist before the ticket had a home.
+
+## Phase 18: Modules that do one thing
+
+**Objective: a file is one thing, or the file says why it is not.**
+
+**Cut out of Phase 10 on 2026-09-07**, with the four files that carry a split
+ticket and the one place an answer is computed twice.
+
+**The guideline is 400 lines, and the mechanism around it already works**, which
+is why this phase is a set of splits rather than a policy. `test_config.py`
+holds a `caps` table: a module over the guideline fails unless it is tracked
+there with the ticket that splits it and a note saying what added the lines. It
+retires its own exceptions, which was demonstrated rather than asserted when #33
+brought `discovery.py` under and the test failed until the stale entry was
+removed. Seven modules sit in that table today. Four files carry a ticket to
+split them, and those splits are what this phase owes.
+
+**No line count is written into this section on purpose.** Every count the
+tickets themselves carry was roughly half the truth when this was written: #68
+says `app.js` is 801 lines and it is 1632, #30 says `test_config.py` is 845 and
+it is 1601, #205 says `server.py` is 573 and the cap table says 631. The table
+is generated from the files and was right about all seven; the prose beside it
+was not. That is #92 and Phase 17, arriving inside the phase next door.
+
+Each of the four is over for a different reason, and the reason decides the cut:
+
+- **`server.py`** (#205) is over because routes accumulated, and its seam is
+  what the handlers touch: the session lifecycle, the read-only views, and the
+  grant and auth pair. Its ticket also names what must NOT happen, and that
+  constraint outranks the split: the per-route `_error` ladders must not be
+  centralised into a mapping of exception type to code, because `docs/api.md`
+  is checked against the server in both directions, and a ladder at the route
+  is what makes a route's refusals visible to whoever is reading that route.
+- **`discovery.py`** (#127) is over because the plural root layer sits on top of
+  the single root one. It is two layers deep rather than two jobs wide, and the
+  seam is between the layers.
+- **`app.js`** (#68) is over because the browser code all landed in one file,
+  and it has a seam it already follows.
+- **`test_config.py`** (#30) is over because it does not split along the seam
+  its own source has, which is the split to make. It is also the file the guard
+  cannot see: `caps` reads `src/hitchrail/*.py`, so this one is outside the
+  mechanism that found the other three, and it is the file that mechanism
+  lives in.
+
+**#196 is here even though it is not about length**, because it is the same
+defect in the small: `preflight` resolves the agent binary and throws the answer
+away, and the spawn resolves the bare name again somewhere else. Those are two
+different environments, since a pane inherits the environment of the tmux SERVER
+as recorded at #113, so this is one answer computed twice in two places that can
+disagree.
+
+**Done when:** every file over the guideline has either been split along a seam
+that already existed, or carries in `caps` the argument for why it is one thing.
+`claude_ipc.py` is the standing example that the second answer is legitimate: it
+is over on purpose, because its whole value is that when Claude Code moves
+exactly one file changes, and the seam anybody would cut on puts undocumented
+vendor knowledge on both sides of it. `engine.py` is the other, and it is the
+largest module in the project: most of its length is comments recording footguns
+that cost real debugging to find, and deleting those to satisfy a line count
+would be the worst trade on offer.
+
+**A split that moves lines without moving responsibility is refused**, and the
+`caps` note on `engine.py` is the precedent. An earlier version of it said to
+cut the graceful stop overlay next; measured rather than guessed, that cut moved
+64 lines, left the file still over the guideline, and split one stop sequence
+across two files to buy nothing. The note was corrected in place instead of
+followed. Length is the trigger for looking, never the reason for cutting.
 
 ## Deliberately later
 
