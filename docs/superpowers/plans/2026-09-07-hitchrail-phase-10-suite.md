@@ -380,7 +380,7 @@ Criterion 3. **Blocked on task 42.** Do not start these before the sweep runs.
       the prose edits, then `git checkout` on top, destroyed all four; they
       survived only because they were scripted.
 
-      Found by tripping it: the email guard reads `user@1000.service` as an
+      Found by tripping it: the email guard reads `the `user@` manager instance` as an
       address. Rephrased rather than allowlisted, and filed as #231, because the
       next person documenting a template unit will reach for the allowlist.
 
@@ -391,6 +391,46 @@ Criterion 3. **Blocked on task 42.** Do not start these before the sweep runs.
       **Read them, do not count them.** The exit criterion is that each survivor
       is either killed or recorded with the reason it is not worth killing, and
       a score is satisfiable without improving anything.
+
+      **Started 2026-09-07. The ticket's priority list is done; 177 survivors
+      are not, and this stays open for them.**
+
+      | | before | after |
+      |---|---|---|
+      | killed | 911 | 1011 |
+      | survived | 264 | 177 |
+      | no covering test | 13 | 0 |
+
+      **The ticket's premises are both stale and were re-measured first.** The
+      48 are not in `tmux.py`: all 13 remaining were in `hostnames.reachable_hosts`,
+      a function NO test named. `tmux.py` had none.
+
+      Three findings, each verified by applying the mutation to the real source,
+      watching red, and confirming the file byte identical after:
+
+      - **The exhaustive injectivity corpus could not see the collision it was
+        written for.** Its alphabet was `.:-abe`, and the escapes spell
+        themselves with `c` and `d`, so a literal `-d` in a name was
+        ungeneratable. Deleting the `-` -> `--` escape left the suite green. Its
+        own docstring says hand picked PAIRS are how the digest version passed
+        while colliding; a hand picked ALPHABET is that mistake one level up.
+      - **`pane_is_dead` had all 21 mutants survive**, including `return False`
+        to `return True` on the undeterminable path, which turns "cannot read
+        this pane" into "kill it". It was driven only by the prefix sweep, which
+        reads the target and ignores the rest of the argv.
+      - **`reachable_hosts` had no test at all**, and it decides which links the
+        banner prints. #202 is the record of a wrong answer there. Its tests
+        went into `test_security_host.py` because that file is already in the
+        mutation selection, and a killing test outside the selection is one the
+        next sweep reports as missing.
+
+      Also pinned: the encoding `sanitize` produces, which is a wire format
+      rather than an implementation detail, since a session outlives the process
+      and its name is recomputed on every call.
+
+      **What is left is unread, not triaged**: security 60, projectnames 34,
+      hostnames 25, roots 16, discovery 15, config 5, and a `tmux` tail. The
+      kill rate is context; the deliverable is each survivor killed or recorded.
 
 - [ ] **Task 52, #217.** Two attention-sweep mutations survive the whole suite.
       Small, specific, and the right last task in this batch: two named

@@ -18,6 +18,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from hitchrail.config import Config
+from hitchrail.hostnames import reachable_hosts
 from hitchrail.security import HostAllowlistMiddleware, middleware_stack, parse_host
 from support import make_config
 
@@ -324,3 +325,58 @@ def test_junk_after_the_closing_bracket_can_never_match(raw: str) -> None:
     outright is what makes the allowlist a whitelist rather than a prefix test.
     """
     assert parse_host(raw) == ""
+
+
+# -- #135: reachable_hosts, which no test reached at all ----------------------
+#
+# All 13 of the sweep's "no covering test" mutants were in this one function.
+# Not "the tests are too loose": nothing in `tests/` named it. It decides which
+# links the startup banner offers, and #202 is what it looks like when that is
+# wrong: `localhost` and `127.0.0.1` printed for a bind that answers on neither,
+# which reads as "the service is down" while the service is fine.
+#
+# Here rather than in a file of its own because this one is already in the
+# mutation selection, and a killing test outside the selection is a test the
+# next sweep reports as missing.
+
+
+def test_a_wildcard_bind_answers_on_everything_the_allowlist_accepts() -> None:
+    """The one case where the two questions really do coincide, which is why
+    the banner printed the allowlist for months without anybody noticing."""
+    allowed = ("localhost", "127.0.0.1", "hitchrail.lan")
+
+    assert reachable_hosts("0.0.0.0", allowed, ()) == list(allowed)
+
+
+def test_a_named_bind_drops_the_loopback_names_nobody_declared() -> None:
+    """#202 itself. A socket bound to one address does not answer on
+    `localhost`, and offering that link sends somebody to a dead page."""
+    allowed = ("localhost", "127.0.0.1", "hitchrail.lan")
+
+    assert reachable_hosts("hitchrail.lan", allowed, ()) == ["hitchrail.lan"]
+
+
+def test_a_loopback_bind_keeps_the_loopback_names() -> None:
+    """`localhost` and `127.0.0.1` are the same socket, so a loopback bind does
+    answer on both, and dropping either would be the same defect mirrored."""
+    allowed = ("localhost", "127.0.0.1", "hitchrail.lan")
+
+    assert reachable_hosts("127.0.0.1", allowed, ()) == ["localhost", "127.0.0.1"]
+
+
+def test_a_declared_host_is_kept_without_resolving_it() -> None:
+    """`--allow-host` exists for no purpose except making a name work here, so
+    an entry is the operator saying the name arrives.
+
+    The alternative is a DNS lookup inside the line that reports the server
+    started, which is a network call that can hang. Asserted with a name that
+    resolves to nothing, so a version that DID resolve would drop it.
+    """
+    allowed = ("phone.invalid", "127.0.0.1")
+
+    assert reachable_hosts("192.0.2.7", allowed, ("phone.invalid",)) == ["phone.invalid"]
+
+
+def test_the_bound_address_is_always_reachable() -> None:
+    """Nothing else in the list is guaranteed, and this one is by definition."""
+    assert reachable_hosts("192.0.2.7", ("192.0.2.7", "localhost"), ()) == ["192.0.2.7"]
