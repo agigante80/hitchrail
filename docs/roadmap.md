@@ -58,10 +58,26 @@ closed and every issue closed while saying nothing here at all, because the
 file was using three conventions at once: a status line on 0 and 1, a `(done)`
 suffix on 4, 5 and 6, and nothing on 2, 3 and 7.
 
-The suffix is kept where it is rather than churned, because
-`test_the_roadmap_marks_a_phase_done_only_when_its_plan_is_finished` reads it.
-A new phase gets the status line. AGENTS.md says this file is the one place
-that says what is built, and for three phases it was not saying.
+The suffix is kept where it is rather than churned. It is now read by
+`_phases()` in `tests/test_docs_are_true.py` alongside the status line, which is
+the correction to what this comment used to say: it claimed the suffix was kept
+BECAUSE the guard read it, and the guard read nothing else, so it covered three
+phases of nine and was green while two closed phases carried unfinished plans.
+
+A phase is in exactly one of three states, and the guards read all three:
+
+- `**Status: done**`, with the closing date and the issues.
+- `**Status: in progress**`, on at most one phase at a time.
+- neither, which means planned.
+
+A phase in either of the first two states MUST link a plan under
+`docs/superpowers/plans/`, and a done phase's plan must have no unticked item
+that is not marked MOVED OUT or NOT BUILT with an issue number on the same line.
+Phases that started before this rule are tracked in `_STARTED_WITHOUT_A_PLAN`
+with their reason, and that exemption fails once it stops being true.
+
+AGENTS.md says this file is the one place that says what is built, and for three
+phases it was not saying.
 -->
 
 ## Phase 0: Design
@@ -598,6 +614,10 @@ could not fail on what they claimed, which is the failure Phase 10 exists for
 and worth noticing in a phase about honest answers.
 
 ## Phase 10: A suite that would notice
+
+**Status: in progress**, started 2026-09-07.
+
+**Plan: [`superpowers/plans/2026-09-07-hitchrail-phase-10-suite.md`](superpowers/plans/2026-09-07-hitchrail-phase-10-suite.md)**
 
 **Objective: the tests fail when the code is wrong, and only then.**
 

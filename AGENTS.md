@@ -41,6 +41,21 @@ claiming otherwise.
   previous one meets its exit criteria. **No counts in this line.** It said
   "six of them" and "1 to 17" while the directory held seven plans numbered
   past 25, which is the decay the Status section above already refuses.
+
+  **The plan is written BEFORE the phase starts and reviewed WHILE it runs**,
+  and the rule is enforced rather than remembered. A phase marked
+  `**Status: in progress**` or `**Status: done**` in the roadmap must link a
+  plan that exists; at most one phase is in progress; and a done phase's plan
+  must have no unticked item unless that item says MOVED OUT or NOT BUILT and
+  names the issue carrying it, on the same line. `tests/test_docs_are_true.py`
+  asserts all four, and each was observed failing before it was observed
+  passing.
+
+  A plan says what a milestone cannot: which ticket blocks which, what must be
+  true before a batch begins, and **what would make the phase fail rather than
+  finish**. Writing one afterwards produces a document nobody used, so a phase
+  that started without one is exempted with its reason rather than given a
+  reconstruction (#225).
 - `docs/tech-guidelines.md` is binding for all code here.
 - `docs/api.md` is the HTTP reference, and it is checked against the server in
   both directions: a code the server can return and the document does not list

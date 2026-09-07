@@ -28,6 +28,7 @@ import tempfile
 import textwrap
 from collections.abc import Iterator
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
@@ -142,25 +143,154 @@ def test_every_module_that_exists_is_named_in_agents_md() -> None:
     )
 
 
-def test_the_roadmap_marks_a_phase_done_only_when_its_plan_is_finished() -> None:
-    """A phase headed "(done)" whose plan still has unticked steps is a phase
-    somebody stopped writing down rather than one that finished."""
+PLANS = ROOT / "docs" / "superpowers" / "plans"
+
+
+class _Phase(NamedTuple):
+    """One phase section of the roadmap, with the three things guards ask of it."""
+
+    name: str
+    status: str  # "done" | "in progress" | "planned"
+    plan: str | None  # the linked plan's filename, if the section links one
+
+
+def _phases() -> list[_Phase]:
+    """Every phase section, read as structure rather than searched for text.
+
+    **Both spellings of done are read, and that is the whole reason this helper
+    exists.** The guard below used to match `^## Phase N ... (done)`, the suffix
+    form, which is Phases 4, 5 and 6 and nothing else. Every phase closed since
+    then marks itself with the `**Status: done**` line the file's own convention
+    requires, so the guard covered three phases of nine and had never had
+    anything to say. It was green while Phase 9 carried an unticked plan item
+    and while Phase 8 carried seven.
+    """
+    found: list[_Phase] = []
     road = ROADMAP.read_text()
-    plans = {
-        p.name: p.read_text() for p in (ROOT / "docs" / "superpowers" / "plans").glob("*.md")
-    }
-    for match in re.finditer(
-        r"^## (Phase \d+)[^\n]*\(done\)(.*?)(?=^## |\Z)", road, re.M | re.S
-    ):
-        section = match.group(2)
-        link = re.search(r"\(superpowers/plans/([^)]+)\)", section)
-        if not link:
+    for match in re.finditer(r"^## (Phase \d+)[^\n]*$(.*?)(?=^## |\Z)", road, re.M | re.S):
+        heading, body = match.group(0).split("\n")[0], match.group(2)
+        if "**Status: done" in body or "(done)" in heading:
+            status = "done"
+        elif "**Status: in progress" in body:
+            status = "in progress"
+        else:
+            status = "planned"
+        link = re.search(r"\(superpowers/plans/([^)]+)\)", body)
+        found.append(_Phase(match.group(1), status, link.group(1) if link else None))
+
+    assert found, (
+        f"{ROADMAP} yielded no phase sections, so every guard below would pass on "
+        "nothing. A rewritten heading style must fail here."
+    )
+    return found
+
+
+# **Phases that started before the plan rule was written down, tracked rather
+# than excused.** Same mechanism as the size `caps` table: an exception carries
+# its reason and the ticket that retires it, and the test below fails once the
+# exception stops being true, so it cannot outlive its cause.
+_STARTED_WITHOUT_A_PLAN = {
+    # Design, and the design IS the artefact: `docs/superpowers/specs/` holds it.
+    # A plan for producing a spec would be a plan for writing a plan.
+    "Phase 0": "the design spec is the deliverable, and it is in specs/",
+    # A real gap, not a natural one. Eleven issues closed with no plan written,
+    # which is what #225 is about.
+    "Phase 7": "no plan was written; the phase predates this rule (#225)",
+}
+
+
+def test_a_phase_that_has_started_links_a_plan_that_exists() -> None:
+    """**Written before the phase starts, and reviewed while it runs.** A phase
+    with no plan is a milestone with an objective attached, and what it loses is
+    the ordering: which ticket blocks which, what has to be true before a batch
+    begins, and what would make the phase fail rather than finish.
+
+    "Started" is done or in progress. A planned phase deliberately has none: a
+    plan written a month before its phase describes tickets that have since
+    moved, which is the drift #92 is about.
+    """
+    missing = [
+        f"{p.name} ({p.status})"
+        for p in _phases()
+        if p.status in {"done", "in progress"}
+        and p.name not in _STARTED_WITHOUT_A_PLAN
+        and (p.plan is None or not (PLANS / p.plan).exists())
+    ]
+    assert not missing, (
+        "these phases have started and link no plan that exists: "
+        + ", ".join(missing)
+        + f". Write one in {PLANS.relative_to(ROOT)}, or record the phase in "
+        "_STARTED_WITHOUT_A_PLAN with its reason and a ticket."
+    )
+
+
+def test_the_exemption_from_the_plan_rule_retires_itself() -> None:
+    """An exemption that outlives its cause is how a rule becomes advice.
+
+    `test_every_module_is_under_the_size_guideline` proved this mechanism works
+    when #33 brought `discovery.py` under the guideline and the suite failed
+    until the stale entry was removed.
+    """
+    stale = [
+        p.name
+        for p in _phases()
+        if p.name in _STARTED_WITHOUT_A_PLAN and p.plan and (PLANS / p.plan).exists()
+    ]
+    assert not stale, (
+        "these phases now link a plan and are still exempted from needing one: "
+        + ", ".join(stale)
+        + ". Remove them from _STARTED_WITHOUT_A_PLAN."
+    )
+
+
+def test_at_most_one_phase_is_in_progress() -> None:
+    """The roadmap says one phase at a time. Two in progress is either a phase
+    somebody forgot to close or two half-phases, and both mean the exit criteria
+    of at least one of them are not being read."""
+    running = [p.name for p in _phases() if p.status == "in progress"]
+    assert len(running) <= 1, f"more than one phase is in progress: {', '.join(running)}"
+
+
+# An unticked box means two different things, and this is the marker that tells
+# them apart. #224 decided it: the item says what happened and names the issue
+# that carries the work, so the exemption cannot be used to wave a box through
+# quietly. Phase 9's task 41 already had this shape before the rule existed.
+_MOVED_OUT = re.compile(r"(MOVED OUT|NOT BUILT)", re.I)
+
+
+def test_the_roadmap_marks_a_phase_done_only_when_its_plan_is_finished() -> None:
+    """A phase marked done whose plan still has unticked steps is a phase
+    somebody stopped writing down rather than one that finished.
+
+    An unticked item is allowed only when it says it was moved out or not built
+    AND names an issue: that is a decision with somewhere to go, rather than an
+    omission. An item claiming to be moved with no issue reference fails, which
+    is the direction that keeps this from becoming a way to close a phase early.
+    """
+    for phase in _phases():
+        if phase.status != "done" or phase.plan is None:
             continue
-        plan = plans.get(link.group(1))
-        assert plan is not None, f"{match.group(1)} links a plan that is not there"
-        unticked = plan.count("\n- [ ] ")
-        assert unticked == 0, (
-            f"{match.group(1)} is marked done but its plan has {unticked} unticked items"
+        path = PLANS / phase.plan
+        assert path.exists(), f"{phase.name} links a plan that is not there: {phase.plan}"
+
+        pending: list[str] = []
+        for item in re.findall(r"^- \[ \] (.*?)(?=^- \[|\Z)", path.read_text(), re.M | re.S):
+            # **The marker and the issue are read from the item's FIRST line**,
+            # not from anywhere in it. Falsifying this guard found that a long
+            # item mentioning any ticket in passing satisfied "names an issue",
+            # so removing the reference from the head of Phase 9's moved-out
+            # task left the check green. The head line is where a reader looks
+            # and where both belong.
+            first = item.split("\n")[0]
+            head = " ".join(item.split())[:90]
+            if not _MOVED_OUT.search(first):
+                pending.append(head)
+            elif not re.search(r"#\d+", first):
+                pending.append(f"{head} (says moved, names no issue)")
+
+        assert not pending, (
+            f"{phase.name} is marked done and {path.name} has {len(pending)} unresolved "
+            "items: " + "; ".join(pending)
         )
 
 
