@@ -193,9 +193,19 @@ _STARTED_WITHOUT_A_PLAN = {
     # Design, and the design IS the artefact: `docs/superpowers/specs/` holds it.
     # A plan for producing a spec would be a plan for writing a plan.
     "Phase 0": "the design spec is the deliverable, and it is in specs/",
-    # A real gap, not a natural one. Eleven issues closed with no plan written,
-    # which is what #225 is about.
-    "Phase 7": "no plan was written; the phase predates this rule (#225)",
+    # **Permanent, decided on #225.** Eleven issues closed with no plan. Writing
+    # one now would be a document nobody used: a plan's value is ordering decided
+    # BEFORE the work, and a reconstruction from the commit log reads like a plan
+    # that was followed while never having been one, which is worse than an
+    # admitted gap because the next reader cannot tell. The reasoning is not
+    # lost: this phase's roadmap section is the longest in the file and carries
+    # what it decided.
+    "Phase 7": "no plan; the roadmap section is the record, decided on #225",
+    # Same decision, and a sharper fact: Phase 12 ran in the same week as 8 and
+    # 9, both of which HAD plans, so it skipped a convention that was in active
+    # use rather than one that did not exist yet. That is precisely what this
+    # rule now makes checkable, and it is the argument for the rule.
+    "Phase 12": "no plan; ran without one while 8 and 9 had theirs (#225)",
 }
 
 

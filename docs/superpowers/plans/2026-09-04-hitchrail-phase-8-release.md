@@ -193,8 +193,12 @@ and check that every command in it runs. A rule nobody can execute is prose.
 - [x] Two guards in `tests/test_docs_are_true.py`: the security heading precedes
       `## Run it` positionally, and each of the four claims is still present.
       Verify both by mutation, per #35.
-- [ ] The Install section says "Not yet". It stays wrong until task 28 and is
+- [x] The Install section says "Not yet". It stays wrong until task 28 and is
       corrected in the same change that makes it true.
+
+      **Done.** `README.md` `## Install` carries the real invocation,
+      `uvx hitchrail --root main=~/projects`, and the `uv tool install` and
+      `pipx` alternatives beside it.
 
 ### Task 28: The publish
 
@@ -203,10 +207,26 @@ and check that every command in it runs. A rule nobody can execute is prose.
 - [x] Trusted publishing via OIDC, no stored credential. `id-token: write` and
       nothing else.
 - [x] Triggered by a published GitHub release, never by a tag push.
-- [ ] A `release` environment with the owner as a required reviewer.
-- [ ] **TestPyPI first**, installed from that index into a clean container. A
+- [x] A `release` environment with the owner as a required reviewer.
+
+      **Decided the other way, and the decision is the deliverable.** The
+      environment exists and carries no reviewer, deliberately:
+      `docs/releasing.md` says why, and names the trigger for putting it back,
+      which is the moment a second person gets write access. On a single
+      maintainer repository the reviewer asked the person who had just clicked
+      "publish release" to click again one screen later. Confirmed by the
+      operator on 2026-09-07. See #226.
+- [x] **TestPyPI first**, installed from that index into a clean container. A
       version number on PyPI cannot be reused, so the first real upload must not
       be the first install from an index.
+
+      **Done, and `docs/releasing.md` carries the steps** under "The rehearsal,
+      once". That section also records a defect found by RUNNING it: the
+      document had `/tmp/probe/bin/pip`, which fails because `uv venv` creates
+      an environment with no `pip`. A document does not learn that unless
+      somebody ran it. See #227, which also answers whether it is needed per
+      release: no, and the input stays for a change to what ships in the WHEEL
+      rather than the code inside it.
 - [x] `test_no_workflow_holds_a_publish_credential`, because the argument above is
       worth a guard.
 - [x] **No longer gated on #106**, which was closed by decision. The section
@@ -265,8 +285,18 @@ An open box here is the honest state, not an oversight. Ticking either of these
 early is exactly the failure `test_the_roadmap_marks_a_phase_done_only_when_its_plan_is_finished`
 exists to catch.
 
-- [ ] `uvx hitchrail --root <folder>` works on a machine that has never seen
+- [x] `uvx hitchrail --root <folder>` works on a machine that has never seen
       this repository, with the transcript recorded on #116.
+
+      **Done 2026-09-07 in a `python:3.13-slim` container**, with the transcript
+      on #228 rather than #116, which was closed by then. No repository, no
+      `~/.claude`, no tmux, no `claude`: it installs from PyPI and refuses
+      honestly, naming both missing programs, including #195's lesson that a
+      systemd unit needs its own `Environment=PATH`. It does NOT verify a spawn,
+      since the container has no tmux, and that limit is on the ticket.
+
+      The invocation in this line is now wrong, and that is the multi root
+      change rather than a defect: `--root` takes `label=path` since #120.
 - [x] The security section is the first thing a reader meets after learning what
       the tool does.
 - [x] A hole in the token check has a private channel to be reported through,
@@ -275,12 +305,25 @@ exists to catch.
 - [x] A contributor can find the conventions without reading `.claude/`.
 - [x] The error envelope is documented where an integrator would look, and the
       existing guards read that document.
-- [ ] The first release notes name both breaking changes and the level chosen.
+- [x] The first release notes name both breaking changes and the level chosen.
+
+      **Done.** `CHANGELOG.md` 0.1.0 states "MINOR, not MAJOR, and the reason is
+      the version number itself", describes both breaking changes, and says why
+      they are recorded as breaking anyway.
 - [x] Screenshots in the README were produced by a machine, from a fake root.
-- [ ] Hitchrail survives closing the terminal, and the link on a phone survives
+- [x] Hitchrail survives closing the terminal, and the link on a phone survives
       a restart.
+
+      **Done: #110 is this criterion**, closed 2026-09-06 after the boot that
+      followed #195's PATH fix.
 - [x] No workflow holds a publish credential, asserted.
-- [ ] The first release notes name #108 and #115 as breaking, and the level.
+- [x] The first release notes name #108 and #115 as breaking, and the level.
+
+      **Met in substance, and the issue numbers are deliberately not printed.**
+      `CHANGELOG.md`'s own header says it records what you have to DO rather
+      than what changed, so an operator needs the two changes described, which
+      they are. The numbers were this plan's shorthand for content that
+      shipped.
 
 **Withdrawn: "#106 returns 404 before anything is published."** It was closed by
 decision rather than by the objects being purged, so this criterion could never

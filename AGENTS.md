@@ -313,6 +313,14 @@ These are the ones that cost real debugging to find, or that protect somebody.
   queue. `ticket-gate` blocks without both, and
   `scripts/check-ticket-hygiene.sh` sweeps for the ones it never sees. A ticket
   that wants two milestones wants splitting.
+
+  **The milestone and the roadmap have to agree, and
+  `scripts/check-roadmap-matches-milestones.sh` is what asks.** It reads both
+  directions: a closed milestone whose phase is not marked done here, and a
+  phase marked done whose milestone still has open issues. Neither it nor the
+  hygiene sweep can be a pytest gate, because both need the network and an
+  authenticated `gh`, and a gate that needs those breaks on a fork and in an
+  offline checkout. Run both before planning a phase and before a release.
 - **Test the refusals.** A security control with only a happy path test is
   untested. Full rules in `.claude/rules/security.md`.
 

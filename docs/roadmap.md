@@ -25,17 +25,22 @@ Two ordering rules decide what goes where:
    member so far.** A phase whose cost rises with every day it is not done
    comes forward, even past phases that are more valuable in themselves.
 
-**Phase 12 runs next, ahead of 9, 10 and 11.** It changes what a project is
-called on the wire, so every saved link and every API caller written against
-0.1.0 changes with it. That is a MINOR while the version is `0.y.z` and a MAJOR
-after 1.0, and 0.1.0 was published on 2026-09-04 with no installed base. The
-break is free today, and every subsequent day it is not. Phases 9, 10 and 11
-make Hitchrail better and do not get more expensive by waiting, so they wait.
+**Phase 12 ran next, ahead of 9, 10 and 11, and closed on 2026-09-05.** The
+argument was that it changes what a project is called on the wire, so every
+saved link and every API caller written against 0.1.0 changed with it: a MINOR
+while the version is `0.y.z` and a MAJOR after 1.0, and 0.1.0 had been published
+the day before with no installed base. The break was free that week and more
+expensive every week after. Phases 9, 10 and 11 got better by waiting and cost
+nothing for it.
 
-The renumbering that would follow from moving it is deliberately not done. The
-milestones are the queryable record and renaming five of them to reorder one is
-churn that breaks every link into them. The order is what this section says,
-not what the numbers imply.
+**It is recorded as taken rather than deleted**, because rule 3 above has one
+member and this is it: the next candidate for jumping the queue is argued
+against this one.
+
+The renumbering that would follow from having moved it is deliberately not done.
+The milestones are the queryable record and renaming five of them to reorder one
+is churn that breaks every link into them. The SECTION sits in numeric position;
+the order it ran in is what this paragraph says.
 
 **An open phase links its milestone rather than listing its tickets, since
 2026-09-07.** Every phase used to type its issue numbers into this file, and
@@ -418,6 +423,17 @@ below keeps an owner.
 
 ## Phase 8: Release
 
+**Status: done**, closed 2026-09-06. Issues #58, #59, #60, #61, #62, #105,
+#106, #110, #116, #117, #170 and #195.
+
+**Plan: [`superpowers/plans/2026-09-04-hitchrail-phase-8-release.md`](superpowers/plans/2026-09-04-hitchrail-phase-8-release.md)**
+
+**Marked on 2026-09-07, and it was closed on GitHub for a day before this line
+existed** (#222). Its plan then held seven unticked boxes, three of which read
+as skipped work and were not: the TestPyPI rehearsal and the reviewer decision
+are both written up in `docs/releasing.md`, and the clean machine install was
+done in a container the same day. Each box now carries its evidence.
+
 **Objective: a stranger can install it, understand it, and report a hole in it.**
 
 The original Phase 7, narrowed back to what it actually said it was. Everything
@@ -729,6 +745,66 @@ control that does not open the session, and `Continue` is Claude Code's own word
 borrowed out of the sentence that explained it. **They are one decision filed as
 two tickets**, and both say so: renaming the log control to `Logs` is what frees
 `open` for the control that actually opens a session.
+
+## Phase 12: More than one root
+
+**Status: done**, closed 2026-09-05. Issues #119, #120, #121, #122 and #129.
+
+**Marked on 2026-09-07** (#222). It shipped on 2026-09-05 and this section went
+on saying it "runs next" for two days, while the paragraph in "How the phases
+are cut" said the same. It also sat after the Superseded heading at the end of
+the file, which is where it was put while it was jumping the queue, and which
+reads as though the phase itself had been superseded. Both are corrected here.
+
+**#119 was decided on 2026-09-04.** A project is `<root-label>~<folder>`,
+always, including with one root. The reasoning, the three options that lost and
+the questions that followed from the answer are in the design, section 6.0.
+
+**Objective: a project is still one thing when there is more than one place to
+keep projects.**
+
+`--root` takes one folder and every directory inside it is a project, so
+somebody with a client tree and a personal tree cannot see both in one
+Hitchrail. Running two instances is the obvious workaround and it is unsafe:
+the session name is derived from the project name and nothing else, so two
+roots containing a folder of the same name collide.
+
+```
+~/work/vessel      -> hr-vessel
+~/personal/vessel  -> hr-vessel
+```
+
+**The failure is silent and destructive.** The second project reads as
+`running` on the first one's session, and tapping Stop there stops the other
+one's agent.
+
+Delivers: several roots in one instance, a project identity that stays unique
+across them, and an interface that shows which root a row is in.
+
+**Done when:** two roots each containing a folder of the same name are two rows
+that can be started and stopped independently, proven against a real tmux
+rather than a fake, and a single root deployment is unchanged.
+
+**This has to land before 1.0.** `docs/versioning.md` cuts 1.0 when the HTTP
+interface is one you are willing to keep, and this phase decides what
+identifies a project on the wire. After 1.0 that is a MAJOR break with saved
+links and any client to migrate; before it, it is a MINOR under the `0.y.z`
+rule.
+
+**#119 gates the rest of the phase and is a decision rather than work.** Four
+options are written up with what each costs. Everything else here is written
+against a question and will need rewriting against the answer, which is said on
+each ticket rather than left to be discovered.
+
+Tickets: #119, #120, #121, #122, #129. **The list said four while the
+milestone held five**, which is the drift #92 names and the reason an open
+phase now links its milestone instead.
+
+The interim workaround was #123, kept out of this phase because it was a
+workaround for the limitation this phase removed. **It is now in Phase 14**, on
+its merits rather than as an interim anything: one instance takes several roots,
+so nobody needs two, and `session_prefix` is simply a setting the operator
+cannot reach.
 
 ## Phase 13: Fifty rows on a phone
 
@@ -1140,56 +1216,3 @@ every successful start. The file is deleted rather than kept alongside its
 replacement, because two plans for the same work is the drift this project
 exists to avoid. Git has it.
 
-## Phase 12: More than one root
-
-**Runs next, out of numeric order.** See "How the phases are cut" above for
-why: this is the one phase whose cost rises every day it is not done.
-
-**#119 is decided as of 2026-09-04.** A project is `<root-label>~<folder>`,
-always, including with one root. The reasoning, the three options that lost and
-the questions that followed from the answer are in the design, section 6.0.
-The three implementation tickets are no longer blocked.
-
-**Objective: a project is still one thing when there is more than one place to
-keep projects.**
-
-`--root` takes one folder and every directory inside it is a project, so
-somebody with a client tree and a personal tree cannot see both in one
-Hitchrail. Running two instances is the obvious workaround and it is unsafe:
-the session name is derived from the project name and nothing else, so two
-roots containing a folder of the same name collide.
-
-```
-~/work/vessel      -> hr-vessel
-~/personal/vessel  -> hr-vessel
-```
-
-**The failure is silent and destructive.** The second project reads as
-`running` on the first one's session, and tapping Stop there stops the other
-one's agent.
-
-Delivers: several roots in one instance, a project identity that stays unique
-across them, and an interface that shows which root a row is in.
-
-**Done when:** two roots each containing a folder of the same name are two rows
-that can be started and stopped independently, proven against a real tmux
-rather than a fake, and a single root deployment is unchanged.
-
-**This has to land before 1.0.** `docs/versioning.md` cuts 1.0 when the HTTP
-interface is one you are willing to keep, and this phase decides what
-identifies a project on the wire. After 1.0 that is a MAJOR break with saved
-links and any client to migrate; before it, it is a MINOR under the `0.y.z`
-rule.
-
-**#119 gates the rest of the phase and is a decision rather than work.** Four
-options are written up with what each costs. Everything else here is written
-against a question and will need rewriting against the answer, which is said on
-each ticket rather than left to be discovered.
-
-Tickets: #119, #120, #121, #122.
-
-The interim workaround was #123, kept out of this phase because it was a
-workaround for the limitation this phase removed. **It is now in Phase 14**, on
-its merits rather than as an interim anything: one instance takes several roots,
-so nobody needs two, and `session_prefix` is simply a setting the operator
-cannot reach.
