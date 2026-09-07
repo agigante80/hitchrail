@@ -905,20 +905,60 @@ def _lines_with_offsets(text: str) -> Iterator[tuple[int, str]]:
         offset += len(line)
 
 
-def _exec_start_argv() -> list[str]:
-    """The ExecStart line, as the argument list systemd will run.
+def _logical_lines(text: str) -> Iterator[str]:
+    """The unit's lines with backslash continuations joined, as systemd reads it.
+
+    #206. A directive continued across lines is ONE directive. Reading physical
+    lines gave `shlex` a value ending in a lone backslash, which raises
+    `ValueError: No escaped character` from inside a stdlib generator, and left
+    every flag on the later lines unread if it had not.
+
+    A trailing continuation at end of file yields what was gathered rather than
+    silently dropping it: systemd warns about that unit, and a checker that
+    discarded the whole command would report nothing wrong with it.
+    """
+    gathered = ""
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        if line.endswith("\\"):
+            gathered += line[:-1] + " "
+            continue
+        yield gathered + line
+        gathered = ""
+    if gathered:
+        yield gathered.rstrip()
+
+
+def _exec_start_argv(text: str) -> list[str]:
+    """The ExecStart directive, as the argument list systemd will run.
 
     `%h` and friends are systemd specifiers it expands at start. They survive
     `shlex.split` as ordinary characters, and `--root` takes any path, so the
     parser sees a value it accepts without this test needing to know what the
     operator's home is.
+
+    **Takes the text rather than reading `UNIT`**, so #206's shapes can be fed
+    in. A helper that can only read the shipped file can only be tested by
+    editing the shipped file.
     """
     line = next(
-        raw.split("=", 1)[1]
-        for raw in UNIT.read_text().splitlines()
-        if raw.startswith("ExecStart=")
+        (raw.split("=", 1)[1] for raw in _logical_lines(text) if raw.startswith("ExecStart=")),
+        None,
     )
-    return shlex.split(line)
+    if line is None:
+        return []
+    try:
+        return shlex.split(line)
+    except ValueError as exc:
+        # **A sentence, not a traceback.** Joining fixes the continuation and
+        # does not make every ExecStart splittable: systemd accepts quotes, so
+        # an unbalanced one reaches here and used to surface as a bare
+        # `ValueError` out of `shlex`, which says nothing about which file is
+        # wrong or why.
+        raise AssertionError(
+            f"the unit's ExecStart cannot be read as a command line: {exc}. "
+            f"The value after joining continuations was {line!r}."
+        ) from exc
 
 
 def test_the_unit_template_names_flags_the_cli_accepts() -> None:
@@ -929,7 +969,7 @@ def test_the_unit_template_names_flags_the_cli_accepts() -> None:
     The argv is fed to the real parser rather than compared against a list of
     flag names. A name check passes when a flag stops taking a value.
     """
-    argv = _exec_start_argv()
+    argv = _exec_start_argv(UNIT.read_text())
     assert argv, "the unit template has no ExecStart"
     assert Path(argv[0]).name == "hitchrail", (
         f"ExecStart runs {argv[0]!r}, which is not hitchrail"
@@ -1349,3 +1389,72 @@ def test_the_photographed_prefix_carries_no_run_identity() -> None:
         f"SHOT_PREFIX is {shot_prefix!r} and carries digits, so the published "
         f"screenshots would show run identity. See #177 and README.md's alt text."
     )
+
+
+# -- #206: a unit whose ExecStart is continued across lines -------------------
+
+# The maintainer's own installed unit, reduced. Five `--root` flags on one line
+# would be unreadable, so it uses the backslash continuations systemd defines,
+# and `packaging/hitchrail.service` is one flag away from the same shape.
+_CONTINUED_UNIT = """[Unit]
+Description=hitchrail
+
+[Service]
+ExecStart=/usr/bin/hitchrail \\
+  --root work=%h/work \\
+  --root play=%h/play \\
+  --host 127.0.0.1
+Restart=on-abnormal
+"""
+
+
+def test_a_unit_whose_exec_start_is_continued_is_read_as_one_command() -> None:
+    """#206. `shlex.split` on a line ending in a lone backslash raises
+    `ValueError: No escaped character`, from inside a stdlib generator.
+
+    Shape 4 of the rotten green taxonomy, a crash standing in for a failure: the
+    operator gets a traceback instead of the sentence naming which flag the
+    template uses that the CLI does not accept.
+
+    **The crash is the loud half. The quiet half is what this asserts.** Reading
+    only the first physical line would leave `argv` as
+    `["/usr/bin/hitchrail"]`, and every flag on the continuation lines would go
+    unchecked while the test reported success. So this pins the flags from the
+    LATER lines specifically, not merely that nothing was raised.
+    """
+    argv = _exec_start_argv(_CONTINUED_UNIT)
+
+    assert argv[0] == "/usr/bin/hitchrail"
+    assert "--host" in argv, (
+        f"the continuation lines were dropped, so nothing on them is checked: {argv}"
+    )
+    assert argv.count("--root") == 2, f"a continued flag went unread: {argv}"
+    # The real parser, which is the point of the test this supports: a name
+    # check passes when a flag stops taking a value.
+    parse_args(argv[1:])
+
+
+def test_a_continued_unit_still_fails_on_a_flag_the_cli_rejects() -> None:
+    """The repair must not have bought parsing at the cost of the assertion.
+
+    A unit that continues its lines AND names a flag the CLI removed has to fail
+    the way a single line one does, through the parser, rather than passing
+    because the joining swallowed something.
+    """
+    wrong = _CONTINUED_UNIT.replace("--host 127.0.0.1", "--port-number 8787")
+
+    with pytest.raises(SystemExit):
+        parse_args(_exec_start_argv(wrong)[1:])
+
+
+def test_an_exec_start_that_cannot_be_split_is_refused_with_a_sentence() -> None:
+    """Joining fixes the continuation. It does not make every ExecStart
+    splittable, and the residue must not go back to being a traceback.
+
+    An unbalanced quote is the reachable case: systemd accepts quotes, so a unit
+    can carry one, and `shlex` raises the same bare `ValueError` for it.
+    """
+    unbalanced = '[Service]\nExecStart=/usr/bin/hitchrail --root "work=/srv/work\n'
+
+    with pytest.raises(AssertionError, match="ExecStart"):
+        _exec_start_argv(unbalanced)

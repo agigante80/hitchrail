@@ -312,10 +312,27 @@ Criterion 1. These are the tests that pass while what they name is broken.
       regex expected exactly two. It failed loudly rather than matching nothing
       because it asserts `declared` is non-empty first.
 
-- [ ] **Task 49, #206.** The unit flag check crashes instead of failing when
+- [x] **Task 49, #206.** The unit flag check crashes instead of failing when
       `ExecStart` is continued across lines. A guard that raises where it should
       refuse reports a broken check as a broken build, and the two need
       different responses.
+
+      **Done 2026-09-07.** `_logical_lines` joins continuations the way systemd
+      does, `_exec_start_argv` takes the text so the shapes can be fed in rather
+      than only read from the shipped file, and a `shlex` failure that survives
+      the joining is re-raised as a sentence naming the file and the value.
+
+      **The crash was the loud half; the quiet half is what the test pins.**
+      Reading physical lines left `argv` as `["/usr/bin/hitchrail"]`, so every
+      flag on the later lines went unchecked. The test asserts the flags from
+      the LATER lines specifically, not merely that nothing was raised.
+
+      All three acceptance criteria falsified against the real shipped unit, not
+      only the synthetic one. A bogus flag in the CONTINUED form now fails with
+      `SystemExit: 2` from the parser, where before it died with
+      `ValueError: No escaped character` from inside a stdlib generator. Remove
+      the joining and the continued test fails; remove the re-raise and the bare
+      `ValueError` comes back.
 
 ## Batch 4: the survivors are read, tasks 50 to 52
 
