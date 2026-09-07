@@ -23,10 +23,10 @@ TESTS = Path(__file__).parent
 # this module's own premise was written for: a tier is a DECLARATION only while
 # something checks it.
 #
-# The glob below is non-recursive, so `tests/e2e/`, `tests/cli_tier/` and
-# `tests/device/` are not scanned at all. That is pre-existing and wider than
-# this list; #216 carries it. Registering the names is the half that belongs
-# with the commits that added them.
+# The glob below is RECURSIVE since #216. It was not, so `tests/e2e/`,
+# `tests/cli_tier/` and `tests/device/` were not scanned at all: the markers
+# were registered here while the files using them went unchecked, which is a
+# guard reporting on a shrinking subset without saying so.
 TIERS = {"integration", "live", "live_tmux", "e2e", "cli", "device"}
 # Unambiguous: a module that names one of these is talking to an ASGI app.
 TRANSPORTS = {"ASGITransport", "AsyncClient"}
@@ -76,7 +76,7 @@ def _module_tiers(path: Path) -> set[str]:
     return found
 
 
-@pytest.mark.parametrize("path", sorted(TESTS.glob("test_*.py")), ids=lambda p: p.name)
+@pytest.mark.parametrize("path", sorted(TESTS.rglob("test_*.py")), ids=lambda p: p.name)
 def test_no_test_claims_two_tiers(path: Path) -> None:
     """A test in two tiers is in neither, because every selection contradicts.
 
@@ -89,7 +89,7 @@ def test_no_test_claims_two_tiers(path: Path) -> None:
         assert len(both) <= 1, f"{path.name}::{node.name} claims tiers {sorted(both)}"
 
 
-@pytest.mark.parametrize("path", sorted(TESTS.glob("test_*.py")), ids=lambda p: p.name)
+@pytest.mark.parametrize("path", sorted(TESTS.rglob("test_*.py")), ids=lambda p: p.name)
 def test_a_test_that_drives_the_app_declares_a_tier(path: Path) -> None:
     """The boundary that used to be an import statement.
 
@@ -112,3 +112,99 @@ def test_a_test_that_drives_the_app_declares_a_tier(path: Path) -> None:
             "Add @pytest.mark.integration, or a module level pytestmark if the "
             "whole file is one tier."
         )
+
+
+# -- #216: the cli tier must not touch the operator's own tmux server ---------
+
+CLI_TIER = TESTS / "cli_tier"
+
+# The one helper that builds a child environment for this tier. Every spawn goes
+# through it, and the guard below is what makes "every" true rather than
+# intended.
+_CHILD_ENV = "_child_env"
+_SPAWNERS = {"run", "Popen", "call", "check_call", "check_output"}
+
+
+def _runs_the_console_script(call: ast.Call) -> bool:
+    """Whether this spawn's argv starts with the console script.
+
+    Structural: the first positional argument is a list whose first element
+    mentions `CONSOLE_SCRIPT`. Not a text search for the name, which would match
+    the docstrings that explain it.
+    """
+    if not call.args or not isinstance(call.args[0], ast.List) or not call.args[0].elts:
+        return False
+    first = call.args[0].elts[0]
+    return any(
+        isinstance(node, ast.Name) and node.id == "CONSOLE_SCRIPT" for node in ast.walk(first)
+    )
+
+
+def _spawn_calls(tree: ast.AST) -> list[ast.Call]:
+    """Every `subprocess.<spawner>(...)` call in a module."""
+    return [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in _SPAWNERS
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "subprocess"
+    ]
+
+
+@pytest.mark.parametrize("path", sorted(CLI_TIER.rglob("*.py")), ids=lambda p: p.name)
+def test_the_cli_tier_never_spawns_without_an_isolated_tmux(path: Path) -> None:
+    """#216. This tier runs the installed console script, and the program it
+    runs talks to whichever tmux server its environment names.
+
+    `env -u TMUX` stops the child inheriting an ambient SESSION. It does not
+    choose a SOCKET, so without `TMUX_TMPDIR` the spawned Hitchrail addresses the
+    operator's own server. Contact is read only today, one `list-panes -a`, and
+    the hazard is the next commit: a tier called "runs the program" grows a start
+    case, and then a spawned Hitchrail creates `hr-` sessions on the real server,
+    whose kill paths are scoped to the same `hr-` prefix a real one uses.
+
+    **The conftest used to ask the next author not to do that, in a comment.**
+    This project has repeatedly found that worthless, so the property is asserted
+    instead: every spawn in this tier passes an environment built by
+    `_child_env`, which sets `TMUX_TMPDIR` and cannot be called without one.
+
+    **Scoped to the console script, and the scope is the claim.** Other spawns
+    here are tmux, each explicitly scoped with `-S` or deliberately unscoped to
+    ask the operator's own server a question. The program under test is the one
+    whose environment must not depend on a reader noticing.
+
+    Read structurally, in both halves: which spawns run the console script, and
+    whether the env came from `_child_env`. A guard that grepped for the string
+    `TMUX_TMPDIR` would match this docstring and the comment above it, which is
+    the trap this repository has hit four times.
+    """
+    tree = ast.parse(path.read_text())
+    offenders: list[str] = []
+    for call in _spawn_calls(tree):
+        if not _runs_the_console_script(call):
+            # Other spawns in this tier are tmux itself, and each is either
+            # scoped with `-S` to a socket the caller made or is deliberately
+            # UNSCOPED to ask the operator's own server whether it holds a
+            # session, which is the negative half of the isolation proof. Both
+            # are legible at the call site; the program under test is the one
+            # whose environment cannot be left to a reader's care.
+            continue
+        env = next((kw for kw in call.keywords if kw.arg == "env"), None)
+        built_here = (
+            env is not None
+            and isinstance(env.value, ast.Call)
+            and isinstance(env.value.func, ast.Name)
+            and env.value.func.id == _CHILD_ENV
+        )
+        if not built_here:
+            offenders.append(f"line {call.lineno}")
+
+    assert not offenders, (
+        f"{path.relative_to(TESTS.parent)} spawns a process at {', '.join(offenders)} "
+        f"without `env={_CHILD_ENV}(...)`. Every child in this tier must carry an "
+        "isolated TMUX_TMPDIR, or the program under test addresses the operator's "
+        "own tmux server and its kill paths are scoped to the same prefix a real "
+        "Hitchrail uses."
+    )

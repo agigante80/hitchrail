@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -115,11 +116,156 @@ def test_two_roots_start_and_both_are_served(roots: Path, agent: Path) -> None:
         str(agent),
     )
     with (
-        serving(*args) as base,
-        urllib.request.urlopen(f"{base}/api/projects", timeout=10) as answer,  # noqa: S310
+        serving(*args) as program,
+        urllib.request.urlopen(f"{program.url}/api/projects", timeout=10) as answer,  # noqa: S310
     ):
         body = json.load(answer)
 
     names = {row["name"] for row in body["projects"]}
     assert "main~vessel" in names, f"the first root did not reach the listing: {names}"
     assert "other~anchor" in names, f"the second root did not reach the listing: {names}"
+
+
+@pytest.mark.cli
+def test_a_start_lands_on_a_server_nobody_else_can_see(agent: Path, tmp_path: Path) -> None:
+    """#216. **The case this tier's conftest used to forbid in a comment.**
+
+    It said "do not add one that does" because the console script could not be
+    pointed at a socket, so a spawned Hitchrail would create `hr-` sessions on
+    the operator's own server, whose kill paths are scoped to the same `hr-`
+    prefix a real one uses. `TMUX_TMPDIR` removes the premise, and this case is
+    the proof rather than the claim: it starts a real session and then asks both
+    servers who has it.
+
+    The project name is unique per run, so the negative assertion cannot be
+    confused by a real Hitchrail on this machine holding a session of the same
+    name. That matters here specifically: the developer's own service runs from
+    this checkout.
+
+    **To falsify this, point `TMUX_TMPDIR` at a SECOND private directory. Do not
+    remove it.** Removing it was tried once, on 2026-09-07, and it did what this
+    test exists to prevent: the start landed on the operator's own tmux server
+    and left `hr-cli~probe-<hex>` there with a fake agent sleeping in it, which
+    had to be found and killed by hand. The failure it produces is the same one
+    either way, because the assertion is "the private server holds it" rather
+    than "some server does".
+
+    The last assertion is conditional and says so: if this machine runs no tmux
+    server at all, `list-sessions` fails and the check passes on an empty
+    string. That is correct rather than vacuous, and it is the reason the
+    positive assertion above it is the one carrying the proof.
+    """
+    import json
+    import subprocess
+    import urllib.request
+    import uuid
+
+    root = tmp_path / "isolated"
+    folder = f"probe-{uuid.uuid4().hex[:8]}"
+    (root / folder).mkdir(parents=True)
+
+    with serving("--root", f"cli={root}", "--agent-binary", str(agent)) as program:
+        name = f"cli~{folder}"
+        start = urllib.request.Request(  # noqa: S310
+            f"{program.url}/api/sessions/{name}",
+            method="POST",
+            headers={"Origin": program.url},
+        )
+        with urllib.request.urlopen(start, timeout=25) as answer:  # noqa: S310
+            assert answer.status < 300, f"the start was refused: {answer.status}"
+
+        with urllib.request.urlopen(  # noqa: S310
+            f"{program.url}/api/projects", timeout=10
+        ) as answer:
+            rows = {row["name"]: row["state"] for row in json.load(answer)["projects"]}
+        assert rows.get(name) == "running", f"the row does not say running: {rows}"
+
+        private = subprocess.run(
+            ["tmux", "-S", str(program.tmux_socket), "list-sessions", "-F", "#{session_name}"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        assert folder in private.stdout, (
+            f"the private server does not hold the session: {private.stdout!r} "
+            f"{private.stderr!r}"
+        )
+
+    # Outside the `with`, so the program is stopped and its private server is
+    # about to be killed. The operator's own server is asked WITHOUT the
+    # isolation, which is the only way this assertion means anything.
+    default = subprocess.run(
+        ["tmux", "list-sessions", "-F", "#{session_name}"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+        env={k: v for k, v in os.environ.items() if k not in {"TMUX", "TMUX_TMPDIR"}},
+    )
+    assert folder not in default.stdout, (
+        "the session reached the operator's own tmux server, which is the whole "
+        f"failure #216 is about: {default.stdout!r}"
+    )
+
+
+@pytest.mark.cli
+def test_the_banner_hands_over_a_link_carrying_the_token(agent: Path, roots: Path) -> None:
+    """#128's banner case, uncovered until #216 drained the pipe.
+
+    `serving` used to promise it yielded the startup lines "because the banner
+    is half of what this tier exists to assert", and yielded `[]`. Nothing
+    asserted a line, so the sentence was the only thing making it look covered.
+
+    A token is what makes the banner exist at all: `banner()` returns "" when
+    there is none, which is every loopback start without `--token`. So this
+    passes one, which also makes the link's fragment assertable.
+    """
+    with serving(
+        "--root",
+        f"main={roots / 'main'}",
+        "--agent-binary",
+        str(agent),
+        "--token",
+        "opensesame",
+    ) as program:
+        printed = program.expect("/grant")
+
+    assert "token: opensesame" in printed, (
+        f"the banner withheld a token nobody else knows:\n{printed}"
+    )
+    assert "#token=opensesame" in printed, (
+        f"the link carries no token, so it hands the phone nothing usable:\n{printed}"
+    )
+
+
+@pytest.mark.cli
+def test_the_banner_withholds_the_token_when_stdout_is_the_journal(
+    agent: Path, roots: Path
+) -> None:
+    """#110's decision, asserted by running the program rather than by reading
+    `banner()`.
+
+    Under a systemd unit stdout IS journald, so a token printed here is kept in
+    a persistent log readable by root and the `systemd-journal` group, while one
+    printed to a terminal scrolls away with the operator in front of it. The
+    banner degrades instead: no token, and no fragment on the link.
+
+    `JOURNAL_STREAM` is what systemd sets, and passing it is what makes this a
+    test of the deployment rather than of a branch.
+    """
+    with serving(
+        "--root",
+        f"main={roots / 'main'}",
+        "--agent-binary",
+        str(agent),
+        "--token",
+        "opensesame",
+        env={"JOURNAL_STREAM": "8:12345"},
+    ) as program:
+        printed = program.expect("/grant")
+
+    assert "opensesame" not in printed, (
+        f"the token reached the journal, which #110 decided it must not:\n{printed}"
+    )
+    assert "#token=" not in printed, f"the link carries the token into the journal:\n{printed}"

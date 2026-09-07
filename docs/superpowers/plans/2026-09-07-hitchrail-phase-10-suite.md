@@ -96,7 +96,7 @@ blocked on it.**
 
 Criterion 2. These are ordered by how much of the machine they touch.
 
-- [ ] **Task 43, #216.** The CLI tier runs against the operator's own tmux
+- [x] **Task 43, #216.** The CLI tier runs against the operator's own tmux
       server. `TMUX_TMPDIR` fixes it.
 
       This is the same hazard class as testing against the real projects root,
@@ -104,6 +104,30 @@ Criterion 2. These are ordered by how much of the machine they touch.
       sessions is a tier that can act on them. Do this before task 44, because
       the process table work needs a tier that is already isolated at the tmux
       level to have anything to stand on.
+
+      **Done 2026-09-07.** Every console script spawn now carries a private
+      `TMUX_TMPDIR`, killed with `-S` and removed at teardown, and
+      `test_the_cli_tier_never_spawns_without_an_isolated_tmux` reads the AST
+      rather than asking the next author nicely. The conftest's "do not add a
+      start case" warning is gone and the start case is written: it starts a
+      real session, asserts the private server holds it, and asserts the
+      operator's own does not.
+
+      **The hazard is not theoretical, and I proved it the expensive way.**
+      Falsifying the isolation by REMOVING `TMUX_TMPDIR` put `hr-cli~probe-<hex>`
+      on the real server with a fake agent sleeping in it, which had to be found
+      and killed by hand. The test now says to falsify it by pointing at a second
+      private directory instead. That is the whole ticket in one line: a tier
+      that looks isolated and is not.
+
+      Also landed, all from the same file: `serving` drains the child's pipe in
+      a thread and yields a `Program` carrying its output, which made #128's two
+      banner cases assertable and they are now covered (the token printed, and
+      withheld under `JOURNAL_STREAM`, which is #110's decision). `test_tiers.py`
+      globs recursively, so `e2e/`, `cli_tier/` and `device/` are scanned at all
+      for the first time. `free_port`'s TOCTOU is knowingly left: the poll checks
+      `process.poll()` first, so a lost race surfaces as "the program exited
+      before serving" with uvicorn's reason attached.
 
 - [ ] **Task 44, #94.** `tests/test_live_tmux.py` isolates tmux carefully: a
       private socket, `env -u TMUX`, only prefixed sessions, teardown that asks
