@@ -1555,8 +1555,17 @@ def _first_party_imports(path: Path) -> set[str]:
             parts = (node.module or "").split(".")
             if len(parts) > 1:
                 found.add(parts[1] + ".py")
-            # `from hitchrail import claude_ipc, discovery`
-            found |= {a.name + ".py" for a in node.names if len(parts) == 1}
+            # `from hitchrail import claude_ipc, discovery`, where a name is a
+            # MODULE only if there is a file behind it. `from hitchrail import
+            # __version__` binds a string in `__init__.py`, and reading it as a
+            # module asked for `__version__.py` to be copied. Checked against
+            # the source tree rather than by pattern: a dunder rule would still
+            # be wrong about any other re-exported name.
+            found |= {
+                a.name + ".py"
+                for a in node.names
+                if len(parts) == 1 and (_REPO / "src" / "hitchrail" / f"{a.name}.py").exists()
+            }
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 bits = alias.name.split(".")
@@ -1585,14 +1594,31 @@ def test_every_mutated_module_can_be_imported_from_the_mutants_tree() -> None:
     has now hit three times.
     """
     section = _mutmut_config()
-    copied = {Path(p).name for p in section["source_paths"] + section.get("also_copy", [])}
+    entries = section["source_paths"] + section.get("also_copy", [])
+    copied = {Path(p).name for p in entries}
+
+    # **Every copied file, not only the mutated ones, and #221 is why.** This
+    # walked `source_paths` alone, so it checked seven modules and ignored the
+    # twelve in `also_copy` and every test. `engine.py` is copied rather than
+    # mutated and imports `attention`, which was in neither list, so the tree
+    # had `engine.py` and no `attention.py`: `conftest.py` failed to import, and
+    # pytest exited 4, a USAGE error rather than a test failure. mutmut reported
+    # only "Failed to run pytest with args", which is why it read as a broken
+    # command for a day. The guard was green throughout, because the module that
+    # could not import was one it never looked at.
+    scanned: list[Path] = []
+    for rel in entries:
+        path = _REPO / rel
+        if path.is_dir():
+            scanned.extend(sorted(path.rglob("*.py")))
+        elif path.suffix == ".py":
+            scanned.append(path)
 
     missing: dict[str, set[str]] = {}
-    for rel in section["source_paths"]:
-        module = _REPO / rel
+    for module in scanned:
         gaps = {i for i in _first_party_imports(module) if i not in copied}
         if gaps:
-            missing[Path(rel).name] = gaps
+            missing[str(module.relative_to(_REPO))] = gaps
 
     assert not missing, (
         "the mutants tree cannot import: "
@@ -1907,3 +1933,45 @@ def test_the_rule_parser_refuses_a_list_entry_at_column_zero(tmp_path: Path) -> 
     rule = _rule_file(tmp_path, 'paths:\n  - "src/a.py"\n- "src/b.py"\n  - "src/c.py"')
     with pytest.raises(AssertionError, match="column zero"):
         _security_rule_paths(rule)
+
+
+def test_every_test_the_sweep_deselects_still_exists() -> None:
+    """#221. A `--deselect` naming a test that is gone makes pytest exit 4, and
+    mutmut renders that as "Failed to run pytest with args: [...]".
+
+    **That message names the arguments, so it reads as a malformed command**,
+    and every argument in it is valid. The one time this happened the cause was
+    a missing module rather than a stale node id, and it still cost a day. This
+    closes the other way in.
+
+    Reads the node id structurally: the file must exist and the function must be
+    DEFINED in it. A substring search would match the name in a docstring, which
+    is how a guard in this repository has failed three times.
+    """
+    deselected = [
+        arg.split("=", 1)[1]
+        for arg in _mutmut_config().get("pytest_add_cli_args", [])
+        if arg.startswith("--deselect=")
+    ]
+    assert deselected, (
+        "[tool.mutmut] pytest_add_cli_args deselects nothing. The repository shape "
+        "guards MUST be deselected under a sweep: they read the source, and under a "
+        "run that source is a tree nobody wrote."
+    )
+
+    gone: list[str] = []
+    for nodeid in deselected:
+        path, _, name = nodeid.partition("::")
+        target = _REPO / path
+        defined = target.exists() and re.search(
+            rf"^def {re.escape(name)}\(", target.read_text(), re.M
+        )
+        if not defined:
+            gone.append(nodeid)
+
+    assert not gone, (
+        "[tool.mutmut] deselects tests that do not exist: "
+        + ", ".join(gone)
+        + ". pytest exits 4 on an unknown node id, and mutmut reports that as a bad "
+        "command rather than a missing test."
+    )

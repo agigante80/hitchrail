@@ -52,7 +52,7 @@ honestly without it; it is argued in place.
 **First, because criterion 3 is currently unmeasurable and two tasks below are
 blocked on it.**
 
-- [ ] **Task 42, #221.** `uv run mutmut run` dies in stats collection with
+- [x] **Task 42, #221.** `uv run mutmut run` dies in stats collection with
       `BadTestExecutionCommandsException`, pytest exit code 4, which is a usage
       error rather than a test failure. Pre-existing: reproduced against
       `origin/develop` with `tests/test_config.py` and `pyproject.toml` reverted.
@@ -70,6 +70,27 @@ blocked on it.**
       verifies the tree imports rather than that the command runs. Without it
       this recurs the next time either list changes, and it recurs silently,
       because nobody runs a twenty minute sweep to find out.
+
+      **Done 2026-09-07. Two causes, both invisible to the guard that existed.**
+      `engine.py` imports `attention`, `attention.py` was in neither list, so
+      the tree held the importer and not the module and `conftest.py` could not
+      import: pytest exits 4, a USAGE error, which mutmut renders as "Failed to
+      run pytest with args" with every argument in it valid. The guard walked
+      `source_paths` only, and `engine.py` is copied rather than mutated, so the
+      module that could not import was one it never looked at. Second cause,
+      same family from the other end:
+      `test_the_sweep_drives_every_public_method` reads `vars(Tmux)`, and under
+      a run those are `xǁTmuxǁ…__mutmut_N` variants whose names do not start
+      with an underscore, so it joined the four deselected repo shape guards.
+
+      The guard now walks every COPIED file with `also_copy` directories
+      expanded, and a second one asserts every deselected node id still exists,
+      because a stale node id produces the identical opaque message. Both were
+      falsified before landing.
+
+      **The sweep runs: 1188 mutants, 911 killed, 264 survived, 13 with no
+      covering test, 0 timeouts, at 14 mutations a second.** Criterion 3 is
+      measurable, and those 264 are the input to tasks 51 and 52.
 
 ## Batch 2: no tier depends on the machine, tasks 43 to 45
 
