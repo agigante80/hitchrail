@@ -888,13 +888,20 @@ typed.**
 
 **Cut out of Phase 10 on 2026-09-07.** Eleven of that phase's tickets were not
 about a suite that would notice. They were about a sentence, a comment, a label
-or a count that disagreed with the thing standing next to it: `AGENTS.md` maps
-the modules completely and omits four that exist (#200), section 5 has eight
-controls and two documents that count them say seven (#174), five source
-comments cite the untracked pointer as the authority (#199), the changelog says
-it follows the one format the release cannot parse (#185), and two docstrings
-promise more than the code does (#181). One defect in eleven costumes, and
-inside a phase about tests it looked like eleven unrelated chores.
+or a count that disagreed with the thing standing next to it: `AGENTS.md` claims
+to map the modules completely (#200), source comments cite the untracked pointer
+as the authority (#199), the changelog says it follows the one format the release
+cannot parse (#185), and two docstrings promise more than the code does (#181).
+Section 5 has eight controls and two tracked documents that count them say seven,
+which is #174 and is the only one of those whose numbers were re-measured against
+the tree on 2026-09-07. One defect in eleven costumes, and inside a phase about
+tests it looked like eleven unrelated chores.
+
+**#200's and #199's own counts did not survive that measurement**, which is the
+phase arguing for itself: `AGENTS.md` omits at most `__init__.py` rather than the
+four #200 names, and the pointer is cited nine times across seven files rather
+than the five #199 names. The tickets are right about the shape and wrong about
+the size, so this section describes the shape.
 
 **The guards are in scope, not only the prose, and they are the harder half.**
 #136 is the one to read: the lockstep guard compares version markers, so the
@@ -992,6 +999,8 @@ vendor knowledge on both sides of it. `engine.py` is the other, and it is the
 largest module in the project: most of its length is comments recording footguns
 that cost real debugging to find, and deleting those to satisfy a line count
 would be the worst trade on offer.
+
+**Tickets: [the Phase 18 milestone](https://github.com/agigante80/hitchrail/milestone/20).**
 
 **A split that moves lines without moving responsibility is refused**, and the
 `caps` note on `engine.py` is the precedent. An earlier version of it said to

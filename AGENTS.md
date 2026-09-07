@@ -64,9 +64,16 @@ claiming otherwise.
   `test_every_mutated_module_loads_the_security_rules_when_it_is_edited` now
   fails when a module in `[tool.mutmut] source_paths` is absent from it. That
   list is a lower bound, not the definition: a module nobody has classified yet
-  is still invisible to both. The guard skips where `.claude/` is absent, which
-  is every CI leg, so it runs on the machine where the list is edited and is not
-  a gate.
+  is still invisible to both. The guard skips where `.claude/` is absent, so it
+  is not a gate: it runs on the machine where the list is edited.
+
+  **Where it skips is wider than CI, and that is the half worth knowing.**
+  `.gitignore` ignores `.claude/`, so a `git worktree add` checkout has none
+  either. Running the full suite in a worktree therefore skips this guard on
+  your own machine, in the environment where you are most likely to believe it
+  ran. A missing rule FILE inside a present `.claude/` is a failure rather than
+  a skip, because that is the rule being renamed or deleted rather than a
+  checkout that cannot carry it.
 - `.claude/agents/`, `.claude/commands/` and `.claude/skills/` hold the
   governance components, adapted to this project rather than copied. Each carries
   a `<name>-version` marker so `forge-adapt` can tell drift from adaptation.
