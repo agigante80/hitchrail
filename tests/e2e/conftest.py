@@ -225,10 +225,32 @@ while True:
     time.sleep(0.2)
 """
 
-# Exits at once, for the dead start flow.
-DYING_BODY = """
-print("hitchrail-shim: nothing to do, exiting", flush=True)
-sys.exit(3)
+# Exits at once, for the dead start flow. **A WHOLE script, and `/bin/sh`, not
+# the Python head the others share (#67).**
+#
+# The Python version did not exit at once and could not: the interpreter has to
+# boot before the first line runs. On this machine that is under 250ms so the
+# engine's first poll missed it; on a CI runner it outlasts the poll, so
+# `_await_running`'s first `get()` found the agent ALIVE, derived `running`, and
+# the start SUCCEEDED. Measured: the POST returns 201, no refusal is produced,
+# and the dialog the test waits 45 seconds for can never open.
+#
+# So the fixture did not model what its name promises. `sh` starts in about a
+# millisecond against the ~20ms the engine spends spawning `ps -eww` for that
+# first look, and the two scale together under load where a Python start does
+# not: it is roughly 50x more work, so contention widens the gap rather than
+# narrowing it.
+#
+# The margin is still a margin, which is why the test asserts its own premise
+# rather than trusting this. See
+# `test_a_start_that_dies_says_so_and_offers_the_output`.
+#
+# `status 3` in the output comes from tmux's own "Pane is dead (status 3)" line,
+# so the exit code has to be 3 here and the pane has to be kept, which
+# `new_session`'s `remain-on-exit` does.
+DYING_SCRIPT = """#!/bin/sh
+echo "hitchrail-shim: nothing to do, exiting"
+exit 3
 """
 
 
@@ -423,11 +445,14 @@ class Harness:
             body = UNCLEARABLE_BOX_BODY
         if prompts_after_stop:
             body = PROMPTS_AFTER_STOP_BODY
-        if agent_exits_immediately:
-            body = DYING_BODY
         if agent_shows_a_modal:
             body = STUCK_BODY
-        self._write_shim(_SHIM_HEAD.format(python=sys.executable) + body)
+        # The dying agent is a whole `sh` script rather than a body under the
+        # Python head, because a Python start is not immediate (#67).
+        if agent_exits_immediately:
+            self._write_shim(DYING_SCRIPT)
+        else:
+            self._write_shim(_SHIM_HEAD.format(python=sys.executable) + body)
 
         for name in (
             (running or [])
