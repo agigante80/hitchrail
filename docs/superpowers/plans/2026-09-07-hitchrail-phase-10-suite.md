@@ -218,9 +218,31 @@ Criterion 2. These are ordered by how much of the machine they touch.
 
 Criterion 1. These are the tests that pass while what they name is broken.
 
-- [ ] **Task 46, #73.** The fatal stream error's refresh has no test of its own.
+- [x] **Task 46, #73.** The fatal stream error's refresh has no test of its own.
       A screen state with no test is a screen state nobody has read since it was
       written.
+
+      **Done 2026-09-07.**
+      `test_a_stream_the_server_stops_accepting_reaches_the_screen_on_its_own`
+      refuses `/api/events` and the listing in one page, with both interceptions
+      installed before `goto`, and nobody calls `refresh()` from the test.
+
+      **The listing succeeds exactly once, and that is the whole mechanism.**
+      Refused from the start, boot's own `refresh()` would raise the screen and
+      the test would pass with the error handler emptied: precisely the false
+      pass it exists to remove. That the second listing can only be the fatal
+      branch's was checked rather than assumed: `refresh()` has six other
+      callers, and each is unreachable here for a stated reason.
+
+      Mutation named and run, as the ticket asks. With `refresh();` removed from
+      the `error` handler the new test fails on the dialog, while the
+      `data-stream` assertion above it still passes, so the failure cannot be
+      misread as "the stream never errored". **The neighbouring test passes under
+      the same mutation**, which is the ticket's claim demonstrated rather than
+      repeated.
+
+      #71 and #72 are Phase 11 and stay there, but the two-refusal harness they
+      were waiting on now exists.
 
 - [ ] **Task 47, #70.** The e2e negatives wait on wall clocks instead of on
       events. A negative that waits two seconds and asserts nothing happened

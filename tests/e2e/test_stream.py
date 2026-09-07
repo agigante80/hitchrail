@@ -564,3 +564,74 @@ async def test_a_two_hundred_the_page_cannot_read_is_not_a_success(
     await expect(page.locator("html")).to_have_attribute("data-stream", "blind")
     await expect(page.locator("[data-stream-note]")).to_be_visible()
     assert errors == [], errors
+
+
+async def test_a_stream_the_server_stops_accepting_reaches_the_screen_on_its_own(
+    page: Page, server: Harness
+) -> None:
+    """#73. The fatal branch's `refresh()`, with nobody calling it from here.
+
+    The neighbouring test routes `/api/projects` to 401 and then calls
+    `refresh()` itself. That covers the listing's 401 branch and says nothing
+    about the stream's, because it would pass against a build with the
+    `refresh()` deleted from the error handler. **The mutation that leaves it
+    green is the behaviour it appears to cover.**
+
+    Reaching the branch needs a stream that is refused AND a listing that is
+    refused, in one page, which no existing interception here does.
+
+    **Why the listing must succeed exactly once.** If it were refused from the
+    start, boot's own `refresh()` would raise the screen and this test would
+    pass with the error handler emptied: the false pass it exists to remove.
+    So the first listing is allowed through and every later one is refused, and
+    the count is the whole mechanism rather than an optimisation.
+
+    **That the count isolates the branch is a property of the page, checked
+    rather than assumed.** `refresh()` has six other callers: boot, the `open`
+    handler, `refreshSoon`, `onVisible`, the new-folder path and the stop loop.
+    Boot's is the one allowed through. The `open` handler needs a stream that
+    opens, and this one never does. `refreshSoon` needs an event, and a refused
+    stream delivers none. `onVisible` needs the tab backgrounded and brought
+    back, which nothing here does. The last two need a click. So the second
+    listing can only be the fatal branch's.
+
+    Verified by mutation, as the ticket asks rather than assuming: with line
+    `refresh();` removed from the `error` handler in `app.js`, this fails on
+    the dialog never appearing, and the strip still reads `down`. The assertion
+    on `data-stream` is what tells those apart: without it, a test that failed
+    because the stream never errored would look identical.
+    """
+    server.seed(stopped=["vessel"])
+
+    listings = {"seen": 0}
+
+    async def listing(route: Route) -> None:
+        listings["seen"] += 1
+        if listings["seen"] == 1:
+            await route.continue_()
+            return
+        await route.fulfill(
+            status=401,
+            content_type="application/json",
+            body='{"code": "unauthorized", "message": "a valid token is required"}',
+        )
+
+    # Both interceptions are installed BEFORE the page loads, which is the half
+    # that makes this a test of the page's own behaviour rather than of a
+    # sequence a test drove.
+    await page.route("**/api/events*", lambda route: route.fulfill(status=401))
+    await page.route("**/api/projects", listing)
+
+    await page.goto(server.base)
+
+    # The stream reached its FATAL state, not merely a transient drop. Asserted
+    # first so a failure below cannot be read as "the screen is missing" when
+    # the truth is "the stream never errored".
+    await expect(page.locator("html")).to_have_attribute("data-stream", "down", timeout=15_000)
+
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text("Not signed in any more", timeout=15_000)
+    assert listings["seen"] >= 2, (
+        f"the listing was fetched {listings['seen']} time(s), so the screen came "
+        "from boot rather than from the stream's error handler"
+    )
