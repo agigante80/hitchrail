@@ -946,12 +946,15 @@ brought `discovery.py` under and the test failed until the stale entry was
 removed. Seven modules sit in that table today. Four files carry a ticket to
 split them, and those splits are what this phase owes.
 
-**No line count is written into this section on purpose.** Every count the
-tickets themselves carry was roughly half the truth when this was written: #68
-says `app.js` is 801 lines and it is 1632, #30 says `test_config.py` is 845 and
-it is 1601, #205 says `server.py` is 573 and the cap table says 631. The table
-is generated from the files and was right about all seven; the prose beside it
-was not. That is #92 and Phase 17, arriving inside the phase next door.
+**No line count is written into this section on purpose, and the tickets no
+longer carry one either.** Every count they held was stale, twice over in two
+cases: #68 and #30 were each filed with a number, re-measured on 2026-09-05 with
+a second number, and both of those were wrong again within days, one of them by
+about 150 lines. #205's was wrong by the time this phase was cut. The `caps`
+table is generated from the files and was right about all seven modules; every
+count typed beside it was not, so on 2026-09-07 the three tickets were rewritten
+to describe the shape and let the guard hold the number. That is Phase 17's rule
+applied inside the phase next door, which is where it was easiest to see.
 
 Each of the four is over for a different reason, and the reason decides the cut:
 
