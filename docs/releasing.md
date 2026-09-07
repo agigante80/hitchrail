@@ -44,9 +44,18 @@ The workflow filename and the environment name are part of the trust, so
 renaming either breaks publishing until PyPI is updated to match.
 
 **Fill in the environment.** PyPI treats it as optional. It is not optional
-here: leaving it blank produces a trust that does not require the `release`
-environment, and the required reviewer on that environment is the only thing
-making a publish need a human click.
+here: leaving it blank produces a trust that ANY run of `publish.yml` in this
+repository satisfies, whatever environment it ran in. Filling it in narrows the
+trust to runs carrying `environment: release`, which is a scoping control rather
+than a gate on a person.
+
+**#229 corrected this sentence.** It used to justify the field by saying the
+environment's required reviewer "is the only thing making a publish need a human
+click", which the section below removes twenty lines later, leaving a reader
+following the document in order with no reason to fill the field in at all. The
+scoping is why it matters, and it survives the reviewer's removal untouched:
+"Deleting the environment does not merely remove a gate: it makes every publish
+fail" was always the accurate model.
 
 **A pending publisher does not reserve the name.** It takes effect when it is
 first used to publish, and until then `hitchrail` remains claimable by anybody.
