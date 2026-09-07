@@ -54,7 +54,7 @@ import tempfile
 from collections.abc import Iterator
 
 import pytest
-from playwright.async_api import Page, ViewportSize, expect
+from playwright.async_api import Locator, Page, ViewportSize, expect
 
 from . import conftest as e2e_conftest
 from .conftest import SHOT_PREFIX, Harness
@@ -138,7 +138,27 @@ async def _settled(page: Page, harness: Harness) -> None:
     await page.wait_for_timeout(600)
 
 
-async def _shoot(page: Page, name: str) -> None:
+def row(page: Page, harness: Harness, name: str) -> Locator:
+    """The row for a seeded project, which is what most captures prove on."""
+    return page.locator(f'[data-project="{harness.project(name)}"]')
+
+
+async def _shoot(page: Page, name: str, showing: Locator) -> None:
+    """Photograph the page, having first proved it is showing the right thing.
+
+    **`showing` is required, and that is the fix for #215.** Two captures here
+    guarded their click with `if await control.count():` and then shot
+    regardless, so when the control was not found the tier photographed whatever
+    was on screen and passed. `phone-logs.png` shipped as a copy of
+    `phone-list.png` for months because of it: the control is named `Open`, not
+    `Logs`, so the count was zero every time.
+
+    The assertion in this tier IS the picture, and a picture nothing checks is
+    the same rotten green as a test with no assertion. Making the proof a
+    parameter rather than a convention means a new capture cannot be added
+    without naming what makes its image the thing it claims to be.
+    """
+    await expect(showing).to_be_visible()
     SHOTS.mkdir(parents=True, exist_ok=True)
     path = SHOTS / f"{name}.png"
 
@@ -172,7 +192,7 @@ async def test_capture_the_phone_list(page: Page, shots_server: Harness) -> None
     _seed_the_world(shots_server)
     await page.goto(shots_server.base)
     await _settled(page, shots_server)
-    await _shoot(page, "phone-list")
+    await _shoot(page, "phone-list", row(page, shots_server, "vessel"))
 
 
 async def test_capture_two_roots_on_a_phone(page: Page, shots_server: Harness) -> None:
@@ -201,7 +221,7 @@ async def test_capture_two_roots_on_a_phone(page: Page, shots_server: Harness) -
     for label in ("main", "personal"):
         row = page.locator(f'[data-project="{shots_server.project("vessel", label)}"]')
         await expect(row.locator(".badge")).to_have_text("running", timeout=15_000)
-    await _shoot(page, "phone-two-roots")
+    await _shoot(page, "phone-two-roots", page.locator("[data-project]").first)
 
 
 async def test_capture_the_phone_list_dark(page: Page, shots_server: Harness) -> None:
@@ -212,7 +232,7 @@ async def test_capture_the_phone_list_dark(page: Page, shots_server: Harness) ->
     _seed_the_world(shots_server)
     await page.goto(shots_server.base)
     await _settled(page, shots_server)
-    await _shoot(page, "phone-list-dark")
+    await _shoot(page, "phone-list-dark", row(page, shots_server, "vessel"))
 
 
 async def test_capture_the_desktop_list(page: Page, shots_server: Harness) -> None:
@@ -220,7 +240,7 @@ async def test_capture_the_desktop_list(page: Page, shots_server: Harness) -> No
     _seed_the_world(shots_server)
     await page.goto(shots_server.base)
     await _settled(page, shots_server)
-    await _shoot(page, "desktop-list")
+    await _shoot(page, "desktop-list", row(page, shots_server, "vessel"))
 
 
 async def test_capture_the_log_drawer(page: Page, shots_server: Harness) -> None:
@@ -229,12 +249,14 @@ async def test_capture_the_log_drawer(page: Page, shots_server: Harness) -> None
     _seed_the_world(shots_server)
     await page.goto(shots_server.base)
     await _settled(page, shots_server)
-    row = page.locator(f'[data-project="{shots_server.project("vessel")}"]')
-    logs = row.get_by_role("button", name="Logs")
-    if await logs.count():
-        await logs.first.click()
-        await page.wait_for_timeout(800)
-    await _shoot(page, "phone-logs")
+    # **`Open`, not `Logs`.** The control has never been called Logs; `app.js`
+    # names it `Open`. The old lookup found nothing every time, and because the
+    # click was guarded rather than asserted, the tier photographed the plain
+    # list and published it as the drawer (#215).
+    await row(page, shots_server, "vessel").get_by_role("button", name="Open").click()
+    drawer = page.locator("[data-dialog]")
+    await expect(drawer).to_contain_text("last 40 lines of the pane")
+    await _shoot(page, "phone-logs", drawer)
 
 
 async def test_capture_the_new_folder_sheet(page: Page, shots_server: Harness) -> None:
@@ -242,11 +264,10 @@ async def test_capture_the_new_folder_sheet(page: Page, shots_server: Harness) -
     _seed_the_world(shots_server)
     await page.goto(shots_server.base)
     await _settled(page, shots_server)
-    new = page.get_by_role("button", name="New")
-    if await new.count():
-        await new.first.click()
-        await page.wait_for_timeout(500)
-    await _shoot(page, "phone-new-folder")
+    await page.get_by_role("button", name="New").click()
+    sheet = page.locator("[data-dialog]")
+    await expect(sheet).to_contain_text("New folder")
+    await _shoot(page, "phone-new-folder", sheet)
 
 
 async def test_capture_the_grant_page(page: Page, shots_server: Harness) -> None:
@@ -255,4 +276,4 @@ async def test_capture_the_grant_page(page: Page, shots_server: Harness) -> None
     shots_server.seed(stopped=["vessel"], token="s3cret-key-value")
     await page.goto(f"{shots_server.base}/grant")
     await page.wait_for_timeout(600)
-    await _shoot(page, "phone-grant")
+    await _shoot(page, "phone-grant", page.get_by_label("Access key"))

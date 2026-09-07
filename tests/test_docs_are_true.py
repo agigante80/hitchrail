@@ -785,7 +785,11 @@ def test_every_shot_the_capture_declares_is_committed() -> None:
     comparison: that is flaky across font versions and a flaky gate is a
     disabled gate, which #105 says explicitly.
     """
-    declared = set(re.findall(r'_shoot\(page, "([a-z-]+)"\)', CAPTURE.read_text()))
+    # `[,)]` because #215 gave `_shoot` a required third argument, the locator
+    # that proves the page is showing what the shot claims. This regex expected
+    # exactly two and matched nothing, and the `assert declared` below is the
+    # only reason that was a failure rather than a silently empty check.
+    declared = set(re.findall(r'_shoot\(page, "([a-z-]+)"[,)]', CAPTURE.read_text()))
     assert declared, "the capture module declares no shots, so this checks nothing"
     missing = sorted(n for n in declared if not (SCREENSHOTS / f"{n}.png").exists())
     assert not missing, (

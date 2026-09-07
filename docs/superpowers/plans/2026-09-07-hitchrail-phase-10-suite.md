@@ -274,7 +274,7 @@ Criterion 1. These are the tests that pass while what they name is broken.
       negative hoping for absence, and #230 records why a blanket guard on
       `wait_for_timeout` would have to carve it out.
 
-- [ ] **Task 48, #215.** Two published screenshots are wrong, and every capture
+- [x] **Task 48, #215.** Two published screenshots are wrong, and every capture
       ships a pid. The pid is a privacy leak into a tracked artefact; the wrong
       screenshots are a document contradicted by the thing it shows.
 
@@ -282,6 +282,35 @@ Criterion 1. These are the tests that pass while what they name is broken.
       arguably Phase 17. It stays here because the capture path is a fixture
       that produces an artefact, and the fix is to the capture, not to the
       prose.
+
+      **Done 2026-09-07, for the half that is this phase's. The pid half is a
+      decision, and it is left as one.**
+
+      The capture defect was one word: `app.js` names the control `Open`, the
+      capture looked for `Logs`, so the count was zero every time and the
+      guarded click was skipped. `_shoot` now takes a REQUIRED `showing`
+      locator, asserted visible before the shutter, so a capture cannot be
+      added without naming what makes its image the thing it claims to be.
+      Falsified by reverting the name: it fails instead of publishing.
+
+      **One image, not two.** `phone-new-folder.png` was not wrong; checked
+      against the committed bytes rather than taken from the ticket. It had the
+      unsafe shape and happened to work. Only `phone-logs.png` is recommitted:
+      the other four differ purely from pid and uptime churn, which is the
+      unreviewable diff the ticket complains about.
+
+      **The pid cannot be removed without removing the state.** Only `detached`
+      rows render one, and the `procs_fn` seam that looked like the answer is
+      not: `derive` walks the process TREE by pid while pane pids come from real
+      tmux, so a faked table would change the STATES the picture shows. So the
+      choice is to drop `detached` from the photographed world or to keep the
+      pid, which is a call about what the README shows. Recorded on the ticket
+      with both options; not taken here.
+
+      Caught by an existing guard, which is worth the line: the new third
+      argument broke `test_every_shot_the_capture_declares_is_committed`, whose
+      regex expected exactly two. It failed loudly rather than matching nothing
+      because it asserts `declared` is non-empty first.
 
 - [ ] **Task 49, #206.** The unit flag check crashes instead of failing when
       `ExecStart` is continued across lines. A guard that raises where it should
