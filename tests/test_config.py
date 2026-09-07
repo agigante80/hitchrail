@@ -8,6 +8,7 @@ socket.
 from __future__ import annotations
 
 import ast
+import re
 import tomllib
 from collections.abc import Callable
 from pathlib import Path
@@ -1598,4 +1599,115 @@ def test_every_mutated_module_can_be_imported_from_the_mutants_tree() -> None:
         + "; ".join(f"{m} imports {sorted(g)}" for m, g in sorted(missing.items()))
         + ". Add each to [tool.mutmut] source_paths or also_copy, or `uv run mutmut run` "
         "dies before it scores a single mutant."
+    )
+
+
+# -- #198: the rules that load for the modules on the spawn path --------------
+
+_SECURITY_RULE = _REPO / ".claude" / "rules" / "security.md"
+
+
+def _security_rule_paths() -> list[str]:
+    """The `paths:` list from the rule file's frontmatter, read as structure.
+
+    Never a substring search for a module name. The frontmatter is located by
+    its delimiters, `paths:` by being a top level key inside it, and its entries
+    by being the indented list items that follow. A grep would match this
+    docstring and every prose mention of a module below it, which is the trap
+    this repository has hit three times and `test_every_mutated_module_can_be_`
+    `imported_from_the_mutants_tree` already names.
+    """
+    text = _SECURITY_RULE.read_text()
+    block = re.match(r"\A---\n(?P<front>.*?)\n---\n", text, re.S)
+    assert block, (
+        f"{_SECURITY_RULE} has no frontmatter block, so the path scoped rules load "
+        "for nothing at all. A rewritten header must fail here rather than leave "
+        "this guard comparing against an empty list."
+    )
+
+    found: list[str] = []
+    inside = False
+    for line in block.group("front").split("\n"):
+        if re.match(r"^paths:\s*$", line):
+            inside = True
+            continue
+        if not inside:
+            continue
+        if not line.strip() or re.match(r"^\s*#", line):
+            # A comment or a blank line inside the list is legal YAML and says
+            # WHY an entry is there, which is the most useful thing in the file.
+            # The first version of this parser ended the list at the first one,
+            # silently dropping the two entries below it, and the run that
+            # caught it was the one that added a comment. A guard that reads
+            # structure has to read the whole structure.
+            continue
+        entry = re.match(r'^\s+-\s*"(?P<path>[^"]+)"\s*$', line)
+        if entry:
+            found.append(entry.group("path"))
+            continue
+        if re.match(r"^\S", line):
+            inside = False
+            continue
+        raise AssertionError(
+            f"{_SECURITY_RULE}: this parser cannot read {line!r} as a `paths:` entry. "
+            "Failing rather than skipping it: an entry read as nothing is a module "
+            "this guard would then report as missing, or worse, one it would stop "
+            "checking without saying so."
+        )
+
+    assert found, (
+        f"{_SECURITY_RULE} has frontmatter but no `paths:` entries this parser can "
+        "read. The list is the record of which modules load the security rules, and "
+        "a guard that cannot find it must fail rather than pass on nothing."
+    )
+    return found
+
+
+def test_every_mutated_module_loads_the_security_rules_when_it_is_edited() -> None:
+    """#198. `roots.py` was created the day after the rule file was last edited,
+    so nothing loaded when an agent opened the module holding the injectivity
+    argument that keeps two projects off one tmux session.
+
+    **The expectation is derived from a list somebody already maintains.**
+    `[tool.mutmut] source_paths` is curated as "the modules between a web page
+    and a shell", and #130 argued `roots.py` onto it with a measurement. Asking
+    that the security rule covers every module the project already mutates costs
+    no second list to keep.
+
+    **What this does NOT claim, and the limit is the point.** mutmut's list is a
+    LOWER BOUND, not the definition of the set. `headers.py`, `server.py` and
+    `cli.py` are in the rule and are deliberately not mutated, so the two lists
+    are different sizes on purpose and neither contains the other. This catches
+    a module the project has already classified as being on the spawn path. It
+    says nothing about one nobody has classified yet, and #126's lesson is that
+    the unclassified direction is where things actually go missing.
+
+    **It skips rather than fails without `.claude/`**, which is gitignored, so
+    this is not a gate: it runs on the machine where the list is edited and on
+    no CI leg. That is the honest cost of deriving the check from a file the
+    repository does not carry.
+
+    **It is deliberately NOT in `[tool.mutmut] pytest_add_cli_args`, against the
+    ticket's own instruction.** #198 required a `--deselect` entry beside the
+    four repository shape guards, reasoning that a test reading `.claude/` fails
+    under `mutmut run` because `also_copy` never copies it. The first half is
+    right and the conclusion is not: `also_copy` carries `src/hitchrail/*` and
+    `tests`, so in the mutants tree this file resolves a `_REPO` with no
+    `.claude/` in it and the skip above is what runs. Verified by hiding the
+    rule file and watching this test skip rather than fail. A deselect entry
+    would have claimed a breakage that does not happen and hidden the guard from
+    the one suite where somebody might notice it had stopped running.
+    """
+    if not _SECURITY_RULE.exists():
+        pytest.skip(f"{_SECURITY_RULE} is not in this checkout (`.claude/` is gitignored)")
+
+    listed = set(_security_rule_paths())
+    missing = [p for p in _mutmut_config()["source_paths"] if p not in listed]
+
+    assert not missing, (
+        "the security rules do not load for "
+        + ", ".join(missing)
+        + ". [tool.mutmut] source_paths in pyproject.toml treats each as a module "
+        f"between a web page and a shell; {_SECURITY_RULE}'s `paths:` list decides "
+        "which modules load those rules when an agent edits them, and it omits these."
     )

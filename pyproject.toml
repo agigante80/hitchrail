@@ -206,6 +206,14 @@ forbidden_modules = [
 # Surviving mutants are READ, not counted. The output that matters is "this
 # operator was flipped and every test still passed", which names one assertion
 # that is missing or too loose.
+#
+# **`source_paths` is read by a test now, so it is two things.** #198 made
+# `test_every_mutated_module_loads_the_security_rules_when_it_is_edited` derive
+# its expectation from this list: a module curated here as being between a web
+# page and a shell must also appear in `.claude/rules/security.md`'s `paths:`,
+# or the security rules do not load when an agent edits it. Removing an entry
+# here therefore stops a module loading those rules, which is a second
+# consequence and not an obvious one.
 [tool.mutmut]
 source_paths = [
   "src/hitchrail/security.py",

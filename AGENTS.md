@@ -58,6 +58,15 @@ claiming otherwise.
   for the modules its own `paths:` list names. Read that list rather than a
   count repeated here, which is how this line came to say "five" while the file
   named eight.
+
+  **The security list is no longer maintained only by memory.** #198 found
+  `roots.py` missing from it since the day after the list was last edited, so
+  `test_every_mutated_module_loads_the_security_rules_when_it_is_edited` now
+  fails when a module in `[tool.mutmut] source_paths` is absent from it. That
+  list is a lower bound, not the definition: a module nobody has classified yet
+  is still invisible to both. The guard skips where `.claude/` is absent, which
+  is every CI leg, so it runs on the machine where the list is edited and is not
+  a gate.
 - `.claude/agents/`, `.claude/commands/` and `.claude/skills/` hold the
   governance components, adapted to this project rather than copied. Each carries
   a `<name>-version` marker so `forge-adapt` can tell drift from adaptation.
