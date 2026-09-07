@@ -22,11 +22,13 @@ in a file somebody later copies.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import tempfile
 import time
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -49,9 +51,37 @@ pytestmark = [
 ]
 
 # Not `hr-`, so nothing here can collide with a real Hitchrail session even if
-# the isolation below were somehow defeated.
+# the isolation below were somehow defeated. This protects the tmux SERVER, and
+# it is a different job from `PROJECT_NAMESPACE` below.
 PREFIX = "hrtest-"
+
+# **The process table is the one resource this tier cannot make private** (#94).
+# `derive` calls `procs.snapshot()`, which reads every process on the machine
+# running the suite, and orphan attribution strips the binary on purpose so it
+# matches `--dangerously-skip-permissions --remote-control <name>` alone. A real
+# agent for a real project of the same name is therefore indistinguishable from
+# the fixture's.
+#
+# It happened: #84's test was written with the plain fixture name `vessel` and
+# failed on a real agent 8 hours old, because `tests/conftest.py` named its
+# fixtures after the developer's real projects. The direction it failed in was
+# luck. A test asserting `running` would have been SATISFIED by that agent.
+#
+# The pid follows the browser tier's #177, decided there and not re-argued: two
+# concurrent runs cannot share one, and it names the run a person has to chase.
+# Read once at import so every name in a run agrees.
+PROJECT_NAMESPACE = f"hrlt{os.getpid()}-"
+
 TIMEOUT = 10
+
+
+def live_project(name: str) -> str:
+    """The name a test asks for, made impossible for a real agent to be running.
+
+    The tier's equivalent of `e2e_name`. Nothing else may mint a project name
+    here, which `test_tiers.py` enforces rather than requests.
+    """
+    return name if name.startswith(PROJECT_NAMESPACE) else f"{PROJECT_NAMESPACE}{name}"
 
 
 class PrivateTmux:
@@ -411,22 +441,16 @@ def test_a_session_that_is_not_there_is_not_reported_as_dead(
 # -- #84: the server's own argv, which only a real server has ---------------
 
 
-# A project name no real project can have. This tier calls `snapshot()`, which
-# reads the WHOLE process table of the machine running the suite, and orphan
-# attribution deliberately strips the binary so it matches on
-# `--dangerously-skip-permissions --remote-control <name>` alone. Written first
-# with the plain fixture name `vessel`, this test failed on a real agent for a
-# real project of that name, 8 hours old, which the developer's machine was
-# running at the time. It could as easily have passed on one.
-#
-# The browser tier already does this with `E2E_PREFIX`; nothing said the live
-# tier needs it too, and it does the moment a test derives rather than only
-# driving tmux.
-LIVE_PROJECT = "hrlt-vessel"
-
 # Another tool's session prefix, and the reason this test exists at all. See
 # the docstring below: our own `new_session` cannot produce #84.
-FOREIGN_PREFIX = "hrlt-other-"
+#
+# A SESSION prefix, so it is a sibling of `PREFIX` rather than of
+# `PROJECT_NAMESPACE`, and it deliberately carries no run identity: these
+# sessions live on a server that is already private per run. It must not start
+# with `PREFIX`, or `panes().ours` claims them and the session stops being
+# foreign, which is the whole premise. Built from neither constant so that
+# reading it cannot suggest it inherits either one's job.
+FOREIGN_PREFIX = "hrother-"
 
 
 def _foreign_server(server: PrivateTmux, agent: Path, project: str) -> None:
@@ -467,20 +491,43 @@ def _config(root: Path, sessions: Path, agent: Path) -> Config:
     )
 
 
+@dataclass(frozen=True)
+class Machine:
+    """A configured Hitchrail, and the ONE project it was given.
+
+    `project` is here rather than in a module constant because that is what
+    makes #94 structural: the fixture mints the name and creates the folder in
+    the same statement, so a test asks the fixture what it made instead of
+    naming a project of its own. `test_tiers.py` holds the guard that keeps
+    every `derive` call on this path.
+    """
+
+    config: Config
+    adapter: Tmux
+    agent: Path
+    project: str
+
+
 @pytest.fixture
-def machine(server: PrivateTmux, tmp_path: Path) -> tuple[Config, Tmux, Path]:
+def machine(server: PrivateTmux, tmp_path: Path) -> Machine:
     root = tmp_path / "root"
-    (root / LIVE_PROJECT).mkdir(parents=True)
+    project = live_project("vessel")
+    (root / project).mkdir(parents=True)
     sessions = tmp_path / "sessions"
     sessions.mkdir()
     agent = Path(server._dir) / "agent"
     agent.write_text("#!/bin/sh\nsleep 30\n")
     agent.chmod(0o755)
-    return _config(root, sessions, agent), Tmux(prefix=PREFIX, socket=server.socket), agent
+    return Machine(
+        config=_config(root, sessions, agent),
+        adapter=Tmux(prefix=PREFIX, socket=server.socket),
+        agent=agent,
+        project=project,
+    )
 
 
 def test_a_foreign_tmux_servers_argv_is_not_read_as_our_detached_agent(
-    server: PrivateTmux, machine: tuple[Config, Tmux, Path]
+    server: PrivateTmux, machine: Machine
 ) -> None:
     """#84 as observed, and the reason no other tier could reach it.
 
@@ -493,17 +540,19 @@ def test_a_foreign_tmux_servers_argv_is_not_read_as_our_detached_agent(
     server>`: the row showed the server's pid, RSS and uptime, and `ram_mb`
     feeds the memory guard that decides whether a start is allowed.
     """
-    config, adapter, agent = machine
-    _foreign_server(server, agent, LIVE_PROJECT)
+    config, adapter, agent = machine.config, machine.adapter, machine.agent
+    _foreign_server(server, agent, machine.project)
     time.sleep(0.5)
     server_pid = int(server.run("display-message", "-p", "#{pid}").stdout.strip())
 
     pane_pid = int(
         server.run(
-            "list-panes", "-t", f"={FOREIGN_PREFIX}{LIVE_PROJECT}:", "-F", "#{pane_pid}"
+            "list-panes", "-t", f"={FOREIGN_PREFIX}{machine.project}:", "-F", "#{pane_pid}"
         ).stdout.split()[0]
     )
-    session = derive.derive(LIVE_PROJECT, derive.look(snapshot, adapter), config, adapter, ())
+    session = derive.derive(
+        machine.project, derive.look(snapshot, adapter), config, adapter, ()
+    )
 
     # The #84 assertion, and only it: WHICH process the row points at.
     #
@@ -519,7 +568,7 @@ def test_a_foreign_tmux_servers_argv_is_not_read_as_our_detached_agent(
 
 @pytest.mark.live_tmux
 def test_a_live_foreign_session_is_named_on_the_row(
-    server: PrivateTmux, machine: tuple[Config, Tmux, Path]
+    server: PrivateTmux, machine: Machine
 ) -> None:
     """#85 against a real server, which is the only tier that can see it.
 
@@ -528,14 +577,16 @@ def test_a_live_foreign_session_is_named_on_the_row(
     name arrives in the shape the adapter parses, and that the agent under it
     is reached through the real process tree rather than a fixture's.
     """
-    config, adapter, agent = machine
-    _foreign_server(server, agent, LIVE_PROJECT)
+    config, adapter, agent = machine.config, machine.adapter, machine.agent
+    _foreign_server(server, agent, machine.project)
     time.sleep(0.5)
 
-    session = derive.derive(LIVE_PROJECT, derive.look(snapshot, adapter), config, adapter, ())
+    session = derive.derive(
+        machine.project, derive.look(snapshot, adapter), config, adapter, ()
+    )
 
     assert session.state is State.DETACHED
-    assert session.foreign_session == f"{FOREIGN_PREFIX}{LIVE_PROJECT}", (
+    assert session.foreign_session == f"{FOREIGN_PREFIX}{machine.project}", (
         "the row cannot say which terminal holds this agent, so it will keep "
         "telling somebody it is orphaned while they have it open"
     )
@@ -543,7 +594,7 @@ def test_a_live_foreign_session_is_named_on_the_row(
 
 @pytest.mark.live_tmux
 def test_a_foreign_session_survives_our_own_listing_untouched(
-    server: PrivateTmux, machine: tuple[Config, Tmux, Path]
+    server: PrivateTmux, machine: Machine
 ) -> None:
     """The second Done when, on a real server rather than a fake.
 
@@ -551,18 +602,18 @@ def test_a_foreign_session_survives_our_own_listing_untouched(
     thing it must not have changed: after a full derivation over a machine
     holding somebody else's session, that session is still there.
     """
-    config, adapter, agent = machine
-    _foreign_server(server, agent, LIVE_PROJECT)
+    config, adapter, agent = machine.config, machine.adapter, machine.agent
+    _foreign_server(server, agent, machine.project)
     time.sleep(0.5)
 
-    derive.derive(LIVE_PROJECT, derive.look(snapshot, adapter), config, adapter, ())
+    derive.derive(machine.project, derive.look(snapshot, adapter), config, adapter, ())
 
-    alive = server.run("has-session", "-t", f"={FOREIGN_PREFIX}{LIVE_PROJECT}")
+    alive = server.run("has-session", "-t", f"={FOREIGN_PREFIX}{machine.project}")
     assert alive.returncode == 0, "our listing ended a session we did not create"
 
 
 def test_the_servers_argv_outlives_the_agent_that_gave_it(
-    server: PrivateTmux, machine: tuple[Config, Tmux, Path]
+    server: PrivateTmux, machine: Machine
 ) -> None:
     """The half a parent/child preference cannot rescue, and the state a long
     lived server spends most of its life in.
@@ -575,18 +626,20 @@ def test_the_servers_argv_outlives_the_agent_that_gave_it(
     argv of the invocation that started it, so creating it first would leave
     the server with a harmless command line and nothing to detect.
     """
-    config, adapter, agent = machine
-    _foreign_server(server, agent, LIVE_PROJECT)
+    config, adapter, agent = machine.config, machine.adapter, machine.agent
+    _foreign_server(server, agent, machine.project)
     server.new_session(f"{PREFIX}keepalive")
     time.sleep(0.5)
     server_pid = int(server.run("display-message", "-p", "#{pid}").stdout.strip())
 
-    server.run("kill-session", "-t", f"={FOREIGN_PREFIX}{LIVE_PROJECT}")
-    server.created.remove(f"{FOREIGN_PREFIX}{LIVE_PROJECT}")
+    server.run("kill-session", "-t", f"={FOREIGN_PREFIX}{machine.project}")
+    server.created.remove(f"{FOREIGN_PREFIX}{machine.project}")
     time.sleep(0.5)
     assert server_pid in snapshot().by_pid, "the server exited, so the test proves nothing"
 
-    session = derive.derive(LIVE_PROJECT, derive.look(snapshot, adapter), config, adapter, ())
+    session = derive.derive(
+        machine.project, derive.look(snapshot, adapter), config, adapter, ()
+    )
     assert session.state is State.STOPPED, "the server's stale argv derived as a detached agent"
     assert session.pid is None
 
@@ -707,3 +760,43 @@ def test_a_key_reaches_a_real_pty_and_the_screen_changes(server: PrivateTmux) ->
             return
         time.sleep(0.05)
     pytest.fail(f"the key never reached the pty; pane was:\n{tmux.capture_pane(project)}")
+
+
+# -- #94: the namespace itself, which the guard in test_tiers.py cannot see ---
+
+
+def test_a_live_project_name_carries_the_run_that_made_it() -> None:
+    """Two concurrent suite runs share one process table, and only one pid.
+
+    Each run gets a private tmux server and a fresh root, so neither of those
+    can collide. `snapshot()` has no equivalent: it reads the machine, so run
+    A's fake agent, whose argv ends `--remote-control <project>`, is visible to
+    run B's derivation and matches on the tail. A fixed namespace would make
+    two runs indistinguishable exactly where the isolation runs out.
+
+    This is #177 in the browser tier, decided there and reused here rather than
+    re-argued: the pid, not a random token, because two runs cannot share one
+    and it names the run in a way a person can chase.
+    """
+    name = live_project("vessel")
+
+    assert str(os.getpid()) in name, (
+        f"{name!r} carries no run identity, so two concurrent live runs derive "
+        "over each other's agents in a process table neither can isolate"
+    )
+    assert live_project("vessel") == name, "the same request must give the same name twice"
+    assert live_project("social") != name, "two projects in one run must not collide"
+
+
+def test_the_session_prefix_and_the_project_namespace_are_not_the_same_thing() -> None:
+    """They protect different resources, and #94's third Done when is that this
+    is visible rather than inferred.
+
+    `PREFIX` keeps our SESSIONS off anything a real Hitchrail owns, on a server
+    we already made private. `PROJECT_NAMESPACE` keeps our PROJECT NAMES off
+    anything a real agent could be running, in a process table nothing can make
+    private. Folding them into one constant would read as tidying and would
+    quietly tie a tmux concern to a process table one.
+    """
+    assert not PROJECT_NAMESPACE.startswith(PREFIX)
+    assert not PREFIX.startswith(PROJECT_NAMESPACE)

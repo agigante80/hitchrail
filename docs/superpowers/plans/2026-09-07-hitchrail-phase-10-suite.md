@@ -129,7 +129,7 @@ Criterion 2. These are ordered by how much of the machine they touch.
       `process.poll()` first, so a lost race surfaces as "the program exited
       before serving" with uvicorn's reason attached.
 
-- [ ] **Task 44, #94.** `tests/test_live_tmux.py` isolates tmux carefully: a
+- [x] **Task 44, #94.** `tests/test_live_tmux.py` isolates tmux carefully: a
       private socket, `env -u TMUX`, only prefixed sessions, teardown that asks
       the server what it holds. **None of that isolates the process table.** Any
       test in the tier that derives rather than only driving tmux calls
@@ -141,6 +141,37 @@ Criterion 2. These are ordered by how much of the machine they touch.
       unreachable. This ticket is the other half of that, and the namespace on
       project names is what makes a derived answer attributable to the test that
       caused it.
+
+      **Done 2026-09-07.** `PROJECT_NAMESPACE = f"hrlt{os.getpid()}-"` and
+      `live_project()`, with the `machine` fixture minting the name and creating
+      the folder in one statement and handing it back as `Machine.project`. So a
+      test asks the fixture what it made rather than naming a project, which is
+      the browser tier's `Harness.project()` answer in this tier's shape. The
+      hand written `LIVE_PROJECT` is gone.
+
+      The pid is #177's decision reused rather than re-argued: two concurrent
+      runs get separate tmux servers and separate roots, and share exactly one
+      process table.
+
+      **Two guards, because one of them names a single file.**
+      `test_the_live_tier_never_derives_a_project_it_did_not_namespace` reads the
+      AST of every `derive.derive` call and requires `machine.project` or
+      `live_project(...)`. `test_no_other_test_reads_the_real_process_table` is
+      what makes that scope honest: every other `snapshot()` caller in the suite
+      passes a fake runner, nothing said so, and a guard scoped to one file on an
+      unstated assumption is the shrinking-subset failure this module already had
+      when its glob was non-recursive.
+
+      Six falsifications, all caught: a bare literal, a module constant in the
+      exact #94 shape, an f-string that looks namespaced but was not minted, a
+      namespace with no run identity, the namespace folded into `PREFIX`, and a
+      real `snapshot()` in `test_procs.py`.
+
+      `FOREIGN_PREFIX` is a plain `"hrother-"` rather than derived from either
+      constant: it names sessions on a server that is already private per run, it
+      must not start with `PREFIX` or `panes().ours` claims them and they stop
+      being foreign, and building it from the namespace produced
+      `hrlt<pid>-other-hrlt<pid>-vessel`.
 
 - [ ] **Task 45, #67.** `test_a_start_that_dies_says_so_and_offers_the_output`
       passes locally in about nine seconds and fails on CI after forty five.

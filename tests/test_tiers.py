@@ -208,3 +208,117 @@ def test_the_cli_tier_never_spawns_without_an_isolated_tmux(path: Path) -> None:
         "own tmux server and its kill paths are scoped to the same prefix a real "
         "Hitchrail uses."
     )
+
+
+# -- #94: the live tmux tier reads the machine's whole process table ----------
+
+LIVE_TIER = TESTS / "test_live_tmux.py"
+
+# The two shapes a project name may arrive in at a `derive` call. `machine.project`
+# is the fixture handing back the folder it made; `live_project(...)` is the one
+# function that stamps the namespace on. Anything else is a name a test chose.
+_NAMESPACER = "live_project"
+_FIXTURE_ATTR = "project"
+
+
+def _derive_calls(tree: ast.AST) -> list[ast.Call]:
+    """Every `derive.derive(...)` call in a module."""
+    return [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "derive"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "derive"
+    ]
+
+
+def _is_namespaced(node: ast.expr) -> bool:
+    """Whether this expression can only be a name the tier itself minted."""
+    if isinstance(node, ast.Attribute) and node.attr == _FIXTURE_ATTR:
+        return True
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == _NAMESPACER
+    )
+
+
+def test_the_live_tier_never_derives_a_project_it_did_not_namespace() -> None:
+    """#94. This tier isolates tmux and cannot isolate the PROCESS TABLE.
+
+    `derive` calls `procs.snapshot()`, which reads every process on the machine
+    running the suite, and orphan attribution matches on the argv tail with the
+    binary deliberately stripped. So a real agent for a real project of the same
+    name is indistinguishable from the fixture's, whatever binary started it.
+
+    That is not hypothetical. The first version of #84's test used the tier's
+    usual fixture name `vessel` and failed on a real agent 8 hours old, because
+    `tests/conftest.py` named its fixtures after the developer's real projects.
+    **It could as easily have passed**, and a green test satisfied by somebody
+    else's agent is the failure this phase exists to remove.
+
+    The browser tier made this structural with `E2E_PREFIX` and has never had
+    the failure. The answer here is the same shape and this guard is what makes
+    it hold: a name reaching `derive` is either `machine.project`, which the
+    fixture minted along with the folder, or a `live_project(...)` call, which
+    cannot return an un-namespaced string. A literal, an f-string or a module
+    constant fails here.
+
+    **Its limit, stated rather than implied.** Rebinding a namespaced name
+    through a local variable would pass. That is not the mistake this guards:
+    #94 was written by somebody typing the name they were used to, and the
+    shape above is what stops the typing.
+    """
+    tree = ast.parse(LIVE_TIER.read_text())
+    calls = _derive_calls(tree)
+    assert calls, (
+        f"{LIVE_TIER.name} no longer derives anything, so this guard is asserting "
+        "nothing. Delete it or point it at the tier that took over."
+    )
+
+    offenders = [
+        f"line {call.lineno}"
+        for call in calls
+        if not (call.args and _is_namespaced(call.args[0]))
+    ]
+    assert not offenders, (
+        f"{LIVE_TIER.name} derives an un-namespaced project at {', '.join(offenders)}. "
+        f"Use the `machine` fixture's `.{_FIXTURE_ATTR}`, or `{_NAMESPACER}(...)`. A "
+        "name a real agent could also be running makes this tier's result depend on "
+        "what else the machine happens to be doing."
+    )
+
+
+def test_no_other_test_reads_the_real_process_table() -> None:
+    """The guard above names ONE file, and this is what makes that honest.
+
+    `snapshot()` with no runner shells out to `ps` and reads the machine. Every
+    other caller in the suite passes a fake, so the namespace requirement lands
+    exactly where the hazard is. Nothing said so, and a guard scoped to a file
+    on an unstated assumption is the shrinking-subset failure this module has
+    already had once: the glob above was non-recursive, so three directories
+    went unchecked while their markers were registered here.
+
+    A new file calling the real thing has to come here and decide, rather than
+    inheriting the isolation of a tier it is not in.
+    """
+    offenders = []
+    for path in sorted(TESTS.rglob("test_*.py")):
+        if path == LIVE_TIER:
+            continue
+        for node in ast.walk(ast.parse(path.read_text())):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "snapshot"
+                and not node.args
+            ):
+                offenders.append(f"{path.name}:{node.lineno}")
+
+    assert not offenders, (
+        f"{', '.join(offenders)} calls `snapshot()` with no runner, so it reads every "
+        f"process on the machine. Either pass a fake, or give it the namespace "
+        f"{LIVE_TIER.name} uses and widen the guard above to cover it."
+    )
