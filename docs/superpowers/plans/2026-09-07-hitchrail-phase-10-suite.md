@@ -173,7 +173,7 @@ Criterion 2. These are ordered by how much of the machine they touch.
       being foreign, and building it from the namespace produced
       `hrlt<pid>-other-hrlt<pid>-vessel`.
 
-- [ ] **Task 45, #67.** `test_a_start_that_dies_says_so_and_offers_the_output`
+- [x] **Task 45, #67.** `test_a_start_that_dies_says_so_and_offers_the_output`
       passes locally in about nine seconds and fails on CI after forty five.
       **The reason is not known**, and that is the ticket rather than an aside.
 
@@ -182,6 +182,37 @@ Criterion 2. These are ordered by how much of the machine they touch.
       watch it is either finding something real about the CI machine or is
       itself the defect. Budget an investigation, and if the answer is "the test
       is wrong", say so and delete it rather than adding a retry.
+
+      **Investigated 2026-09-07. It was the third answer: the test as weakened
+      was the defect, and not in the direction the ticket expected.** The
+      weakened assertion asserts nothing. The row is already `stopped` when the
+      button is clicked, so `not_to_have_attribute("data-state", "running")` is
+      satisfied before the start has done anything: 0.26s against the restored
+      form's 8.65s. It passed with `_dead_start_output` returning `""`, which is
+      exactly the #56 case its own comment claimed it caught, and it passed with
+      `Engine.start` replaced by `return self.get(name)` so that nothing was
+      started at all. **Thirteen commits of apparent coverage over an assertion
+      that could not fail.**
+
+      Both of the ticket's candidates are closed without a CI round trip.
+      Candidate 1 is answered by a measurement CI already takes:
+      `test_a_dead_pane_and_a_live_one_are_told_apart` asserts `pane_is_dead` is
+      True against a real dead pane, and `ci.yml` refuses a `live_tmux` skip, so
+      green CI is the runner's answer to `#{pane_dead}`. Candidate 2 was fixed in
+      `5a50a87`. Scoped rather than generalised: this rules out "`#{pane_dead}`
+      differs on the runner", not "`pane_is_dead` returned True in that run".
+
+      The likely cause of the original failure is `E2E_PREFIX` contamination,
+      fixed since by `a1c0acb`: the ticket's failure snapshot reads
+      `hrx-vessel stale` while the test seeds `koala`, and under the constant
+      prefix then in force that row is not this test's project.
+
+      The assertion is restored with the measurement and both falsifications in
+      the docstring. **Left open: one CI round trip.** `ci.yml` runs on push to
+      `main` and on `pull_request`, so a `develop` push does not exercise it, and
+      that is the risk `39bdded` weakened the assertion to avoid. Step 1 of the
+      ticket's plan, capturing the uvicorn log and browser console, was
+      deliberately not built: needed only if that round trip is red.
 
 ## Batch 3: fixtures that cannot agree with the bug, tasks 46 to 49
 
