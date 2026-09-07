@@ -78,19 +78,31 @@ Documentation=https://github.com/agigante80/hitchrail
 # physically absent, and a third had it attached by hand 2m12s in. Every
 # observed outage was missing hardware.
 #
-# **But one boot does show a real race, and it is tighter than that boot makes
-# it look.** Boot -3 of 2026-09-06 had the adapter connected: carrier and DHCP
-# lease 15.1s into the boot, and this unit's first start 7.4s later.
+# **But one boot does show a real race.** Boot -3 of 2026-09-06 had the adapter
+# connected: carrier at 35.172s, DHCP lease at 35.328s, and this unit's first
+# start at 42.714s, so 7.386s later. All three from the same boot, which is what
+# makes the interval mean something when the offsets themselves do not.
 #
-# Seven seconds of margin is the FAVOURABLE reading, and it is worth not
-# quoting it on its own. Boot -3 is also the boot where this unit started
-# unusually late, at 22.7s; the other four boots started it at 14.1s to 14.6s.
-# Against the same 15.1s lease, an ordinary boot reaches the bind about a
-# second BEFORE the address exists and needs a retry to get there.
+# **That is ONE data point, and #209 withdrew the paragraph that tried to make
+# it more.** This file used to argue that boot -3 started unusually late at
+# 22.7s while the other four started at 14.1s to 14.6s, and that an ordinary
+# boot therefore reaches the bind about a second BEFORE the address exists.
+# Every number in that sentence was measured against an unstable origin.
 #
-# So the floor the test below asserts is better supported than "seven seconds"
-# suggests. What a budget does not have to outlast is absent hardware, which is
-# what the withdrawn reasoning claimed it did.
+# Re-measured on `__MONOTONIC_TIMESTAMP`, the only origin comparable across
+# boots, this unit starts 3 to 18 MILLISECONDS after `the `user@` manager instance` on
+# every one of six boots. Its start offset therefore records when the user
+# manager came up and nothing else, and it cannot support any inference about
+# boot ordering or network readiness. The 14.1s to 14.6s band is not
+# reproducible under any origin, and "boot -3 started late" inverts once the
+# origin is stable: at 42.7s it is the second earliest of the six. It looked
+# late because that boot flushed its journal at 20.6s where others flushed
+# anywhere from 14.5s to 66.3s, moving the apparent origin by up to 52 seconds.
+#
+# So the floor the test below asserts rests on ONE observation, and this file
+# says so rather than generalising from it. What a budget does not have to
+# outlast is absent hardware, which is what the withdrawn reasoning claimed it
+# did.
 #
 # So 12 and 120 are arbitrary rather than derived. They are left alone because
 # no measurement argues for another pair, and because the shipped `ExecStart`
@@ -151,7 +163,8 @@ Environment=PYTHONUNBUFFERED=1
 # `systemctl --user show-environment` looks healthy and every interactive test
 # passes. Reproduce the real condition without rebooting:
 #
-#   env -i HOME="$HOME" PATH=/usr/local/bin:/usr/bin:/bin #     ~/.local/bin/hitchrail --root main="$HOME/projects"
+#   env -i HOME="$HOME" PATH=/usr/local/bin:/usr/bin:/bin \
+#     ~/.local/bin/hitchrail --root main="$HOME/projects"
 #
 # **What this PATH definitely does is let Hitchrail RESOLVE the agent at
 # startup.** Whether it becomes the agent's OWN path is a separate question with
@@ -179,10 +192,8 @@ Environment=PYTHONUNBUFFERED=1
 # node project needs node on ITS path, and this line is that path at boot.
 # Prefer a stable directory to a version pinned one: something like
 # `%h/.nvm/versions/node/v22.22.2/bin` goes stale at the next upgrade and fails
-# at the next BOOT rather than at the upgrade.
-# Something like `%h/.nvm/versions/node/v22.22.2/bin` goes stale at the next
-# upgrade and fails at the next BOOT rather than at the upgrade, which is a long
-# way from the change that caused it.
+# at the next BOOT rather than at the upgrade, which is a long way from the
+# change that caused it.
 Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # **What restarts, what stays stopped, and what is merely bounded.** #170, and

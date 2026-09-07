@@ -338,7 +338,7 @@ Criterion 1. These are the tests that pass while what they name is broken.
 
 Criterion 3. **Blocked on task 42.** Do not start these before the sweep runs.
 
-- [ ] **Task 50, #209.** What the #201 review loop left open when it hit its
+- [x] **Task 50, #209.** What the #201 review loop left open when it hit its
       trip wire. Round 2 found three defects in round 1's fix and round 3 found
       three in round 2's: 75% then 100% fix-induced against a 7-29% base rate,
       so the loop was re-deriving the same three mistakes in new wording rather
@@ -349,6 +349,40 @@ Criterion 3. **Blocked on task 42.** Do not start these before the sweep runs.
       that never gets picked up unless it is scheduled. Reading it first is also
       the cheapest way into batch 4: it is a written record of assertions that
       did not hold, which is what a survivor is.
+
+      **Done 2026-09-07, in one pass as the ticket demands rather than another
+      round.** `_directive_key` folds systemd's `StartLimitInterval` alias, used
+      by BOTH the value lookup and the duplicate set, and the ticket's whole
+      mutation table is now caught where two of three survived. `_unit_sections`
+      takes text and `_assert_start_limit` is split out, which is what made the
+      two spellings comparable at all: the check could only run against the
+      shipped file, so nobody had ever compared them.
+
+      The cross-boot paragraph is withdrawn with its re-measurement in place,
+      and the retracted seven seconds is gone from both files, kept only inside
+      the note that says it was withdrawn.
+
+      Also made live rather than left latent: `RestartSteps` and
+      `RestartMaxDelaySec` would make `burst * gap` understate the real span
+      while every assertion passed. Refused with a message rather than
+      modelled; reimplementing systemd's backoff curve in a docs test is not
+      worth it.
+
+      **Two of the ticket's items were not there to fix.** The 203 claim is in
+      no tracked file, and the dangling antecedent is already gone. Said rather
+      than ticked.
+
+      **Two mistakes of mine, recorded because they cost time.** This file names
+      `[Service]` and `RestartSec=5` in COMMENTS before the real directives, so
+      `.replace(x, y, 1)` mutated a comment twice: once making the ticket look
+      wrong, once making a working guard look broken. Anchor on
+      `line.strip() == ...`. And restoring the unit from a backup taken before
+      the prose edits, then `git checkout` on top, destroyed all four; they
+      survived only because they were scripted.
+
+      Found by tripping it: the email guard reads `user@1000.service` as an
+      address. Rephrased rather than allowlisted, and filed as #231, because the
+      next person documenting a template unit will reach for the allowlist.
 
 - [ ] **Task 51, #135.** 48 mutants in `tmux.py` have no covering test, and 74
       survivors have never been read. The 48 are a coverage gap the module was

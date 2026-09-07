@@ -977,7 +977,25 @@ def test_the_unit_template_names_flags_the_cli_accepts() -> None:
     parse_args(argv[1:])  # SystemExit here is the failure
 
 
-def _unit_sections() -> dict[str, list[str]]:
+# systemd's supported compatibility aliases, which set the SAME field as their
+# canonical spelling with last-assignment-wins applying across the two (#209).
+# Reading the text before `=` treats them as different directives, which let
+# `StartLimitInterval=0` switch rate limiting off with the suite green.
+_DIRECTIVE_ALIASES = {"StartLimitInterval": "StartLimitIntervalSec"}
+
+
+def _directive_key(directive: str) -> str:
+    """The field a directive assigns, under one name per field.
+
+    The `_key()` the ticket asks for, used by BOTH the value lookup and the
+    duplicate set, because fixing one and not the other leaves the same hole in
+    the other half.
+    """
+    name = directive.split("=", 1)[0].strip()
+    return _DIRECTIVE_ALIASES.get(name, name)
+
+
+def _unit_sections(text: str) -> dict[str, list[str]]:
     """The unit's directives, by section, comments dropped.
 
     Read as DIRECTIVES rather than as text. A substring check over the file
@@ -987,7 +1005,7 @@ def _unit_sections() -> dict[str, list[str]]:
     """
     sections: dict[str, list[str]] = {}
     current = ""
-    for raw in UNIT.read_text().splitlines():
+    for raw in text.splitlines():
         line = raw.strip()
         if line.startswith("[") and line.endswith("]"):
             current = line[1:-1]
@@ -1014,7 +1032,7 @@ def test_the_unit_never_restarts_a_refusal_forever() -> None:
     The list assertion is what made it blind: it pinned the directives present
     and could not see the one that was missing.
     """
-    service = _unit_sections()["Service"]
+    service = _unit_sections(UNIT.read_text())["Service"]
     assert "Restart=always" not in service, (
         "every deliberate refusal would become a boot loop that buries its own "
         "explanation in the journal"
@@ -1039,7 +1057,7 @@ def test_the_unit_carries_a_path_that_can_find_the_agent() -> None:
     while the boot environment never was.
 
     Asserted on the DIRECTIVE rather than on the file, through
-    `_unit_sections()`, and the reason is sharper than the usual one. A
+    `_unit_sections(UNIT.read_text())`, and the reason is sharper than the usual one. A
     substring search for `%h/.local/bin` over this file passes with no PATH
     line at all, because `ExecStart=%h/.local/bin/hitchrail` already carries
     that literal. Such a guard would have been green against the exact unit
@@ -1047,7 +1065,7 @@ def test_the_unit_carries_a_path_that_can_find_the_agent() -> None:
     """
     paths = [
         directive.split("=", 1)[1]
-        for directive in _unit_sections()["Service"]
+        for directive in _unit_sections(UNIT.read_text())["Service"]
         if directive.startswith("Environment=PATH=")
     ]
     assert paths, (
@@ -1081,7 +1099,7 @@ def test_the_unit_prevents_the_exit_code_the_cli_actually_returns() -> None:
 
     prevented = {
         int(value)
-        for line in _unit_sections()["Service"]
+        for line in _unit_sections(UNIT.read_text())["Service"]
         if line.startswith("RestartPreventExitStatus=")
         for value in line.split("=", 1)[1].split()
     }
@@ -1096,22 +1114,14 @@ def test_the_unit_prevents_the_exit_code_the_cli_actually_returns() -> None:
     )
 
 
-def test_the_units_start_limit_is_where_systemd_reads_it() -> None:
-    """The backstop for everything `RestartPreventExitStatus` cannot name.
+def _assert_start_limit(sections: dict[str, list[str]]) -> None:
+    """The start limit checks, over sections a caller supplies.
 
-    That directive bounds ONE status. An unhandled exception exits 1 and would
-    loop by the same mechanism, so the limit is what makes any loop terminate.
-
-    **It has to be in `[Unit]`.** These moved out of `[Service]` at systemd 230
-    and are silently ignored there now, which is the worst failure available to
-    a limit: it reads as configured and does nothing.
-
-    The window is checked too, because the default one cannot fire here.
-    systemd allows five starts in ten seconds and `RestartSec` spaces attempts
-    further apart than that, which is why 37 restarts in a row were never rate
-    limited.
+    **Split out at #209 so the shapes can be fed in.** It could only be run
+    against the shipped unit, so the two spellings systemd accepts could only
+    have been compared by editing `packaging/hitchrail.service`, and they never
+    were.
     """
-    sections = _unit_sections()
     limits = [d for d in sections["Unit"] if d.startswith("StartLimit")]
     assert limits, "the unit has no start limit, so a loop this cannot name runs forever"
     assert not [d for d in sections["Service"] if d.startswith("StartLimit")], (
@@ -1127,6 +1137,11 @@ def test_the_units_start_limit_is_where_systemd_reads_it() -> None:
         `StartLimitIntervalSec=0` added under a good pair satisfied every
         assertion here while systemd saw rate limiting switched off.
 
+        **Matched on `_directive_key`, not `startswith` (#209).** The prefix
+        test read `StartLimitInterval` as a different directive from
+        `StartLimitIntervalSec`, when systemd treats them as one field, and it
+        would equally have matched a longer name that merely starts the same.
+
         **`None` rather than a raise on a value this cannot parse.** systemd
         accepts `30s`, `2min` and `infinity`; a bare `int()` turns each into a
         `ValueError` traceback where the caller needed the sentence. That is the
@@ -1137,7 +1152,7 @@ def test_the_units_start_limit_is_where_systemd_reads_it() -> None:
         Parsing systemd's time spans properly is not this test's job. Refusing
         to guess is.
         """
-        found = [d.split("=", 1)[1].strip() for d in directives if d.startswith(name)]
+        found = [d.split("=", 1)[1].strip() for d in directives if _directive_key(d) == name]
         if not found:
             return None
         effective = found[-1]
@@ -1146,15 +1161,39 @@ def test_the_units_start_limit_is_where_systemd_reads_it() -> None:
     # A repeated directive is how this goes wrong in practice, and systemd takes
     # the LAST one. Checked separately from the values so the message says "you
     # have two of these" rather than silently reporting whichever survived.
-    keys = [d.split("=", 1)[0] for d in limits]
+    #
+    # Keyed through `_directive_key` so the alias counts as the same field. It
+    # is what catches `StartLimitInterval=` with no value, which is unparseable
+    # rather than zero and so cannot be caught by the value check below.
+    keys = [_directive_key(d) for d in limits]
     repeated = sorted({key for key in keys if keys.count(key) > 1})
     assert not repeated, (
         f"{repeated} appears more than once, and systemd takes the LAST "
-        f"assignment, so what a reader sees here and what systemd does differ"
+        f"assignment, so what a reader sees here and what systemd does differ. "
+        f"`StartLimitInterval` and `StartLimitIntervalSec` are ONE field."
     )
+
+    # **The arithmetic below assumes `RestartSec` IS the gap, and two directives
+    # make that false (#209).** `RestartSteps=` and `RestartMaxDelaySec=`
+    # (systemd 254+) turn `RestartSec` into an initial delay with exponential
+    # backoff after it, so the real span of `burst` attempts far exceeds
+    # `burst * gap`, sails past the window, and the limit never fires while
+    # every assertion here still passes. Refused rather than modelled: this test
+    # is not going to reimplement systemd's backoff curve.
+    backoff = [
+        d
+        for d in sections["Service"]
+        if _directive_key(d) in {"RestartSteps", "RestartMaxDelaySec"}
+    ]
+    assert not backoff, (
+        f"{backoff} makes RestartSec an INITIAL delay with exponential backoff, "
+        f"so `burst * RestartSec` below understates the real span and the window "
+        f"check stops meaning anything. Model the curve or drop the directive."
+    )
+
     window = _value(limits, "StartLimitIntervalSec")
     burst = _value(limits, "StartLimitBurst")
-    gap = _value(sections["Service"], "RestartSec=")
+    gap = _value(sections["Service"], "RestartSec")
     assert window is not None and burst is not None and gap is not None, (
         f"a limit needs StartLimitIntervalSec, StartLimitBurst and RestartSec to "
         f"mean anything, and this unit has window={window} burst={burst} gap={gap}. "
@@ -1174,22 +1213,47 @@ def test_the_units_start_limit_is_where_systemd_reads_it() -> None:
         f"{burst} restarts {gap}s apart span {burst * gap}s, which is outside the "
         f"{window}s window, so the limit can never fire and the loop is unbounded"
     )
-    # #201. The budget still has to outlast a real network bring up, and the
-    # margin is thinner than it looks.
+    # #201, and #209 replaced the argument this floor used to carry.
     #
-    # **What #201 withdrew is the CAUSE, not this floor.** It used to say here
-    # that a race with `After=network.target` killed the service. It did not:
-    # every observed outage was missing hardware, and `After=network.target` is
-    # inert in a user unit anyway, because the user manager has no such unit.
+    # **What #201 withdrew is the CAUSE, not this floor.** It used to say a race
+    # with `After=network.target` killed the service. It did not: every observed
+    # outage was missing hardware, and `After=network.target` is inert in a user
+    # unit anyway, because the user manager has no such unit.
     #
-    # The race is real and tight. Boot -3 of 2026-09-06 had the adapter
-    # connected, took its DHCP lease 15s into the boot, and this unit's first
-    # start came 7s later. Seven seconds of margin is the reason for a floor.
+    # **The seven seconds is gone, and #209 is why.** The framing said this unit
+    # "won by 7s" against a DHCP lease, generalised from a start offset measured
+    # across boots. That offset is not comparable across boots: hitchrail starts
+    # 3 to 18 MILLISECONDS after `the `user@` manager instance` every time, so it measures
+    # when the user manager came up and nothing else.
+    #
+    # What survives is one same-boot, origin-independent observation, and it is
+    # stated as the single measurement it is: on boot -3 of 2026-09-06 the
+    # carrier came up at 35.172s, the DHCP lease landed at 35.328s, and this
+    # unit first started at 42.714s. 7.386s of margin, once.
     assert burst * gap >= 60, (
-        f"{burst} restarts {gap}s apart give up after {burst * gap}s. A boot that "
-        f"has to acquire a DHCP lease took 15s to do it and this unit won by 7s, "
-        f"so a named bind needs more margin than a couple of attempts. See #201."
+        f"{burst} restarts {gap}s apart give up after {burst * gap}s. On one "
+        f"measured boot this unit started 7.4s after the DHCP lease landed, so a "
+        f"named bind needs more margin than a couple of attempts. One data point, "
+        f"not a distribution. See #201 and #209."
     )
+
+
+def test_the_units_start_limit_is_where_systemd_reads_it() -> None:
+    """The backstop for everything `RestartPreventExitStatus` cannot name.
+
+    That directive bounds ONE status. An unhandled exception exits 1 and would
+    loop by the same mechanism, so the limit is what makes any loop terminate.
+
+    **It has to be in `[Unit]`.** These moved out of `[Service]` at systemd 230
+    and are silently ignored there now, which is the worst failure available to
+    a limit: it reads as configured and does nothing.
+
+    The window is checked too, because the default one cannot fire here.
+    systemd allows five starts in ten seconds and `RestartSec` spaces attempts
+    further apart than that, which is why 37 restarts in a row were never rate
+    limited.
+    """
+    _assert_start_limit(_unit_sections(UNIT.read_text()))
 
 
 def test_the_start_limit_is_not_what_keeps_a_refusal_stopped() -> None:
@@ -1205,7 +1269,7 @@ def test_the_start_limit_is_not_what_keeps_a_refusal_stopped() -> None:
     restarts. The two directives are therefore asserted together rather than
     apart, because it is the PAIR that is correct.
     """
-    sections = _unit_sections()
+    sections = _unit_sections(UNIT.read_text())
     prevented = [d for d in sections["Service"] if d.startswith("RestartPreventExitStatus=")]
     assert prevented == ["RestartPreventExitStatus=2"], (
         "the unit no longer prevents restarting exit 2, so a deliberate "
@@ -1458,3 +1522,90 @@ def test_an_exec_start_that_cannot_be_split_is_refused_with_a_sentence() -> None
 
     with pytest.raises(AssertionError, match="ExecStart"):
         _exec_start_argv(unbalanced)
+
+
+# -- #209: systemd's compatibility alias for the start limit window -----------
+
+# A minimal unit in the shape the shipped one has: window 120, burst 12, gap 5,
+# so `burst * gap` is 60, inside the window and at the floor.
+_SOUND_UNIT = """[Unit]
+Description=Hitchrail
+StartLimitIntervalSec=120
+StartLimitBurst=12
+
+[Service]
+RestartSec=5
+"""
+
+
+def test_the_alias_spelling_cannot_switch_rate_limiting_off() -> None:
+    """#209. `StartLimitInterval=` is systemd's supported compatibility alias
+    for `StartLimitIntervalSec=`. It sets the same field, and
+    last-assignment-wins applies ACROSS the two spellings.
+
+    Verified on systemd 255 by loading real units: the alias after the Sec form
+    gives `StartLimitIntervalUSec=0`, rate limiting OFF.
+
+    The check matched on the text before `=`, so it read the two spellings as
+    different directives and neither the value lookup nor the duplicate set saw
+    a conflict. Reproduced against the shipped unit before the fix:
+
+        appended StartLimitIntervalSec=0   ->  1 failed   (caught)
+        appended StartLimitInterval=0      ->  2 passed   (SURVIVED)
+        appended StartLimitInterval=       ->  2 passed   (SURVIVED)
+
+    **This is the spelling a hand edit reaches for**, because every pre-230
+    example on the internet uses it, which is where somebody copies from.
+    """
+    appended = _SOUND_UNIT.replace(
+        "StartLimitBurst=12", "StartLimitBurst=12\nStartLimitInterval=0"
+    )
+
+    with pytest.raises(AssertionError):
+        _assert_start_limit(_unit_sections(appended))
+
+
+def test_a_unit_written_in_the_alias_form_is_not_failed_for_it() -> None:
+    """The converse, and it is the half that insults the operator.
+
+    A unit written entirely in the alias form is valid systemd. The check failed
+    it, and the message told them to "write plain seconds so the check stays
+    honest", which is exactly what they had done.
+    """
+    aliased = _SOUND_UNIT.replace("StartLimitIntervalSec=120", "StartLimitInterval=120")
+
+    _assert_start_limit(_unit_sections(aliased))
+
+
+def test_the_alias_is_still_caught_when_it_is_the_repeated_one() -> None:
+    """Folding the two spellings must reach the DUPLICATE set too, not only the
+    value lookup. One directive assigned twice under two names is the case the
+    ticket's third mutation covers, `StartLimitInterval=` with no value, which
+    is unparseable rather than zero and so cannot be caught by the value check.
+    """
+    appended = _SOUND_UNIT.replace(
+        "StartLimitBurst=12", "StartLimitBurst=12\nStartLimitInterval="
+    )
+
+    with pytest.raises(AssertionError, match="more than once"):
+        _assert_start_limit(_unit_sections(appended))
+
+
+def test_exponential_backoff_would_make_the_window_arithmetic_a_lie() -> None:
+    """#209's low, made live rather than left latent.
+
+    `RestartSteps=` and `RestartMaxDelaySec=` (systemd 254+) turn `RestartSec`
+    into an INITIAL delay with exponential backoff after it. The real span of
+    `burst` attempts then far exceeds `burst * RestartSec`, so it can sail past
+    the window while `burst * gap < window` still passes and the limit never
+    fires.
+
+    Neither directive is in the shipped unit, so this is a guard against the
+    edit rather than a fix. It is here because the arithmetic below is stated as
+    if `RestartSec` were the whole gap, and the day that stops being true
+    nothing else would notice.
+    """
+    with_backoff = _SOUND_UNIT.replace("RestartSec=5", "RestartSec=5\nRestartSteps=8")
+
+    with pytest.raises(AssertionError, match="RestartSteps"):
+        _assert_start_limit(_unit_sections(with_backoff))
