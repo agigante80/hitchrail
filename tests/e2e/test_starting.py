@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from playwright.async_api import Page, expect
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from support import DEFAULT_LABEL
 
@@ -111,30 +112,34 @@ async def test_a_start_that_dies_says_so_and_offers_the_output(
     # uses `/bin/sh` so it is fast enough, and this races the two outcomes so
     # that if it ever is not, the failure says so in one line.
     dialog = page.locator("[data-dialog]")
-    running = page.locator(f'[data-project="{server.project("koala")}"][data-state="running"]')
 
-    # **Capture which outcome won, rather than re-querying (round 1 review).**
-    # `count()` after the wait is a fresh query a round trip later, and
-    # `remain-on-exit` keeps the pane, so a shim that outlived the first poll
-    # gives exactly the transition `running` to `stale`. If that lands between
-    # the two calls, the premise assertion passes and the test then spends 45
-    # seconds on a dialog that can never open, which is the opaque failure this
-    # was written to remove.
+    # **One wait, and the diagnosis after it (round 2 review).**
     #
-    # `.or_().first` is `nth(0)` over the union in DOM ORDER, not in
-    # resolution order, so it does not say which one appeared. The dialog is
-    # after the list in `index.html`, so `first` is the row today; moving the
-    # dialog above the list would make `first` always the dialog and quietly
-    # restore the 45 second timeout. Both halves are therefore read explicitly.
-    await dialog.or_(running).first.wait_for(state="visible", timeout=45_000)
-    started_running = await running.count() > 0
-    dialog_open = await dialog.is_visible()
-    assert not (started_running and not dialog_open), (
-        "the fake agent outlived the engine's first poll, so the start SUCCEEDED "
-        "and this test never exercised a dead start. That is #67: the shim must "
-        "exit before `_await_running` calls `get()`, which is why it is a `sh` "
-        "script and not a Python one."
-    )
+    # Round 1 flagged that `count()` after a `wait_for` is a fresh query a round
+    # trip later. My fix read BOTH halves after the same wait, which did not
+    # close the race and made the assertion strictly weaker: it had failed on
+    # `running.count() > 0` alone, and then failed only when the row was running
+    # AND no dialog had opened. `remain-on-exit` takes the row `running` to
+    # `stale`, so the very transition the race produces made the premise pass.
+    # The comment claimed it had been strengthened.
+    #
+    # There is no race here because there is only one wait. The row is read
+    # after the dialog has definitively failed to appear, so what it says is
+    # a diagnosis rather than a second guess at who won.
+    #
+    # `or_().first` is gone with it: it resolves in DOM ORDER, not in the order
+    # things appeared, so it never could say which outcome arrived.
+    try:
+        await dialog.wait_for(state="visible", timeout=45_000)
+    except PlaywrightTimeoutError:
+        state = await row.get_attribute("data-state")
+        pytest.fail(
+            f"no refusal dialog opened and the row reads data-state={state!r}. The "
+            f"fake agent outlived the engine's first poll, so the start SUCCEEDED "
+            f"and this test never exercised a dead start. That is #67: the shim "
+            f"must exit before `_await_running` calls `get()`, which is why it is "
+            f"a `sh` script and not a Python one."
+        )
 
     # A closed `<dialog>` is display:none, so `to_contain_text` on it reports an
     # empty string and says nothing about why: on CI this failed with "Actual
