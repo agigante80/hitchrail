@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 import re
+import socket
 import tomllib
 from collections.abc import Callable
 from pathlib import Path
@@ -24,6 +25,7 @@ from hitchrail.config import (
     local_addresses,
     normalise_host,
     normalise_origin,
+    origin_forms,
 )
 from hitchrail.roots import Root
 
@@ -1975,3 +1977,296 @@ def test_every_test_the_sweep_deselects_still_exists() -> None:
         + ". pytest exits 4 on an unknown node id, and mutmut reports that as a bad "
         "command rather than a missing test."
     )
+
+
+# -- #233: local_addresses' happy path, which no test pinned ------------------
+
+
+def test_local_addresses_asks_the_machine_exactly_these_questions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#233. Seventeen mutants lived in this function and every one survived.
+
+    Three tests cover it and all three are FAILURE paths: no socket, no
+    hostname, a failing lookup. Nothing asserted what it asks for when the
+    machine answers, so the arguments were free: `getaddrinfo(None, None)`,
+    `socket.socket(socket.AF_INET, None)`, `probe.connect(None)` and a dropped
+    second argument all passed.
+
+    **The arguments are the behaviour here.** `AF_INET` with `SOCK_DGRAM` is
+    what makes the probe ask the routing table without sending a packet, and
+    `192.0.2.1` is TEST-NET-1 precisely because it is guaranteed unrouted: a
+    mutant that connects somewhere real turns a config read into traffic.
+    """
+    asked: dict[str, object] = {}
+
+    class Probe:
+        def __enter__(self) -> Probe:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+        def connect(self, address: tuple[str, int]) -> None:
+            asked["connect"] = address
+
+        def getsockname(self) -> tuple[str, int]:
+            return ("10.0.0.7", 0)
+
+    monkeypatch.setattr("hitchrail.hostnames.socket.gethostname", lambda: "box")
+
+    def record_lookup(*args: object) -> list[tuple[object, ...]]:
+        asked["getaddrinfo"] = args
+        return [(0, 0, 0, "", ("192.168.1.10", 0))]
+
+    def record_socket(*args: object) -> Probe:
+        asked["socket"] = args
+        return Probe()
+
+    monkeypatch.setattr("hitchrail.hostnames.socket.getaddrinfo", record_lookup)
+    monkeypatch.setattr("hitchrail.hostnames.socket.socket", record_socket)
+
+    result = local_addresses()
+
+    assert asked["getaddrinfo"] == ("box", None), (
+        "the hostname lookup asks for the name this machine reported, with no service filter"
+    )
+    assert asked["socket"] == (socket.AF_INET, socket.SOCK_DGRAM), (
+        "a UDP socket is what asks the routing table without sending a packet"
+    )
+    assert asked["connect"] == ("192.0.2.1", 1), (
+        "TEST-NET-1 is guaranteed unrouted; connecting anywhere else turns "
+        "reading the config into real traffic"
+    )
+    assert result == ("box", "192.168.1.10", "10.0.0.7"), (
+        f"the three sources are the hostname, its lookup and the routing "
+        f"probe, in that order and deduplicated: {result}"
+    )
+
+
+# -- #233: the origin normaliser's parts, each of which was free to move ------
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected", "why"),
+    [
+        # `partition`, not `rpartition`. Both find `://` in an ordinary origin,
+        # so every existing test agreed with either. They differ when the value
+        # carries a second `://`, where `rpartition` splits on the LAST one.
+        # `partition`, not `rpartition`: with a second `://` in the value,
+        # rpartition splits on the LAST and the root dot is then stripped
+        # from a different string. The obvious case, `http://box.lan/x://y`,
+        # does NOT distinguish them, which is why the first version of this
+        # test left the mutant alive: a trailing dot is needed to show it.
+        ("http://a://b.lan.", "http://a://b.lan.", "partition takes the FIRST separator"),
+        # `rstrip("/")` mutated to `rstrip("XX/XX")` strips a trailing `X` too,
+        # and it runs BEFORE `.lower()`, so the capital is what shows it.
+        ("http://box.lanX/", "http://box.lanx", "only the slash is stripped, not a trailing X"),
+        # The bracket guard, and the root-dot strip it protects.
+        ("http://[::1]:8787", "http://[::1]:8787", "an IPv6 literal keeps its brackets"),
+        ("http://box.lan.:8787", "http://box.lan:8787", "the root dot goes, the port stays"),
+        ("http://box.lanX:8787", "http://box.lanx:8787", "the host strip is the dot alone"),
+    ],
+)
+def test_normalise_origin_keeps_each_of_its_parts(raw: str, expected: str, why: str) -> None:
+    """#233. Six mutants lived in this function and every one survived.
+
+    It is four decisions in five lines, and the tests exercised only origins
+    where all four happen to agree: `rpartition` for `partition`, a widened
+    `rstrip` set and a dropped bracket check all passed.
+
+    **This is the origin check's own input.** A value normalised differently
+    here does not fail loudly; it fails to match the allowlist and the request
+    is refused. Repairing junk INTO a match is the failure worth avoiding.
+
+    **One of the six is not a gap.** See the test below.
+    """
+    assert normalise_origin(raw) == expected, why
+
+
+def test_the_or_in_normalise_origins_guard_is_equivalent_to_and() -> None:
+    """#233. `if not separator or not rest:` mutated to `and` survives, and no
+    test can kill it. Recorded rather than chased.
+
+    `rstrip("/")` runs FIRST, so the value can never end in `://`, so
+    "separator present and rest empty" is unreachable. And `str.partition` with
+    no match returns `(value, "", "")`, so "no separator" always comes with an
+    empty rest. The two operands are therefore never in disagreement, and `or`
+    and `and` agree on every input.
+
+    **Asserted rather than argued**, because "these are equivalent" is the claim
+    that gets written into a triage log and is occasionally wrong. Exhaustive
+    over an alphabet holding the separator, the slash, the dot and brackets.
+    """
+    from itertools import product
+
+    def with_and(raw: str) -> str:
+        value = raw.strip().rstrip("/").lower()
+        scheme, separator, rest = value.partition("://")
+        if not separator and not rest:
+            return value
+        if rest.startswith("["):
+            return f"{scheme}://{rest}"
+        host, colon, port = rest.partition(":")
+        return f"{scheme}://{host.rstrip('.')}{colon}{port}"
+
+    for length in range(1, 6):
+        for parts in product(":/.abc[] ", repeat=length):
+            raw = "".join(parts)
+            assert normalise_origin(raw) == with_and(raw), (
+                f"{raw!r} distinguishes `or` from `and`, so the mutant is a real "
+                f"gap after all and this test is what found it"
+            )
+
+
+def test_the_widened_rstrip_sets_are_equivalent_because_lower_runs_first() -> None:
+    """#233. Two survivors widen a `rstrip(".")` to `rstrip("XX.XX")`, in
+    `normalise_host` and in `normalise_origin`. Neither can be killed.
+
+    The widened set is `{X, .}`, so it differs from `{.}` only on a trailing
+    UPPERCASE `X`. Both functions lowercase before they strip, so no uppercase
+    survives to reach it.
+
+    **I wrote a killing test for these first and it passed against the mutant**,
+    asserting `normalise_host("linux") == "linux"`. `rstrip` is case sensitive
+    and the lowercase `x` was never in the set, so the test agreed with the
+    mutation. Verified exhaustively instead, over an alphabet holding both
+    cases of `x`, the dot, the brackets and the separator.
+    """
+    from itertools import product
+
+    def host_with_widened_strip(raw: str) -> str:
+        value = raw.strip().lower()
+        if value.startswith("[") and value.endswith("]"):
+            value = value[1:-1]
+        # B005 is exactly what the mutation looks like: ruff would refuse this
+        # shape in production, which is a second reason the mutant is not a
+        # gap in the tests.
+        return value.rstrip("XX.XX")  # noqa: B005
+
+    for length in range(1, 6):
+        for parts in product(".xX[]:/ab ", repeat=length):
+            raw = "".join(parts)
+            assert normalise_host(raw) == host_with_widened_strip(raw), (
+                f"{raw!r} distinguishes the two strip sets, so this is a real gap"
+            )
+
+    # And the ordinary behaviour, which is what the strip is FOR.
+    assert normalise_host("box.lan.") == "box.lan"
+    assert normalise_host("box.lan..") == "box.lan"
+
+
+def test_origin_forms_brackets_only_a_bare_ipv6_literal() -> None:
+    """`host.startswith("[")` mutated to `startswith("XX[XX")` survived: no host
+    starts with the literal three characters `XX[`, so the guard never fires and
+    an already bracketed literal is bracketed twice.
+    """
+    assert "http://[::1]:8787" in origin_forms("http", "::1", 8787)
+    assert "http://[[::1]]:8787" not in origin_forms("http", "[::1]", 8787), (
+        "an already bracketed literal was bracketed again"
+    )
+
+
+@pytest.mark.parametrize(
+    ("failing", "raised", "expected", "why"),
+    [
+        # The OUTER suppress, around gethostname. Both types, because the
+        # mutants drop each one independently.
+        ("gethostname", OSError("no UTS"), (), "an unreadable hostname is survivable"),
+        (
+            "gethostname",
+            UnicodeError("bad label"),
+            (),
+            "UnicodeError is a ValueError, NOT an OSError, and getaddrinfo "
+            "raises it for a label over 63 characters",
+        ),
+        # The INNER suppress, around the lookup. The hostname already found
+        # must survive the lookup failing.
+        ("getaddrinfo", OSError("EAI_NONAME"), ("box",), "a failed lookup keeps the hostname"),
+        (
+            "getaddrinfo",
+            UnicodeError("idna"),
+            ("box",),
+            "a name that will not encode to IDNA keeps the hostname",
+        ),
+    ],
+)
+def test_local_addresses_suppresses_both_types_at_both_call_sites(
+    monkeypatch: pytest.MonkeyPatch,
+    failing: str,
+    raised: Exception,
+    expected: tuple[str, ...],
+    why: str,
+) -> None:
+    """#233. Five survivors lived in the `contextlib.suppress` arguments:
+    `suppress(OSError, None)`, `suppress(OSError,)` and `suppress(UnicodeError)`
+    at both call sites.
+
+    Three tests covered this function and all three were failure paths, but each
+    raised only ONE type from ONE site, so dropping the other type from either
+    tuple changed nothing any test could see.
+
+    **The `UnicodeError` half is not decoration.** It is a `ValueError` and not
+    an `OSError`, and `getaddrinfo` raises it for a hostname with a label over
+    63 characters or one that will not encode to IDNA. A container or a pod can
+    easily have such a name, and suppressing only `OSError` made `Config()` die
+    with a raw `UnicodeError` on that machine. The function is documented as
+    best effort and that has to hold for every lookup in it.
+    """
+
+    def boom(*args: object, **kwargs: object) -> object:
+        raise raised
+
+    monkeypatch.setattr("hitchrail.hostnames.socket.gethostname", lambda: "box")
+    monkeypatch.setattr("hitchrail.hostnames.socket.getaddrinfo", lambda *a, **k: [])
+    monkeypatch.setattr("hitchrail.hostnames.socket.socket", no_socket)
+    monkeypatch.setattr(f"hitchrail.hostnames.socket.{failing}", boom)
+
+    assert local_addresses() == expected, why
+
+
+def test_the_inner_suppress_in_local_addresses_is_defensive_not_observable() -> None:
+    """#233. Two survivors narrow the INNER `contextlib.suppress` in
+    `local_addresses`, dropping one type from its tuple. Neither can be killed,
+    and the reason is worth writing down rather than re-deriving.
+
+    The inner block sits inside the outer one, which suppresses the same two
+    types, and `found` has already been appended to by the time the lookup runs.
+    So whatever the inner tuple drops, the outer catches, `found` is unchanged,
+    and the routing table probe after the outer block runs either way.
+
+    **The inner suppress is therefore defensive redundancy, not behaviour.** It
+    is worth keeping: it says at the call site that this lookup is best effort,
+    and it stops a future edit that moves code after it inside the outer block
+    from silently losing the probe. But no input distinguishes it, so a killing
+    test cannot exist and one written anyway would be asserting the
+    implementation rather than the behaviour.
+
+    The OUTER suppress is a different matter and IS pinned, by
+    `test_local_addresses_suppresses_both_types_at_both_call_sites`.
+    """
+    import contextlib
+
+    def with_inner(inner: tuple[type[BaseException], ...], lookup: object) -> tuple[str, ...]:
+        found: list[str] = []
+        with contextlib.suppress(OSError, UnicodeError):
+            found.append("box")
+            with contextlib.suppress(*inner):
+                for info in lookup("box", None):  # type: ignore[operator]
+                    found.append(info[4][0])
+        return tuple(found)
+
+    def raises(exc: BaseException) -> object:
+        def go(*args: object) -> object:
+            raise exc
+
+        return go
+
+    for lookup in (
+        raises(OSError("EAI")),
+        raises(UnicodeError("idna")),
+        lambda *a: [(0, 0, 0, "", ("1.2.3.4", 0))],
+    ):
+        both = with_inner((OSError, UnicodeError), lookup)
+        assert with_inner((UnicodeError,), lookup) == both, "dropping OSError was observable"
+        assert with_inner((OSError,), lookup) == both, "dropping UnicodeError was observable"
