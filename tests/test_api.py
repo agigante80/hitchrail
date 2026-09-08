@@ -1708,6 +1708,29 @@ async def test_only_one_attention_scan_runs_at_a_time(
         concurrent = started
         release.set()
 
+        # **The other direction, and it was pinned by nothing (#217).** This
+        # test asserted only the UPPER bound, so `scanning is None or
+        # scanning.done()` reduced to `scanning is None` survived the whole
+        # suite, e2e included. With that, the scan runs exactly ONCE for the
+        # life of the process: no row ever gains or loses "waiting for an
+        # answer" after the first sweep, and nothing anywhere fails.
+        #
+        # Shape 3 of the rotten green taxonomy: the assertion and the mutated
+        # implementation agree on the tested side and differ only on the
+        # untested one. So the released scan must be seen starting again.
+        for _ in range(200):
+            if started > concurrent:
+                break
+            await asyncio.sleep(0.02)
+        resumed = started
+
+    assert resumed > concurrent, (
+        f"the scan ran {concurrent} time(s) and never started again after the "
+        f"first finished, so the attention overlay is frozen for the life of "
+        f"the process. The `scanning.done()` half of the guard is what starts "
+        f"the next one."
+    )
+
     assert concurrent == 1, (
         f"{concurrent} attention scans were started while the first was still "
         f"running. The sweep must not start another until the last is done, or "

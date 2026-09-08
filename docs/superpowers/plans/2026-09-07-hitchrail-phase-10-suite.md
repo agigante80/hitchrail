@@ -456,17 +456,55 @@ Criterion 3. **Blocked on task 42.** Do not start these before the sweep runs.
       hostnames 25, roots 16, discovery 15, config 5, and a `tmux` tail. The
       kill rate is context; the deliverable is each survivor killed or recorded.
 
-- [ ] **Task 52, #217.** Two attention-sweep mutations survive the whole suite.
+- [x] **Task 52, #217.** Two attention-sweep mutations survive the whole suite.
       Small, specific, and the right last task in this batch: two named
       survivors with a known module are the proof that the criterion 3 loop
       closes.
 
+      **Done 2026-09-08.** The first is not small in consequence.
+      `if scanning is None or scanning.done()` reduced to `if scanning is None:`
+      survived ALL 1387 tests, e2e included: the attention scan then runs
+      exactly once for the life of the process and no row ever gains or loses
+      "waiting for an answer" again. The test pinned only the UPPER bound, so
+      the assertion and the mutated implementation agreed on the tested side.
+      It now releases the first scan and waits for the next to start.
+
+      The second: `assert bumped` proved the CAPTURE ran, not that the epoch
+      moved, so deleting `self._attention_epoch += 1` left the discard test
+      green by taking the ordinary path. The epoch is captured before the sweep
+      and asserted to have changed. Its `koala` fixture was inert, the `root`
+      fixture creates no such folder, so the session, the two `ps_row` lines and
+      the `pane_text` did nothing: gone, and the docstring says `other` is a
+      NAME rather than a project.
+
 ## Batch 5: no tier runs unasked, task 53
 
-- [ ] **Task 53, #214.** Two known limits in the e2e prefix guard and the
+- [x] **Task 53, #214.** Two known limits in the e2e prefix guard and the
       screenshot tier. Criterion 4 is the `addopts` deselection being replaced
       by any `-m`, so a tier that must not run unasked has to enforce it in
       collection rather than in configuration a flag can drop.
+
+      **Done 2026-09-08, and it was a fix rather than the documentation the
+      ticket offered as the alternative.** Measured before writing anything:
+      `pytest -m e2e` collected 7 screenshot captures, because pytest REPLACES
+      `addopts`' whole `-m` when a run brings its own. That is the command
+      `AGENTS.md` gives for the browser tier, and it is how run identity reached
+      `docs/screenshots/` in a1c0acb. `device`, which drives a real phone over
+      adb, had the identical hole.
+
+      A collection hook in `tests/conftest.py` now deselects both markers unless
+      the run NAMES them. Deselected rather than skipped, because `AGENTS.md`
+      says a tier that skips everywhere looks like coverage while proving less
+      than none. `-m e2e` now collects 0; `-m screenshots` still collects 7;
+      removing the hook fails the new test listing all seven by name.
+
+      Item 1 needed nothing: the guard's docstring already names the real limit,
+      EXPLICIT concatenation as a `BinOp`, and the implicit case it once claimed
+      is folded by CPython at parse time and caught. Verified both.
+
+      Item 2's fixed path stays single instance, with the true reason written in
+      place: the path is PHOTOGRAPHED, so it cannot carry run identity the way
+      `E2E_PREFIX` does.
 
 ## Done when
 

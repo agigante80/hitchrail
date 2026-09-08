@@ -64,6 +64,24 @@ pytestmark = [pytest.mark.e2e, pytest.mark.screenshots]
 SHOTS = pathlib.Path(__file__).resolve().parents[2] / "docs" / "screenshots"
 
 # Every segment neutral, because the interface displays this path.
+#
+# **Fixed, so this tier is single instance by construction (#214).** The fixture
+# `rmtree`s it at setup, so two concurrent capture runs delete each other's root
+# and both fail confusingly. That is accepted rather than fixed, and the reason
+# has to be the true one: an earlier note here said the tier "runs deliberately
+# at a release, never twice at once", and that was false. `AGENTS.md` documents
+# `uv run pytest -m e2e` as the browser tier's command, and any `-m` replaces
+# the `-m "not screenshots"` in `addopts`, so an ordinary developer running the
+# browser tier used to capture these images.
+#
+# The real reason is that the path is PHOTOGRAPHED. A run identity in it reaches
+# `docs/screenshots/` and the README, which is the same rule `SHOT_PREFIX`
+# follows and states, so it cannot carry a pid the way `E2E_PREFIX` does.
+#
+# What makes the collision unlikely now is not luck: the collection hook in
+# `tests/conftest.py` means this tier runs only when a run asks for
+# `-m screenshots` by name, so two concurrent captures take two people deciding
+# to capture at once rather than one person running the tier next door.
 SHOT_ROOT = pathlib.Path(tempfile.gettempdir()) / "hitchrail-demo" / "projects"
 
 # The case the project exists for, at the CSS width of the phones it was walked

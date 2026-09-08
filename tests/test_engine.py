@@ -3122,26 +3122,30 @@ def test_a_discarded_sweep_still_drops_a_claim_it_can_no_longer_support(
     a claim on stale evidence leaves a person told nothing, while keeping one
     leaves them told they are needed by a prompt that is gone.
 
-    **The epoch is bumped by a DIFFERENT project**, and the first version of
-    this test got that wrong. Clearing the project under test pops its own entry
+    **The epoch is bumped by a DIFFERENT name**, and the first version of this
+    test got that wrong. Clearing the project under test pops its own entry
     directly, so the claim went away whatever `clear` did and the mutation
     `stuck, clear = [], []` survived. `vessel` is the row whose claim must be
-    dropped by the sweep; `koala` is the unrelated stop that moves the epoch.
+    dropped by the sweep; `other` is the unrelated stop that moves the epoch.
+
+    **`other` is a NAME, not a project, and that is deliberate (#217).** It used
+    to be given a tmux session, two `ps_row` lines and a `pane_text`, none of
+    which did anything: the `root` fixture creates `vessel`, `vessel-social`,
+    `a`, `ab` and `dotted.site`, so `koala` was never yielded by
+    `list_root_projects`, never derived, never a candidate, and its pane was
+    never read. `_forget_attention` bumps the epoch for any name at all, which
+    is the only property this test needs from it, so the decoration is gone
+    rather than made real. A fixture that looks like it is under test and is not
+    tells the next reader something false.
     """
-    other = proj("koala")
+    other = "an-unrelated-stop"
     engine, tmux = engine_for(
         root,
-        sessions={proj("vessel"): PANE, other: PANE + 1},
-        table=(
-            ps_row(PANE, 1)
-            + ps_row(AGENT, PANE, project=proj("vessel"), etime_s=60)
-            + ps_row(PANE + 1, 1)
-            + ps_row(AGENT + 1, PANE + 1, project=other, etime_s=60)
-        ),
+        sessions={proj("vessel"): PANE},
+        table=ps_row(PANE, 1) + ps_row(AGENT, PANE, project=proj("vessel"), etime_s=60),
     )
     name = proj("vessel")
     tmux.pane_text[name] = MODAL_PANE
-    tmux.pane_text[other] = CLEAR_INPUT_BOX
 
     assert name in engine.scan_for_stuck(), "the claim was never established"
     assert engine.get(name).awaiting_input is True
@@ -3159,9 +3163,19 @@ def test_a_discarded_sweep_still_drops_a_claim_it_can_no_longer_support(
         return original(project, lines, escapes)
 
     tmux.capture_pane = bump_midway  # type: ignore[method-assign]
+    epoch_before = engine._attention_epoch
     engine.scan_for_stuck()
 
     assert bumped, "the capture never ran, so the discard path was not entered"
+    # **`bumped` proves the CAPTURE ran, not that the epoch moved (#217).**
+    # Delete `self._attention_epoch += 1` from `_forget_attention` and this test
+    # stayed green: with no bump the sweep is never discarded, `clear` is applied
+    # on the ordinary path, and the assertion below passes for the wrong reason.
+    # The discard path is the whole subject, so entering it is asserted.
+    assert engine._attention_epoch != epoch_before, (
+        "the epoch did not move, so this sweep was never discarded and the "
+        "assertion below is testing the ordinary path instead of #182's"
+    )
     assert engine.get(name).awaiting_input is False, (
         "a sweep that discarded its `stuck` batch also discarded `clear`, so a "
         "person is still being told they are needed by a prompt that is gone. "

@@ -1609,3 +1609,43 @@ def test_exponential_backoff_would_make_the_window_arithmetic_a_lie() -> None:
 
     with pytest.raises(AssertionError, match="RestartSteps"):
         _assert_start_limit(_unit_sections(with_backoff))
+
+
+# -- #214: criterion 4, a tier cannot be selected by accident -----------------
+
+
+@pytest.mark.parametrize("marker", ["screenshots", "device"])
+def test_a_tier_that_must_be_asked_for_is_not_collected_by_another_tiers_run(
+    marker: str,
+) -> None:
+    """#214. `addopts` carries `-m "not screenshots and not device"`, and pytest
+    REPLACES that whole expression when a run brings its own `-m`.
+
+    So `uv run pytest -m e2e`, which `AGENTS.md` documents as the command for
+    the browser tier, used to collect the seven screenshot captures as well, and
+    an ordinary developer running the browser tier rewrote the published images.
+    That is how run identity reached `docs/screenshots/` in a1c0acb.
+
+    Asserted by RUNNING pytest's collector rather than by reading `addopts`,
+    because the defect was that `addopts` says one thing and a flag undoes it.
+    A test that read the config would have agreed with the bug.
+    """
+    collected = subprocess.run(
+        [sys.executable, "-m", "pytest", "-m", "e2e", "--collect-only", "-q", "--no-header"],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        check=False,
+    ).stdout
+
+    offenders = [
+        line
+        for line in collected.splitlines()
+        if marker == "screenshots" and "test_screenshots.py" in line
+    ] + [line for line in collected.splitlines() if marker == "device" and "device/" in line]
+
+    assert not offenders, (
+        f"`pytest -m e2e` collected {len(offenders)} test(s) from the `{marker}` "
+        f"tier, which must be asked for by name. `addopts` cannot enforce this: "
+        f"any `-m` replaces it. See the collection hook in tests/conftest.py."
+    )
