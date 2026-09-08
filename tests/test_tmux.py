@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from hitchrail.procs import _default_runner as procs_runner
-from hitchrail.tmux import NotOurSession, Tmux, TmuxUnavailable
+from hitchrail.tmux import NotOurSession, Tmux, TmuxUnavailable, _scrub_flags
 from hitchrail.tmux import _default_runner as tmux_runner
 from hitchrail.tmuxnames import sanitize
 
@@ -843,3 +843,114 @@ def test_send_keys_targets_the_pane_and_passes_the_keys_through() -> None:
     Tmux(prefix="hr-", run=runner).send_keys("vessel", "C-c", "Enter")
 
     assert runner.calls[-1] == ["tmux", "send-keys", "-t", "=hr-vessel:", "C-c", "Enter"]
+
+
+# -- #233: the two survivors in tmux that are not message prose ---------------
+
+
+def test_every_scrubbed_name_reaches_the_argv_not_only_the_last() -> None:
+    """#233. `flags += ["-u", name]` mutated to `flags =` survived.
+
+    **It is equivalent today and a token leak the day it is not.** `Engine`
+    builds the adapter with `scrub_env=(TOKEN_ENV,)`, one name, and with one
+    element `=` and `+=` produce the same list. Add a second thing worth
+    scrubbing and the assignment silently keeps only the last, so the first is
+    handed to the agent's environment.
+
+    `_scrub_flags` is what keeps `HITCHRAIL_TOKEN` out of the child, so the
+    failure mode is the token reaching a process the operator did not intend to
+    give it. Asserted with two names, which is the case the production caller
+    does not exercise yet.
+    """
+    assert _scrub_flags(("FIRST", "SECOND")) == ["-u", "FIRST", "-u", "SECOND"], (
+        "only the last name was scrubbed, so anything before it stays in the "
+        "child's environment"
+    )
+    assert _scrub_flags(()) == []
+    assert _scrub_flags(("ONLY",)) == ["-u", "ONLY"]
+
+
+def test_the_real_runner_captures_text_and_does_not_raise_on_a_refusal() -> None:
+    """#233. Ten survivors lived in `_default_runner`'s keyword arguments and
+    every one of them survived, because this tier injects a runner and never
+    calls the real one.
+
+    Each argument is load bearing and the docstring names one of them:
+
+    - `capture_output=True`, or `stdout` is `None` and every parser here reads
+      an attribute that is not there
+    - `text=True`, or it is `bytes` and every `.split()` and `in` test compares
+      against the wrong type
+    - `check=False`, and this is the one the docstring argues: **a non zero
+      return is normal here.** `has-session` says no that way and `list-panes`
+      fails when no server is running at all, so `check=True` turns both into a
+      `CalledProcessError` out of a method documented to answer False.
+
+    **This spawns `echo` and `false`, never tmux.** The tier's hermetic property
+    is that no test here starts a tmux server, and that still holds: these are
+    two of the cheapest processes on the machine and neither leaves anything
+    behind.
+    """
+    ran = tmux_runner(["echo", "hello"])
+
+    assert ran.stdout == "hello\n", (
+        "output was not captured as text, so every parser in this module reads "
+        f"the wrong type or nothing at all: {ran.stdout!r}"
+    )
+    assert isinstance(ran.stdout, str), "bytes, not str: `text=True` was dropped"
+    assert ran.returncode == 0
+
+    # The refusal path, which is the ordinary answer rather than an error.
+    refused = tmux_runner(["false"])
+
+    assert refused.returncode != 0, "a failing command reported success"
+    assert refused.stdout == "", "a failing command still captures its (empty) output"
+
+
+def test_the_remaining_runner_survivors_are_equivalent_to_the_default() -> None:
+    """#233. Two survivors in `_default_runner` cannot be killed.
+
+    `check=None` and dropping `check` entirely both behave as `check=False`:
+    `subprocess.run`'s own default is `False`, and `None` is falsy where it is
+    tested. So no input distinguishes them from the code as written.
+
+    **Asserted rather than argued.** The claim "this argument's absence equals
+    its current value" is the kind that stops being true when a library changes
+    its default, and `check` is the one whose flip turns every ordinary tmux
+    refusal into an exception.
+    """
+    import inspect
+    import subprocess as sp
+
+    assert inspect.signature(sp.run).parameters["check"].default is False, (
+        "subprocess.run's default for `check` is no longer False, so dropping "
+        "the argument is no longer equivalent and those mutants are real"
+    )
+    # And None is falsy where `check` is tested, which is the other mutant.
+    assert not None
+
+    # The behaviour itself, through the real runner: a refusal does not raise
+    # however `check` is spelled.
+    assert tmux_runner(["false"]).returncode != 0
+
+
+def test_capture_panes_default_depth_is_a_tuning_number_not_a_boundary() -> None:
+    """#233. `lines: int = 40` mutated to `41` survives, and is left alive.
+
+    Three callers rely on the default: `claude_ipc` twice and `engine` once,
+    all reading a pane to judge whether an agent is waiting for a person. One
+    more line of scrollback does not change that judgment, and there is no
+    boundary at 40: it is a depth chosen to be enough, not a limit that
+    something breaks either side of.
+
+    Pinning it would assert a NUMBER rather than a property, and the next person
+    who tunes it would get a red test for a change that is theirs to make. What
+    is worth asserting is that the default reaches the argv at all, and that
+    `lines=0` still means the whole scrollback, which
+    `test_capture_pane_asks_for_the_whole_scrollback_or_a_bounded_tail` does.
+    """
+    runner = FakeRunner(stdout={"capture-pane": "out"})
+    Tmux(prefix="hr-", run=runner).capture_pane("vessel")
+
+    assert runner.calls[-1][4] == "-S", "the depth flag moved, so the default reaches nothing"
+    assert runner.calls[-1][5].startswith("-"), "the default depth is not a negative line count"
