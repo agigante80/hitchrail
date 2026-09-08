@@ -381,3 +381,111 @@ def test_a_codec_name_is_case_insensitive_so_those_mutants_are_equivalent() -> N
 
     assert raw.decode("LATIN-1") == raw.decode("latin-1")
     assert codecs.lookup("LATIN-1").name == codecs.lookup("latin-1").name
+
+
+# -- #233: projectnames, where four survivors are crashes and the rest are copy
+
+
+def test_display_name_replaces_undecodable_bytes_rather_than_raising() -> None:
+    """The behaviour the function exists for, which its docstring says already
+    broke once: `os.listdir` surrogate escapes a name that is not valid UTF-8,
+    and a strict decode then raises, so one latin-1 named folder under the root
+    turned the whole project list into a 500.
+    """
+    shown = projectnames.display_name("caf\udcff")
+
+    assert shown, "a surrogate escaped name produced nothing at all"
+    assert "\udcff" not in shown, "the lone surrogate survived, so json.dumps will raise"
+    assert shown.startswith("caf")
+
+
+def test_the_decodes_error_handler_is_unreachable_so_its_mutants_are_equivalent() -> None:
+    """#233. Two survivors drop or corrupt `errors` on the DECODE half of
+
+        name.encode("utf-8", "replace").decode("utf-8", "replace")
+
+    and neither can be killed. **`str.encode` with `errors="replace"` always
+    yields valid UTF-8**, so the decode never meets a byte it could fail on: the
+    handler it is given is never consulted, and `strict` or a name no codec
+    registers behaves identically.
+
+    The ENCODE's handler is the one doing the work, and it is pinned by the test
+    above.
+
+    **I wrote a killing test for these first and it passed against both
+    mutants**, because it fed a lone surrogate and expected the decode to see
+    bad bytes. The encode had already replaced them. Asserted here instead over
+    the shapes that reach this function: surrogate escaped names, astral
+    characters and plain ASCII.
+    """
+    for name in ("caf\udcff", "\udc80\udcff", "ok", "\U0001f600", "a b"):
+        encoded = name.encode("utf-8", "replace")
+        assert encoded.decode("utf-8") == encoded.decode("utf-8", "replace"), (
+            f"{name!r} reaches the decode as bytes a strict handler would refuse, "
+            f"so the mutants are a real gap after all and this test found it"
+        )
+
+
+def test_explain_name_names_the_first_character_not_the_second() -> None:
+    """#233. `name[0]` mutated to `name[1]` survived.
+
+    The branch reports a name whose FIRST character is not alphanumeric, so
+    reading the second is wrong twice: it names a character the reader did not
+    ask about, and on a one character name it raises `IndexError` from a
+    function whose job is to explain a refusal.
+    """
+    assert projectnames.explain_name("_") == (
+        "begins with '_'; a name must start with a letter or a digit"
+    ), "a one character name crashed or named the wrong character"
+
+    reason = projectnames.explain_name("_x")
+    assert reason is not None and "'_'" in reason and "'x'" not in reason
+
+
+def test_the_offender_buckets_do_not_report_one_character_twice() -> None:
+    """#233. `c.isascii() and not c.isspace()` mutated to `or` survived, and the
+    function's docstring calls this exact case out.
+
+    The distinguishing character is a PLAIN ASCII SPACE, not the non breaking
+    space the docstring talks about: for a space, `isascii` and `isspace` are
+    both true, so `and not` excludes it and `or not` admits it. For a non
+    breaking space both forms exclude it, so the obvious input proves nothing.
+    I used the non breaking space first and the mutant survived.
+
+    **Asserted on CONTENT, not on wording.** The rule this project follows is
+    that a message's phrasing is not pinned, because the next person to improve
+    the sentence should not get a red test. Which characters it names, and how
+    many times, is behaviour.
+    """
+    # Written as an escape: a literal one is invisible in a diff, and ruff
+    # RUF001 refuses it for exactly that reason.
+    described = projectnames._describe_offenders([" "])
+
+    assert described == "a space", (
+        f"a plain space landed in the `other` bucket as well as `spaces`, so one "
+        f"character is reported as two problems: {described!r}"
+    )
+
+
+def test_the_offender_message_names_the_actual_characters() -> None:
+    """#233. `shown = ", ".join(repr(c) ...)` mutated to `shown = None` survived,
+    and the message then reads `non ASCII characters (None)`.
+
+    **This is where the line between content and wording falls in this project.**
+    Which characters a refusal names is behaviour: it is the whole reason the
+    message exists, and a reader who is told `None` learns nothing about their
+    folder. How that sentence is phrased is not, so nothing here asserts the
+    words around the characters.
+
+    The truncation boundaries in the same function, `[:3]` against `[:4]` and
+    `> 3` against `>= 3`, are left alone on the same reasoning: whether an
+    ellipsis appears after the third or the fourth character is presentation,
+    and a test pinning it would fail on any future rewording of the list.
+    """
+    described = projectnames._describe_offenders(["Ж", "й"])
+
+    assert "None" not in described, f"the characters were not named: {described!r}"
+    assert repr("Ж") in described and repr("й") in described, (
+        f"a refusal that does not name the offending characters tells the "
+        f"reader nothing they could act on: {described!r}"
+    )
