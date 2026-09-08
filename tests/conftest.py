@@ -6,6 +6,7 @@ now it holds the one guard that keeps the hermetic tier honest.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from collections.abc import Callable
 
@@ -384,7 +385,17 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     an expression that never names the marker gets the rule applied, which is
     the accident this exists for.
     """
-    named = config.option.markexpr or ""
+    # **Identifiers, not a substring (round 1 review).** `marker not in named`
+    # over the raw expression means `-m "not devices"`, one plural typo, stands
+    # the hook down for `device` and collects the real-Android tier. Measured
+    # before the fix: 3 device tests collected. `--strict-markers` does not
+    # catch it, because it validates marks on ITEMS, not the names inside a
+    # `-m` expression, so an unregistered `devices` evaluates false and
+    # `not devices` is true for everything.
+    #
+    # The same trap fires for any future marker holding one of these as a
+    # substring: `-m device_farm` would have selected the phone tier.
+    named = set(re.findall(r"[A-Za-z_]\w*", config.option.markexpr or ""))
     dropped = [
         item
         for item in items

@@ -2225,48 +2225,40 @@ def test_local_addresses_suppresses_both_types_at_both_call_sites(
     assert local_addresses() == expected, why
 
 
-def test_the_inner_suppress_in_local_addresses_is_defensive_not_observable() -> None:
+def test_the_inner_suppress_in_local_addresses_is_defensive_not_observable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """#233. Two survivors narrow the INNER `contextlib.suppress` in
-    `local_addresses`, dropping one type from its tuple. Neither can be killed,
-    and the reason is worth writing down rather than re-deriving.
+    `local_addresses`, dropping one type from its tuple. Neither can be killed.
 
     The inner block sits inside the outer one, which suppresses the same two
     types, and `found` has already been appended to by the time the lookup runs.
     So whatever the inner tuple drops, the outer catches, `found` is unchanged,
-    and the routing table probe after the outer block runs either way.
+    and the routing table probe after the outer block still runs.
 
-    **The inner suppress is therefore defensive redundancy, not behaviour.** It
-    is worth keeping: it says at the call site that this lookup is best effort,
-    and it stops a future edit that moves code after it inside the outer block
-    from silently losing the probe. But no input distinguishes it, so a killing
-    test cannot exist and one written anyway would be asserting the
-    implementation rather than the behaviour.
-
-    The OUTER suppress is a different matter and IS pinned, by
-    `test_local_addresses_suppresses_both_types_at_both_call_sites`.
+    **Driven through the REAL function, not a hand model (round 1 review).**
+    The first version built its own `with_inner` and never referenced
+    `local_addresses` at all, so it would have gone on asserting an equivalence
+    after it stopped being true. The very edit its own docstring named, moving
+    code after the inner block, was the thing it could not see. Here the
+    production function is called with each exception raised from
+    `getaddrinfo`, which is the only call the inner suppress wraps.
     """
-    import contextlib
 
-    def with_inner(inner: tuple[type[BaseException], ...], lookup: object) -> tuple[str, ...]:
-        found: list[str] = []
-        with contextlib.suppress(OSError, UnicodeError):
-            found.append("box")
-            with contextlib.suppress(*inner):
-                for info in lookup("box", None):  # type: ignore[operator]
-                    found.append(info[4][0])
-        return tuple(found)
+    def outcome(raising: Exception | None) -> tuple[str, ...]:
+        def lookup(*args: object, **kwargs: object) -> object:
+            if raising is not None:
+                raise raising
+            return [(0, 0, 0, "", ("192.168.1.10", 0))]
 
-    def raises(exc: BaseException) -> object:
-        def go(*args: object) -> object:
-            raise exc
+        monkeypatch.setattr("hitchrail.hostnames.socket.gethostname", lambda: "box")
+        monkeypatch.setattr("hitchrail.hostnames.socket.getaddrinfo", lookup)
+        monkeypatch.setattr("hitchrail.hostnames.socket.socket", no_socket)
+        return local_addresses()
 
-        return go
-
-    for lookup in (
-        raises(OSError("EAI")),
-        raises(UnicodeError("idna")),
-        lambda *a: [(0, 0, 0, "", ("1.2.3.4", 0))],
-    ):
-        both = with_inner((OSError, UnicodeError), lookup)
-        assert with_inner((UnicodeError,), lookup) == both, "dropping OSError was observable"
-        assert with_inner((OSError,), lookup) == both, "dropping UnicodeError was observable"
+    # Whatever the lookup raises, the hostname already found survives it. That
+    # is the property the inner suppress appears to provide and the outer one
+    # actually provides, which is why narrowing the inner one changes nothing.
+    assert outcome(OSError("EAI")) == ("box",)
+    assert outcome(UnicodeError("idna")) == ("box",)
+    assert outcome(None) == ("box", "192.168.1.10")

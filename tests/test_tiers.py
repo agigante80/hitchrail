@@ -181,8 +181,35 @@ def test_the_cli_tier_never_spawns_without_an_isolated_tmux(path: Path) -> None:
     the trap this repository has hit four times.
     """
     tree = ast.parse(path.read_text())
+    spawns = _spawn_calls(tree)
+    running_the_script = [c for c in spawns if _runs_the_console_script(c)]
+
+    # **This guard inspects nothing in two of its three files, and used to say
+    # so nowhere (round 1 review).** Measured: `__init__.py` has 0 spawns,
+    # `test_running_the_program.py` has 2 spawns and 0 that run the console
+    # script, `conftest.py` has 3 and 2. So the whole check rests on one file,
+    # and its sibling below already asserts its own input is non-empty.
+    #
+    # It is brittle in exactly the way that takes the count to zero:
+    # `_runs_the_console_script` needs `call.args[0]` to be a literal `ast.List`
+    # and `_spawn_calls` needs a `subprocess.<verb>` attribute. Hoisting
+    # `argv = [str(CONSOLE_SCRIPT), ...]` into a variable, or writing
+    # `from subprocess import run`, drops every match and this passes while
+    # enforcing nothing. That is the shrinking-subset failure this module's own
+    # docstring names about its non-recursive glob.
+    #
+    # So the per-file assertion is on the TIER, not on each file: at least one
+    # file here must still spawn the console script.
+    if path.name == "conftest.py":
+        assert running_the_script, (
+            "no spawn in the cli tier's conftest runs the console script any "
+            "more, so this guard is matching nothing. Either the tier stopped "
+            "spawning it, or the argv is no longer a literal list and this "
+            "check has to be repointed rather than left green."
+        )
+
     offenders: list[str] = []
-    for call in _spawn_calls(tree):
+    for call in spawns:
         if not _runs_the_console_script(call):
             # Other spawns in this tier are tmux itself, and each is either
             # scoped with `-S` to a socket the caller made or is deliberately

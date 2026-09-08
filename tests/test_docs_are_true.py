@@ -1630,13 +1630,32 @@ def test_a_tier_that_must_be_asked_for_is_not_collected_by_another_tiers_run(
     because the defect was that `addopts` says one thing and a flag undoes it.
     A test that read the config would have agreed with the bug.
     """
-    collected = subprocess.run(
+    run = subprocess.run(
         [sys.executable, "-m", "pytest", "-m", "e2e", "--collect-only", "-q", "--no-header"],
         capture_output=True,
         text=True,
         cwd=ROOT,
         check=False,
-    ).stdout
+    )
+    collected = run.stdout
+
+    # **The guard was delivered to nothing, and round 1 measured it.** Every
+    # offender is derived from this subprocess's stdout, so a run that fails to
+    # collect at all produces zero lines, zero offenders, and a PASS. Verified:
+    # a broken inner run exits 4 with an empty stdout and both parametrizations
+    # went green. That is the condition under which this guard is most wanted,
+    # a missing playwright or a collection error, and it was exactly when it
+    # stopped looking.
+    assert run.returncode == 0, (
+        f"the inner collection failed with exit {run.returncode}, so this guard "
+        f"inspected nothing and would have passed:\n{run.stdout[-2000:]}\n{run.stderr[-2000:]}"
+    )
+    # A positive control. `-m e2e` must reach the browser tier, or "no
+    # screenshot tests were collected" is true for the wrong reason.
+    assert any("test_starting.py" in line for line in collected.splitlines()), (
+        f"`-m e2e` collected no browser tier tests at all, so finding no "
+        f"`{marker}` tests proves nothing:\n{collected[-2000:]}"
+    )
 
     offenders = [
         line

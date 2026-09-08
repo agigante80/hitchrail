@@ -112,8 +112,24 @@ async def test_a_start_that_dies_says_so_and_offers_the_output(
     # that if it ever is not, the failure says so in one line.
     dialog = page.locator("[data-dialog]")
     running = page.locator(f'[data-project="{server.project("koala")}"][data-state="running"]')
+
+    # **Capture which outcome won, rather than re-querying (round 1 review).**
+    # `count()` after the wait is a fresh query a round trip later, and
+    # `remain-on-exit` keeps the pane, so a shim that outlived the first poll
+    # gives exactly the transition `running` to `stale`. If that lands between
+    # the two calls, the premise assertion passes and the test then spends 45
+    # seconds on a dialog that can never open, which is the opaque failure this
+    # was written to remove.
+    #
+    # `.or_().first` is `nth(0)` over the union in DOM ORDER, not in
+    # resolution order, so it does not say which one appeared. The dialog is
+    # after the list in `index.html`, so `first` is the row today; moving the
+    # dialog above the list would make `first` always the dialog and quietly
+    # restore the 45 second timeout. Both halves are therefore read explicitly.
     await dialog.or_(running).first.wait_for(state="visible", timeout=45_000)
-    assert await running.count() == 0, (
+    started_running = await running.count() > 0
+    dialog_open = await dialog.is_visible()
+    assert not (started_running and not dialog_open), (
         "the fake agent outlived the engine's first poll, so the start SUCCEEDED "
         "and this test never exercised a dead start. That is #67: the shim must "
         "exit before `_await_running` calls `get()`, which is why it is a `sh` "

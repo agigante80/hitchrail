@@ -293,30 +293,15 @@ def device_server(
         shutil.rmtree(sock_dir, ignore_errors=True)
 
 
-def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Deselect this tier unless somebody asked for it BY NAME.
-
-    `addopts` carries `-m "not screenshots and not device"`, and that is not
-    enough on its own: any `-m` on the command line REPLACES it rather than
-    adding to it. So the ordinary `-m "not e2e"` re-selects this tier, and then
-    a suite run reaches for a phone that may be asleep, on someone else's desk,
-    or absent.
-
-    That is not hypothetical. The identical override is how the per run prefix
-    reached six published screenshots: `-m e2e` re-selected the shots tier,
-    which `addopts` had deselected. #214 carries the general shape.
-
-    So the deselection is enforced here rather than declared in configuration.
-    `-m device` still selects it, which is the documented way to run it, and
-    every other invocation leaves it alone whatever `-m` it carries.
-    """
-    expression = config.option.markexpr or ""
-    if "device" in expression:
-        return
-    kept: list[pytest.Item] = []
-    dropped: list[pytest.Item] = []
-    for item in items:
-        (dropped if item.get_closest_marker("device") else kept).append(item)
-    if dropped:
-        config.hook.pytest_deselected(items=dropped)
-        items[:] = kept
+# **The deselection hook that used to live here is gone (round 1 review).**
+#
+# `tests/conftest.py` now enforces it for `device` AND `screenshots` together,
+# and this file's copy carried the same defect: it tested `"device" in
+# expression` over the raw `-m` text, so `-m "not devices"`, one plural typo,
+# stood it down and collected this tier. A fix applied to only one of two copies
+# fixes nothing, which is the argument `is_loopback_host` already makes about
+# two copies of a rule drifting.
+#
+# The rule is in one place now, matched on parsed identifiers rather than as a
+# substring. A parent `conftest.py` applies to this directory, including when
+# pytest is invoked as `pytest tests/device/`.
