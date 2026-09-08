@@ -202,17 +202,41 @@ Criterion 2. These are ordered by how much of the machine they touch.
       `5a50a87`. Scoped rather than generalised: this rules out "`#{pane_dead}`
       differs on the runner", not "`pane_is_dead` returned True in that run".
 
-      The likely cause of the original failure is `E2E_PREFIX` contamination,
-      fixed since by `a1c0acb`: the ticket's failure snapshot reads
-      `hrx-vessel stale` while the test seeds `koala`, and under the constant
-      prefix then in force that row is not this test's project.
+      **That hypothesis was wrong, and the CI round trip falsified it.** I
+      argued the original failure was `E2E_PREFIX` contamination fixed by
+      `a1c0acb`, on the strength of the ticket's snapshot reading `hrx-vessel`
+      while the test seeds `koala`. The failing row in the 2026-09-07 run reads
+      `hrx3303-koala`: this test's own project, carrying this run's pid prefix.
+
+      **The real cause is a race the fixture did not control.**
+      `_await_running` polls `get()` immediately after `new_session`, before any
+      sleep, and the dying shim was a PYTHON script, so the interpreter had to
+      boot before its first line. Here that finishes inside the 250ms poll; on a
+      runner it does not, so the first `ps` found the agent alive, `derive`
+      reported `running`, and the start SUCCEEDED. Measured by driving the route:
+      **201, not 502.** No refusal, so the dialog can never open, and the 45
+      second wait is spent on an impossible event.
+
+      Fixed by making the fixture model its own name, a `/bin/sh` script rather
+      than a Python start, and by making the test ASSERT ITS PREMISE: it races
+      the dialog against the row going `running` and fails in two seconds naming
+      the cause. The margin is a margin rather than a proof, so it is checked
+      rather than trusted.
+
+      Rejected after testing it: asserting the union of both outcomes. Under the
+      slow shim this machine goes `stopped` to `running` and stays, because a
+      quietly dying session announces nothing, while CI reached `stale`. Three
+      environment-dependent branches is a worse test than the race.
 
       The assertion is restored with the measurement and both falsifications in
-      the docstring. **Left open: one CI round trip.** `ci.yml` runs on push to
-      `main` and on `pull_request`, so a `develop` push does not exercise it, and
-      that is the risk `39bdded` weakened the assertion to avoid. Step 1 of the
-      ticket's plan, capturing the uvicorn log and browser console, was
-      deliberately not built: needed only if that round trip is red.
+      the docstring, and the round trip was taken: PR #234, which also gave
+      `ci.yml` a `workflow_dispatch` trigger (#232) so `develop` stops being
+      unverifiable without one.
+
+      **The round trip paid for itself by being RED.** Step 1 of the ticket's
+      plan, capturing the uvicorn log and browser console, was never needed: the
+      aria snapshot in the failure named the project, and the pid prefix in that
+      name is what falsified the leading hypothesis in one line.
 
 ## Batch 3: fixtures that cannot agree with the bug, tasks 46 to 49
 

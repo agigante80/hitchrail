@@ -99,15 +99,34 @@ async def test_a_start_that_dies_says_so_and_offers_the_output(
     await expect(row).to_be_visible()
     await row.get_by_role("button", name="Start").click()
 
-    # Wait for the dialog to OPEN before asserting on its text. A closed
-    # `<dialog>` is display:none, so `to_contain_text` on it reports an empty
-    # string and says nothing about why: on CI this failed with "Actual value:
-    # (blank)" and no indication that the request was simply still in flight.
+    # **Assert the PREMISE before the behaviour (#67).** This test needs the
+    # agent to be gone before the engine's first look. If it is not, the start
+    # legitimately SUCCEEDS, no refusal is produced, and the dialog below can
+    # never open: the test then spends its whole timeout on an event that cannot
+    # happen and fails as "Locator expected to be visible", which says nothing
+    # about why.
+    #
+    # That is exactly what happened on CI from 2026-08-28 to 2026-09-07 and cost
+    # a ticket, two wrong hypotheses and a CI round trip to name. The fixture now
+    # uses `/bin/sh` so it is fast enough, and this races the two outcomes so
+    # that if it ever is not, the failure says so in one line.
+    dialog = page.locator("[data-dialog]")
+    running = page.locator(f'[data-project="{server.project("koala")}"][data-state="running"]')
+    await dialog.or_(running).first.wait_for(state="visible", timeout=45_000)
+    assert await running.count() == 0, (
+        "the fake agent outlived the engine's first poll, so the start SUCCEEDED "
+        "and this test never exercised a dead start. That is #67: the shim must "
+        "exit before `_await_running` calls `get()`, which is why it is a `sh` "
+        "script and not a Python one."
+    )
+
+    # A closed `<dialog>` is display:none, so `to_contain_text` on it reports an
+    # empty string and says nothing about why: on CI this failed with "Actual
+    # value: (blank)" and no indication that the request was still in flight.
     #
     # The generous timeout is the engine's, not this test's. `start` polls for
     # `start_grace` seconds before it can report a dead start, and every poll
     # spawns `ps` and `tmux`, which on a shared runner is far slower than here.
-    dialog = page.locator("[data-dialog]")
     await expect(dialog).to_be_visible(timeout=45_000)
     await expect(dialog).to_contain_text("died")
     await expect(dialog).to_contain_text("exited almost immediately")
