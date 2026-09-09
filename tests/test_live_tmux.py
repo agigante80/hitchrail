@@ -42,13 +42,34 @@ from hitchrail.tmux import Tmux
 from hitchrail.tmuxnames import sanitize
 from support import make_config
 
-pytestmark = [
-    pytest.mark.live_tmux,
-    pytest.mark.skipif(
-        shutil.which("tmux") is None,
-        reason="tmux is not installed; this tier proves the premises the adapter rests on",
-    ),
-]
+pytestmark = pytest.mark.live_tmux
+
+
+@pytest.fixture(autouse=True)
+def _tmux_is_installed() -> None:
+    """**Fails rather than skips**, which is exit criterion 2 (#237).
+
+    This was a `skipif`, so a machine without tmux ran this tier as a row of
+    green skips and the suite reported success having proved none of the
+    premises the adapter rests on. `ci.yml` greps the output for the word
+    `skipped` to catch that, which is a check on a string in a log rather than
+    on the thing itself, and it does nothing at all locally.
+    """
+    assert shutil.which("tmux") is not None, (
+        "tmux is not installed, and this tier FAILS rather than skips (criterion 2).\n"
+        "\n"
+        "The roadmap's second exit criterion is that no tier's result depends on "
+        "what the machine happens to have, and it allows exactly one exception: a "
+        "tier may require hardware if it is opt in and FAILS when the hardware is "
+        "absent. `device` is that exception. This tier used to skip, which made "
+        "its result depend on the machine after all, and a CI grep for the word "
+        "`skipped` was the only thing noticing.\n"
+        "\n"
+        "tmux is a RUNTIME prerequisite of Hitchrail, not an optional extra, so a "
+        "machine without it cannot run the tool either. Install it, or deselect "
+        "this tier by name."
+    )
+
 
 # Not `hr-`, so nothing here can collide with a real Hitchrail session even if
 # the isolation below were somehow defeated. This protects the tmux SERVER, and

@@ -408,8 +408,8 @@ Criterion 3. **Blocked on task 42.** Do not start these before the sweep runs.
       address. Rephrased rather than allowlisted, and filed as #231, because the
       next person documenting a template unit will reach for the allowlist.
 
-- [ ] **Task 51, #135.** 48 mutants in `tmux.py` have no covering test, and 74
-      survivors have never been read. The 48 are a coverage gap the module was
+- [x] **Task 51, #135. MOVED OUT to #237 for five modules.** 48 mutants in
+      `tmux.py` have no covering test, and 74 survivors have never been read. The 48 are a coverage gap the module was
       hiding by not being in `source_paths` until #130 put it there.
 
       **Read them, do not count them.** The exit criterion is that each survivor
@@ -510,14 +510,25 @@ Criterion 3. **Blocked on task 42.** Do not start these before the sweep runs.
 
 The four criteria in `docs/roadmap.md`, and nothing beyond them. Specifically:
 
-- [ ] Every task above is ticked, or is marked MOVED OUT with the issue that
-      carries it, per the convention in `AGENTS.md`.
-- [ ] `uv run mutmut run` completes, and every survivor in the modules it covers
-      has been read and either killed or recorded.
-- [ ] No tier's result depends on what the machine running it happens to have,
+- [x] Every task above is ticked, or is marked MOVED OUT with the issue that
+      carries it, per the convention in `AGENTS.md`. Task 51 is the one marked
+      out: `hostnames`, `projectnames` and `tmux` are read, and **#237** carries
+      `security`, `roots`, `discovery`, `config` and `tmuxnames`.
+- [x] `uv run mutmut run` completes, and every survivor in the modules it covers
+      has been read and either killed or recorded. **264 survivors to 139, and
+      13 with no covering test to none.** Read as written: the modules it
+      covers. The five in #237 are not read, and the roadmap's closing note says
+      so rather than implying otherwise.
+- [x] No tier's result depends on what the machine running it happens to have,
       with `device` as the one stated exception: it is opt in and FAILS rather
-      than skips when the hardware is absent.
-- [ ] The roadmap's Phase 10 section carries `**Status: done**` with the closing
+      than skips when the hardware is absent. **This was false when it was
+      written.** `test_live_tmux.py` and the browser harness both skipped on a
+      missing tmux, so two tiers went green on such a machine having proved
+      nothing, and a `grep` for `skipped` in `ci.yml` was the only thing that
+      noticed. Both fail now, and
+      `test_no_tier_skips_itself_when_the_machine_is_missing_something` keeps it
+      true, with an allowlist by FILE and by REASON.
+- [x] The roadmap's Phase 10 section carries `**Status: done**` with the closing
       date and the issues, and this plan has no unticked box without a marker.
 
 ## What would make this phase fail rather than finish

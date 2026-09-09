@@ -631,7 +631,7 @@ and worth noticing in a phase about honest answers.
 
 ## Phase 10: A suite that would notice
 
-**Status: in progress**, started 2026-09-07.
+**Status: done**, 2026-09-07 to 2026-09-09.
 
 **Plan: [`superpowers/plans/2026-09-07-hitchrail-phase-10-suite.md`](superpowers/plans/2026-09-07-hitchrail-phase-10-suite.md)**
 
@@ -674,6 +674,51 @@ repeatable, and the gates checking what they claim to.
 
 The third exit criterion this phase used to carry, "a phase's progress count in
 prose is checked", moved to Phase 17 with the rest of the documents work.
+
+### Closed 2026-09-09, reported against those four rather than rewritten to fit
+
+**The criteria above are left exactly as they were written.** Amending one after
+the fact to match what was done is the move this phase spent twelve tickets
+removing from the suite, and it would be a worse thing to do to the roadmap than
+to a test.
+
+**2 and 4 are met.** Criterion 4 is enforced in collection by
+`tests/conftest.py` and asserted by a test that runs pytest's own collector: any
+`-m` replaces the `addopts` deselection, so `-m e2e` used to collect the seven
+screenshot captures, which is how run identity reached `docs/screenshots/`.
+
+Criterion 2 was NOT met when this phase started and is now. It says `device` is
+the only tier allowed to depend on the machine, and that such a tier must FAIL
+rather than skip. `test_live_tmux.py` and the browser harness both SKIPPED on a
+missing tmux, so on such a machine two tiers went green having proved nothing,
+and a `grep` for the word `skipped` in `ci.yml` was the only thing that noticed.
+Both fail now, and
+`test_no_tier_skips_itself_when_the_machine_is_missing_something` is what keeps
+the claim true, with an allowlist by FILE and by REASON: the permitted skips all
+turn on a fact about the repository, never about the machine.
+
+**1 is met in practice and is not checkable, which the line above it claims.**
+Nothing can mechanically tell a fixture built from the production path from one
+written from a description of it. What the phase has instead is evidence: the
+per-run pid prefix, the `_child_env` guard, `_shoot`'s required `showing`
+locator, and a capture that could not fail publishing the wrong screenshot for
+months. **Three fixtures written from a description were found and fixed during
+this phase**, two of them written by the agent doing the fixing. Treat the
+criterion as a practice with a record, and read the line above it as aspiration.
+
+**3 is met for three modules and carried for five.** The sweep went from 264
+survivors to 139, and from 13 with no covering test to none. `hostnames`,
+`projectnames` and `tmux` are read: each survivor killed, or recorded as
+equivalent with a test that checks the reason rather than a comment asserting
+it. **#237 carries `security`, `roots`, `discovery`, `config` and `tmuxnames`**,
+in Backlog rather than in a phase, because this phase's own narrowing note says a
+quality objective absorbs every finding and therefore never ends.
+
+What the three finished modules established is worth more than the count: a diff
+classification called about 59 survivors productive and **33 were real**, and the
+ratio is not predictive per module. `hostnames` was 20 of 25 because a whole
+function had no test at all; `projectnames` was 4 of 19 because most of its
+survivors sit inside error messages.
 
 **Tickets: [the Phase 10 milestone](https://github.com/agigante80/hitchrail/milestone/12).**
 

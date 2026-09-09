@@ -361,3 +361,78 @@ def test_no_other_test_reads_the_real_process_table() -> None:
         f"process on the machine. Either pass a fake, or give it the namespace "
         f"{LIVE_TIER.name} uses and widen the guard above to cover it."
     )
+
+
+# -- criterion 2: no tier's result depends on what the machine has ------------
+
+# The roadmap's second exit criterion allows exactly ONE tier to require
+# something of the machine, and requires that it FAIL rather than skip:
+#
+#   "No tier's result depends on what the machine happens to have, with one
+#    stated exception: a tier may require hardware if it is opt in and FAILS
+#    rather than skips when the hardware is absent. `device` is that exception
+#    and is the only one."
+#
+# It was not true when it was written. `test_live_tmux.py` and the browser
+# harness both skipped on a missing tmux, so on such a machine two tiers went
+# green having proved nothing, and `ci.yml`'s grep for the word `skipped` was
+# the only thing that noticed. A grep on a log is not the criterion.
+_MAY_SKIP = {
+    # Not tiers. These skip on a FACT ABOUT THE REPOSITORY rather than about
+    # the machine: no tags yet, no publish workflow yet, `.claude/` gitignored
+    # out of a worktree. A different checkout is not a different machine.
+    "test_workflows_are_pinned.py",
+    "test_docs_are_true.py",
+    "test_config.py",
+    # A filesystem that will not create a name, and an `is_symlink` that did not
+    # raise. Both are properties of the platform and both are asserted about,
+    # not skipped past, in the tests that own them.
+    "test_api.py",
+    "test_mutation_survivors.py",
+    "test_discovery.py",
+}
+
+
+def test_no_tier_skips_itself_when_the_machine_is_missing_something() -> None:
+    """Criterion 2, made checkable rather than felt.
+
+    A tier that skips looks like coverage while proving less than none, which
+    `AGENTS.md` states and which this project has already paid for: the browser
+    tier and the live tmux tier both skipped on a missing tmux, and tmux is a
+    RUNTIME prerequisite of Hitchrail, so such a machine cannot run the tool
+    either.
+
+    The `device` tier is the one exception the criterion allows, and it earns it
+    by failing: `tests/device/conftest.py` raises with a long message naming the
+    four taps that usually fix it.
+
+    **The allowlist is by FILE and by reason**, not by pattern, so adding a skip
+    means coming here and saying which fact about the repository it turns on.
+    """
+    offenders: list[str] = []
+    for path in sorted(TESTS.rglob("*.py")):
+        if path.name in _MAY_SKIP:
+            continue
+        for node in ast.walk(ast.parse(path.read_text())):
+            # A CALL to `pytest.skip(...)`, or an `Attribute` naming `skipif`
+            # anywhere in a decorator or a `pytestmark`. Read structurally: a
+            # text search for `pytest.skip(` matches the sentence forbidding it,
+            # and this guard's own docstring says the words. That trap has cost
+            # this repository four separate guards.
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "skip"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "pytest"
+            ):
+                offenders.append(f"{path.relative_to(TESTS.parent)}:{node.lineno} pytest.skip")
+            elif isinstance(node, ast.Attribute) and node.attr == "skipif":
+                offenders.append(f"{path.relative_to(TESTS.parent)}:{node.lineno} skipif")
+
+    assert not offenders, (
+        f"a tier skips instead of failing: {offenders}. A tier that skips when "
+        f"the machine is missing something reports success having proved "
+        f"nothing. Fail with a message naming the fix, as `tests/device/` does, "
+        f"or add the file to `_MAY_SKIP` with the repository fact it turns on."
+    )

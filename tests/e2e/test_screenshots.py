@@ -136,8 +136,23 @@ def shots_server(monkeypatch: pytest.MonkeyPatch) -> Iterator[Harness]:
     teardown: only sessions on this socket are killed, never a bare
     `tmux kill-server`.
     """
-    if shutil.which("tmux") is None:  # pragma: no cover - CI installs tmux
-        pytest.skip("the browser tier drives a real tmux")
+    # **Fails rather than skips**, which is exit criterion 2 (#237). A skip here
+    # made the browser tier's result depend on what the machine has, and left
+    # `ci.yml`'s grep for `skipped` as the only thing that noticed.
+    assert shutil.which("tmux") is not None, (
+        "tmux is not installed, and this tier FAILS rather than skips (criterion 2).\n"
+        "\n"
+        "The roadmap's second exit criterion is that no tier's result depends on "
+        "what the machine happens to have, and it allows exactly one exception: a "
+        "tier may require hardware if it is opt in and FAILS when the hardware is "
+        "absent. `device` is that exception. This tier used to skip, which made "
+        "its result depend on the machine after all, and a CI grep for the word "
+        "`skipped` was the only thing noticing.\n"
+        "\n"
+        "tmux is a RUNTIME prerequisite of Hitchrail, not an optional extra, so a "
+        "machine without it cannot run the tool either. Install it, or deselect "
+        "this tier by name."
+    )
 
     # Pinned for the duration, so the published images carry no run identity.
     #
