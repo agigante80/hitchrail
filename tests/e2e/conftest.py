@@ -447,6 +447,15 @@ class Harness:
             body = PROMPTS_AFTER_STOP_BODY
         if agent_shows_a_modal:
             body = STUCK_BODY
+        # **Two shims cannot both be written, and this used to decide it by
+        # accident (#235 L7).** The chain above is last-wins, so `modal` beat
+        # `dying`; moving the dying agent out to its own `sh` script for #67
+        # silently reversed that. No caller passes both today, which is exactly
+        # why nothing noticed.
+        assert not (agent_exits_immediately and agent_shows_a_modal), (
+            "an agent cannot both exit at once and sit on a modal. Ask for one, "
+            "or the shim you get depends on the order of these branches."
+        )
         # The dying agent is a whole `sh` script rather than a body under the
         # Python head, because a Python start is not immediate (#67).
         if agent_exits_immediately:
@@ -857,6 +866,15 @@ class Harness:
         finally:
             release.set()
             holder.join(timeout=5)
+            # **The join can time out, and a daemon thread that outlives it
+            # raises into nothing (#235 L1).** Once the harness closes its loop,
+            # this thread's next `call_soon_threadsafe` fails in the window
+            # between `is_running()` and the call, which prints an unhandled
+            # thread exception and fails no test. Asserted rather than hoped.
+            assert not holder.is_alive(), (
+                "the cut-and-hold thread did not stop within 5s, so it will go "
+                "on aborting connections into the next test"
+            )
 
     def stop_serving(self) -> None:
         """Teardown, and neither exit flag can do it alone.

@@ -3141,11 +3141,27 @@ def test_a_discarded_sweep_still_drops_a_claim_it_can_no_longer_support(
     other = "an-unrelated-stop"
     engine, tmux = engine_for(
         root,
-        sessions={proj("vessel"): PANE},
-        table=ps_row(PANE, 1) + ps_row(AGENT, PANE, project=proj("vessel"), etime_s=60),
+        sessions={proj("vessel"): PANE, proj("vessel-social"): PANE + 1},
+        table=(
+            ps_row(PANE, 1)
+            + ps_row(AGENT, PANE, project=proj("vessel"), etime_s=60)
+            + ps_row(PANE + 1, 1)
+            + ps_row(AGENT + 1, PANE + 1, project=proj("vessel-social"), etime_s=60)
+        ),
     )
     name = proj("vessel")
+    # **A SECOND project that would be newly marked, and it is what proves the
+    # discard path was entered (#235 L2).** Without it this test could not tell
+    # a discarded sweep from an ordinary one: with the pane clear, `awaiting_input`
+    # ends False either way, and deleting `discarded = self._attention_epoch !=
+    # epoch` from `scan_for_stuck` left it green. Measured.
+    #
+    # `vessel-social` sits on a modal for the whole test, so an ORDINARY sweep
+    # marks it and a DISCARDED one does not. The two paths now differ in the
+    # result rather than only in the route.
+    newly_stuck = proj("vessel-social")
     tmux.pane_text[name] = MODAL_PANE
+    tmux.pane_text[newly_stuck] = CLEAR_INPUT_BOX
 
     assert name in engine.scan_for_stuck(), "the claim was never established"
     assert engine.get(name).awaiting_input is True
@@ -3153,6 +3169,7 @@ def test_a_discarded_sweep_still_drops_a_claim_it_can_no_longer_support(
     # The prompt is answered, so this sweep sees a clear box. An unrelated stop
     # lands mid capture and moves the epoch, which discards `stuck` only.
     tmux.pane_text[name] = CLEAR_INPUT_BOX
+    tmux.pane_text[newly_stuck] = MODAL_PANE
     bumped: list[str] = []
     original = tmux.capture_pane
 
@@ -3171,7 +3188,10 @@ def test_a_discarded_sweep_still_drops_a_claim_it_can_no_longer_support(
     # Delete `self._attention_epoch += 1` from `_forget_attention` and this test
     # stayed green: with no bump the sweep is never discarded, `clear` is applied
     # on the ordinary path, and the assertion below passes for the wrong reason.
-    # The discard path is the whole subject, so entering it is asserted.
+    #
+    # The epoch moving is necessary and was not sufficient (#235 L2): it says the
+    # sweep SHOULD be discarded, not that it WAS. The second project below is
+    # what says it was.
     assert engine._attention_epoch != epoch_before, (
         "the epoch did not move, so this sweep was never discarded and the "
         "assertion below is testing the ordinary path instead of #182's"
@@ -3180,6 +3200,14 @@ def test_a_discarded_sweep_still_drops_a_claim_it_can_no_longer_support(
         "a sweep that discarded its `stuck` batch also discarded `clear`, so a "
         "person is still being told they are needed by a prompt that is gone. "
         "See #182."
+    )
+    # **And the other half of #182's asymmetry: `stuck` really was dropped.**
+    # This project sat on a modal for the whole sweep, so an ordinary sweep marks
+    # it. A discarded one must not, because that evidence predates a clear the
+    # person has already acted on.
+    assert engine.get(newly_stuck).awaiting_input is False, (
+        "the discarded sweep still wrote its `stuck` batch, so an observation "
+        "older than the clear is being reported at somebody. See #182."
     )
 
 

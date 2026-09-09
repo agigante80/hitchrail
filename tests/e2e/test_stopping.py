@@ -179,15 +179,46 @@ async def test_kill_appears_once_the_wait_is_under_way_and_stays(
     alternative. Asserted twice with time in between, because a control that
     appears and then vanishes passes a single check."""
     server.seed(running=["vessel"], ignores_graceful_stop=True)
-    await _open_stop(page, server)
+    await page.goto(server.base)
+    # **The patience is SET, so the wait has a deadline this test owns (#230).**
+    # It used to sample the control twice with a bare 2500ms between, a number
+    # derived from nothing: the default patience is 30s, so 2500 was an
+    # arbitrary slice of a wait the test did not control.
+    await page.evaluate("() => window.__hitchrail.setStopPatience(3000)")
+
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row).to_be_visible()
+    await row.get_by_role("button", name="Stop").click()
     await page.locator("[data-dialog]").get_by_role("button", name="Stop", exact=True).click()
 
     dialog = page.locator("[data-dialog]")
     await expect(dialog).to_contain_text(f"Stopping {server.project('vessel')}")
     kill = dialog.get_by_role("button", name="Do not wait, kill it now")
     await expect(kill).to_be_visible()
-    await page.wait_for_timeout(2500)
-    await expect(kill).to_be_visible()
+
+    # **Watched for the WHOLE wait, and bounded by an EVENT rather than a
+    # clock.** The claim is that the control does not appear and then vanish, so
+    # two samples with a guess between them is the wrong shape: it can miss a
+    # gap either side. This polls until the wait actually ends, which is the
+    # timeout screen arriving, and fails on the first frame the control is gone.
+    watched = 0
+    while not await dialog.get_by_text("No answer from").is_visible():
+        assert await kill.is_visible(), (
+            f"the kill control vanished {watched * 100}ms into the wait, so "
+            f"somebody reaching for it finds it gone"
+        )
+        watched += 1
+        await page.wait_for_timeout(100)
+
+    # **The loop must have watched something.** If the timeout screen were
+    # already up on the first check this would pass having asserted nothing,
+    # which is the vacuous-guard shape this phase exists to remove. The patience
+    # is 3000ms, so a healthy run samples the control about thirty times; ten is
+    # a floor that a slow machine still clears.
+    assert watched >= 10, (
+        f"the wait ended after only {watched} samples, so the control was barely "
+        f"observed and this test proves close to nothing"
+    )
 
 
 async def test_the_wait_can_be_dismissed_without_cancelling_the_stop(
@@ -281,7 +312,8 @@ async def test_the_timeout_does_not_kill_by_itself(page: Page, server: Harness) 
     while the person was not looking, and this is the assertion that pins it."""
     server.seed(running=["vessel"], ignores_graceful_stop=True)
     await page.goto(server.base)
-    await page.evaluate("() => window.__hitchrail.setStopPatience(1200)")
+    patience_ms = 1200
+    await page.evaluate(f"() => window.__hitchrail.setStopPatience({patience_ms})")
 
     row = page.locator(f'[data-project="{server.project("vessel")}"]')
     await expect(row).to_be_visible()
@@ -291,7 +323,12 @@ async def test_the_timeout_does_not_kill_by_itself(page: Page, server: Harness) 
         "No answer from", timeout=15_000
     )
 
-    await page.wait_for_timeout(3000)
+    # **Derived from the deadline this test SET, not a constant (#230).** The
+    # claim is that nothing kills the session by itself once the interface has
+    # given up waiting, so the wait has to outlast that giving-up by a margin.
+    # It was a bare 3000 against a patience of 1200, which was right and said
+    # nothing about why; now moving the patience moves this with it.
+    await page.wait_for_timeout(patience_ms * 2 + 600)
 
     assert server.is_running("vessel"), "the interface killed a session nobody told it to"
 
@@ -344,8 +381,15 @@ async def test_a_finishing_stop_does_not_close_a_dialog_opened_since(
     await expect(dialog).to_contain_text("New folder")
     await page.get_by_label("Folder name").fill("half-typed")
 
-    # Let the background stop run to completion underneath it.
-    await page.wait_for_timeout(6000)
+    # **Wait for the stop to COMPLETE, not for six seconds (#230).** The old
+    # form guessed how long a background stop takes, so on a loaded runner the
+    # assertions below ran before the thing they must survive had happened, and
+    # the test passed for the wrong reason. The row reaching `stopped` is that
+    # completion, and it is what the sleep was approximating.
+    #
+    # The sheet is modal and makes the page inert, but the listing still patches
+    # the DOM underneath it, which is the whole property under test.
+    await expect(vessel).to_have_attribute("data-state", "stopped", timeout=30_000)
 
     await expect(dialog).to_be_visible()
     await expect(dialog).to_contain_text("New folder")

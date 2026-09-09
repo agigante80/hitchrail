@@ -404,7 +404,7 @@ Criterion 3. **Blocked on task 42.** Do not start these before the sweep runs.
       the prose edits, then `git checkout` on top, destroyed all four; they
       survived only because they were scripted.
 
-      Found by tripping it: the email guard reads `the `user@` manager instance` as an
+      Found by tripping it: the email guard reads `user@1000.service` as an
       address. Rephrased rather than allowlisted, and filed as #231, because the
       next person documenting a template unit will reach for the allowlist.
 

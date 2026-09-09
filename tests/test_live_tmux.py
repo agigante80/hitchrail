@@ -788,6 +788,30 @@ def test_a_live_project_name_carries_the_run_that_made_it() -> None:
     assert live_project("social") != name, "two projects in one run must not collide"
 
 
+def test_the_foreign_prefix_is_not_one_this_adapter_would_claim() -> None:
+    """#235 L5. `FOREIGN_PREFIX`'s comment states this and nothing checked it.
+
+    The whole premise of the #84 and #85 tests is that those sessions belong to
+    somebody ELSE. `panes().ours` matches on `PREFIX`, so a foreign prefix that
+    started with it would be claimed as ours, the sessions would stop being
+    foreign, and the tests would go on passing while asserting the opposite of
+    what they name.
+
+    An invariant worth a paragraph is worth an assertion: that paragraph sat
+    beside it in the same commit that added
+    `test_the_session_prefix_and_the_project_namespace_are_not_the_same_thing`
+    for a weaker property.
+    """
+    assert not FOREIGN_PREFIX.startswith(PREFIX), (
+        f"`{FOREIGN_PREFIX}` starts with this adapter's own prefix, so "
+        f"`panes().ours` claims those sessions and nothing in the #84 tests is "
+        f"foreign any more"
+    )
+    assert not PREFIX.startswith(FOREIGN_PREFIX)
+    # And it must not look like a real Hitchrail session either.
+    assert not FOREIGN_PREFIX.startswith("hr-")
+
+
 def test_the_session_prefix_and_the_project_namespace_are_not_the_same_thing() -> None:
     """They protect different resources, and #94's third Done when is that this
     is visible rather than inferred.

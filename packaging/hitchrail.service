@@ -90,7 +90,7 @@ Documentation=https://github.com/agigante80/hitchrail
 # Every number in that sentence was measured against an unstable origin.
 #
 # Re-measured on `__MONOTONIC_TIMESTAMP`, the only origin comparable across
-# boots, this unit starts 3 to 18 MILLISECONDS after `the `user@` manager instance` on
+# boots, this unit starts 3 to 18 MILLISECONDS after `user@1000.service` on
 # every one of six boots. Its start offset therefore records when the user
 # manager came up and nothing else, and it cannot support any inference about
 # boot ordering or network readiness. The 14.1s to 14.6s band is not

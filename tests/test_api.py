@@ -1724,18 +1724,18 @@ async def test_only_one_attention_scan_runs_at_a_time(
             await asyncio.sleep(0.02)
         resumed = started
 
-    assert resumed > concurrent, (
-        f"the scan ran {concurrent} time(s) and never started again after the "
-        f"first finished, so the attention overlay is frozen for the life of "
-        f"the process. The `scanning.done()` half of the guard is what starts "
-        f"the next one."
-    )
-
     assert concurrent == 1, (
         f"{concurrent} attention scans were started while the first was still "
         f"running. The sweep must not start another until the last is done, or "
         f"a wedged tmux fills the executor that also serves the operator's "
         f"stop. See #180."
+    )
+
+    assert resumed > concurrent, (
+        f"the scan ran {concurrent} time(s) and never started again after the "
+        f"first finished, so the attention overlay is frozen for the life of "
+        f"the process. The `scanning.done()` half of the guard is what starts "
+        f"the next one."
     )
 
 

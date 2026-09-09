@@ -1223,7 +1223,7 @@ def _assert_start_limit(sections: dict[str, list[str]]) -> None:
     # **The seven seconds is gone, and #209 is why.** The framing said this unit
     # "won by 7s" against a DHCP lease, generalised from a start offset measured
     # across boots. That offset is not comparable across boots: hitchrail starts
-    # 3 to 18 MILLISECONDS after `the `user@` manager instance` every time, so it measures
+    # 3 to 18 MILLISECONDS after `user@1000.service` every time, so it measures
     # when the user manager came up and nothing else.
     #
     # What survives is one same-boot, origin-independent observation, and it is

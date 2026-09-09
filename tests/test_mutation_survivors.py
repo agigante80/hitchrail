@@ -489,3 +489,119 @@ def test_the_offender_message_names_the_actual_characters() -> None:
         f"a refusal that does not name the offending characters tells the "
         f"reader nothing they could act on: {described!r}"
     )
+
+
+# -- #233: security ----------------------------------------------------------
+
+
+def test_the_unterminated_bracket_guard_in_parse_host_is_redundant_not_a_gap() -> None:
+    """#233. `if end == -1:` survives as `== +1` and as `== -2`, and NEITHER is
+    a gap. **This was named in #233 as the flagship example of a survivor worth
+    killing, and that was wrong.**
+
+    `find` returns -1 only when `]` is absent, and the branch is entered only
+    when the value starts with `[`. So `value[end + 1 :]` is `value[0:]`, the
+    whole value, which starts with `[` and never with `:`, and the check three
+    lines below returns "" anyway:
+
+        rest = value[end + 1 :]
+        if rest and not rest.startswith(":"):
+            return ""
+
+    The early return is redundant with that one. It is worth keeping for the
+    reader, since "no closing bracket" is a different thought from "junk after
+    the bracket", but no input can tell the two spellings apart.
+
+    **The lesson is the one this phase keeps relearning.** A boundary mutation
+    on a security control LOOKS like the highest value survivor in the list, and
+    I argued it in a ticket as one, from its appearance rather than from the
+    code around it. Verified exhaustively instead.
+    """
+    from itertools import product
+
+    def with_sentinel(sentinel: int) -> object:
+        def f(raw: str) -> str:
+            value = raw.strip().lower()
+            if value.startswith("["):
+                end = value.find("]")
+                if end == sentinel:
+                    return ""
+                rest = value[end + 1 :]
+                if rest and not rest.startswith(":"):
+                    return ""
+                return value[1:end]
+            if value.count(":") > 1:
+                return ""
+            host = value.split(":")[0]
+            if any(c.isspace() for c in host):
+                return ""
+            return host.rstrip(".")
+
+        return f
+
+    for sentinel in (1, -2):
+        mutated = with_sentinel(sentinel)
+        for length in range(1, 6):
+            for parts in product("[]:.1a ", repeat=length):
+                raw = "".join(parts)
+                assert parse_host(raw) == mutated(raw), (  # type: ignore[operator]
+                    f"{raw!r} distinguishes `end == -1` from `end == {sentinel}`, so "
+                    f"this IS a real gap and the ticket was right after all"
+                )
+
+    # And the behaviour itself, which is what matters however it is spelled.
+    assert parse_host("[::1") == "", "an unterminated bracket must not parse"
+    assert parse_host("[::1]:8787") == "::1"
+
+
+def test_the_grant_cookie_carries_every_attribute_it_needs() -> None:
+    """#233. Four survivors live in `set_token_cookie`'s keyword arguments, and
+    the existing test asserts only `httponly` and `samesite`.
+
+    **Two of the four are real and two are not, and the difference is
+    Starlette's own defaults**, which I checked rather than assumed after
+    writing this test to kill all four and watching two survive:
+
+        set_cookie(..., path="/", samesite="lax", max_age=None, httponly=False)
+
+    So DROPPING `path` or `samesite` falls back to the same value and changes
+    nothing. Explicitly passing `None` does not.
+
+    - `path=None` is real. Starlette then emits no `Path`, the browser scopes
+      the cookie to the granting path, and a token granted at `/api/grant` is
+      sent back for `/api/grant` and nothing else: the page loads, every call
+      after it is refused, and the operator sees a tool that took their key and
+      then behaved as though they had never signed in.
+    - `max_age=None` is real, and here the default is against us: it makes a
+      session cookie, so a phone left on the page loses its grant whenever the
+      browser ends the session, which is the opposite of what a tool meant to
+      live on a phone wants.
+
+    The arguments are still written out in full at the call site even where they
+    match the default, because a security control that reads as "whatever the
+    framework does today" is one nobody can review, and Starlette's defaults are
+    not this project's contract.
+    """
+    from starlette.responses import JSONResponse
+
+    from hitchrail.security import COOKIE_MAX_AGE, TOKEN_COOKIE, set_token_cookie
+
+    response: JSONResponse = JSONResponse({})
+    set_token_cookie(response, "s3cret")
+    header = dict(response.headers)["set-cookie"]
+
+    assert f"{TOKEN_COOKIE}=s3cret" in header
+    assert "Path=/" in header, (
+        f"the cookie is scoped to the granting path, so every later request is "
+        f"refused and the tool reads as broken rather than unauthorised: {header}"
+    )
+    assert f"Max-Age={COOKIE_MAX_AGE}" in header, (
+        f"a session cookie instead of a lasting one, so a phone left on the page "
+        f"loses its grant whenever the browser ends the session: {header}"
+    )
+    assert "SameSite=" in header, "the CSRF property TokenMiddleware relies on is gone"
+    assert "HttpOnly" in header
+    assert "Secure" not in header, (
+        "a Secure cookie is never sent over plain HTTP on a LAN, which is a "
+        "supported deployment, and the tool silently stops working"
+    )
