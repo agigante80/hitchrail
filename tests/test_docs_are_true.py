@@ -1652,7 +1652,17 @@ def test_a_tier_that_must_be_asked_for_is_not_collected_by_another_tiers_run(
     )
     # A positive control. `-m e2e` must reach the browser tier, or "no
     # screenshot tests were collected" is true for the wrong reason.
-    assert any("test_starting.py" in line for line in collected.splitlines()), (
+    # **Floored on the tier, not on one file (#236 F4).** This named
+    # `test_starting.py`, so renaming or splitting that file would fail here
+    # with "collected no browser tier tests at all", which is not what happened.
+    # It cannot simply widen to `tests/e2e/`, because `test_screenshots.py`
+    # lives there and is exactly what must not be collected.
+    browser_tier = [
+        line
+        for line in collected.splitlines()
+        if line.startswith("tests/e2e/") and "test_screenshots.py" not in line
+    ]
+    assert browser_tier, (
         f"`-m e2e` collected no browser tier tests at all, so finding no "
         f"`{marker}` tests proves nothing:\n{collected[-2000:]}"
     )

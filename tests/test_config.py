@@ -249,6 +249,28 @@ def test_a_padded_extra_host_is_usable(tmp_path: Path) -> None:
     assert " phone.lan " not in cfg.allowed_hosts
 
 
+# **Patching `hitchrail.hostnames.socket.*` patches the STDLIB (#235 L8).**
+#
+# `hitchrail.hostnames` does `import socket`, so `hitchrail.hostnames.socket` IS
+# the module object, and `monkeypatch.setattr("hitchrail.hostnames.socket.socket",
+# ...)` replaces `socket.socket` for every importer in the process, not just for
+# the module under test. Verified: `hitchrail.hostnames.socket is socket`.
+#
+# **Recorded rather than fixed, and the reason is a rule this project already
+# has.** The fix would be to import the three names into `hostnames` so tests
+# could patch module-local bindings, and that is a production change made for a
+# test's benefit: the move #216 refused when it declined to add a `--tmux-socket`
+# flag so the CLI tier could isolate itself.
+#
+# What contains it: `monkeypatch` is function scoped and restores on teardown, so
+# nothing survives the test, and this suite runs in one process without xdist, so
+# no other test is executing while the fake is installed. Both halves have to
+# hold. If either changes, this is a hazard rather than a note.
+#
+# The tests below and their siblings all inherit this. It is written once here
+# rather than at each of the ten patch sites.
+
+
 def test_local_addresses_survives_a_machine_that_cannot_make_a_socket(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2065,7 +2087,15 @@ def test_local_addresses_asks_the_machine_exactly_these_questions(
         # The bracket guard, and the root-dot strip it protects.
         ("http://[::1]:8787", "http://[::1]:8787", "an IPv6 literal keeps its brackets"),
         ("http://box.lan.:8787", "http://box.lan:8787", "the root dot goes, the port stays"),
-        ("http://box.lanX:8787", "http://box.lanx:8787", "the host strip is the dot alone"),
+        # NOT the widened `rstrip` at `hostnames.py:109` (#235 L3): `value` is
+        # lowercased before it, so `rstrip("XX.XX")` and `rstrip(".")` agree
+        # here and that mutant is equivalent, recorded below. What this pins is
+        # that the host is lowercased at all while the PORT is left alone.
+        (
+            "http://box.lanX:8787",
+            "http://box.lanx:8787",
+            "the host lowercases, the port survives",
+        ),
     ],
 )
 def test_normalise_origin_keeps_each_of_its_parts(raw: str, expected: str, why: str) -> None:
@@ -2144,16 +2174,35 @@ def test_the_widened_rstrip_sets_are_equivalent_because_lower_runs_first() -> No
         # gap in the tests.
         return value.rstrip("XX.XX")  # noqa: B005
 
+    # **The SECOND site, which the first version of this test claimed and did
+    # not model (#235 L3).** It said "in `normalise_host` and in
+    # `normalise_origin`" and then exhaustively checked only the former, so half
+    # its own claim rested on the argument rather than on the corpus.
+    def origin_with_widened_strip(raw: str) -> str:
+        value = raw.strip().rstrip("/").lower()
+        scheme, separator, rest = value.partition("://")
+        if not separator or not rest:
+            return value
+        if rest.startswith("["):
+            return f"{scheme}://{rest}"
+        host, colon, port = rest.partition(":")
+        return f"{scheme}://{host.rstrip('XX.XX')}{colon}{port}"  # noqa: B005
+
     for length in range(1, 6):
         for parts in product(".xX[]:/ab ", repeat=length):
             raw = "".join(parts)
             assert normalise_host(raw) == host_with_widened_strip(raw), (
-                f"{raw!r} distinguishes the two strip sets, so this is a real gap"
+                f"{raw!r} distinguishes the two strip sets in normalise_host, so "
+                f"that one is a real gap"
+            )
+            assert normalise_origin(raw) == origin_with_widened_strip(raw), (
+                f"{raw!r} distinguishes them in normalise_origin, so that one is a real gap"
             )
 
     # And the ordinary behaviour, which is what the strip is FOR.
     assert normalise_host("box.lan.") == "box.lan"
     assert normalise_host("box.lan..") == "box.lan"
+    assert normalise_origin("http://box.lan.:8787") == "http://box.lan:8787"
 
 
 def test_origin_forms_brackets_only_a_bare_ipv6_literal() -> None:
@@ -2239,10 +2288,21 @@ def test_the_inner_suppress_in_local_addresses_is_defensive_not_observable(
     **Driven through the REAL function, not a hand model (round 1 review).**
     The first version built its own `with_inner` and never referenced
     `local_addresses` at all, so it would have gone on asserting an equivalence
-    after it stopped being true. The very edit its own docstring named, moving
-    code after the inner block, was the thing it could not see. Here the
-    production function is called with each exception raised from
-    `getaddrinfo`, which is the only call the inner suppress wraps.
+    after it stopped being true. Here the production function is called with
+    each exception raised from `getaddrinfo`, which is the only call the inner
+    suppress wraps.
+
+    **What this does NOT detect, corrected in round 2 (#236 F2).** An earlier
+    version of this paragraph claimed it catches the edit that moves code after
+    the inner block. It does not: `outcome()` patches `socket.socket` to
+    `no_socket`, so the routing table probe raises and contributes nothing in
+    all three cases, and that probe is the only code after the inner block.
+    Falsified by making the edit and watching this pass.
+
+    The codebase is covered anyway, by
+    `test_a_failing_gethostname_does_not_discard_the_probe_address`, which is
+    what pins the probe's position. Two tests, two properties, and this one
+    should not claim the other's.
     """
 
     def outcome(raising: Exception | None) -> tuple[str, ...]:

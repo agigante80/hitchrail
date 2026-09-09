@@ -153,6 +153,35 @@ def _spawn_calls(tree: ast.AST) -> list[ast.Call]:
     ]
 
 
+def test_the_cli_tier_still_spawns_the_console_script_somewhere() -> None:
+    """The canary for the guard below, and it asks about the TIER.
+
+    That guard inspects nothing in two of the tier's three files, and it is
+    brittle in the way that takes the count to zero everywhere:
+    `_runs_the_console_script` needs `call.args[0]` to be a literal `ast.List`
+    and `_spawn_calls` needs a `subprocess.<verb>` attribute. Hoisting
+    `argv = [str(CONSOLE_SCRIPT), ...]` into a variable, or writing
+    `from subprocess import run`, drops every match and it passes while
+    enforcing nothing. That is the shrinking-subset failure this module's own
+    docstring names about its non-recursive glob.
+
+    Asked of the tier as a whole rather than per file, so moving the spawn
+    between files is not a failure and losing it altogether is.
+    """
+    spawns = [
+        call
+        for path in sorted(CLI_TIER.rglob("*.py"))
+        for call in _spawn_calls(ast.parse(path.read_text()))
+    ]
+
+    assert any(_runs_the_console_script(call) for call in spawns), (
+        "no spawn anywhere in the cli tier runs the console script, so the guard "
+        "below is matching nothing. Either the tier stopped spawning it, or the "
+        "argv is no longer a literal list and the check has to be repointed "
+        "rather than left green."
+    )
+
+
 @pytest.mark.parametrize("path", sorted(CLI_TIER.rglob("*.py")), ids=lambda p: p.name)
 def test_the_cli_tier_never_spawns_without_an_isolated_tmux(path: Path) -> None:
     """#216. This tier runs the installed console script, and the program it
@@ -182,31 +211,14 @@ def test_the_cli_tier_never_spawns_without_an_isolated_tmux(path: Path) -> None:
     """
     tree = ast.parse(path.read_text())
     spawns = _spawn_calls(tree)
-    running_the_script = [c for c in spawns if _runs_the_console_script(c)]
 
-    # **This guard inspects nothing in two of its three files, and used to say
-    # so nowhere (round 1 review).** Measured: `__init__.py` has 0 spawns,
-    # `test_running_the_program.py` has 2 spawns and 0 that run the console
-    # script, `conftest.py` has 3 and 2. So the whole check rests on one file,
-    # and its sibling below already asserts its own input is non-empty.
-    #
-    # It is brittle in exactly the way that takes the count to zero:
-    # `_runs_the_console_script` needs `call.args[0]` to be a literal `ast.List`
-    # and `_spawn_calls` needs a `subprocess.<verb>` attribute. Hoisting
-    # `argv = [str(CONSOLE_SCRIPT), ...]` into a variable, or writing
-    # `from subprocess import run`, drops every match and this passes while
-    # enforcing nothing. That is the shrinking-subset failure this module's own
-    # docstring names about its non-recursive glob.
-    #
-    # So the per-file assertion is on the TIER, not on each file: at least one
-    # file here must still spawn the console script.
-    if path.name == "conftest.py":
-        assert running_the_script, (
-            "no spawn in the cli tier's conftest runs the console script any "
-            "more, so this guard is matching nothing. Either the tier stopped "
-            "spawning it, or the argv is no longer a literal list and this "
-            "check has to be repointed rather than left green."
-        )
+    # **The canary is a separate test now, over the whole tier (#236 F3).**
+    # It was `if path.name == "conftest.py":` inside this parametrised check,
+    # which said TIER in its comment and implemented FILENAME. Two ordinary
+    # changes made it fail for the wrong reason: the spawn moving out of
+    # `conftest.py` into a helper, and the tier gaining a second `conftest.py`
+    # in a subdirectory, which `rglob` yields and which would also collide on
+    # the `ids=lambda p: p.name` id.
 
     offenders: list[str] = []
     for call in spawns:
