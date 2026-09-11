@@ -225,10 +225,32 @@ while True:
     time.sleep(0.2)
 """
 
-# Exits at once, for the dead start flow.
-DYING_BODY = """
-print("hitchrail-shim: nothing to do, exiting", flush=True)
-sys.exit(3)
+# Exits at once, for the dead start flow. **A WHOLE script, and `/bin/sh`, not
+# the Python head the others share (#67).**
+#
+# The Python version did not exit at once and could not: the interpreter has to
+# boot before the first line runs. On this machine that is under 250ms so the
+# engine's first poll missed it; on a CI runner it outlasts the poll, so
+# `_await_running`'s first `get()` found the agent ALIVE, derived `running`, and
+# the start SUCCEEDED. Measured: the POST returns 201, no refusal is produced,
+# and the dialog the test waits 45 seconds for can never open.
+#
+# So the fixture did not model what its name promises. `sh` starts in about a
+# millisecond against the ~20ms the engine spends spawning `ps -eww` for that
+# first look, and the two scale together under load where a Python start does
+# not: it is roughly 50x more work, so contention widens the gap rather than
+# narrowing it.
+#
+# The margin is still a margin, which is why the test asserts its own premise
+# rather than trusting this. See
+# `test_a_start_that_dies_says_so_and_offers_the_output`.
+#
+# `status 3` in the output comes from tmux's own "Pane is dead (status 3)" line,
+# so the exit code has to be 3 here and the pane has to be kept, which
+# `new_session`'s `remain-on-exit` does.
+DYING_SCRIPT = """#!/bin/sh
+echo "hitchrail-shim: nothing to do, exiting"
+exit 3
 """
 
 
@@ -267,7 +289,7 @@ E2E_PREFIX = f"hrx{os.getpid()}-"
 # single-instance by construction before this. The pin adds no new constraint.
 #
 # **Not because it "only runs at a release".** That reason was written here once
-# and is false: `AGENTS.md` documents `uv run pytest -m e2e` as the command for
+# and is false: `.claude/CLAUDE.md` documents `uv run pytest -m e2e` as the command for
 # the browser tier, and `-m e2e` OVERRIDES the `-m "not screenshots"` in addopts.
 # So an ordinary developer running the browser tier captures these images, which
 # is precisely how the pid reached them. #214 carries the concurrency question
@@ -423,11 +445,23 @@ class Harness:
             body = UNCLEARABLE_BOX_BODY
         if prompts_after_stop:
             body = PROMPTS_AFTER_STOP_BODY
-        if agent_exits_immediately:
-            body = DYING_BODY
         if agent_shows_a_modal:
             body = STUCK_BODY
-        self._write_shim(_SHIM_HEAD.format(python=sys.executable) + body)
+        # **Two shims cannot both be written, and this used to decide it by
+        # accident (#235 L7).** The chain above is last-wins, so `modal` beat
+        # `dying`; moving the dying agent out to its own `sh` script for #67
+        # silently reversed that. No caller passes both today, which is exactly
+        # why nothing noticed.
+        assert not (agent_exits_immediately and agent_shows_a_modal), (
+            "an agent cannot both exit at once and sit on a modal. Ask for one, "
+            "or the shim you get depends on the order of these branches."
+        )
+        # The dying agent is a whole `sh` script rather than a body under the
+        # Python head, because a Python start is not immediate (#67).
+        if agent_exits_immediately:
+            self._write_shim(DYING_SCRIPT)
+        else:
+            self._write_shim(_SHIM_HEAD.format(python=sys.executable) + body)
 
         for name in (
             (running or [])
@@ -793,6 +827,55 @@ class Harness:
             "Without this the tests that depend on it fail as opaque timeouts."
         )
 
+    @contextlib.contextmanager
+    def cut_and_hold(self, every: float = 0.05) -> Iterator[None]:
+        """Keep the stream down until the block exits, instead of racing it.
+
+        #70. `drop_connections` cuts ONCE, and `down` is transient by design:
+        Chromium retries a few seconds after an abort and #57 added a five
+        second reopen on top, so every assertion about `down` had to land inside
+        a window the test did not control. It had not flaked in about thirty
+        local runs and in CI, which makes it a flake risk rather than a live
+        failure, and the reason to fix it now is that widening the window is not
+        the same as removing the race.
+
+        A held cut removes it: anything the page reopens is aborted again, so
+        `down` is a state the test ENTERS and LEAVES rather than one it catches
+        in flight.
+
+        The first cut asserts, exactly as `drop_connections` does and for the
+        same reason: these are uvicorn internals, and a silent no op here turns
+        every dependent test into an opaque timeout. The repeats do not assert,
+        because a moment with no connection open is the normal case once the
+        page has given up reopening, not a failure.
+        """
+        self.drop_connections()
+        release = threading.Event()
+
+        def keep_cutting() -> None:
+            while not release.is_set():
+                # Not `drop_connections`: its assertion is right for the first
+                # cut and wrong for every later one.
+                self._abort_connections()
+                release.wait(every)
+
+        holder = threading.Thread(target=keep_cutting, daemon=True)
+        holder.start()
+        try:
+            yield
+        finally:
+            release.set()
+            holder.join(timeout=5)
+            # **The join can time out, and a daemon thread that outlives it
+            # raises into nothing (#235 L1).** Once the harness closes its loop,
+            # this thread's next `call_soon_threadsafe` fails in the window
+            # between `is_running()` and the call, which prints an unhandled
+            # thread exception and fails no test. Asserted rather than hoped.
+            assert not holder.is_alive(), (
+                "the cut-and-hold thread did not stop within 5s, so it will go "
+                "on aborting connections into the next test"
+            )
+
     def stop_serving(self) -> None:
         """Teardown, and neither exit flag can do it alone.
 
@@ -1024,8 +1107,23 @@ class Harness:
 
 @pytest.fixture
 def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Harness]:
-    if shutil.which("tmux") is None:  # pragma: no cover - CI installs tmux
-        pytest.skip("the browser tier drives a real tmux")
+    # **Fails rather than skips**, which is exit criterion 2 (#237). A skip here
+    # made the browser tier's result depend on what the machine has, and left
+    # `ci.yml`'s grep for `skipped` as the only thing that noticed.
+    assert shutil.which("tmux") is not None, (
+        "tmux is not installed, and this tier FAILS rather than skips (criterion 2).\n"
+        "\n"
+        "The roadmap's second exit criterion is that no tier's result depends on "
+        "what the machine happens to have, and it allows exactly one exception: a "
+        "tier may require hardware if it is opt in and FAILS when the hardware is "
+        "absent. `device` is that exception. This tier used to skip, which made "
+        "its result depend on the machine after all, and a CI grep for the word "
+        "`skipped` was the only thing noticing.\n"
+        "\n"
+        "tmux is a RUNTIME prerequisite of Hitchrail, not an optional extra, so a "
+        "machine without it cannot run the tool either. Install it, or deselect "
+        "this tier by name."
+    )
 
     root = tmp_path_factory.mktemp("hr")
     # A SHORT socket path. A unix socket path is capped near 108 bytes and a
@@ -1104,10 +1202,17 @@ async def page() -> AsyncIterator[Page]:
     A fresh context per test is the isolation that matters anyway: the theme
     lives in `localStorage`, and a leaked one would make a dark theme test
     pass because the previous test set it.
+
+    **A phone viewport by default**, since Phase 11. Playwright's default is
+    1280x720, so every dialog and row this tier proved was proved on a desktop
+    and #161 sat on the bottom edge of every phone for a week while the tier
+    was green. This is the product's own viewport; a test that wants the
+    desktop says so with `set_viewport_size`, the way the #161 test does for
+    both.
     """
     async with async_playwright() as driver:
         browser = await driver.chromium.launch()
-        context = await browser.new_context()
+        context = await browser.new_context(viewport={"width": 390, "height": 844})
         try:
             yield await context.new_page()
         finally:

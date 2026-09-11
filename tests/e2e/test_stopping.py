@@ -7,7 +7,7 @@ it is a sequence over time, not a status code.
 from __future__ import annotations
 
 import pytest
-from playwright.async_api import Page, expect
+from playwright.async_api import Page, Route, expect
 
 from .conftest import Harness, grant_and_land
 
@@ -179,15 +179,46 @@ async def test_kill_appears_once_the_wait_is_under_way_and_stays(
     alternative. Asserted twice with time in between, because a control that
     appears and then vanishes passes a single check."""
     server.seed(running=["vessel"], ignores_graceful_stop=True)
-    await _open_stop(page, server)
+    await page.goto(server.base)
+    # **The patience is SET, so the wait has a deadline this test owns (#230).**
+    # It used to sample the control twice with a bare 2500ms between, a number
+    # derived from nothing: the default patience is 30s, so 2500 was an
+    # arbitrary slice of a wait the test did not control.
+    await page.evaluate("() => window.__hitchrail.setStopPatience(3000)")
+
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row).to_be_visible()
+    await row.get_by_role("button", name="Stop").click()
     await page.locator("[data-dialog]").get_by_role("button", name="Stop", exact=True).click()
 
     dialog = page.locator("[data-dialog]")
     await expect(dialog).to_contain_text(f"Stopping {server.project('vessel')}")
     kill = dialog.get_by_role("button", name="Do not wait, kill it now")
     await expect(kill).to_be_visible()
-    await page.wait_for_timeout(2500)
-    await expect(kill).to_be_visible()
+
+    # **Watched for the WHOLE wait, and bounded by an EVENT rather than a
+    # clock.** The claim is that the control does not appear and then vanish, so
+    # two samples with a guess between them is the wrong shape: it can miss a
+    # gap either side. This polls until the wait actually ends, which is the
+    # timeout screen arriving, and fails on the first frame the control is gone.
+    watched = 0
+    while not await dialog.get_by_text("No answer from").is_visible():
+        assert await kill.is_visible(), (
+            f"the kill control vanished {watched * 100}ms into the wait, so "
+            f"somebody reaching for it finds it gone"
+        )
+        watched += 1
+        await page.wait_for_timeout(100)
+
+    # **The loop must have watched something.** If the timeout screen were
+    # already up on the first check this would pass having asserted nothing,
+    # which is the vacuous-guard shape this phase exists to remove. The patience
+    # is 3000ms, so a healthy run samples the control about thirty times; ten is
+    # a floor that a slow machine still clears.
+    assert watched >= 10, (
+        f"the wait ended after only {watched} samples, so the control was barely "
+        f"observed and this test proves close to nothing"
+    )
 
 
 async def test_the_wait_can_be_dismissed_without_cancelling_the_stop(
@@ -281,7 +312,8 @@ async def test_the_timeout_does_not_kill_by_itself(page: Page, server: Harness) 
     while the person was not looking, and this is the assertion that pins it."""
     server.seed(running=["vessel"], ignores_graceful_stop=True)
     await page.goto(server.base)
-    await page.evaluate("() => window.__hitchrail.setStopPatience(1200)")
+    patience_ms = 1200
+    await page.evaluate(f"() => window.__hitchrail.setStopPatience({patience_ms})")
 
     row = page.locator(f'[data-project="{server.project("vessel")}"]')
     await expect(row).to_be_visible()
@@ -291,7 +323,12 @@ async def test_the_timeout_does_not_kill_by_itself(page: Page, server: Harness) 
         "No answer from", timeout=15_000
     )
 
-    await page.wait_for_timeout(3000)
+    # **Derived from the deadline this test SET, not a constant (#230).** The
+    # claim is that nothing kills the session by itself once the interface has
+    # given up waiting, so the wait has to outlast that giving-up by a margin.
+    # It was a bare 3000 against a patience of 1200, which was right and said
+    # nothing about why; now moving the patience moves this with it.
+    await page.wait_for_timeout(patience_ms * 2 + 600)
 
     assert server.is_running("vessel"), "the interface killed a session nobody told it to"
 
@@ -344,8 +381,15 @@ async def test_a_finishing_stop_does_not_close_a_dialog_opened_since(
     await expect(dialog).to_contain_text("New folder")
     await page.get_by_label("Folder name").fill("half-typed")
 
-    # Let the background stop run to completion underneath it.
-    await page.wait_for_timeout(6000)
+    # **Wait for the stop to COMPLETE, not for six seconds (#230).** The old
+    # form guessed how long a background stop takes, so on a loaded runner the
+    # assertions below ran before the thing they must survive had happened, and
+    # the test passed for the wrong reason. The row reaching `stopped` is that
+    # completion, and it is what the sleep was approximating.
+    #
+    # The sheet is modal and makes the page inert, but the listing still patches
+    # the DOM underneath it, which is the whole property under test.
+    await expect(vessel).to_have_attribute("data-state", "stopped", timeout=30_000)
 
     await expect(dialog).to_be_visible()
     await expect(dialog).to_contain_text("New folder")
@@ -387,6 +431,48 @@ async def test_a_stop_that_never_reached_the_server_says_so(
     await expect(dialog).not_to_contain_text("Waiting for it to finish")
     # And the session is untouched, because nothing was ever sent.
     assert server.is_running("vessel")
+
+
+async def test_a_reply_the_page_cannot_read_is_not_reported_as_a_failure(
+    page: Page, server: Harness
+) -> None:
+    """#82. Tap Stop; the server accepts it, begins the stop and answers 202;
+    the body arrives broken. The page used to say "That did not work", and
+    the next thing a person does about that is tap Stop again or reach for
+    Kill, for a session that is already stopping.
+
+    The request goes THROUGH to the real server here and only the reply is
+    corrupted, so the session really is stopping when the words appear.
+    """
+    server.seed(running=["vessel"])
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row).to_have_attribute("data-state", "running")
+
+    async def corrupt_the_reply(route: Route) -> None:
+        response = await route.fetch()
+        await route.fulfill(
+            status=response.status, content_type="application/json", body="{ truncated"
+        )
+
+    await page.route(
+        lambda url: "/api/sessions/" in url and not url.endswith("/logs"), corrupt_the_reply
+    )
+
+    await row.get_by_role("button", name="Stop").click()
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop", exact=True).click()
+
+    await expect(dialog).to_contain_text("could not be read")
+    text = await dialog.inner_text()
+    assert "That did not work" not in text, text
+    assert "was sent" in text, text
+    # Nothing on this screen may suggest nothing happened, and the way out is
+    # Close, not a second Stop and not a Kill.
+    await expect(dialog.get_by_role("button", name="Close")).to_be_visible()
+    assert await dialog.get_by_role("button", name="Kill it").count() == 0
+    # And it did work: the shim exits on the graceful request.
+    server.wait_until_the_agents_are_gone()
 
 
 # -- #98: a session with no agent in it ------------------------------------
@@ -531,3 +617,71 @@ async def test_a_timeout_on_a_prompt_says_so_rather_than_it_has_not_finished(
     # Kill stays available: the person may want it, and now they know what
     # they would be interrupting.
     await expect(dialog.get_by_role("button", name="Kill it")).to_be_visible()
+
+    # #183. Leave it, and the row itself says a person is needed: the stop
+    # marker expired with the wait, so `stopping` no longer outranks the
+    # overlay and the badge reads `waiting`, not `running`.
+    await dialog.get_by_role("button", name="Leave it").click()
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row.locator(".badge")).to_have_text("waiting")
+
+
+async def test_the_waiting_dialog_shows_the_question_and_the_keys(
+    page: Page, server: Harness
+) -> None:
+    """#165, reported from a real install where every part worked and the
+    dialog was still the wrong screen.
+
+    The engine captured the pane one screen earlier to decide the flag this
+    dialog renders, then offered `Leave it` and `Kill it` and sent the reader
+    to "that terminal", which is the one surface the prompt is never on. The
+    operator opened the session link, saw nothing, and concluded the exit
+    request had never been sent.
+
+    The pane view is the one `openLogs` renders, keypad included since #204,
+    which is how #166's last clause ("from the waiting dialog") lands here.
+    Ordering as `showDialog` requires: the pane and its keys above `Leave it`,
+    `Kill it` last and furthest from the thumb.
+    """
+    server.seed(running=["vessel"], prompts_after_stop=True, stop_timeout=2.0)
+    await _stop_and_hold(page, server, patience_ms=6000)
+
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text("is waiting for you", timeout=20_000)
+
+    # The question itself, as the shim painted it, without leaving the dialog.
+    await expect(dialog.locator(".log-pane")).to_contain_text("Exit and stop tasks")
+    # The keys, and they are above the decision. Compared as document order,
+    # since two visible things can only be ordered by where they sit.
+    keys = dialog.get_by_role("button", name="Send Enter")
+    await expect(keys).to_be_visible()
+    order = await dialog.evaluate(
+        """(d) => {
+          const key = d.querySelector('[aria-label="Send Enter"]');
+          const buttons = [...d.querySelectorAll('.dialog-actions button')];
+          return [key.compareDocumentPosition(buttons[0]) & Node.DOCUMENT_POSITION_FOLLOWING,
+                  buttons.map((b) => b.textContent)];
+        }"""
+    )
+    assert order[0], "the keys are not above the actions"
+    assert order[1] == ["Leave it", "Kill it"], order[1]
+
+    # Pane, not terminal: the reader has two surfaces and only one has the prompt.
+    text = await dialog.inner_text()
+    assert "that terminal" not in text, text
+    assert "pane" in text.lower(), text
+
+
+async def test_the_waiting_dialog_goes_when_the_agent_does(page: Page, server: Harness) -> None:
+    """#165's unhappy path. A prompt for a process that is gone is a dialog
+    inviting a key into nothing; when the row leaves `running`, so does it."""
+    server.seed(running=["vessel"], prompts_after_stop=True, stop_timeout=2.0)
+    await _stop_and_hold(page, server, patience_ms=6000)
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text("is waiting for you", timeout=20_000)
+
+    # Through the engine, so the stopped row is announced on the stream: that
+    # is the path a person answering at the pane produces, and the one the
+    # page can act on without polling.
+    server.kill("vessel")
+    await expect(dialog).not_to_be_visible(timeout=15_000)

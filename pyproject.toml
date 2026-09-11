@@ -1,6 +1,6 @@
 [project]
 name = "hitchrail"
-version = "0.5.1"
+version = "0.6.0"
 description = "Start and stop headless Claude Code sessions across a folder of projects, from your phone."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -122,7 +122,7 @@ markers = [
   "cli: runs the installed console script as a subprocess and reads its output",
   # Not a tier that runs anywhere. It drives a REAL Android over wireless adb,
   # so it needs hardware that is not in CI and is not always on the desk, and it
-  # is deselected below for the same reason the screenshot marker is. AGENTS.md:
+  # is deselected below for the same reason the screenshot marker is. `.claude/CLAUDE.md`:
   # a tier that skips everywhere looks like coverage while proving less than
   # none. This one is never silently skipped because it is never silently
   # selected. See #104.
@@ -206,6 +206,14 @@ forbidden_modules = [
 # Surviving mutants are READ, not counted. The output that matters is "this
 # operator was flipped and every test still passed", which names one assertion
 # that is missing or too loose.
+#
+# **`source_paths` is read by a test now, so it is two things.** #198 made
+# `test_every_mutated_module_loads_the_security_rules_when_it_is_edited` derive
+# its expectation from this list: a module curated here as being between a web
+# page and a shell must also appear in `.claude/rules/security.md`'s `paths:`,
+# or the security rules do not load when an agent edits it. Removing an entry
+# here therefore stops a module loading those rules, which is a second
+# consequence and not an obvious one.
 [tool.mutmut]
 source_paths = [
   "src/hitchrail/security.py",
@@ -252,6 +260,15 @@ source_paths = [
 # themselves and make every run report zero mutants killed.
 also_copy = [
   "src/hitchrail/__init__.py",
+  # #221. Copied rather than mutated, and its ABSENCE was not a gap but a
+  # break: `engine.py` imports it, so the assembled tree had the importer and
+  # not the module, `tests/conftest.py` failed to import, and pytest exited 4.
+  # mutmut reports that as "Failed to run pytest with args", which reads as a
+  # malformed command rather than a missing file, and the sweep could not start
+  # at all. Whether it should be MUTATED is a separate question: nothing in it
+  # spawns and its capture arrives injected, so it is not obviously between a
+  # web page and a shell.
+  "src/hitchrail/attention.py",
   "src/hitchrail/claude_ipc.py",
   "src/hitchrail/cli.py",
   "src/hitchrail/derive.py",
@@ -279,11 +296,24 @@ also_copy = [
 # They are not weakened by this. They run in the ordinary suite, where the tree
 # they inspect is the real one, which is the only place their answer means
 # anything.
+#
+# **#221 added the fifth**, and it is the same shape from the other end.
+# `test_the_sweep_drives_every_public_method` reads `vars(Tmux)` and
+# `inspect.getsource`, so under a run it sees every `xǁTmuxǁmethod__mutmut_N`
+# variant as a public method the driver never calls. The mutant names do not
+# start with an underscore, so the test's own filter does not exclude them.
+#
+# This list is maintained by hand and rots loudly rather than quietly:
+# a `--deselect` naming a test that no longer exists makes pytest exit 4, which
+# mutmut reports as "Failed to run pytest with args" and which cost a day of
+# reading a valid command as a malformed one.
+# `test_every_test_the_sweep_deselects_still_exists` is why it cannot.
 pytest_add_cli_args = [
   "--deselect=tests/test_config.py::test_every_module_is_under_the_size_guideline",
   "--deselect=tests/test_config.py::test_the_import_contract_covers_every_engine_layer_module",
   "--deselect=tests/test_config.py::test_projectnames_does_not_import_config",
   "--deselect=tests/test_config.py::test_hostnames_does_not_import_config",
+  "--deselect=tests/test_tmux.py::test_the_sweep_drives_every_public_method",
 ]
 pytest_add_cli_args_test_selection = [
   "tests/test_security_host.py",

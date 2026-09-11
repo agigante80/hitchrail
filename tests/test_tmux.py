@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from hitchrail.procs import _default_runner as procs_runner
-from hitchrail.tmux import NotOurSession, Tmux, TmuxUnavailable
+from hitchrail.tmux import NotOurSession, Tmux, TmuxUnavailable, _scrub_flags
 from hitchrail.tmux import _default_runner as tmux_runner
 from hitchrail.tmuxnames import sanitize
 
@@ -663,3 +663,294 @@ def test_a_line_with_no_name_is_dropped_rather_than_named_empty_string() -> None
         f"is not what docs/api.md promises. See #175."
     )
     assert panes.ours == {}
+
+
+# -- #135: pane_is_dead, whose caller acts destructively on True --------------
+
+
+def test_pane_is_dead_asks_tmux_exactly_this() -> None:
+    """#135. Every one of this method's 21 mutants survived the sweep.
+
+    It was driven by `drive_every_method` for the prefix sweep and nothing else,
+    so the target was checked and the rest of the argv was not. Deleting the
+    verb, the `-F`, or the format string left the whole suite green.
+
+    **Each argument is load bearing.** `-F '#{pane_dead}'` is the only reason
+    the answer is a flag rather than a pane listing, and `pane_target` carries
+    the trailing `:` that makes `=` take effect, which has its own test.
+    """
+    runner = FakeRunner(stdout={"list-panes": "0\n"})
+    Tmux(prefix="hr-", run=runner).pane_is_dead("vessel")
+
+    assert runner.calls[-1] == [
+        "tmux",
+        "list-panes",
+        "-t",
+        "=hr-vessel:",
+        "-F",
+        "#{pane_dead}",
+    ]
+
+
+def test_an_undeterminable_pane_counts_as_alive_not_dead() -> None:
+    """The safe direction, and the one mutation that inverts it survived.
+
+    `Engine._dead_start_output` calls `kill_session` when this returns True. So
+    False on a failed call is not tidiness, it is the difference between leaving
+    a session alone and killing an agent that was starting perfectly well.
+
+    Mutants that survived here: `if result.returncode != 0` to `== 0`, and the
+    `return False` under it to `return True`. The second is the destructive one.
+    """
+    refused = FakeRunner(rc={"list-panes": 1}, stdout={"list-panes": "1\n"})
+
+    assert Tmux(prefix="hr-", run=refused).pane_is_dead("vessel") is False, (
+        "a pane whose state could not be read was reported DEAD, and the caller "
+        "kills on that answer"
+    )
+
+
+def test_a_dead_pane_and_a_live_one_are_read_from_the_flag() -> None:
+    """The two success paths, which `== ["1"]` to `!= ["1"]` inverted while
+    every test stayed green.
+
+    Hermetic on purpose. The live tier proves tmux really answers `1` for a
+    dead pane; this proves the adapter reads that answer the right way round,
+    and it is the half that runs in the mutation selection.
+    """
+    dead = FakeRunner(stdout={"list-panes": "1\n"})
+    alive = FakeRunner(stdout={"list-panes": "0\n"})
+
+    assert Tmux(prefix="hr-", run=dead).pane_is_dead("vessel") is True
+    assert Tmux(prefix="hr-", run=alive).pane_is_dead("vessel") is False
+
+
+# -- #135: the argv nothing pinned -------------------------------------------
+#
+# `has-session` and `kill-session` had their argv asserted and produced no
+# survivors. Every other verb was driven only by the prefix sweep, which reads
+# the TARGET and ignores the rest, so a dropped flag or a mangled format string
+# left the suite green. These pin the whole call.
+
+
+def test_the_pane_map_asks_for_every_pane_in_one_format() -> None:
+    """`-a` is what makes this one call rather than one per session, which the
+    performance contract above already asserts. The FORMAT is what makes the
+    answer parseable, and nothing checked it: `#{session_name} #{pane_pid}` is
+    two fields separated by one space, and the parser below splits on it.
+    """
+    runner = FakeRunner(stdout={"list-panes": "hr-vessel 4\n"})
+    Tmux(prefix="hr-", run=runner).panes()
+
+    assert runner.calls[-1] == [
+        "tmux",
+        "list-panes",
+        "-a",
+        "-F",
+        "#{session_name} #{pane_pid}",
+    ]
+
+
+def test_pane_pid_asks_for_the_pid_format_and_reads_the_first_field() -> None:
+    """Two properties in one call because they are one claim: what is asked
+    for, and how the answer is read.
+
+    The refusal paths matter as much as the value. A pane that cannot be read
+    gives `None`, not a guess, and both `returncode != 0` and the empty-fields
+    branch had mutants that survived.
+    """
+    runner = FakeRunner(stdout={"list-panes": "4321\n"})
+    tmux = Tmux(prefix="hr-", run=runner)
+
+    assert tmux.pane_pid("vessel") == 4321
+    assert runner.calls[-1] == [
+        "tmux",
+        "list-panes",
+        "-t",
+        "=hr-vessel:",
+        "-F",
+        "#{pane_pid}",
+    ]
+
+    assert Tmux(prefix="hr-", run=FakeRunner(rc={"list-panes": 1})).pane_pid("v") is None
+    assert Tmux(prefix="hr-", run=FakeRunner(stdout={"list-panes": ""})).pane_pid("v") is None
+
+
+def test_capture_pane_asks_for_the_whole_scrollback_or_a_bounded_tail() -> None:
+    """`-p -J -S` are each load bearing and none was asserted.
+
+    `-p` prints to stdout rather than to a buffer, `-J` joins wrapped lines so a
+    long line reads as one, and `-S` sets the start line: `-` for the WHOLE
+    scrollback, which is what a dead start needs because tmux writes its own
+    "Pane is dead" line into the visible pane and the agent's output has
+    scrolled above it.
+    """
+    runner = FakeRunner(stdout={"capture-pane": "out"})
+    tmux = Tmux(prefix="hr-", run=runner)
+
+    tmux.capture_pane("vessel", lines=40)
+    assert runner.calls[-1] == [
+        "tmux",
+        "capture-pane",
+        "-p",
+        "-J",
+        "-S",
+        "-40",
+        "-t",
+        "=hr-vessel:",
+    ]
+
+    tmux.capture_pane("vessel", lines=0)
+    assert runner.calls[-1][5] == "-", "lines=0 must ask for the WHOLE scrollback"
+
+    tmux.capture_pane("vessel", lines=40, escapes=True)
+    assert "-e" in runner.calls[-1], (
+        "without -e the capture loses the colour that tells a suggestion from "
+        "what a person typed"
+    )
+    assert Tmux(prefix="hr-", run=FakeRunner(rc={"capture-pane": 1})).capture_pane("v") == ""
+
+
+def test_keep_pane_on_exit_sets_the_option_both_ways() -> None:
+    """The `remain-on-exit` workaround, which is what makes a dead start's
+    output readable at all. Every mutant on this line survived, including ones
+    that inverted `on`/`off` and dropped the option name.
+    """
+    runner = FakeRunner()
+    tmux = Tmux(prefix="hr-", run=runner)
+
+    tmux.keep_pane_on_exit("vessel", True)
+    assert runner.calls[-1] == [
+        "tmux",
+        "set-option",
+        "-t",
+        "=hr-vessel:",
+        "remain-on-exit",
+        "on",
+    ]
+
+    tmux.keep_pane_on_exit("vessel", False)
+    assert runner.calls[-1][-1] == "off", (
+        "the engine clears this after a start; on/off inverted"
+    )
+
+
+def test_send_keys_targets_the_pane_and_passes_the_keys_through() -> None:
+    """`pane_target`, not `session_target`: the keys go to a pane, and the
+    trailing colon is what makes the anchor take effect.
+    """
+    runner = FakeRunner()
+    Tmux(prefix="hr-", run=runner).send_keys("vessel", "C-c", "Enter")
+
+    assert runner.calls[-1] == ["tmux", "send-keys", "-t", "=hr-vessel:", "C-c", "Enter"]
+
+
+# -- #233: the two survivors in tmux that are not message prose ---------------
+
+
+def test_every_scrubbed_name_reaches_the_argv_not_only_the_last() -> None:
+    """#233. `flags += ["-u", name]` mutated to `flags =` survived.
+
+    **It is equivalent today and a token leak the day it is not.** `Engine`
+    builds the adapter with `scrub_env=(TOKEN_ENV,)`, one name, and with one
+    element `=` and `+=` produce the same list. Add a second thing worth
+    scrubbing and the assignment silently keeps only the last, so the first is
+    handed to the agent's environment.
+
+    `_scrub_flags` is what keeps `HITCHRAIL_TOKEN` out of the child, so the
+    failure mode is the token reaching a process the operator did not intend to
+    give it. Asserted with two names, which is the case the production caller
+    does not exercise yet.
+    """
+    assert _scrub_flags(("FIRST", "SECOND")) == ["-u", "FIRST", "-u", "SECOND"], (
+        "only the last name was scrubbed, so anything before it stays in the "
+        "child's environment"
+    )
+    assert _scrub_flags(()) == []
+    assert _scrub_flags(("ONLY",)) == ["-u", "ONLY"]
+
+
+def test_the_real_runner_captures_text_and_does_not_raise_on_a_refusal() -> None:
+    """#233. Ten survivors lived in `_default_runner`'s keyword arguments and
+    every one of them survived, because this tier injects a runner and never
+    calls the real one.
+
+    Each argument is load bearing and the docstring names one of them:
+
+    - `capture_output=True`, or `stdout` is `None` and every parser here reads
+      an attribute that is not there
+    - `text=True`, or it is `bytes` and every `.split()` and `in` test compares
+      against the wrong type
+    - `check=False`, and this is the one the docstring argues: **a non zero
+      return is normal here.** `has-session` says no that way and `list-panes`
+      fails when no server is running at all, so `check=True` turns both into a
+      `CalledProcessError` out of a method documented to answer False.
+
+    **This spawns `echo` and `false`, never tmux.** The tier's hermetic property
+    is that no test here starts a tmux server, and that still holds: these are
+    two of the cheapest processes on the machine and neither leaves anything
+    behind.
+    """
+    ran = tmux_runner(["echo", "hello"])
+
+    assert ran.stdout == "hello\n", (
+        "output was not captured as text, so every parser in this module reads "
+        f"the wrong type or nothing at all: {ran.stdout!r}"
+    )
+    assert isinstance(ran.stdout, str), "bytes, not str: `text=True` was dropped"
+    assert ran.returncode == 0
+
+    # The refusal path, which is the ordinary answer rather than an error.
+    refused = tmux_runner(["false"])
+
+    assert refused.returncode != 0, "a failing command reported success"
+    assert refused.stdout == "", "a failing command still captures its (empty) output"
+
+
+def test_the_remaining_runner_survivors_are_equivalent_to_the_default() -> None:
+    """#233. Two survivors in `_default_runner` cannot be killed.
+
+    `check=None` and dropping `check` entirely both behave as `check=False`:
+    `subprocess.run`'s own default is `False`, and `None` is falsy where it is
+    tested. So no input distinguishes them from the code as written.
+
+    **Asserted rather than argued.** The claim "this argument's absence equals
+    its current value" is the kind that stops being true when a library changes
+    its default, and `check` is the one whose flip turns every ordinary tmux
+    refusal into an exception.
+    """
+    import inspect
+    import subprocess as sp
+
+    assert inspect.signature(sp.run).parameters["check"].default is False, (
+        "subprocess.run's default for `check` is no longer False, so dropping "
+        "the argument is no longer equivalent and those mutants are real"
+    )
+    # And None is falsy where `check` is tested, which is the other mutant.
+    assert not None
+
+    # The behaviour itself, through the real runner: a refusal does not raise
+    # however `check` is spelled.
+    assert tmux_runner(["false"]).returncode != 0
+
+
+def test_capture_panes_default_depth_is_a_tuning_number_not_a_boundary() -> None:
+    """#233. `lines: int = 40` mutated to `41` survives, and is left alive.
+
+    Three callers rely on the default: `claude_ipc` twice and `engine` once,
+    all reading a pane to judge whether an agent is waiting for a person. One
+    more line of scrollback does not change that judgment, and there is no
+    boundary at 40: it is a depth chosen to be enough, not a limit that
+    something breaks either side of.
+
+    Pinning it would assert a NUMBER rather than a property, and the next person
+    who tunes it would get a red test for a change that is theirs to make. What
+    is worth asserting is that the default reaches the argv at all, and that
+    `lines=0` still means the whole scrollback, which
+    `test_capture_pane_asks_for_the_whole_scrollback_or_a_bounded_tail` does.
+    """
+    runner = FakeRunner(stdout={"capture-pane": "out"})
+    Tmux(prefix="hr-", run=runner).capture_pane("vessel")
+
+    assert runner.calls[-1][4] == "-S", "the depth flag moved, so the default reaches nothing"
+    assert runner.calls[-1][5].startswith("-"), "the default depth is not a negative line count"

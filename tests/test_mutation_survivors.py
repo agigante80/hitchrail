@@ -335,3 +335,273 @@ def test_a_circular_symlink_is_explained_by_its_errno(tmp_path: Path) -> None:
     a.symlink_to(b)
     b.symlink_to(a)
     assert discovery._broken_link_reason(a) == "is a symlink loop, so it has no target to open"
+
+
+# -- #135: survivors recorded as EQUIVALENT, so they stop being re-triaged ----
+#
+# The sweep of 2026-09-07 left 177 survivors. 27 of them cannot be killed by any
+# test, and this section is where that is written down: the skill says an
+# equivalent mutant is recorded with the reason so it never resurfaces, and a
+# reason nobody can check is a claim rather than a record.
+#
+# **21 are on `# pragma: no cover` lifespan branches.** Both middlewares open
+# with `if scope["type"] not in ("http", "websocket")`, and every mutant of that
+# guard and of the `await self.app(...)` under it survives because the branch is
+# never taken: an ASGI lifespan message does not arrive through the transports
+# these tests use. The code already declares that line untested. Mutating a line
+# whose own comment says no test reaches it produces a survivor that means
+# nothing, which is what Google's mutation work calls an ARID node and suppresses
+# before generation rather than after.
+#
+# They are not silently dropped. They are the only survivors in this file's scope
+# that no test could kill without inventing a lifespan transport, and that
+# transport would assert nothing about Hitchrail.
+#
+# **6 are codec name case flips**, `latin-1` to `LATIN-1`, and those two are the
+# same codec. That one has a test below rather than a paragraph, because it is
+# checkable.
+
+
+def test_a_codec_name_is_case_insensitive_so_those_mutants_are_equivalent() -> None:
+    """#135. Six survivors flip the case of a codec name and change nothing.
+
+    `header_map` decodes header bytes with `latin-1`, which is what ASGI
+    specifies. Mutants replace it with `LATIN-1`. Python's codec registry
+    normalises the name, so both resolve to the same codec and produce the same
+    string: there is no input that distinguishes them, and no test can kill them.
+
+    **Asserted rather than argued.** The claim "these are equivalent" is exactly
+    the kind that gets written into a triage log, believed, and turns out to be
+    wrong. If a future Python ever made codec lookup case sensitive, this fails
+    and the six mutants become real again.
+    """
+    import codecs
+
+    raw = "Höst".encode("latin-1")
+
+    assert raw.decode("LATIN-1") == raw.decode("latin-1")
+    assert codecs.lookup("LATIN-1").name == codecs.lookup("latin-1").name
+
+
+# -- #233: projectnames, where four survivors are crashes and the rest are copy
+
+
+def test_display_name_replaces_undecodable_bytes_rather_than_raising() -> None:
+    """The behaviour the function exists for, which its docstring says already
+    broke once: `os.listdir` surrogate escapes a name that is not valid UTF-8,
+    and a strict decode then raises, so one latin-1 named folder under the root
+    turned the whole project list into a 500.
+    """
+    shown = projectnames.display_name("caf\udcff")
+
+    assert shown, "a surrogate escaped name produced nothing at all"
+    assert "\udcff" not in shown, "the lone surrogate survived, so json.dumps will raise"
+    assert shown.startswith("caf")
+
+
+def test_the_decodes_error_handler_is_unreachable_so_its_mutants_are_equivalent() -> None:
+    """#233. Two survivors drop or corrupt `errors` on the DECODE half of
+
+        name.encode("utf-8", "replace").decode("utf-8", "replace")
+
+    and neither can be killed. **`str.encode` with `errors="replace"` always
+    yields valid UTF-8**, so the decode never meets a byte it could fail on: the
+    handler it is given is never consulted, and `strict` or a name no codec
+    registers behaves identically.
+
+    The ENCODE's handler is the one doing the work, and it is pinned by the test
+    above.
+
+    **I wrote a killing test for these first and it passed against both
+    mutants**, because it fed a lone surrogate and expected the decode to see
+    bad bytes. The encode had already replaced them. Asserted here instead over
+    the shapes that reach this function: surrogate escaped names, astral
+    characters and plain ASCII.
+    """
+    for name in ("caf\udcff", "\udc80\udcff", "ok", "\U0001f600", "a b"):
+        encoded = name.encode("utf-8", "replace")
+        assert encoded.decode("utf-8") == encoded.decode("utf-8", "replace"), (
+            f"{name!r} reaches the decode as bytes a strict handler would refuse, "
+            f"so the mutants are a real gap after all and this test found it"
+        )
+
+
+def test_explain_name_names_the_first_character_not_the_second() -> None:
+    """#233. `name[0]` mutated to `name[1]` survived.
+
+    The branch reports a name whose FIRST character is not alphanumeric, so
+    reading the second is wrong twice: it names a character the reader did not
+    ask about, and on a one character name it raises `IndexError` from a
+    function whose job is to explain a refusal.
+    """
+    assert projectnames.explain_name("_") == (
+        "begins with '_'; a name must start with a letter or a digit"
+    ), "a one character name crashed or named the wrong character"
+
+    reason = projectnames.explain_name("_x")
+    assert reason is not None and "'_'" in reason and "'x'" not in reason
+
+
+def test_the_offender_buckets_do_not_report_one_character_twice() -> None:
+    """#233. `c.isascii() and not c.isspace()` mutated to `or` survived, and the
+    function's docstring calls this exact case out.
+
+    The distinguishing character is a PLAIN ASCII SPACE, not the non breaking
+    space the docstring talks about: for a space, `isascii` and `isspace` are
+    both true, so `and not` excludes it and `or not` admits it. For a non
+    breaking space both forms exclude it, so the obvious input proves nothing.
+    I used the non breaking space first and the mutant survived.
+
+    **Asserted on CONTENT, not on wording.** The rule this project follows is
+    that a message's phrasing is not pinned, because the next person to improve
+    the sentence should not get a red test. Which characters it names, and how
+    many times, is behaviour.
+    """
+    # Written as an escape: a literal one is invisible in a diff, and ruff
+    # RUF001 refuses it for exactly that reason.
+    described = projectnames._describe_offenders([" "])
+
+    assert described == "a space", (
+        f"a plain space landed in the `other` bucket as well as `spaces`, so one "
+        f"character is reported as two problems: {described!r}"
+    )
+
+
+def test_the_offender_message_names_the_actual_characters() -> None:
+    """#233. `shown = ", ".join(repr(c) ...)` mutated to `shown = None` survived,
+    and the message then reads `non ASCII characters (None)`.
+
+    **This is where the line between content and wording falls in this project.**
+    Which characters a refusal names is behaviour: it is the whole reason the
+    message exists, and a reader who is told `None` learns nothing about their
+    folder. How that sentence is phrased is not, so nothing here asserts the
+    words around the characters.
+
+    The truncation boundaries in the same function, `[:3]` against `[:4]` and
+    `> 3` against `>= 3`, are left alone on the same reasoning: whether an
+    ellipsis appears after the third or the fourth character is presentation,
+    and a test pinning it would fail on any future rewording of the list.
+    """
+    described = projectnames._describe_offenders(["Ж", "й"])
+
+    assert "None" not in described, f"the characters were not named: {described!r}"
+    assert repr("Ж") in described and repr("й") in described, (
+        f"a refusal that does not name the offending characters tells the "
+        f"reader nothing they could act on: {described!r}"
+    )
+
+
+# -- #233: security ----------------------------------------------------------
+
+
+def test_the_unterminated_bracket_guard_in_parse_host_is_redundant_not_a_gap() -> None:
+    """#233. `if end == -1:` survives as `== +1` and as `== -2`, and NEITHER is
+    a gap. **This was named in #233 as the flagship example of a survivor worth
+    killing, and that was wrong.**
+
+    `find` returns -1 only when `]` is absent, and the branch is entered only
+    when the value starts with `[`. So `value[end + 1 :]` is `value[0:]`, the
+    whole value, which starts with `[` and never with `:`, and the check three
+    lines below returns "" anyway:
+
+        rest = value[end + 1 :]
+        if rest and not rest.startswith(":"):
+            return ""
+
+    The early return is redundant with that one. It is worth keeping for the
+    reader, since "no closing bracket" is a different thought from "junk after
+    the bracket", but no input can tell the two spellings apart.
+
+    **The lesson is the one this phase keeps relearning.** A boundary mutation
+    on a security control LOOKS like the highest value survivor in the list, and
+    I argued it in a ticket as one, from its appearance rather than from the
+    code around it. Verified exhaustively instead.
+    """
+    from itertools import product
+
+    def with_sentinel(sentinel: int) -> object:
+        def f(raw: str) -> str:
+            value = raw.strip().lower()
+            if value.startswith("["):
+                end = value.find("]")
+                if end == sentinel:
+                    return ""
+                rest = value[end + 1 :]
+                if rest and not rest.startswith(":"):
+                    return ""
+                return value[1:end]
+            if value.count(":") > 1:
+                return ""
+            host = value.split(":")[0]
+            if any(c.isspace() for c in host):
+                return ""
+            return host.rstrip(".")
+
+        return f
+
+    for sentinel in (1, -2):
+        mutated = with_sentinel(sentinel)
+        for length in range(1, 6):
+            for parts in product("[]:.1a ", repeat=length):
+                raw = "".join(parts)
+                assert parse_host(raw) == mutated(raw), (  # type: ignore[operator]
+                    f"{raw!r} distinguishes `end == -1` from `end == {sentinel}`, so "
+                    f"this IS a real gap and the ticket was right after all"
+                )
+
+    # And the behaviour itself, which is what matters however it is spelled.
+    assert parse_host("[::1") == "", "an unterminated bracket must not parse"
+    assert parse_host("[::1]:8787") == "::1"
+
+
+def test_the_grant_cookie_carries_every_attribute_it_needs() -> None:
+    """#233. Four survivors live in `set_token_cookie`'s keyword arguments, and
+    the existing test asserts only `httponly` and `samesite`.
+
+    **Two of the four are real and two are not, and the difference is
+    Starlette's own defaults**, which I checked rather than assumed after
+    writing this test to kill all four and watching two survive:
+
+        set_cookie(..., path="/", samesite="lax", max_age=None, httponly=False)
+
+    So DROPPING `path` or `samesite` falls back to the same value and changes
+    nothing. Explicitly passing `None` does not.
+
+    - `path=None` is real. Starlette then emits no `Path`, the browser scopes
+      the cookie to the granting path, and a token granted at `/api/grant` is
+      sent back for `/api/grant` and nothing else: the page loads, every call
+      after it is refused, and the operator sees a tool that took their key and
+      then behaved as though they had never signed in.
+    - `max_age=None` is real, and here the default is against us: it makes a
+      session cookie, so a phone left on the page loses its grant whenever the
+      browser ends the session, which is the opposite of what a tool meant to
+      live on a phone wants.
+
+    The arguments are still written out in full at the call site even where they
+    match the default, because a security control that reads as "whatever the
+    framework does today" is one nobody can review, and Starlette's defaults are
+    not this project's contract.
+    """
+    from starlette.responses import JSONResponse
+
+    from hitchrail.security import COOKIE_MAX_AGE, TOKEN_COOKIE, set_token_cookie
+
+    response: JSONResponse = JSONResponse({})
+    set_token_cookie(response, "s3cret")
+    header = dict(response.headers)["set-cookie"]
+
+    assert f"{TOKEN_COOKIE}=s3cret" in header
+    assert "Path=/" in header, (
+        f"the cookie is scoped to the granting path, so every later request is "
+        f"refused and the tool reads as broken rather than unauthorised: {header}"
+    )
+    assert f"Max-Age={COOKIE_MAX_AGE}" in header, (
+        f"a session cookie instead of a lasting one, so a phone left on the page "
+        f"loses its grant whenever the browser ends the session: {header}"
+    )
+    assert "SameSite=" in header, "the CSRF property TokenMiddleware relies on is gone"
+    assert "HttpOnly" in header
+    assert "Secure" not in header, (
+        "a Secure cookie is never sent over plain HTTP on a LAN, which is a "
+        "supported deployment, and the tool silently stops working"
+    )

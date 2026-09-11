@@ -95,7 +95,18 @@ def test_sanitize_is_injective_over_a_generated_corpus() -> None:
     """
     from itertools import product
 
-    alphabet = ".:-abe"
+    # **`c` and `d` are in here because the escapes spell themselves with them
+    # (#135).** The alphabet was `.:-abe`, which cannot reach the collision the
+    # `-` escape exists to prevent: that needs a literal `-d` or `-c` in the
+    # NAME, so it can be confused with an encoded separator. Mutation testing
+    # found it. Deleting the `-` -> `--` escape left this test green, and with
+    # `c` and `d` present it fails on `':-d'` and `'-c.'` both encoding to
+    # `'e--c-d'`.
+    #
+    # So the docstring above was true of the pairs and not of the corpus: hand
+    # picked pairs are how the digest version passed while colliding, and a
+    # hand picked ALPHABET is the same mistake one level up.
+    alphabet = ".:-abcde"
     names = ["".join(p) for n in range(1, 5) for p in product(alphabet, repeat=n)]
     seen: dict[str, str] = {}
     for name in names:
@@ -104,6 +115,36 @@ def test_sanitize_is_injective_over_a_generated_corpus() -> None:
         assert clash is None, f"{name!r} and {clash!r} both sanitize to {out!r}"
         seen[out] = name
     assert len(seen) == len(names)
+
+
+def test_the_encoding_is_exactly_this_and_may_not_drift() -> None:
+    """#135. The three escapes, pinned to the character.
+
+    **This is a wire format, not an implementation detail.** A tmux session
+    outlives the process that made it, and its name is recomputed from the
+    project name on every call: `session_target` is `prefix + sanitize(name)`.
+    So changing an escape does not rename anything, it makes every RUNNING
+    session unaddressable, and the project reads as stopped while its agent is
+    alive in a pane nobody is looking for. That is the same failure the
+    docstring describes for tmux's own `.` rewrite, caused by us instead.
+
+    Five mutations survived the whole suite because nothing asserted the output
+    itself: `.` to `-D`, `:` to `-C`, and three that pad an escape with `XX`.
+    Each keeps `sanitize` injective, so the corpus above cannot see them, and
+    each silently orphans every existing session with a separator in its name.
+
+    Injectivity and stability are different properties and need different
+    tests. The corpus proves no two names collide; this proves the mapping is
+    the one sessions on disk were named with.
+    """
+    assert sanitize("a-b.c:d") == "e-a--b-dc-cd"
+
+    # Each escape on its own, so a failure names which one moved rather than
+    # only that something did.
+    assert sanitize("a.b") == "e-a-db", "the `.` escape moved"
+    assert sanitize("a:b") == "e-a-cb", "the `:` escape moved"
+    assert sanitize("a-b.c") == "e-a--b-dc", "the `-` escape moved"
+    assert sanitize("e-x") == "e-e--x", "the prefix or its re-encoding moved"
 
 
 @pytest.mark.parametrize("name", ["a.b", "e-x", "a-b", "..", "e-", "a:b.c"])

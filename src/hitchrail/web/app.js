@@ -195,13 +195,27 @@ function badgeFor(project) {
   // The canvas: `live && live.controller ? 'controller' : 'running'`. The
   // controller badge replaces the state badge rather than sitting beside it.
   if (project.protected) return "controller";
+  // `stopping` outranks `waiting`, and the order of these lines is the
+  // statement, not an accident (#183). A stop in flight is the action the
+  // person already took, and the wait dialog is where a prompt met during it
+  // is reported, with the pane and the keys. A row that is both is one whose
+  // stop ran into a question, and the badge names the thing they are waiting
+  // ON rather than the thing they are waiting FOR.
   if (project.stopping) return "stopping";
   // #88. `running` is true and useless here: the agent is alive and sitting on
   // a prompt that only somebody at a terminal can answer, so it will sit there
   // forever. A row saying nothing but "running" is the interface asserting
   // something it knows to be misleading, which the design forbids everywhere
   // else. An overlay like `stopping`, not a fifth state.
-  if (project.awaiting_trust) return "waiting";
+  //
+  // #183. Every clause of that is true of `awaiting_input` too. The two flags
+  // are kept apart in `sessions.py` because they are FOUND differently and
+  // cost differently, which is a fact about derivation and not about what a
+  // row should look like: both answers are "go to the pane", so the badge
+  // means "a person is needed" rather than naming which prompt. The meta line
+  // still says which. Descriptive only, as #91 requires of a signal an agent
+  // can produce: the badge gates nothing.
+  if (project.awaiting_trust || project.awaiting_input) return "waiting";
   return project.state;
 }
 
@@ -368,6 +382,13 @@ function sessionLink(href, label) {
   const link = document.createElement("a");
   link.className = "btn ghost";
   link.textContent = label;
+  // #163. The only control on a row that leaves the page, so it says so. The
+  // mark is decorative and hidden from the accessible name, which stays the
+  // words: a screen reader and a sighted person hear and read the same label.
+  const mark = document.createElement("span");
+  mark.setAttribute("aria-hidden", "true");
+  mark.textContent = " \u2197";
+  link.append(mark);
   link.href = href;
   link.target = "_blank";
   // `noreferrer` as much as `noopener`. Without it the outbound request
@@ -422,7 +443,7 @@ async function showSessionLink(project) {
       "This link was read off the terminal rather than published by the "
       + "session, so it may belong to an earlier session in the same pane.",
     actions: [["Close", "ghost", () => closeDialog()]],
-    extra: sessionLink(href, "Continue anyway"),
+    extra: sessionLink(href, "Open it anyway"),
   });
 }
 
@@ -437,19 +458,21 @@ function buildActions(project, actions) {
   };
 
   if (isRunning(project) || project.state === "stale") {
-    add("Open", "ghost").addEventListener("click", () => openLogs(project));
+    // #162. The word the route, `docs/api.md` and `openLogs` use. It was
+    // `Open`, the one control on the row that did not open the session.
+    add("Logs", "ghost").addEventListener("click", () => openLogs(project));
   }
   if (isRunning(project)) {
-    // "Continue" is Claude Code's own word for it, from the line it prints on
-    // start. `Open` next to it is the pane; this is the conversation.
+    // #163. The action and its object, no vendor word. One label for one
+    // action in two states: a link when the session has published one, and
+    // a button that asks for it when it has not, because the listing will not
+    // learn of a link arriving on its own. The stream announces state changes
+    // and this is not one, so it is asked for rather than waited for.
     const href = sessionHref(project.url);
     if (href !== null) {
-      actions.append(sessionLink(href, "Continue"));
+      actions.append(sessionLink(href, "Open session"));
     } else {
-      // A session that has not published a link yet. The listing will not
-      // learn of one arriving, because the stream announces state changes and
-      // this is not one, so it is asked for rather than waited for.
-      add("Get link", "ghost").addEventListener("click", () => showSessionLink(project));
+      add("Open session", "ghost").addEventListener("click", () => showSessionLink(project));
     }
   }
   if (project.state === "stopped") {
@@ -604,6 +627,7 @@ function showDialog({ title, body, actions, extra, forProject }) {
   const dialog = $("[data-dialog]");
   if (!dialog) return;
   dialog.replaceChildren();
+  delete dialog.dataset.refusal;
   if (forProject === undefined) {
     delete dialog.dataset.for;
   } else {
@@ -784,7 +808,7 @@ function showLostTrack(project) {
   });
 }
 
-function showTimedOut(project) {
+async function showTimedOut(project) {
   // #101. The wait can end two ways and they need different words.
   //
   // The engine looks at the pane ONCE when the wait expires, and says whether
@@ -799,13 +823,27 @@ function showTimedOut(project) {
   // predates it.
   const current = state.projects.find((p) => p.name === project.name) ?? project;
   if (current.awaiting_input) {
+    // #165. The engine captured this pane one screen ago to set the flag this
+    // dialog renders, and the first version then sent the reader to "that
+    // terminal", which is the one surface the prompt is never on: an operator
+    // opened the session link, saw nothing, and concluded the exit request
+    // had never been sent. So the question is shown here, in the same pane
+    // view `openLogs` renders, keys included, and this is the second capture
+    // of that screen: one from the sweep and one for the dialog, affordable
+    // because a wait expiring on a prompt is rare and this is the moment the
+    // person is deciding whether to kill a process with unsaved work.
+    //
+    // Fails closed if the pane cannot be read: a note saying so, never an
+    // empty box that reads as "the agent is asking nothing".
+    const extra = await paneView(current);
     showDialog({
       title: `${project.name} is waiting for you`,
       body:
-        "It was asked to exit and answered with a prompt. Only somebody at "
-        + "that terminal can reply to it, so Hitchrail has stopped waiting.",
+        "It was asked to exit and answered with a prompt, shown below. Reply "
+        + "with a key here or at the pane; Hitchrail has stopped waiting.",
+      extra,
       forProject: project.name,
-      // Kill is still here, and still second. The person may well want it, and
+      // Kill is still here, and still last. The person may well want it, and
       // the warning is the same one: the difference is that they now know what
       // they would be interrupting rather than being told nothing happened.
       actions: [
@@ -878,11 +916,22 @@ function showRefusal(result, project) {
     //
     // Relative, for the reason `grant.html` argues at length: this page is
     // served from the app root, wherever that is.
+    //
+    // #71. Left alone if it is already up. The stream's fatal branch asks
+    // once per fatal error and the reopen backs off forever, so a phone
+    // holding a stale token reached this once a minute, and `showDialog`
+    // starts with `replaceChildren`: the screen was torn down and rebuilt
+    // under the reader, focus on Sign in included. Same reason, same dialog,
+    // nothing to redraw. `showDialog` clears the tag, so any other dialog
+    // opened in between makes this one fresh again.
+    const dialog = $("[data-dialog]");
+    if (dialog?.open && dialog.dataset.refusal === "signed-out") return;
     showDialog({
       title: "Not signed in any more",
       body: "This browser is no longer accepted. Sign in again with your access key.",
       actions: [["Sign in", "accent", () => window.location.assign("grant")]],
     });
+    if (dialog) dialog.dataset.refusal = "signed-out";
     return;
   }
   if (code === "no_agent") {
@@ -959,6 +1008,25 @@ function showRefusal(result, project) {
         + " Killing it now ends the process immediately, and anything it has "
         + "not written to disk is lost.",
       actions,
+    });
+    return;
+  }
+  if (code === "unreadable_answer") {
+    // #82. The server answered and the answer did not arrive in one piece.
+    // For a stop, a kill, a start or a create, "That did not work" is a guess
+    // and it guesses wrong: on a 2xx the action DID happen on the machine, and
+    // the next thing a person does about "did not work" is tap Stop again or
+    // reach for Kill. The page says exactly what it knows, which is that the
+    // request was sent and the reply was unusable, and lets the listing say
+    // the rest. `api` keeps the real status for this code, so this branch
+    // cannot be reached by a refusal.
+    showDialog({
+      title: "The reply could not be read",
+      body:
+        "The request was sent and the server answered, but the answer did "
+        + "not arrive in one piece. Nothing here says whether it worked. The "
+        + "list will catch up.",
+      actions: [["Close", "ghost", () => closeDialog()]],
     });
     return;
   }
@@ -1152,13 +1220,23 @@ function answerPad(project, pane) {
 
 /* -- the log drawer ---------------------------------------------------- */
 
-async function openLogs(project) {
+/* The pane, with the keypad when the row is waiting on a person. ONE renderer,
+   used by the log drawer and by the waiting dialog (#165): `app.js` is past
+   the size guideline and #68 is open about it, and the size guard does not
+   read `web/`, so this comment is the rule. Never null: an unreadable pane
+   yields a note saying so, because a dialog built on this must not show an
+   empty box that reads as "nothing is being asked". */
+async function paneView(project) {
   const result = await api(
     `/api/sessions/${encodeURIComponent(project.name)}/logs?lines=40`,
   );
+  const extra = document.createElement("div");
   if (!result.ok) {
-    showRefusal(result);
-    return;
+    const note = document.createElement("p");
+    note.className = "meta";
+    note.textContent = `The pane could not be read: ${result.body.message}`;
+    extra.appendChild(note);
+    return extra;
   }
   const pane = document.createElement("pre");
   pane.className = "log-pane";
@@ -1170,11 +1248,16 @@ async function openLogs(project) {
   //
   // The flag is a hint, never the guard. It is up to 30s old by `attention.TTL_S`,
   // and the server re-reads the pane inside the send regardless.
-  const waiting = project.awaiting_trust || project.awaiting_input;
-  const extra = document.createElement("div");
   extra.appendChild(pane);
-  if (waiting) extra.appendChild(answerPad(project, pane));
+  if (project.awaiting_trust || project.awaiting_input) {
+    extra.appendChild(answerPad(project, pane));
+  }
+  return extra;
+}
 
+async function openLogs(project) {
+  const waiting = project.awaiting_trust || project.awaiting_input;
+  const extra = await paneView(project);
   showDialog({
     title: project.name,
     body: waiting
@@ -1336,10 +1419,21 @@ let reopenDelay = REOPEN_MS;
 /* Backed off and capped. The motivating case is a token the server stopped
    accepting, which no amount of asking will fix, so a fixed five seconds would
    be one refused request every five seconds for as long as the tab is open. */
+/* Overridable only so the browser tier can watch several reopen attempts
+   without waiting fifteen seconds per test (#71). Same shape and same
+   argument as `setStopPatience`: not read from the server, and a client that
+   shortened it would only make itself impatient. */
+let reopenPaceMs = null;
+
+export function setReopenPace(ms) {
+  reopenPaceMs = ms;
+  reopenDelay = ms;
+}
+
 function scheduleReopen() {
   if (reopenTimer !== null) return;
   const delay = reopenDelay;
-  reopenDelay = Math.min(reopenDelay * 2, REOPEN_CEILING_MS);
+  reopenDelay = reopenPaceMs ?? Math.min(reopenDelay * 2, REOPEN_CEILING_MS);
   reopenTimer = setTimeout(() => {
     reopenTimer = null;
     openStream();
@@ -1438,6 +1532,13 @@ function applySession(session) {
     return;
   }
   state.projects[index] = session;
+  // #165. The confirm, the wait and the waiting dialog all carry `forProject`,
+  // and all three are about a RUNNING session's stop. When the row leaves
+  // `running`, the process they were about is gone and a waiting dialog would
+  // go on showing a prompt nobody can answer, inviting a key into nothing.
+  // Any other dialog, a log view or a new folder sheet, carries no `for` and
+  // is left alone.
+  if (session.state !== "running") closeDialog(session.name);
   render();
 }
 
@@ -1532,7 +1633,16 @@ async function refresh() {
     // that, whether the root went away, tmux broke or the server faulted.
     // None of them is `down`: reporting a network problem for a root that was
     // unmounted sends somebody to look at their wifi instead of their mount.
-    setStreamState("blind");
+    //
+    // #72. Unless the stream is provably NOT live. The fatal branch calls this
+    // after the stream closed for good, and "Live, but this machine cannot be
+    // read" at that moment is the lie the strip exists to prevent. CLOSED is
+    // the test, not OPEN: at boot this runs while the stream is still
+    // connecting, and an unreadable machine then is still `blind`, which the
+    // recovery branch below already agrees with when it clears it.
+    if (!stream || stream.readyState !== EventSource.CLOSED) {
+      setStreamState("blind");
+    }
     return result;
   }
   if (document.documentElement.getAttribute("data-stream") === "blind") {
@@ -1625,6 +1735,7 @@ window.__hitchrail = {
   state,
   api,
   setStopPatience,
+  setReopenPace,
   openStream,
   get stream() {
     return stream;

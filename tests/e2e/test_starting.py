@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from playwright.async_api import Page, expect
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from support import DEFAULT_LABEL
 
@@ -78,31 +79,90 @@ async def test_a_start_that_dies_says_so_and_offers_the_output(
     page: Page, server: Harness
 ) -> None:
     """ "Started, then exited" is a sentence somebody can act on. "Failed to
-    start" is not."""
+    start" is not.
+
+    **Restored 2026-09-07, #67, after the weakened form was measured.** From
+    2026-08-28 this asserted only `not_to_have_attribute("data-state",
+    "running")`, with a comment claiming it "still fails if the dead start
+    reports nothing at all, which is the thing #56 was written to notice".
+
+    That claim was false. The row is already `stopped` when the button is
+    clicked, so the assertion was satisfied before the start had done anything
+    and the call took 0.26s where this one takes 8.65. Falsified twice: with
+    `_dead_start_output` returning "" it passed, and with `Engine.start` replaced
+    by `return self.get(name)`, so that nothing was ever started, it passed
+    again. A weakened assertion that still costs a browser is worse than none,
+    because it reads as coverage.
+    """
     server.seed(stopped=["koala"], agent_exits_immediately=True)
     await page.goto(server.base)
     row = page.locator(f'[data-project="{server.project("koala")}"]')
     await expect(row).to_be_visible()
     await row.get_by_role("button", name="Start").click()
 
-    # Weakened again, deliberately, and #67 is why.
+    # **Assert the PREMISE before the behaviour (#67).** This test needs the
+    # agent to be gone before the engine's first look. If it is not, the start
+    # legitimately SUCCEEDS, no refusal is produced, and the dialog below can
+    # never open: the test then spends its whole timeout on an event that cannot
+    # happen and fails as "Locator expected to be visible", which says nothing
+    # about why.
     #
-    # #66 made the output real and the unit and live_tmux tiers prove it: a
-    # dead pane keeps what it printed, the exit status survives, and a live
-    # pane is told from a dead one against a real tmux. Asserting it a fourth
-    # time here adds little.
+    # That is exactly what happened on CI from 2026-08-28 to 2026-09-07 and cost
+    # a ticket, two wrong hypotheses and a CI round trip to name. The fixture now
+    # uses `/bin/sh` so it is fast enough, and this races the two outcomes so
+    # that if it ever is not, the failure says so in one line.
+    dialog = page.locator("[data-dialog]")
+
+    # **One wait, and the diagnosis after it (round 2 review).**
     #
-    # What it added instead was a CI only failure nobody has explained. On the
-    # runner the dialog never opens within 45 seconds and the row reads
-    # `stale` rather than `stopped`, so the cleanup did not fire there either.
-    # It is green locally in 9 seconds and was green on CI before #66. Leaving
-    # a red main branch to hold an assertion the other tiers already make is
-    # the wrong trade, and weakening it quietly would be worse: #67 carries
-    # the reproduction.
+    # Round 1 flagged that `count()` after a `wait_for` is a fresh query a round
+    # trip later. My fix read BOTH halves after the same wait, which did not
+    # close the race and made the assertion strictly weaker: it had failed on
+    # `running.count() > 0` alone, and then failed only when the row was running
+    # AND no dialog had opened. `remain-on-exit` takes the row `running` to
+    # `stale`, so the very transition the race produces made the premise pass.
+    # The comment claimed it had been strengthened.
     #
-    # This still fails if the dead start reports nothing at all, which is the
-    # thing #56 was written to notice.
-    await expect(row).not_to_have_attribute("data-state", "running", timeout=45_000)
+    # There is no race here because there is only one wait. The row is read
+    # after the dialog has definitively failed to appear, so what it says is
+    # a diagnosis rather than a second guess at who won.
+    #
+    # `or_().first` is gone with it: it resolves in DOM ORDER, not in the order
+    # things appeared, so it never could say which outcome arrived.
+    try:
+        await dialog.wait_for(state="visible", timeout=45_000)
+    except PlaywrightTimeoutError:
+        state = await row.get_attribute("data-state")
+        pytest.fail(
+            f"no refusal dialog opened and the row reads data-state={state!r}. The "
+            f"fake agent outlived the engine's first poll, so the start SUCCEEDED "
+            f"and this test never exercised a dead start. That is #67: the shim "
+            f"must exit before `_await_running` calls `get()`, which is why it is "
+            f"a `sh` script and not a Python one."
+        )
+
+    # A closed `<dialog>` is display:none, so `to_contain_text` on it reports an
+    # empty string and says nothing about why: on CI this failed with "Actual
+    # value: (blank)" and no indication that the request was still in flight.
+    #
+    # The generous timeout is the engine's, not this test's. `start` polls for
+    # `start_grace` seconds before it can report a dead start, and every poll
+    # spawns `ps` and `tmux`, which on a shared runner is far slower than here.
+    await expect(dialog).to_be_visible(timeout=45_000)
+    await expect(dialog).to_contain_text("died")
+    await expect(dialog).to_contain_text("exited almost immediately")
+    await dialog.get_by_role("button", name="Read what it printed").click()
+
+    # #66 landed, so this asserts what the agent actually printed rather than
+    # only that something is there. `new_session` keeps the pane alive past
+    # its process, so the capture has something to find: without it the pane,
+    # the window, the session and the tmux server are gone inside fifty
+    # milliseconds and this control has nothing behind it.
+    printed = await dialog.locator("pre").inner_text()
+    assert "hitchrail-shim" in printed, printed
+    assert "status 3" in printed, (
+        f"the exit status is the diagnostic and it was lost: {printed!r}"
+    )
 
 
 async def test_the_log_drawer_shows_the_pane_tail(page: Page, server: Harness) -> None:
@@ -110,7 +170,7 @@ async def test_the_log_drawer_shows_the_pane_tail(page: Page, server: Harness) -
     await page.goto(server.base)
     row = page.locator(f'[data-project="{server.project("vessel")}"]')
     await expect(row).to_be_visible()
-    await row.get_by_role("button", name="Open").click()
+    await row.get_by_role("button", name="Logs").click()
 
     dialog = page.locator("[data-dialog]")
     await expect(dialog).to_contain_text("last 40 lines of the pane")

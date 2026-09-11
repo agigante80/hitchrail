@@ -39,10 +39,29 @@ ROOT = Path(__file__).resolve().parents[1]
 # and `/home/.../x` is what a redacted paste looks like once it is safe.
 _HOME_PATH = re.compile(r"(?:/home/|/Users/)(?!user\b|you\b|USER\b|<|\.\.\.)[A-Za-z0-9._-]+/")
 
+# systemd TEMPLATE INSTANCES, which are `name@instance.suffix` and name nobody
+# (#231). This project ships a systemd unit and documents it at length, so
+# `user@1000.service` and `getty@tty1.service` arrive in comments routinely, and
+# the guard read every one as an address. It cost a rewrite of a packaging
+# comment to dodge it once.
+#
+# **A closed vocabulary, not a widened allowlist.** These are systemd's unit
+# types, a finite set defined by another system, which is a different thing from
+# adding shapes to `_ALLOWED_EMAIL`: that list holds exact reserved values
+# (`noreply@`, `example.com`) and a SHAPE in it is how a guard stops guarding.
+# The suffix must be the LAST label, so `someone@mail.service.com` is still an
+# address.
+#
+# If `.service` ever becomes a real TLD this needs revisiting, which is why the
+# set is spelled out rather than matched loosely.
+_UNIT_SUFFIXES = "service|socket|timer|target|mount|automount|path|slice|scope|device|swap"
+
 # An email address, and NOT a URL's userinfo. `http://user:pass@box.lan` is a
 # host parsing fixture, not a person, and this project has several: the `(?<![:/])`
 # refuses a local part that a scheme or a colon introduced.
-_EMAIL = re.compile(r"(?<![:/\w])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+_EMAIL = re.compile(
+    rf"(?<![:/\w])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.(?!(?:{_UNIT_SUFFIXES})\b)[A-Za-z]{{2,}}\b"
+)
 # `noreply@` is how commit attribution works and names nobody. The rest are the
 # TLDs reserved for documentation and for local networks, which cannot reach a
 # real mailbox.
@@ -234,3 +253,35 @@ def test_no_tilde_path_shows_a_real_directory_scheme() -> None:
         + "\n  ".join(offences[:20])
         + "\nUse ~/projects, or add the root to _ALLOWED_ROOT if it is public."
     )
+
+
+@pytest.mark.parametrize(
+    ("text", "is_an_address"),
+    [
+        # #231. systemd template instances, which this repository documents at
+        # length because it ships a unit. None of them names a person.
+        ("user@1000.service", False),
+        ("getty@tty1.service", False),
+        ("systemd-nspawn@container.service", False),
+        ("apt-daily@.timer", False),
+        # And the guard still catches what it is for. The third is the case a
+        # loose suffix rule would have broken: a real domain that merely
+        # contains a unit type.
+        ("a.person@example.org", True),
+        ("first.last@company.co.uk", True),
+        ("someone@mail.service.com", True),
+    ],
+)
+def test_a_systemd_unit_name_is_not_read_as_an_email_address(
+    text: str, is_an_address: bool
+) -> None:
+    """#231. The guard matched `user@1000.service` and there was no way to write
+    about the unit without tripping it.
+
+    It was worked around once by rewording a packaging comment, which is the
+    outcome worth avoiding: the next person hits the same wall and reaches for
+    `_ALLOWED_EMAIL` instead, and a SHAPE in that list is how a guard stops
+    guarding. The suffix set is systemd's own closed vocabulary and must be the
+    LAST label, so a domain that merely contains one is unaffected.
+    """
+    assert bool(_EMAIL.search(text)) is is_an_address

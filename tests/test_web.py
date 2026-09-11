@@ -46,6 +46,12 @@ DIALOGS: dict[str, str] = {
     '"Found in the pane",': (
         "Informational, and it carries the link itself in `extra`. Reading it IS the action."
     ),
+    '"The reply could not be read",': (
+        "#82. The request was sent and the server answered; only the reply was "
+        "unusable. Offering an action here would be the guess this screen "
+        "replaces: a second Stop or a Kill for a session that is already "
+        "stopping. The list catches up on its own."
+    ),
     "`Stop ${displayProject(project.name)}?`,": _MUST_ACT,
     "`Clear ${project.name}?`,": _MUST_ACT,
     "`Stopping ${project.name}`,": _MUST_ACT,

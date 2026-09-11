@@ -133,10 +133,10 @@ The candidates in this repository, and what each one owns:
 |---|---|
 | `README.md` | anything a user does before or while running Hitchrail: prerequisites, install, flags, stated limitations |
 | `docs/superpowers/specs/...-design.md` | the argument. Amend it when the implementation departs from it, rather than letting the code drift |
-| `docs/roadmap.md` | phase scope, exit criteria, and the retrospective once a phase closes |
+| `docs/roadmap.md` | which phases exist, the state of each, and why each sits where it does; the plan under `docs/superpowers/plans/` owns the exit criteria, and the closing outcome is one line in the roadmap block |
 | `docs/tech-guidelines.md` | a rule that generalises beyond this ticket |
 | `.claude/rules/*.md` | the same rule, where it loads automatically for the files it governs |
-| `AGENTS.md` | project shape, commands, architecture, and the non negotiables. Tracked, and the canonical copy since #60; `.claude/CLAUDE.md` is a pointer |
+| `.claude/CLAUDE.md` | project shape, commands, architecture, and the non negotiables. Tracked, the one file `.gitignore` re-admits from `.claude/`, and the canonical copy since 2026-09-11; it was `AGENTS.md` from #60 until then |
 | `docs/versioning.md` | anything that changes the operator contract |
 
 Three cases where this section may **not** be N/A, because these are the ones that were
@@ -173,7 +173,7 @@ those answers a different question. The milestone says *when*; the labels say
 
 | Milestone | Meaning |
 |---|---|
-| `Phase 1` through `Phase 7` | Triaged, and it belongs to that phase of `docs/roadmap.md` |
+| a `Phase N:` milestone | Triaged, and it belongs to that phase of `docs/roadmap.md`, whose block heading is the milestone's title |
 | `Backlog` | Triaged, real work, no phase. Do-anytime maintenance, and tickets whose right answer may turn out to be closing them |
 | **empty** | **Nobody has triaged this yet** |
 

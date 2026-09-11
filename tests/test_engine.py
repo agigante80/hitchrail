@@ -2324,7 +2324,7 @@ def test_a_graceful_stop_waits_through_the_engines_injected_sleep(root: Path) ->
     """#95. `request_stop` defaulted its settle to a real `time.sleep`, going
     round the clock seam the architecture says every external surface uses.
 
-    `AGENTS.md`: "Every external surface is injected: tmux, the process table,
+    `.claude/CLAUDE.md`: "Every external surface is injected: tmux, the process table,
     memory readings, the Claude state directory, the clock. That is what makes
     the engine testable without a real machine."
 
@@ -3122,26 +3122,46 @@ def test_a_discarded_sweep_still_drops_a_claim_it_can_no_longer_support(
     a claim on stale evidence leaves a person told nothing, while keeping one
     leaves them told they are needed by a prompt that is gone.
 
-    **The epoch is bumped by a DIFFERENT project**, and the first version of
-    this test got that wrong. Clearing the project under test pops its own entry
+    **The epoch is bumped by a DIFFERENT name**, and the first version of this
+    test got that wrong. Clearing the project under test pops its own entry
     directly, so the claim went away whatever `clear` did and the mutation
     `stuck, clear = [], []` survived. `vessel` is the row whose claim must be
-    dropped by the sweep; `koala` is the unrelated stop that moves the epoch.
+    dropped by the sweep; `other` is the unrelated stop that moves the epoch.
+
+    **`other` is a NAME, not a project, and that is deliberate (#217).** It used
+    to be given a tmux session, two `ps_row` lines and a `pane_text`, none of
+    which did anything: the `root` fixture creates `vessel`, `vessel-social`,
+    `a`, `ab` and `dotted.site`, so `koala` was never yielded by
+    `list_root_projects`, never derived, never a candidate, and its pane was
+    never read. `_forget_attention` bumps the epoch for any name at all, which
+    is the only property this test needs from it, so the decoration is gone
+    rather than made real. A fixture that looks like it is under test and is not
+    tells the next reader something false.
     """
-    other = proj("koala")
+    other = "an-unrelated-stop"
     engine, tmux = engine_for(
         root,
-        sessions={proj("vessel"): PANE, other: PANE + 1},
+        sessions={proj("vessel"): PANE, proj("vessel-social"): PANE + 1},
         table=(
             ps_row(PANE, 1)
             + ps_row(AGENT, PANE, project=proj("vessel"), etime_s=60)
             + ps_row(PANE + 1, 1)
-            + ps_row(AGENT + 1, PANE + 1, project=other, etime_s=60)
+            + ps_row(AGENT + 1, PANE + 1, project=proj("vessel-social"), etime_s=60)
         ),
     )
     name = proj("vessel")
+    # **A SECOND project that would be newly marked, and it is what proves the
+    # discard path was entered (#235 L2).** Without it this test could not tell
+    # a discarded sweep from an ordinary one: with the pane clear, `awaiting_input`
+    # ends False either way, and deleting `discarded = self._attention_epoch !=
+    # epoch` from `scan_for_stuck` left it green. Measured.
+    #
+    # `vessel-social` sits on a modal for the whole test, so an ORDINARY sweep
+    # marks it and a DISCARDED one does not. The two paths now differ in the
+    # result rather than only in the route.
+    newly_stuck = proj("vessel-social")
     tmux.pane_text[name] = MODAL_PANE
-    tmux.pane_text[other] = CLEAR_INPUT_BOX
+    tmux.pane_text[newly_stuck] = CLEAR_INPUT_BOX
 
     assert name in engine.scan_for_stuck(), "the claim was never established"
     assert engine.get(name).awaiting_input is True
@@ -3149,6 +3169,7 @@ def test_a_discarded_sweep_still_drops_a_claim_it_can_no_longer_support(
     # The prompt is answered, so this sweep sees a clear box. An unrelated stop
     # lands mid capture and moves the epoch, which discards `stuck` only.
     tmux.pane_text[name] = CLEAR_INPUT_BOX
+    tmux.pane_text[newly_stuck] = MODAL_PANE
     bumped: list[str] = []
     original = tmux.capture_pane
 
@@ -3159,13 +3180,34 @@ def test_a_discarded_sweep_still_drops_a_claim_it_can_no_longer_support(
         return original(project, lines, escapes)
 
     tmux.capture_pane = bump_midway  # type: ignore[method-assign]
+    epoch_before = engine._attention_epoch
     engine.scan_for_stuck()
 
     assert bumped, "the capture never ran, so the discard path was not entered"
+    # **`bumped` proves the CAPTURE ran, not that the epoch moved (#217).**
+    # Delete `self._attention_epoch += 1` from `_forget_attention` and this test
+    # stayed green: with no bump the sweep is never discarded, `clear` is applied
+    # on the ordinary path, and the assertion below passes for the wrong reason.
+    #
+    # The epoch moving is necessary and was not sufficient (#235 L2): it says the
+    # sweep SHOULD be discarded, not that it WAS. The second project below is
+    # what says it was.
+    assert engine._attention_epoch != epoch_before, (
+        "the epoch did not move, so this sweep was never discarded and the "
+        "assertion below is testing the ordinary path instead of #182's"
+    )
     assert engine.get(name).awaiting_input is False, (
         "a sweep that discarded its `stuck` batch also discarded `clear`, so a "
         "person is still being told they are needed by a prompt that is gone. "
         "See #182."
+    )
+    # **And the other half of #182's asymmetry: `stuck` really was dropped.**
+    # This project sat on a modal for the whole sweep, so an ordinary sweep marks
+    # it. A discarded one must not, because that evidence predates a clear the
+    # person has already acted on.
+    assert engine.get(newly_stuck).awaiting_input is False, (
+        "the discarded sweep still wrote its `stuck` batch, so an observation "
+        "older than the clear is being reported at somebody. See #182."
     )
 
 
@@ -3205,6 +3247,55 @@ def test_a_claim_reconfirmed_after_the_ttl_is_kept_not_expired(root: Path) -> No
         "a claim past the TTL that this very sweep re-confirmed was expired by "
         "the same block that renewed it, and silently: `changed` is empty "
         "because the name was already there. See #182 round 2."
+    )
+
+
+async def test_a_claim_reconfirmed_after_the_ttl_is_announced(root: Path) -> None:
+    """#218. The test above proves the claim is KEPT; this one proves it is TOLD.
+
+    Two representations of one fact: `changed` asked the store (`in
+    self._stuck`), the interface asks the view (`attention.standing`, filtered
+    by the TTL), and inside the gap they disagreed. A name past `TTL_S` was
+    still in the dict, so a sweep that re-confirmed it computed "nothing
+    changed" and announced nothing, while the page, which had read `standing`
+    on reconnect, showed the row as not waiting. The server knew; nobody was
+    told. Closing a phone for thirty seconds reaches it, because the prune
+    lived inside the sweep and an unwatched engine prunes nothing.
+
+    **Asserted on the EVENT, not on `awaiting_input`.** Every existing test
+    read the flag or the dict, and the flag reads True either way once the
+    entry is renewed, which is exactly why this survived.
+    """
+    clock = FakeClock()
+    bus = EventBus()
+    engine, tmux = engine_for(
+        root,
+        sessions={proj("vessel"): PANE},
+        table=running_table(etime_s=60),
+        clock=clock,
+    )
+    engine._bus = bus
+    name = proj("vessel")
+    tmux.pane_text[name] = MODAL_PANE
+    seen: list[dict[str, object]] = []
+    bus.publish = lambda payload: seen.append(payload)  # type: ignore[assignment]
+
+    with bus.subscribe():
+        assert engine.scan_for_stuck() == [name]
+        assert [p["name"] for p in seen] == [name], "the first claim was never announced"
+
+        # Past the TTL with nobody sweeping: the page that reconnects now reads
+        # `standing` and shows the row as NOT waiting.
+        clock.now += attention.TTL_S + 1
+        assert name not in engine._needs_a_person()
+
+        seen.clear()
+        engine.scan_for_stuck()
+
+    assert [(p["name"], p["awaiting_input"]) for p in seen] == [(name, True)], (
+        "a claim re-confirmed after its TTL was kept and announced to nobody: "
+        "the store still held the name, so `changed` said nothing changed, "
+        "while the interface had already read it as expired. See #218."
     )
 
 

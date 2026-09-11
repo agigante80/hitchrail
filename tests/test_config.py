@@ -8,6 +8,8 @@ socket.
 from __future__ import annotations
 
 import ast
+import re
+import socket
 import tomllib
 from collections.abc import Callable
 from pathlib import Path
@@ -23,6 +25,7 @@ from hitchrail.config import (
     local_addresses,
     normalise_host,
     normalise_origin,
+    origin_forms,
 )
 from hitchrail.roots import Root
 
@@ -244,6 +247,28 @@ def test_a_padded_extra_host_is_usable(tmp_path: Path) -> None:
     cfg = Config(roots=_r(tmp_path), host="0.0.0.0", token="t", extra_hosts=(" phone.lan ",))
     assert "phone.lan" in cfg.allowed_hosts
     assert " phone.lan " not in cfg.allowed_hosts
+
+
+# **Patching `hitchrail.hostnames.socket.*` patches the STDLIB (#235 L8).**
+#
+# `hitchrail.hostnames` does `import socket`, so `hitchrail.hostnames.socket` IS
+# the module object, and `monkeypatch.setattr("hitchrail.hostnames.socket.socket",
+# ...)` replaces `socket.socket` for every importer in the process, not just for
+# the module under test. Verified: `hitchrail.hostnames.socket is socket`.
+#
+# **Recorded rather than fixed, and the reason is a rule this project already
+# has.** The fix would be to import the three names into `hostnames` so tests
+# could patch module-local bindings, and that is a production change made for a
+# test's benefit: the move #216 refused when it declined to add a `--tmux-socket`
+# flag so the CLI tier could isolate itself.
+#
+# What contains it: `monkeypatch` is function scoped and restores on teardown, so
+# nothing survives the test, and this suite runs in one process without xdist, so
+# no other test is executing while the fake is installed. Both halves have to
+# hold. If either changes, this is a hazard rather than a note.
+#
+# The tests below and their siblings all inherit this. It is written once here
+# rather than at each of the ten patch sites.
 
 
 def test_local_addresses_survives_a_machine_that_cannot_make_a_socket(
@@ -959,7 +984,11 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # predicate rather than only in the ticket. A stale modal reads as live,
         # which is cosmetic for #100's badge and a keystroke for #204, and the
         # next reader of this function is the one who needs to know that.
-        "claude_ipc.py": 800,
+        # 800 to 821 for closing #208: `_live_ornament_row` and the allowance
+        # it reads. The predicate is five lines; the rest is the belief behind
+        # the number and the two captured screens that justify it, which is
+        # exactly the kind of vendor layout fact this module quarantines.
+        "claude_ipc.py": 821,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.
@@ -1037,7 +1066,11 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # declined to renew; round 2 found that hoisting the expiry above the
         # renewal loop popped a claim the same sweep had just written, so the
         # ordering is now spelled out where it can be read.
-        "engine.py": 1185,
+        # 1185 to 1198 for #218. The prune moved above `changed`, and the
+        # comment says which side of the renewal it is on and why the other
+        # side was round 1 of #182's regression: the two look alike in a diff
+        # and are opposite in effect, so the next review needs the reason.
+        "engine.py": 1198,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -1161,7 +1194,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # two layers deep rather than two jobs wide, so it is tracked here
         # instead of split mid migration. #127 carries the split.
         "discovery.py": 440,
-        "security.py": 409,
+        # 409 to 418 for #78: two entries in the exemption and the argument
+        # beside them, which the set's own rule requires of every entry.
+        "security.py": 418,
         # rather than one. A refusal handler is the shape this file is made of.
         # 513 to 517 for #120. The listing payload reports every configured
         # root as a labelled list rather than one path string, and the comment
@@ -1526,7 +1561,7 @@ def _mutmut_config() -> dict[str, list[str]]:
     **Fails rather than skips when the section is missing or unparseable.** A
     configuration guard that passes when it cannot find its configuration is
     the exact failure mode this exists to prevent, and it is how the
-    `AGENTS.md` guards used to pass quietly on a clone.
+    `.claude/CLAUDE.md` guards used to pass quietly on a clone.
     """
     import tomllib
 
@@ -1554,8 +1589,17 @@ def _first_party_imports(path: Path) -> set[str]:
             parts = (node.module or "").split(".")
             if len(parts) > 1:
                 found.add(parts[1] + ".py")
-            # `from hitchrail import claude_ipc, discovery`
-            found |= {a.name + ".py" for a in node.names if len(parts) == 1}
+            # `from hitchrail import claude_ipc, discovery`, where a name is a
+            # MODULE only if there is a file behind it. `from hitchrail import
+            # __version__` binds a string in `__init__.py`, and reading it as a
+            # module asked for `__version__.py` to be copied. Checked against
+            # the source tree rather than by pattern: a dunder rule would still
+            # be wrong about any other re-exported name.
+            found |= {
+                a.name + ".py"
+                for a in node.names
+                if len(parts) == 1 and (_REPO / "src" / "hitchrail" / f"{a.name}.py").exists()
+            }
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 bits = alias.name.split(".")
@@ -1575,7 +1619,7 @@ def test_every_mutated_module_can_be_imported_from_the_mutants_tree() -> None:
 
     The check is a `tomllib` read and an `ast` walk, so it costs milliseconds
     and needs no mutation run. That shape is the point: the expensive sweep
-    stays on demand, per `AGENTS.md`, and the cheap invariant that keeps it
+    stays on demand, per `.claude/CLAUDE.md`, and the cheap invariant that keeps it
     RUNNABLE becomes a gate. A check exempt from CI is a check that can rot
     without anybody learning.
 
@@ -1584,14 +1628,31 @@ def test_every_mutated_module_can_be_imported_from_the_mutants_tree() -> None:
     has now hit three times.
     """
     section = _mutmut_config()
-    copied = {Path(p).name for p in section["source_paths"] + section.get("also_copy", [])}
+    entries = section["source_paths"] + section.get("also_copy", [])
+    copied = {Path(p).name for p in entries}
+
+    # **Every copied file, not only the mutated ones, and #221 is why.** This
+    # walked `source_paths` alone, so it checked seven modules and ignored the
+    # twelve in `also_copy` and every test. `engine.py` is copied rather than
+    # mutated and imports `attention`, which was in neither list, so the tree
+    # had `engine.py` and no `attention.py`: `conftest.py` failed to import, and
+    # pytest exited 4, a USAGE error rather than a test failure. mutmut reported
+    # only "Failed to run pytest with args", which is why it read as a broken
+    # command for a day. The guard was green throughout, because the module that
+    # could not import was one it never looked at.
+    scanned: list[Path] = []
+    for rel in entries:
+        path = _REPO / rel
+        if path.is_dir():
+            scanned.extend(sorted(path.rglob("*.py")))
+        elif path.suffix == ".py":
+            scanned.append(path)
 
     missing: dict[str, set[str]] = {}
-    for rel in section["source_paths"]:
-        module = _REPO / rel
+    for module in scanned:
         gaps = {i for i in _first_party_imports(module) if i not in copied}
         if gaps:
-            missing[Path(rel).name] = gaps
+            missing[str(module.relative_to(_REPO))] = gaps
 
     assert not missing, (
         "the mutants tree cannot import: "
@@ -1599,3 +1660,678 @@ def test_every_mutated_module_can_be_imported_from_the_mutants_tree() -> None:
         + ". Add each to [tool.mutmut] source_paths or also_copy, or `uv run mutmut run` "
         "dies before it scores a single mutant."
     )
+
+
+# -- #198: the rules that load for the modules on the spawn path --------------
+
+_SECURITY_RULE = _REPO / ".claude" / "rules" / "security.md"
+
+
+def _security_rule_paths(rule: Path | None = None) -> list[str]:
+    """The `paths:` list from the rule file's frontmatter, read as structure.
+
+    Never a substring search for a module name. The frontmatter is located by
+    its delimiters, `paths:` by being a top level key inside it, and its entries
+    by being the indented list items that follow. A grep would match this
+    docstring and every prose mention of a module below it, which is the trap
+    this repository has hit three times and `test_every_mutated_module_can_be_`
+    `imported_from_the_mutants_tree` already names.
+
+    Takes the file rather than closing over it so the refusals below can be
+    driven against synthetic frontmatter. Round 1 of review found the guard's
+    four refusals had no test at all: they had been verified once, by hand, on
+    the real file, which says nothing about whether a later edit leaves them
+    able to fail.
+    """
+    rule = rule or _SECURITY_RULE
+    text = rule.read_text()
+    block = re.match(r"\A---\n(?P<front>.*?)\n---\n", text, re.S)
+    assert block, (
+        f"{rule} has no frontmatter block, so the path scoped rules load "
+        "for nothing at all. A rewritten header must fail here rather than leave "
+        "this guard comparing against an empty list."
+    )
+
+    found: list[str] = []
+    inside = False
+    seen_key = False
+    for line in block.group("front").split("\n"):
+        key = re.match(r"^paths:(?P<tail>.*)$", line)
+        if key:
+            # **A second `paths:` key is refused rather than merged.** The
+            # parser used to return the union of both blocks, and a union is a
+            # SUPERSET of what loads: YAML is last wins, so an entry from the
+            # first block would satisfy this guard while the rule file never
+            # loaded for it. That is the direction in which this whole check
+            # can pass falsely, which is why it raises instead of being read
+            # generously.
+            #
+            # **The key is matched with any tail, and round 2 of review is why.**
+            # The first version required the key alone on its line, so a second
+            # key written flow style (`paths: ["a.py"]`) or with a trailing
+            # comment fell through to the `^\S` branch below, ended the list
+            # silently, and left exactly the union this assertion exists to
+            # refuse. Matching the name and rejecting the tail closes both.
+            assert not seen_key, (
+                f"{rule} has more than one top level `paths:` key. YAML keeps the "
+                "last, so reading both would report modules as covered that no "
+                "rule loads for."
+            )
+            seen_key = True
+            tail = key.group("tail").strip()
+            if tail and not tail.startswith("#"):
+                raise AssertionError(
+                    f"{rule}: `paths:` carries {tail!r} on its own line. This parser "
+                    "reads the block form only, and reading a flow style list wrongly "
+                    "is how a module reports as covered by a rule that never loads."
+                )
+            inside = True
+            continue
+        if not inside:
+            continue
+        if not line.strip() or re.match(r"^\s*#", line):
+            # A comment or a blank line inside the list is legal YAML and says
+            # WHY an entry is there, which is the most useful thing in the file.
+            # The first version of this parser ended the list at the first one,
+            # silently dropping the two entries below it, and the run that
+            # caught it was the one that added a comment. A guard that reads
+            # structure has to read the whole structure.
+            continue
+        entry = re.match(r'^\s+-\s*"(?P<path>[^"]+)"\s*$', line)
+        if entry:
+            found.append(entry.group("path"))
+            continue
+        if re.match(r"^-", line):
+            # A sequence item at column zero under a mapping key is legal YAML
+            # and the `^\S` branch below used to drop it, and everything after
+            # it, in silence. Round 2 found it: the parser's own message says an
+            # entry read as nothing is a module it would stop checking without
+            # saying so, and this was that shape inside the parser saying it.
+            raise AssertionError(
+                f"{rule}: {line!r} is a list entry at column zero. It is legal YAML "
+                "and this parser does not read it, so it must refuse rather than "
+                "truncate the list here and report the rest as covered."
+            )
+        if re.match(r"^\S", line):
+            inside = False
+            continue
+        raise AssertionError(
+            f"{rule}: this parser cannot read {line!r} as a `paths:` entry. "
+            "Failing rather than skipping it: an entry read as nothing is a module "
+            "this guard would then report as missing, or worse, one it would stop "
+            "checking without saying so."
+        )
+
+    assert found, (
+        f"{rule} has frontmatter but no `paths:` entries this parser can "
+        "read. The list is the record of which modules load the security rules, and "
+        "a guard that cannot find it must fail rather than pass on nothing."
+    )
+    return found
+
+
+def _stale_rule_entries(listed: list[str]) -> list[str]:
+    """The entries naming no file, which the subset check cannot see.
+
+    `headers.py`, `server.py` and `cli.py` are in the rule and deliberately not
+    in `[tool.mutmut] source_paths`, so nothing in the subset direction checks
+    them at all: rename or split one and its entry matches no file, the rules
+    stop loading for it, and every guard in this repository stays green. That is
+    #126's asymmetry reappearing inside the guard written to answer it.
+
+    A function rather than a comprehension inline, because round 2 of review
+    pointed out the comprehension could only ever run against the real tree, in
+    its passing direction, on the one machine where `.claude/` exists. Here it
+    can be driven with a list.
+    """
+    return [entry for entry in listed if not (_REPO / entry).exists()]
+
+
+def test_every_mutated_module_loads_the_security_rules_when_it_is_edited() -> None:
+    """#198. `roots.py` was created the day after the rule file was last edited,
+    so nothing loaded when an agent opened the module holding the injectivity
+    argument that keeps two projects off one tmux session.
+
+    **The expectation is derived from a list somebody already maintains.**
+    `[tool.mutmut] source_paths` is curated as "the modules between a web page
+    and a shell", and #130 argued `roots.py` onto it with a measurement. Asking
+    that the security rule covers every module the project already mutates costs
+    no second list to keep.
+
+    **What this does NOT claim, and the limit is the point.** mutmut's list is a
+    LOWER BOUND, not the definition of the set. `headers.py`, `server.py` and
+    `cli.py` are in the rule and are deliberately not mutated, so the two lists
+    are different sizes on purpose and neither contains the other. This catches
+    a module the project has already classified as being on the spawn path. It
+    says nothing about one nobody has classified yet, and #126's lesson is that
+    the unclassified direction is where things actually go missing.
+
+    **It skips rather than fails without `.claude/rules/`**, which is
+    gitignored, so this is not a gate: it runs on the machine where the list is
+    edited and on no CI leg. That is the honest cost of deriving the check from
+    a file the repository does not carry. The directory asked about is `rules/`
+    and not `.claude/` itself: `.claude/CLAUDE.md` is tracked since 2026-09-11,
+    so `.claude/` exists in every clone, and asking about it would have turned
+    this skip into a failure on every CI leg.
+
+    **It is deliberately NOT in `[tool.mutmut] pytest_add_cli_args`, against the
+    ticket's own instruction.** #198 required a `--deselect` entry beside the
+    four repository shape guards, reasoning that a test reading `.claude/` fails
+    under `mutmut run` because `also_copy` never copies it. The first half is
+    right and the conclusion is not: `also_copy` carries `src/hitchrail/*` and
+    `tests`, so in the mutants tree this file resolves a `_REPO` with no
+    `.claude/` in it and the skip below is what runs. Review round 1 verified
+    that in the tree rather than by inference: a generated `mutants/` was run
+    with mutmut's own selection and reported `692 passed, 1 skipped`, the skip
+    being this test. A deselect entry would have claimed a breakage that does
+    not happen and hidden the guard from the one suite where somebody might
+    notice it had stopped running.
+
+    **The skip is on the DIRECTORY, and a missing file is a failure.** They are
+    not the same condition, and conflating them is how this guard would have
+    died quietly: `.claude/rules/` absent is a checkout that cannot carry the
+    rule, while `.claude/rules/` present without the rule file is the rule having been
+    renamed, moved into a subdirectory, or deleted, which is #198 recurring with
+    the guard green. Review round 1 produced exactly that state and got a skip
+    whose stated reason was false.
+    """
+    if not _SECURITY_RULE.parent.exists():
+        pytest.skip("`.claude/rules/` is not in this checkout (it is gitignored)")
+
+    assert _SECURITY_RULE.exists(), (
+        f"`.claude/rules/` is here but {_SECURITY_RULE} is not, so this guard has stopped "
+        "checking rather than been skipped. Restore the file, or move this constant "
+        "to wherever the path scoped security rules now live."
+    )
+
+    listed = _security_rule_paths()
+    missing = [p for p in _mutmut_config()["source_paths"] if p not in set(listed)]
+
+    assert not missing, (
+        "the security rules do not load for "
+        + ", ".join(missing)
+        + ". [tool.mutmut] source_paths in pyproject.toml treats each as a module "
+        f"between a web page and a shell; {_SECURITY_RULE}'s `paths:` list decides "
+        "which modules load those rules when an agent edits them, and it omits these."
+    )
+
+    gone = _stale_rule_entries(listed)
+    assert not gone, (
+        f"{_SECURITY_RULE} names " + ", ".join(gone) + ", which do not exist. An entry "
+        "pointing at nothing loads no rules for anything, and it looks identical to a "
+        "module that is covered."
+    )
+
+
+# The refusals above, exercised. Round 1 of review found them written and
+# unasserted: verified once by hand against the real file, which says nothing
+# about whether a later edit leaves them able to fail. Each case below is a
+# shape the parser must NOT read generously, because every one of them ends
+# with a module whose security rules silently stop loading.
+
+
+def _rule_file(tmp_path: Path, frontmatter: str) -> Path:
+    rule = tmp_path / "security.md"
+    rule.write_text(f"---\n{frontmatter}\n---\n\n# You are editing something\n")
+    return rule
+
+
+def test_the_rule_parser_reads_entries_through_comments_and_blank_lines(tmp_path: Path) -> None:
+    """The regression that shipped inside this guard's own first version.
+
+    It ended the list at the first YAML comment and silently dropped the two
+    entries below it. What caught it was adding a comment to explain the fix,
+    which is luck rather than a check.
+    """
+    rule = _rule_file(
+        tmp_path,
+        'paths:\n  - "src/a.py"\n  # why b is here\n\n  - "src/b.py"',
+    )
+    assert _security_rule_paths(rule) == ["src/a.py", "src/b.py"]
+
+
+def test_the_rule_parser_refuses_a_file_with_no_frontmatter(tmp_path: Path) -> None:
+    rule = tmp_path / "security.md"
+    rule.write_text("# You are editing something\n\npaths are elsewhere now\n")
+    with pytest.raises(AssertionError, match="no frontmatter block"):
+        _security_rule_paths(rule)
+
+
+def test_the_rule_parser_refuses_frontmatter_with_no_paths_key(tmp_path: Path) -> None:
+    """A renamed key must not read as an empty list. An empty list makes the
+    subset check vacuously true, so the guard would pass while nothing loads."""
+    rule = _rule_file(tmp_path, 'globs:\n  - "src/a.py"')
+    with pytest.raises(AssertionError, match="no `paths:` entries"):
+        _security_rule_paths(rule)
+
+
+def test_the_rule_parser_refuses_an_entry_it_cannot_read(tmp_path: Path) -> None:
+    """An unquoted scalar is legal YAML and is not read here. Failing loudly is
+    the point: an entry read as nothing is a module the guard stops checking."""
+    rule = _rule_file(tmp_path, 'paths:\n  - "src/a.py"\n  - src/b.py')
+    with pytest.raises(AssertionError, match="cannot read"):
+        _security_rule_paths(rule)
+
+
+def test_the_rule_parser_refuses_a_second_paths_key(tmp_path: Path) -> None:
+    """The one shape that can pass FALSELY. Reading both blocks returns their
+    union, and YAML keeps only the last, so an entry from the first block would
+    report a module as covered by a rule that never loads for it."""
+    rule = _rule_file(tmp_path, 'paths:\n  - "src/a.py"\nother: 1\npaths:\n  - "src/b.py"')
+    with pytest.raises(AssertionError, match="more than one top level"):
+        _security_rule_paths(rule)
+
+
+def test_the_rule_parser_returns_entries_verbatim_for_the_caller_to_resolve(
+    tmp_path: Path,
+) -> None:
+    """The parser must not normalise or drop a path that names no file: the
+    existence check belongs to `_stale_rule_entries`, which is tested
+    separately. This asserts only the parser's half, which is that it hands the
+    entry on unchanged rather than quietly filtering it."""
+    rule = _rule_file(tmp_path, 'paths:\n  - "src/hitchrail/gone.py"')
+    assert _security_rule_paths(rule) == ["src/hitchrail/gone.py"]
+    assert not (_REPO / "src/hitchrail/gone.py").exists()
+
+
+def test_a_rule_entry_naming_no_file_is_reported_as_stale() -> None:
+    """The direction the subset check cannot see, driven by a list rather than
+    by the repository. Against the real tree this returns nothing, which is a
+    guard that has never been observed doing its job."""
+    assert _stale_rule_entries(["src/hitchrail/config.py"]) == []
+    assert _stale_rule_entries(
+        ["src/hitchrail/config.py", "src/hitchrail/renamed_away.py"]
+    ) == ["src/hitchrail/renamed_away.py"]
+
+
+def test_the_rule_parser_refuses_a_flow_style_second_paths_key(tmp_path: Path) -> None:
+    """Round 2. The block-form-only key match let this through: the second key
+    fell to the `^\\S` branch, ended the list silently, and returned the first
+    block's entries as the answer. YAML keeps the last key, so those modules
+    would have reported as covered by a rule that never loads for them."""
+    rule = _rule_file(tmp_path, 'paths:\n  - "src/a.py"\npaths: ["src/c.py"]')
+    with pytest.raises(AssertionError, match="more than one top level"):
+        _security_rule_paths(rule)
+
+
+def test_the_rule_parser_refuses_a_flow_style_first_paths_key(tmp_path: Path) -> None:
+    """The same shape with only one key. Reading the name and ignoring the tail
+    would report an empty list, and an empty list makes the subset check
+    vacuously true."""
+    rule = _rule_file(tmp_path, 'paths: ["src/a.py", "src/b.py"]')
+    with pytest.raises(AssertionError, match="carries"):
+        _security_rule_paths(rule)
+
+
+def test_the_rule_parser_refuses_a_list_entry_at_column_zero(tmp_path: Path) -> None:
+    """Legal YAML this parser does not read. It used to truncate the list there
+    and report everything after it as absent, silently, which is the shape the
+    parser's own refusal message forbids."""
+    rule = _rule_file(tmp_path, 'paths:\n  - "src/a.py"\n- "src/b.py"\n  - "src/c.py"')
+    with pytest.raises(AssertionError, match="column zero"):
+        _security_rule_paths(rule)
+
+
+def test_every_test_the_sweep_deselects_still_exists() -> None:
+    """#221. A `--deselect` naming a test that is gone makes pytest exit 4, and
+    mutmut renders that as "Failed to run pytest with args: [...]".
+
+    **That message names the arguments, so it reads as a malformed command**,
+    and every argument in it is valid. The one time this happened the cause was
+    a missing module rather than a stale node id, and it still cost a day. This
+    closes the other way in.
+
+    Reads the node id structurally: the file must exist and the function must be
+    DEFINED in it. A substring search would match the name in a docstring, which
+    is how a guard in this repository has failed three times.
+    """
+    deselected = [
+        arg.split("=", 1)[1]
+        for arg in _mutmut_config().get("pytest_add_cli_args", [])
+        if arg.startswith("--deselect=")
+    ]
+    assert deselected, (
+        "[tool.mutmut] pytest_add_cli_args deselects nothing. The repository shape "
+        "guards MUST be deselected under a sweep: they read the source, and under a "
+        "run that source is a tree nobody wrote."
+    )
+
+    gone: list[str] = []
+    for nodeid in deselected:
+        path, _, name = nodeid.partition("::")
+        target = _REPO / path
+        defined = target.exists() and re.search(
+            rf"^def {re.escape(name)}\(", target.read_text(), re.M
+        )
+        if not defined:
+            gone.append(nodeid)
+
+    assert not gone, (
+        "[tool.mutmut] deselects tests that do not exist: "
+        + ", ".join(gone)
+        + ". pytest exits 4 on an unknown node id, and mutmut reports that as a bad "
+        "command rather than a missing test."
+    )
+
+
+# -- #233: local_addresses' happy path, which no test pinned ------------------
+
+
+def test_local_addresses_asks_the_machine_exactly_these_questions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#233. Seventeen mutants lived in this function and every one survived.
+
+    Three tests cover it and all three are FAILURE paths: no socket, no
+    hostname, a failing lookup. Nothing asserted what it asks for when the
+    machine answers, so the arguments were free: `getaddrinfo(None, None)`,
+    `socket.socket(socket.AF_INET, None)`, `probe.connect(None)` and a dropped
+    second argument all passed.
+
+    **The arguments are the behaviour here.** `AF_INET` with `SOCK_DGRAM` is
+    what makes the probe ask the routing table without sending a packet, and
+    `192.0.2.1` is TEST-NET-1 precisely because it is guaranteed unrouted: a
+    mutant that connects somewhere real turns a config read into traffic.
+    """
+    asked: dict[str, object] = {}
+
+    class Probe:
+        def __enter__(self) -> Probe:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+        def connect(self, address: tuple[str, int]) -> None:
+            asked["connect"] = address
+
+        def getsockname(self) -> tuple[str, int]:
+            return ("10.0.0.7", 0)
+
+    monkeypatch.setattr("hitchrail.hostnames.socket.gethostname", lambda: "box")
+
+    def record_lookup(*args: object) -> list[tuple[object, ...]]:
+        asked["getaddrinfo"] = args
+        return [(0, 0, 0, "", ("192.168.1.10", 0))]
+
+    def record_socket(*args: object) -> Probe:
+        asked["socket"] = args
+        return Probe()
+
+    monkeypatch.setattr("hitchrail.hostnames.socket.getaddrinfo", record_lookup)
+    monkeypatch.setattr("hitchrail.hostnames.socket.socket", record_socket)
+
+    result = local_addresses()
+
+    assert asked["getaddrinfo"] == ("box", None), (
+        "the hostname lookup asks for the name this machine reported, with no service filter"
+    )
+    assert asked["socket"] == (socket.AF_INET, socket.SOCK_DGRAM), (
+        "a UDP socket is what asks the routing table without sending a packet"
+    )
+    assert asked["connect"] == ("192.0.2.1", 1), (
+        "TEST-NET-1 is guaranteed unrouted; connecting anywhere else turns "
+        "reading the config into real traffic"
+    )
+    assert result == ("box", "192.168.1.10", "10.0.0.7"), (
+        f"the three sources are the hostname, its lookup and the routing "
+        f"probe, in that order and deduplicated: {result}"
+    )
+
+
+# -- #233: the origin normaliser's parts, each of which was free to move ------
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected", "why"),
+    [
+        # `partition`, not `rpartition`. Both find `://` in an ordinary origin,
+        # so every existing test agreed with either. They differ when the value
+        # carries a second `://`, where `rpartition` splits on the LAST one.
+        # `partition`, not `rpartition`: with a second `://` in the value,
+        # rpartition splits on the LAST and the root dot is then stripped
+        # from a different string. The obvious case, `http://box.lan/x://y`,
+        # does NOT distinguish them, which is why the first version of this
+        # test left the mutant alive: a trailing dot is needed to show it.
+        ("http://a://b.lan.", "http://a://b.lan.", "partition takes the FIRST separator"),
+        # `rstrip("/")` mutated to `rstrip("XX/XX")` strips a trailing `X` too,
+        # and it runs BEFORE `.lower()`, so the capital is what shows it.
+        ("http://box.lanX/", "http://box.lanx", "only the slash is stripped, not a trailing X"),
+        # The bracket guard, and the root-dot strip it protects.
+        ("http://[::1]:8787", "http://[::1]:8787", "an IPv6 literal keeps its brackets"),
+        ("http://box.lan.:8787", "http://box.lan:8787", "the root dot goes, the port stays"),
+        # NOT the widened `rstrip` at `hostnames.py:109` (#235 L3): `value` is
+        # lowercased before it, so `rstrip("XX.XX")` and `rstrip(".")` agree
+        # here and that mutant is equivalent, recorded below. What this pins is
+        # that the host is lowercased at all while the PORT is left alone.
+        (
+            "http://box.lanX:8787",
+            "http://box.lanx:8787",
+            "the host lowercases, the port survives",
+        ),
+    ],
+)
+def test_normalise_origin_keeps_each_of_its_parts(raw: str, expected: str, why: str) -> None:
+    """#233. Six mutants lived in this function and every one survived.
+
+    It is four decisions in five lines, and the tests exercised only origins
+    where all four happen to agree: `rpartition` for `partition`, a widened
+    `rstrip` set and a dropped bracket check all passed.
+
+    **This is the origin check's own input.** A value normalised differently
+    here does not fail loudly; it fails to match the allowlist and the request
+    is refused. Repairing junk INTO a match is the failure worth avoiding.
+
+    **One of the six is not a gap.** See the test below.
+    """
+    assert normalise_origin(raw) == expected, why
+
+
+def test_the_or_in_normalise_origins_guard_is_equivalent_to_and() -> None:
+    """#233. `if not separator or not rest:` mutated to `and` survives, and no
+    test can kill it. Recorded rather than chased.
+
+    `rstrip("/")` runs FIRST, so the value can never end in `://`, so
+    "separator present and rest empty" is unreachable. And `str.partition` with
+    no match returns `(value, "", "")`, so "no separator" always comes with an
+    empty rest. The two operands are therefore never in disagreement, and `or`
+    and `and` agree on every input.
+
+    **Asserted rather than argued**, because "these are equivalent" is the claim
+    that gets written into a triage log and is occasionally wrong. Exhaustive
+    over an alphabet holding the separator, the slash, the dot and brackets.
+    """
+    from itertools import product
+
+    def with_and(raw: str) -> str:
+        value = raw.strip().rstrip("/").lower()
+        scheme, separator, rest = value.partition("://")
+        if not separator and not rest:
+            return value
+        if rest.startswith("["):
+            return f"{scheme}://{rest}"
+        host, colon, port = rest.partition(":")
+        return f"{scheme}://{host.rstrip('.')}{colon}{port}"
+
+    for length in range(1, 6):
+        for parts in product(":/.abc[] ", repeat=length):
+            raw = "".join(parts)
+            assert normalise_origin(raw) == with_and(raw), (
+                f"{raw!r} distinguishes `or` from `and`, so the mutant is a real "
+                f"gap after all and this test is what found it"
+            )
+
+
+def test_the_widened_rstrip_sets_are_equivalent_because_lower_runs_first() -> None:
+    """#233. Two survivors widen a `rstrip(".")` to `rstrip("XX.XX")`, in
+    `normalise_host` and in `normalise_origin`. Neither can be killed.
+
+    The widened set is `{X, .}`, so it differs from `{.}` only on a trailing
+    UPPERCASE `X`. Both functions lowercase before they strip, so no uppercase
+    survives to reach it.
+
+    **I wrote a killing test for these first and it passed against the mutant**,
+    asserting `normalise_host("linux") == "linux"`. `rstrip` is case sensitive
+    and the lowercase `x` was never in the set, so the test agreed with the
+    mutation. Verified exhaustively instead, over an alphabet holding both
+    cases of `x`, the dot, the brackets and the separator.
+    """
+    from itertools import product
+
+    def host_with_widened_strip(raw: str) -> str:
+        value = raw.strip().lower()
+        if value.startswith("[") and value.endswith("]"):
+            value = value[1:-1]
+        # B005 is exactly what the mutation looks like: ruff would refuse this
+        # shape in production, which is a second reason the mutant is not a
+        # gap in the tests.
+        return value.rstrip("XX.XX")  # noqa: B005
+
+    # **The SECOND site, which the first version of this test claimed and did
+    # not model (#235 L3).** It said "in `normalise_host` and in
+    # `normalise_origin`" and then exhaustively checked only the former, so half
+    # its own claim rested on the argument rather than on the corpus.
+    def origin_with_widened_strip(raw: str) -> str:
+        value = raw.strip().rstrip("/").lower()
+        scheme, separator, rest = value.partition("://")
+        if not separator or not rest:
+            return value
+        if rest.startswith("["):
+            return f"{scheme}://{rest}"
+        host, colon, port = rest.partition(":")
+        return f"{scheme}://{host.rstrip('XX.XX')}{colon}{port}"  # noqa: B005
+
+    for length in range(1, 6):
+        for parts in product(".xX[]:/ab ", repeat=length):
+            raw = "".join(parts)
+            assert normalise_host(raw) == host_with_widened_strip(raw), (
+                f"{raw!r} distinguishes the two strip sets in normalise_host, so "
+                f"that one is a real gap"
+            )
+            assert normalise_origin(raw) == origin_with_widened_strip(raw), (
+                f"{raw!r} distinguishes them in normalise_origin, so that one is a real gap"
+            )
+
+    # And the ordinary behaviour, which is what the strip is FOR.
+    assert normalise_host("box.lan.") == "box.lan"
+    assert normalise_host("box.lan..") == "box.lan"
+    assert normalise_origin("http://box.lan.:8787") == "http://box.lan:8787"
+
+
+def test_origin_forms_brackets_only_a_bare_ipv6_literal() -> None:
+    """`host.startswith("[")` mutated to `startswith("XX[XX")` survived: no host
+    starts with the literal three characters `XX[`, so the guard never fires and
+    an already bracketed literal is bracketed twice.
+    """
+    assert "http://[::1]:8787" in origin_forms("http", "::1", 8787)
+    assert "http://[[::1]]:8787" not in origin_forms("http", "[::1]", 8787), (
+        "an already bracketed literal was bracketed again"
+    )
+
+
+@pytest.mark.parametrize(
+    ("failing", "raised", "expected", "why"),
+    [
+        # The OUTER suppress, around gethostname. Both types, because the
+        # mutants drop each one independently.
+        ("gethostname", OSError("no UTS"), (), "an unreadable hostname is survivable"),
+        (
+            "gethostname",
+            UnicodeError("bad label"),
+            (),
+            "UnicodeError is a ValueError, NOT an OSError, and getaddrinfo "
+            "raises it for a label over 63 characters",
+        ),
+        # The INNER suppress, around the lookup. The hostname already found
+        # must survive the lookup failing.
+        ("getaddrinfo", OSError("EAI_NONAME"), ("box",), "a failed lookup keeps the hostname"),
+        (
+            "getaddrinfo",
+            UnicodeError("idna"),
+            ("box",),
+            "a name that will not encode to IDNA keeps the hostname",
+        ),
+    ],
+)
+def test_local_addresses_suppresses_both_types_at_both_call_sites(
+    monkeypatch: pytest.MonkeyPatch,
+    failing: str,
+    raised: Exception,
+    expected: tuple[str, ...],
+    why: str,
+) -> None:
+    """#233. Five survivors lived in the `contextlib.suppress` arguments:
+    `suppress(OSError, None)`, `suppress(OSError,)` and `suppress(UnicodeError)`
+    at both call sites.
+
+    Three tests covered this function and all three were failure paths, but each
+    raised only ONE type from ONE site, so dropping the other type from either
+    tuple changed nothing any test could see.
+
+    **The `UnicodeError` half is not decoration.** It is a `ValueError` and not
+    an `OSError`, and `getaddrinfo` raises it for a hostname with a label over
+    63 characters or one that will not encode to IDNA. A container or a pod can
+    easily have such a name, and suppressing only `OSError` made `Config()` die
+    with a raw `UnicodeError` on that machine. The function is documented as
+    best effort and that has to hold for every lookup in it.
+    """
+
+    def boom(*args: object, **kwargs: object) -> object:
+        raise raised
+
+    monkeypatch.setattr("hitchrail.hostnames.socket.gethostname", lambda: "box")
+    monkeypatch.setattr("hitchrail.hostnames.socket.getaddrinfo", lambda *a, **k: [])
+    monkeypatch.setattr("hitchrail.hostnames.socket.socket", no_socket)
+    monkeypatch.setattr(f"hitchrail.hostnames.socket.{failing}", boom)
+
+    assert local_addresses() == expected, why
+
+
+def test_the_inner_suppress_in_local_addresses_is_defensive_not_observable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#233. Two survivors narrow the INNER `contextlib.suppress` in
+    `local_addresses`, dropping one type from its tuple. Neither can be killed.
+
+    The inner block sits inside the outer one, which suppresses the same two
+    types, and `found` has already been appended to by the time the lookup runs.
+    So whatever the inner tuple drops, the outer catches, `found` is unchanged,
+    and the routing table probe after the outer block still runs.
+
+    **Driven through the REAL function, not a hand model (round 1 review).**
+    The first version built its own `with_inner` and never referenced
+    `local_addresses` at all, so it would have gone on asserting an equivalence
+    after it stopped being true. Here the production function is called with
+    each exception raised from `getaddrinfo`, which is the only call the inner
+    suppress wraps.
+
+    **What this does NOT detect, corrected in round 2 (#236 F2).** An earlier
+    version of this paragraph claimed it catches the edit that moves code after
+    the inner block. It does not: `outcome()` patches `socket.socket` to
+    `no_socket`, so the routing table probe raises and contributes nothing in
+    all three cases, and that probe is the only code after the inner block.
+    Falsified by making the edit and watching this pass.
+
+    The codebase is covered anyway, by
+    `test_a_failing_gethostname_does_not_discard_the_probe_address`, which is
+    what pins the probe's position. Two tests, two properties, and this one
+    should not claim the other's.
+    """
+
+    def outcome(raising: Exception | None) -> tuple[str, ...]:
+        def lookup(*args: object, **kwargs: object) -> object:
+            if raising is not None:
+                raise raising
+            return [(0, 0, 0, "", ("192.168.1.10", 0))]
+
+        monkeypatch.setattr("hitchrail.hostnames.socket.gethostname", lambda: "box")
+        monkeypatch.setattr("hitchrail.hostnames.socket.getaddrinfo", lookup)
+        monkeypatch.setattr("hitchrail.hostnames.socket.socket", no_socket)
+        return local_addresses()
+
+    # Whatever the lookup raises, the hostname already found survives it. That
+    # is the property the inner suppress appears to provide and the outer one
+    # actually provides, which is why narrowing the inner one changes nothing.
+    assert outcome(OSError("EAI")) == ("box",)
+    assert outcome(UnicodeError("idna")) == ("box",)
+    assert outcome(None) == ("box", "192.168.1.10")

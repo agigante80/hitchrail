@@ -54,7 +54,7 @@ import tempfile
 from collections.abc import Iterator
 
 import pytest
-from playwright.async_api import Page, ViewportSize, expect
+from playwright.async_api import Locator, Page, ViewportSize, expect
 
 from . import conftest as e2e_conftest
 from .conftest import SHOT_PREFIX, Harness
@@ -64,6 +64,24 @@ pytestmark = [pytest.mark.e2e, pytest.mark.screenshots]
 SHOTS = pathlib.Path(__file__).resolve().parents[2] / "docs" / "screenshots"
 
 # Every segment neutral, because the interface displays this path.
+#
+# **Fixed, so this tier is single instance by construction (#214).** The fixture
+# `rmtree`s it at setup, so two concurrent capture runs delete each other's root
+# and both fail confusingly. That is accepted rather than fixed, and the reason
+# has to be the true one: an earlier note here said the tier "runs deliberately
+# at a release, never twice at once", and that was false. `.claude/CLAUDE.md` documents
+# `uv run pytest -m e2e` as the browser tier's command, and any `-m` replaces
+# the `-m "not screenshots"` in `addopts`, so an ordinary developer running the
+# browser tier used to capture these images.
+#
+# The real reason is that the path is PHOTOGRAPHED. A run identity in it reaches
+# `docs/screenshots/` and the README, which is the same rule `SHOT_PREFIX`
+# follows and states, so it cannot carry a pid the way `E2E_PREFIX` does.
+#
+# What makes the collision unlikely now is not luck: the collection hook in
+# `tests/conftest.py` means this tier runs only when a run asks for
+# `-m screenshots` by name, so two concurrent captures take two people deciding
+# to capture at once rather than one person running the tier next door.
 SHOT_ROOT = pathlib.Path(tempfile.gettempdir()) / "hitchrail-demo" / "projects"
 
 # The case the project exists for, at the CSS width of the phones it was walked
@@ -76,7 +94,32 @@ DESKTOP = ViewportSize(width=1280, height=860)
 # appear rather than only the happy path. Names are fixtures, not projects.
 def _seed_the_world(harness: Harness) -> None:
     """Spelled out rather than a `**dict`, which defeats `seed`'s typed
-    signature and hides a misspelled state behind a mypy error per call."""
+    signature and hides a misspelled state behind a mypy error per call.
+
+    **`detached` stays, and with it a real pid in the published images (#215).**
+    Decided 2026-09-07 rather than left as an oversight, because every way of
+    removing it is worse:
+
+    - Dropping `detached` loses the state the code itself calls "the one a naive
+      tool gets wrong", and `README.md`'s alt text advertises it: "detached with
+      its pid".
+    - Faking the pid through `Engine`'s `procs_fn` seam corrupts the picture.
+      `derive` walks the process TREE by pid, `descendants`, `first_matching_in_tree`,
+      `by_pid`, while pane pids come from real tmux, so a rewritten table
+      desynchronises the two and changes the STATES rendered.
+    - Masking it at capture time is possible, Playwright takes `mask` and
+      `style`, but `metaFor` returns one string into one `<p class="meta">`, so
+      the mask covers the whole line and not the pid. Masking precisely needs the
+      pid wrapped in its own element, which is a DOM change made for a test's
+      benefit: the move #216 refused when it declined to add `--tmux-socket`.
+
+    So the pid is published, knowingly. It is a uid-space process id from a
+    development machine, it identifies no person, and the ticket calls it
+    harmless in itself. What it costs is a readable diff: four of seven images
+    change on every capture, from the pid and from `up 0s` versus `up 1s`, so a
+    screenshot refresh cannot be reviewed. That is accepted and is why a capture
+    now recaptures only what it is asked for.
+    """
     harness.seed(
         running=["vessel", "harbour"],
         stopped=["anchor"],
@@ -93,8 +136,23 @@ def shots_server(monkeypatch: pytest.MonkeyPatch) -> Iterator[Harness]:
     teardown: only sessions on this socket are killed, never a bare
     `tmux kill-server`.
     """
-    if shutil.which("tmux") is None:  # pragma: no cover - CI installs tmux
-        pytest.skip("the browser tier drives a real tmux")
+    # **Fails rather than skips**, which is exit criterion 2 (#237). A skip here
+    # made the browser tier's result depend on what the machine has, and left
+    # `ci.yml`'s grep for `skipped` as the only thing that noticed.
+    assert shutil.which("tmux") is not None, (
+        "tmux is not installed, and this tier FAILS rather than skips (criterion 2).\n"
+        "\n"
+        "The roadmap's second exit criterion is that no tier's result depends on "
+        "what the machine happens to have, and it allows exactly one exception: a "
+        "tier may require hardware if it is opt in and FAILS when the hardware is "
+        "absent. `device` is that exception. This tier used to skip, which made "
+        "its result depend on the machine after all, and a CI grep for the word "
+        "`skipped` was the only thing noticing.\n"
+        "\n"
+        "tmux is a RUNTIME prerequisite of Hitchrail, not an optional extra, so a "
+        "machine without it cannot run the tool either. Install it, or deselect "
+        "this tier by name."
+    )
 
     # Pinned for the duration, so the published images carry no run identity.
     #
@@ -138,7 +196,27 @@ async def _settled(page: Page, harness: Harness) -> None:
     await page.wait_for_timeout(600)
 
 
-async def _shoot(page: Page, name: str) -> None:
+def row(page: Page, harness: Harness, name: str) -> Locator:
+    """The row for a seeded project, which is what most captures prove on."""
+    return page.locator(f'[data-project="{harness.project(name)}"]')
+
+
+async def _shoot(page: Page, name: str, showing: Locator) -> None:
+    """Photograph the page, having first proved it is showing the right thing.
+
+    **`showing` is required, and that is the fix for #215.** Two captures here
+    guarded their click with `if await control.count():` and then shot
+    regardless, so when the control was not found the tier photographed whatever
+    was on screen and passed. `phone-logs.png` shipped as a copy of
+    `phone-list.png` for months because of it: the control is named `Open`, not
+    `Logs`, so the count was zero every time.
+
+    The assertion in this tier IS the picture, and a picture nothing checks is
+    the same rotten green as a test with no assertion. Making the proof a
+    parameter rather than a convention means a new capture cannot be added
+    without naming what makes its image the thing it claims to be.
+    """
+    await expect(showing).to_be_visible()
     SHOTS.mkdir(parents=True, exist_ok=True)
     path = SHOTS / f"{name}.png"
 
@@ -172,7 +250,7 @@ async def test_capture_the_phone_list(page: Page, shots_server: Harness) -> None
     _seed_the_world(shots_server)
     await page.goto(shots_server.base)
     await _settled(page, shots_server)
-    await _shoot(page, "phone-list")
+    await _shoot(page, "phone-list", row(page, shots_server, "vessel"))
 
 
 async def test_capture_two_roots_on_a_phone(page: Page, shots_server: Harness) -> None:
@@ -201,7 +279,7 @@ async def test_capture_two_roots_on_a_phone(page: Page, shots_server: Harness) -
     for label in ("main", "personal"):
         row = page.locator(f'[data-project="{shots_server.project("vessel", label)}"]')
         await expect(row.locator(".badge")).to_have_text("running", timeout=15_000)
-    await _shoot(page, "phone-two-roots")
+    await _shoot(page, "phone-two-roots", page.locator("[data-project]").first)
 
 
 async def test_capture_the_phone_list_dark(page: Page, shots_server: Harness) -> None:
@@ -212,7 +290,7 @@ async def test_capture_the_phone_list_dark(page: Page, shots_server: Harness) ->
     _seed_the_world(shots_server)
     await page.goto(shots_server.base)
     await _settled(page, shots_server)
-    await _shoot(page, "phone-list-dark")
+    await _shoot(page, "phone-list-dark", row(page, shots_server, "vessel"))
 
 
 async def test_capture_the_desktop_list(page: Page, shots_server: Harness) -> None:
@@ -220,7 +298,7 @@ async def test_capture_the_desktop_list(page: Page, shots_server: Harness) -> No
     _seed_the_world(shots_server)
     await page.goto(shots_server.base)
     await _settled(page, shots_server)
-    await _shoot(page, "desktop-list")
+    await _shoot(page, "desktop-list", row(page, shots_server, "vessel"))
 
 
 async def test_capture_the_log_drawer(page: Page, shots_server: Harness) -> None:
@@ -229,12 +307,14 @@ async def test_capture_the_log_drawer(page: Page, shots_server: Harness) -> None
     _seed_the_world(shots_server)
     await page.goto(shots_server.base)
     await _settled(page, shots_server)
-    row = page.locator(f'[data-project="{shots_server.project("vessel")}"]')
-    logs = row.get_by_role("button", name="Logs")
-    if await logs.count():
-        await logs.first.click()
-        await page.wait_for_timeout(800)
-    await _shoot(page, "phone-logs")
+    # **`Open`, not `Logs`.** The control has never been called Logs; `app.js`
+    # names it `Open`. The old lookup found nothing every time, and because the
+    # click was guarded rather than asserted, the tier photographed the plain
+    # list and published it as the drawer (#215).
+    await row(page, shots_server, "vessel").get_by_role("button", name="Logs").click()
+    drawer = page.locator("[data-dialog]")
+    await expect(drawer).to_contain_text("last 40 lines of the pane")
+    await _shoot(page, "phone-logs", drawer)
 
 
 async def test_capture_the_new_folder_sheet(page: Page, shots_server: Harness) -> None:
@@ -242,11 +322,10 @@ async def test_capture_the_new_folder_sheet(page: Page, shots_server: Harness) -
     _seed_the_world(shots_server)
     await page.goto(shots_server.base)
     await _settled(page, shots_server)
-    new = page.get_by_role("button", name="New")
-    if await new.count():
-        await new.first.click()
-        await page.wait_for_timeout(500)
-    await _shoot(page, "phone-new-folder")
+    await page.get_by_role("button", name="New").click()
+    sheet = page.locator("[data-dialog]")
+    await expect(sheet).to_contain_text("New folder")
+    await _shoot(page, "phone-new-folder", sheet)
 
 
 async def test_capture_the_grant_page(page: Page, shots_server: Harness) -> None:
@@ -255,4 +334,4 @@ async def test_capture_the_grant_page(page: Page, shots_server: Harness) -> None
     shots_server.seed(stopped=["vessel"], token="s3cret-key-value")
     await page.goto(f"{shots_server.base}/grant")
     await page.wait_for_timeout(600)
-    await _shoot(page, "phone-grant")
+    await _shoot(page, "phone-grant", page.get_by_label("Access key"))

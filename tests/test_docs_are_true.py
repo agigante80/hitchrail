@@ -4,8 +4,8 @@ Every guard this project has protects the SOURCE: five gates, an import
 contract, module size caps, a tier partition, a template lockstep. Nothing
 protected the prose, and the prose is what an outside reader meets first.
 
-The cost was not hypothetical. The conventions file, then `.claude/CLAUDE.md`
-and now `AGENTS.md`, told every reader that
+The cost was not hypothetical. The conventions file, `.claude/CLAUDE.md` and
+for a while `AGENTS.md`, told every reader that
 `engine.py`, `server.py`, `events.py` and `cli.py` were one line placeholders
 for three phases after all four were implemented, and that is the file an agent
 reads before it touches anything. The design's route table stayed correct while
@@ -28,6 +28,7 @@ import tempfile
 import textwrap
 from collections.abc import Iterator
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
@@ -37,19 +38,23 @@ from support import make_config
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src" / "hitchrail"
-AGENTS_MD = ROOT / "AGENTS.md"
+CLAUDE_MD = ROOT / ".claude" / "CLAUDE.md"
 
 # **These guards used to skip on a clone, and now they do not.**
 #
-# The conventions lived in `.claude/CLAUDE.md`, which is untracked, so every
-# check below ran only in the maintainer's checkout: CI validated the roadmap
-# and not the file an agent reads first. #60 moved them to `AGENTS.md` at the
-# root, for the wider reason that exactly one tool read the old location, and
-# this is the side effect worth naming. The guard that caught a reversed
-# middleware order now runs on every push, for every contributor.
+# The conventions lived in `.claude/CLAUDE.md` while `.gitignore` excluded the
+# whole of `.claude/`, so every check below ran only in the maintainer's
+# checkout: CI validated the roadmap and not the file an agent reads first. #60
+# moved them to `AGENTS.md` at the root for that reason. On 2026-09-11 they
+# moved back, because Claude Code reads `CLAUDE.md` and not `AGENTS.md`, and
+# `.gitignore` now excludes `.claude/*` and re-admits this one file, which is
+# the git spelling that lets a file under an ignored directory be tracked. The
+# guard that caught a reversed middleware order still runs on every push, for
+# every contributor, and `test_the_conventions_file_is_tracked` is what keeps
+# a `.gitignore` edit from quietly taking it back out of CI.
 #
-# There is no skip mark any more. A missing `AGENTS.md` is a failure, not a
-# reason to pass quietly.
+# There is no skip mark any more. A missing `.claude/CLAUDE.md` is a failure,
+# not a reason to pass quietly.
 ROADMAP = ROOT / "docs" / "roadmap.md"
 README = ROOT / "README.md"
 
@@ -62,7 +67,7 @@ def _modules() -> dict[str, int]:
     return {p.name: len(p.read_text().splitlines()) for p in SRC.glob("*.py")}
 
 
-@pytest.mark.parametrize("doc", [AGENTS_MD, ROADMAP], ids=lambda p: p.name)
+@pytest.mark.parametrize("doc", [CLAUDE_MD, ROADMAP], ids=lambda p: p.name)
 def test_no_document_calls_an_implemented_module_a_placeholder(doc: Path) -> None:
     """The exact failure that prompted this file.
 
@@ -84,7 +89,26 @@ def test_no_document_calls_an_implemented_module_a_placeholder(doc: Path) -> Non
         )
 
 
-@pytest.mark.parametrize("doc", [AGENTS_MD, ROADMAP, README], ids=lambda p: p.name)
+def test_the_conventions_file_is_tracked() -> None:
+    """`.gitignore` excludes `.claude/*` and re-admits `.claude/CLAUDE.md`. Fold
+    that back into a bare `.claude/` and the file stays on this machine while
+    every guard in this module fails in CI on a file that is not there. Asked of
+    git rather than of the ignore file's text, because the text can say
+    `!.claude/CLAUDE.md` under a pattern that makes it inert."""
+    listed = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", str(CLAUDE_MD.relative_to(ROOT))],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert listed.returncode == 0, (
+        f"{CLAUDE_MD.relative_to(ROOT)} is not tracked: {listed.stderr.strip()}. "
+        "It is the file every contributor and CI leg reads; see .gitignore."
+    )
+
+
+@pytest.mark.parametrize("doc", [CLAUDE_MD, ROADMAP, README], ids=lambda p: p.name)
 def test_no_document_hardcodes_a_test_count(doc: Path) -> None:
     """ "519 tests" was true once. A number that decays silently is worse than
     no number, because it reads as precision."""
@@ -96,9 +120,9 @@ def test_no_document_hardcodes_a_test_count(doc: Path) -> None:
     )
 
 
-def _named_in_agents_md() -> set[str]:
+def _named_in_claude_md() -> set[str]:
     """The modules the architecture block claims exist, by their listed name."""
-    return set(re.findall(r"^\s{2}(\w+\.py)\s", AGENTS_MD.read_text(), re.M))
+    return set(re.findall(r"^\s{2}(\w+\.py)\s", CLAUDE_MD.read_text(), re.M))
 
 
 # `__init__.py` is a package marker rather than a module anybody navigates to,
@@ -108,14 +132,14 @@ def _named_in_agents_md() -> set[str]:
 _NOT_ON_THE_MAP = {"__init__.py"}
 
 
-def test_every_module_named_in_agents_md_exists() -> None:
+def test_every_module_named_in_claude_md_exists() -> None:
     """The architecture block lists the modules. A rename that misses it leaves
     a map pointing at a road that is not there."""
-    missing = {n for n in _named_in_agents_md() if not (SRC / n).exists()}
-    assert not missing, f"AGENTS.md names modules that do not exist: {sorted(missing)}"
+    missing = {n for n in _named_in_claude_md() if not (SRC / n).exists()}
+    assert not missing, f".claude/CLAUDE.md names modules that do not exist: {sorted(missing)}"
 
 
-def test_every_module_that_exists_is_named_in_agents_md() -> None:
+def test_every_module_that_exists_is_named_in_claude_md() -> None:
     """#126. The inverse of the guard above, and the direction that was missing.
 
     **The asymmetry was not theoretical.** The guard above was green while the
@@ -131,9 +155,9 @@ def test_every_module_that_exists_is_named_in_agents_md() -> None:
     was safe to touch that neither existed.
     """
     on_disk = {p.name for p in SRC.glob("*.py")} - _NOT_ON_THE_MAP
-    unlisted = on_disk - _named_in_agents_md()
+    unlisted = on_disk - _named_in_claude_md()
     assert not unlisted, (
-        "AGENTS.md does not name "
+        ".claude/CLAUDE.md does not name "
         + ", ".join(
             f"{n} ({len((SRC / n).read_text().splitlines())} lines)" for n in sorted(unlisted)
         )
@@ -142,25 +166,151 @@ def test_every_module_that_exists_is_named_in_agents_md() -> None:
     )
 
 
-def test_the_roadmap_marks_a_phase_done_only_when_its_plan_is_finished() -> None:
-    """A phase headed "(done)" whose plan still has unticked steps is a phase
-    somebody stopped writing down rather than one that finished."""
-    road = ROADMAP.read_text()
-    plans = {
-        p.name: p.read_text() for p in (ROOT / "docs" / "superpowers" / "plans").glob("*.md")
-    }
-    for match in re.finditer(
-        r"^## (Phase \d+)[^\n]*\(done\)(.*?)(?=^## |\Z)", road, re.M | re.S
-    ):
-        section = match.group(2)
-        link = re.search(r"\(superpowers/plans/([^)]+)\)", section)
-        if not link:
+PLANS = ROOT / "docs" / "superpowers" / "plans"
+
+# The roadmap format is forge-kit's `roadmap-phases`, parsed by
+# `scripts/roadmap-lib.sh` for the two scripts that talk to the host. These
+# guards are the offline half, rule 2 and the one-open-phase half of rule 3,
+# so a clone and every CI leg check what needs no network. Rules 1, 3 and 4
+# need the milestones and stay in `scripts/check-phases.sh`.
+_STATES = {"planned", "open", "done", "backlog"}
+
+
+class _Phase(NamedTuple):
+    """One `## Phase:` block of the roadmap, with the three things guards ask of it."""
+
+    name: str
+    state: str
+    plan: str | None  # the declared plan path, relative to the repository root
+
+
+def _phases() -> list[_Phase]:
+    """Every phase block, read the way `roadmap-lib.sh` reads it.
+
+    A `state:` or `plan:` line binds to the nearest `## Phase:` heading above
+    it, and a block with no state or an unknown one is a failure of THIS helper
+    rather than a phase quietly skipped: the shell library refuses the whole
+    file on one malformed block, and a guard that read a subset would report
+    phases as compliant that were never read.
+    """
+    found: list[_Phase] = []
+    name: str | None = None
+    state = ""
+    plan = ""
+
+    def flush() -> None:
+        if name is None:
+            return
+        assert state, f"{ROADMAP.name}: phase {name!r} has no `state:` line"
+        assert state in _STATES, (
+            f"{ROADMAP.name}: phase {name!r} has state {state!r}; one of {sorted(_STATES)}"
+        )
+        found.append(_Phase(name, state, plan or None))
+
+    for line in ROADMAP.read_text().splitlines():
+        if line.startswith("## Phase:"):
+            flush()
+            name, state, plan = line[len("## Phase:") :].strip(), "", ""
+        elif line.startswith("state:"):
+            state = line[len("state:") :].strip()
+        elif line.startswith("plan:"):
+            plan = line[len("plan:") :].strip()
+    flush()
+
+    assert found, (
+        f"{ROADMAP} yielded no phase blocks, so every guard below would pass on "
+        "nothing. A rewritten heading style must fail here."
+    )
+    return found
+
+
+def test_a_phase_that_has_started_declares_a_plan_with_a_premortem() -> None:
+    """Rule 2. **Written before the phase starts, and reviewed while it runs.**
+    A phase with no plan is a milestone with an objective attached, and what it
+    loses is the ordering and the premortem: what would make the phase fail
+    rather than finish.
+
+    "Started" is open or done, and done is included so a phase moved straight
+    from planned to done cannot skip the state where a plan is required. A
+    planned phase deliberately has none: a plan written a month before its
+    phase describes tickets that have since moved, which is the drift #92 is
+    about. "Fails if" is the section a plan cannot be without, because a plan
+    that only says what finishing looks like cannot tell you to stop.
+    """
+    problems: list[str] = []
+    for p in _phases():
+        if p.state not in {"open", "done"}:
             continue
-        plan = plans.get(link.group(1))
-        assert plan is not None, f"{match.group(1)} links a plan that is not there"
-        unticked = plan.count("\n- [ ] ")
-        assert unticked == 0, (
-            f"{match.group(1)} is marked done but its plan has {unticked} unticked items"
+        if p.plan is None:
+            problems.append(f"{p.name} is {p.state} and declares no plan")
+            continue
+        path = ROOT / p.plan
+        if not path.exists():
+            problems.append(f"{p.name} declares {p.plan}, which does not exist")
+        elif not re.search(r"^#{1,4}\s*Fails if", path.read_text(), re.M | re.I):
+            problems.append(f"{p.name}'s plan {p.plan} has no 'Fails if' section")
+    assert not problems, "; ".join(problems) + (
+        f". A started phase's `plan:` names a file under {PLANS.relative_to(ROOT)} "
+        "with a 'Fails if' premortem."
+    )
+
+
+def test_at_most_one_phase_is_open() -> None:
+    """One phase at a time. Two open is either a phase somebody forgot to close
+    or two half-phases, and both mean "the current phase" names nothing. The
+    backlog is a state, not an open phase, so it does not count."""
+    running = [p.name for p in _phases() if p.state == "open"]
+    assert len(running) <= 1, f"more than one phase is open: {', '.join(running)}"
+
+
+def test_exactly_one_phase_is_the_backlog() -> None:
+    """Every ticket has a phase only because a ticket with no home has this one
+    to go to. A roadmap without it makes rule 1 impossible to satisfy honestly;
+    two of them make the answer to "where does this go" ambiguous again."""
+    backlog = [p.name for p in _phases() if p.state == "backlog"]
+    assert len(backlog) == 1, f"expected one backlog phase, found {backlog}"
+
+
+# An unticked box means two different things, and this is the marker that tells
+# them apart. #224 decided it: the item says what happened and names the issue
+# that carries the work, so the exemption cannot be used to wave a box through
+# quietly. Phase 9's task 41 already had this shape before the rule existed.
+_MOVED_OUT = re.compile(r"(MOVED OUT|NOT BUILT)", re.I)
+
+
+def test_the_roadmap_marks_a_phase_done_only_when_its_plan_is_finished() -> None:
+    """A phase marked done whose plan still has unticked steps is a phase
+    somebody stopped writing down rather than one that finished.
+
+    An unticked item is allowed only when it says it was moved out or not built
+    AND names an issue: that is a decision with somewhere to go, rather than an
+    omission. An item claiming to be moved with no issue reference fails, which
+    is the direction that keeps this from becoming a way to close a phase early.
+    """
+    for phase in _phases():
+        if phase.state != "done" or phase.plan is None:
+            continue
+        path = ROOT / phase.plan
+        assert path.exists(), f"{phase.name} declares a plan that is not there: {phase.plan}"
+
+        pending: list[str] = []
+        for item in re.findall(r"^- \[ \] (.*?)(?=^- \[|\Z)", path.read_text(), re.M | re.S):
+            # **The marker and the issue are read from the item's FIRST line**,
+            # not from anywhere in it. Falsifying this guard found that a long
+            # item mentioning any ticket in passing satisfied "names an issue",
+            # so removing the reference from the head of Phase 9's moved-out
+            # task left the check green. The head line is where a reader looks
+            # and where both belong.
+            first = item.split("\n")[0]
+            head = " ".join(item.split())[:90]
+            if not _MOVED_OUT.search(first):
+                pending.append(head)
+            elif not re.search(r"#\d+", first):
+                pending.append(f"{head} (says moved, names no issue)")
+
+        assert not pending, (
+            f"{phase.name} is marked done and {path.name} has {len(pending)} unresolved "
+            "items: " + "; ".join(pending)
         )
 
 
@@ -238,7 +388,7 @@ def test_the_api_doc_documents_no_code_the_server_cannot_return() -> None:
 # -- the README, which is the only one a stranger reads ---------------------
 
 
-def test_the_readme_does_not_claim_a_phase_is_unbuilt_that_the_roadmap_closed() -> None:
+def test_the_readme_does_not_claim_there_is_no_server() -> None:
     """The file a stranger meets first was the only one with no guard.
 
     It said "Phases 1 to 3 of 7 are built; there is no runnable server yet" and
@@ -248,24 +398,15 @@ def test_the_readme_does_not_claim_a_phase_is_unbuilt_that_the_roadmap_closed() 
     left.
 
     This is the same failure `.claude/CLAUDE.md` records about ITSELF, in the
-    docstring at the top of this file, repeated in the one document that guard
-    did not cover. Two copies of a claim, one checked.
-
-    Checked against the ROADMAP rather than against a number written here, so
-    closing a phase updates the expectation instead of breaking the test.
+    docstring at the top of this file, repeated in the one document a stranger
+    reads. The phase-count half of the old guard is gone with the counts: the
+    README names no phase number any more, and the roadmap no longer lists the
+    closed ones to compare against.
     """
     readme = README.read_text()
-    closed = re.findall(r"^## (Phase \d+)[^\n]*\((?:done|closed)\)", ROADMAP.read_text(), re.M)
-    assert closed, "the roadmap marks no phase done, so this cannot check anything"
-    highest = max(int(p.split()[1]) for p in closed)
-
-    for match in re.finditer(r"[Pp]hases? (\d+) to (\d+) of \d+ are built", readme):
-        claimed = int(match.group(2))
-        assert claimed >= highest, (
-            f"README says phases up to {claimed} are built; the roadmap closed "
-            f"Phase {highest}. The README is the only document a stranger reads."
-        )
-
+    assert not re.search(r"[Pp]hases? \d+ to \d+ of \d+ are built", readme), (
+        "README states a phase count again; it decayed by several last time"
+    )
     # The specific sentence that was wrong, in the shape it was wrong in.
     for absent in ("there is no runnable server", "no runnable server yet"):
         assert absent not in readme.lower(), (
@@ -288,11 +429,11 @@ _CONTROL_CLASSES = {
 }
 
 
-def test_agents_md_states_the_middleware_order_the_code_uses(tmp_path: Path) -> None:
+def test_claude_md_states_the_middleware_order_the_code_uses(tmp_path: Path) -> None:
     from hitchrail.security import middleware_stack
 
-    line = re.search(r"^\s{2}security\.py\s+(.+)$", AGENTS_MD.read_text(), re.M)
-    assert line, "AGENTS.md's architecture block no longer describes security.py"
+    line = re.search(r"^\s{2}security\.py\s+(.+)$", CLAUDE_MD.read_text(), re.M)
+    assert line, ".claude/CLAUDE.md's architecture block no longer describes security.py"
 
     described = [
         _CONTROL_CLASSES[part]
@@ -309,7 +450,7 @@ def test_agents_md_states_the_middleware_order_the_code_uses(tmp_path: Path) -> 
     ]
 
     assert described == actual, (
-        f"AGENTS.md says {described}, middleware_stack returns {actual}. "
+        f".claude/CLAUDE.md says {described}, middleware_stack returns {actual}. "
         "Fix the document: the stack order is deliberate and documented in its "
         "own docstring."
     )
@@ -393,7 +534,7 @@ def test_the_security_policy_names_a_private_channel() -> None:
     )
 
 
-def test_contributing_and_agents_list_the_same_gates() -> None:
+def test_contributing_and_claude_md_list_the_same_gates() -> None:
     """Both files tell somebody which checks are blocking, so both are copies of
     one fact. The copy that drifts is the one a contributor happens to read.
 
@@ -402,10 +543,10 @@ def test_contributing_and_agents_list_the_same_gates() -> None:
     """
     pattern = re.compile(r"^uv run ([a-z-]+)", re.M)
     contributing = set(pattern.findall(CONTRIBUTING.read_text()))
-    agents = set(pattern.findall(AGENTS_MD.read_text()))
+    claude_md = set(pattern.findall(CLAUDE_MD.read_text()))
     gates = {"pytest", "ruff", "mypy", "lint-imports"}
     assert gates <= contributing, f"CONTRIBUTING.md omits gates: {sorted(gates - contributing)}"
-    assert gates <= agents, f"AGENTS.md omits gates: {sorted(gates - agents)}"
+    assert gates <= claude_md, f".claude/CLAUDE.md omits gates: {sorted(gates - claude_md)}"
 
 
 def test_contributing_points_at_documents_that_exist() -> None:
@@ -645,7 +786,11 @@ def test_every_shot_the_capture_declares_is_committed() -> None:
     comparison: that is flaky across font versions and a flaky gate is a
     disabled gate, which #105 says explicitly.
     """
-    declared = set(re.findall(r'_shoot\(page, "([a-z-]+)"\)', CAPTURE.read_text()))
+    # `[,)]` because #215 gave `_shoot` a required third argument, the locator
+    # that proves the page is showing what the shot claims. This regex expected
+    # exactly two and matched nothing, and the `assert declared` below is the
+    # only reason that was a failure rather than a silently empty check.
+    declared = set(re.findall(r'_shoot\(page, "([a-z-]+)"[,)]', CAPTURE.read_text()))
     assert declared, "the capture module declares no shots, so this checks nothing"
     missing = sorted(n for n in declared if not (SCREENSHOTS / f"{n}.png").exists())
     assert not missing, (
@@ -761,20 +906,60 @@ def _lines_with_offsets(text: str) -> Iterator[tuple[int, str]]:
         offset += len(line)
 
 
-def _exec_start_argv() -> list[str]:
-    """The ExecStart line, as the argument list systemd will run.
+def _logical_lines(text: str) -> Iterator[str]:
+    """The unit's lines with backslash continuations joined, as systemd reads it.
+
+    #206. A directive continued across lines is ONE directive. Reading physical
+    lines gave `shlex` a value ending in a lone backslash, which raises
+    `ValueError: No escaped character` from inside a stdlib generator, and left
+    every flag on the later lines unread if it had not.
+
+    A trailing continuation at end of file yields what was gathered rather than
+    silently dropping it: systemd warns about that unit, and a checker that
+    discarded the whole command would report nothing wrong with it.
+    """
+    gathered = ""
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        if line.endswith("\\"):
+            gathered += line[:-1] + " "
+            continue
+        yield gathered + line
+        gathered = ""
+    if gathered:
+        yield gathered.rstrip()
+
+
+def _exec_start_argv(text: str) -> list[str]:
+    """The ExecStart directive, as the argument list systemd will run.
 
     `%h` and friends are systemd specifiers it expands at start. They survive
     `shlex.split` as ordinary characters, and `--root` takes any path, so the
     parser sees a value it accepts without this test needing to know what the
     operator's home is.
+
+    **Takes the text rather than reading `UNIT`**, so #206's shapes can be fed
+    in. A helper that can only read the shipped file can only be tested by
+    editing the shipped file.
     """
     line = next(
-        raw.split("=", 1)[1]
-        for raw in UNIT.read_text().splitlines()
-        if raw.startswith("ExecStart=")
+        (raw.split("=", 1)[1] for raw in _logical_lines(text) if raw.startswith("ExecStart=")),
+        None,
     )
-    return shlex.split(line)
+    if line is None:
+        return []
+    try:
+        return shlex.split(line)
+    except ValueError as exc:
+        # **A sentence, not a traceback.** Joining fixes the continuation and
+        # does not make every ExecStart splittable: systemd accepts quotes, so
+        # an unbalanced one reaches here and used to surface as a bare
+        # `ValueError` out of `shlex`, which says nothing about which file is
+        # wrong or why.
+        raise AssertionError(
+            f"the unit's ExecStart cannot be read as a command line: {exc}. "
+            f"The value after joining continuations was {line!r}."
+        ) from exc
 
 
 def test_the_unit_template_names_flags_the_cli_accepts() -> None:
@@ -785,7 +970,7 @@ def test_the_unit_template_names_flags_the_cli_accepts() -> None:
     The argv is fed to the real parser rather than compared against a list of
     flag names. A name check passes when a flag stops taking a value.
     """
-    argv = _exec_start_argv()
+    argv = _exec_start_argv(UNIT.read_text())
     assert argv, "the unit template has no ExecStart"
     assert Path(argv[0]).name == "hitchrail", (
         f"ExecStart runs {argv[0]!r}, which is not hitchrail"
@@ -793,7 +978,25 @@ def test_the_unit_template_names_flags_the_cli_accepts() -> None:
     parse_args(argv[1:])  # SystemExit here is the failure
 
 
-def _unit_sections() -> dict[str, list[str]]:
+# systemd's supported compatibility aliases, which set the SAME field as their
+# canonical spelling with last-assignment-wins applying across the two (#209).
+# Reading the text before `=` treats them as different directives, which let
+# `StartLimitInterval=0` switch rate limiting off with the suite green.
+_DIRECTIVE_ALIASES = {"StartLimitInterval": "StartLimitIntervalSec"}
+
+
+def _directive_key(directive: str) -> str:
+    """The field a directive assigns, under one name per field.
+
+    The `_key()` the ticket asks for, used by BOTH the value lookup and the
+    duplicate set, because fixing one and not the other leaves the same hole in
+    the other half.
+    """
+    name = directive.split("=", 1)[0].strip()
+    return _DIRECTIVE_ALIASES.get(name, name)
+
+
+def _unit_sections(text: str) -> dict[str, list[str]]:
     """The unit's directives, by section, comments dropped.
 
     Read as DIRECTIVES rather than as text. A substring check over the file
@@ -803,7 +1006,7 @@ def _unit_sections() -> dict[str, list[str]]:
     """
     sections: dict[str, list[str]] = {}
     current = ""
-    for raw in UNIT.read_text().splitlines():
+    for raw in text.splitlines():
         line = raw.strip()
         if line.startswith("[") and line.endswith("]"):
             current = line[1:-1]
@@ -830,7 +1033,7 @@ def test_the_unit_never_restarts_a_refusal_forever() -> None:
     The list assertion is what made it blind: it pinned the directives present
     and could not see the one that was missing.
     """
-    service = _unit_sections()["Service"]
+    service = _unit_sections(UNIT.read_text())["Service"]
     assert "Restart=always" not in service, (
         "every deliberate refusal would become a boot loop that buries its own "
         "explanation in the journal"
@@ -855,7 +1058,7 @@ def test_the_unit_carries_a_path_that_can_find_the_agent() -> None:
     while the boot environment never was.
 
     Asserted on the DIRECTIVE rather than on the file, through
-    `_unit_sections()`, and the reason is sharper than the usual one. A
+    `_unit_sections(UNIT.read_text())`, and the reason is sharper than the usual one. A
     substring search for `%h/.local/bin` over this file passes with no PATH
     line at all, because `ExecStart=%h/.local/bin/hitchrail` already carries
     that literal. Such a guard would have been green against the exact unit
@@ -863,7 +1066,7 @@ def test_the_unit_carries_a_path_that_can_find_the_agent() -> None:
     """
     paths = [
         directive.split("=", 1)[1]
-        for directive in _unit_sections()["Service"]
+        for directive in _unit_sections(UNIT.read_text())["Service"]
         if directive.startswith("Environment=PATH=")
     ]
     assert paths, (
@@ -897,7 +1100,7 @@ def test_the_unit_prevents_the_exit_code_the_cli_actually_returns() -> None:
 
     prevented = {
         int(value)
-        for line in _unit_sections()["Service"]
+        for line in _unit_sections(UNIT.read_text())["Service"]
         if line.startswith("RestartPreventExitStatus=")
         for value in line.split("=", 1)[1].split()
     }
@@ -912,22 +1115,14 @@ def test_the_unit_prevents_the_exit_code_the_cli_actually_returns() -> None:
     )
 
 
-def test_the_units_start_limit_is_where_systemd_reads_it() -> None:
-    """The backstop for everything `RestartPreventExitStatus` cannot name.
+def _assert_start_limit(sections: dict[str, list[str]]) -> None:
+    """The start limit checks, over sections a caller supplies.
 
-    That directive bounds ONE status. An unhandled exception exits 1 and would
-    loop by the same mechanism, so the limit is what makes any loop terminate.
-
-    **It has to be in `[Unit]`.** These moved out of `[Service]` at systemd 230
-    and are silently ignored there now, which is the worst failure available to
-    a limit: it reads as configured and does nothing.
-
-    The window is checked too, because the default one cannot fire here.
-    systemd allows five starts in ten seconds and `RestartSec` spaces attempts
-    further apart than that, which is why 37 restarts in a row were never rate
-    limited.
+    **Split out at #209 so the shapes can be fed in.** It could only be run
+    against the shipped unit, so the two spellings systemd accepts could only
+    have been compared by editing `packaging/hitchrail.service`, and they never
+    were.
     """
-    sections = _unit_sections()
     limits = [d for d in sections["Unit"] if d.startswith("StartLimit")]
     assert limits, "the unit has no start limit, so a loop this cannot name runs forever"
     assert not [d for d in sections["Service"] if d.startswith("StartLimit")], (
@@ -943,6 +1138,11 @@ def test_the_units_start_limit_is_where_systemd_reads_it() -> None:
         `StartLimitIntervalSec=0` added under a good pair satisfied every
         assertion here while systemd saw rate limiting switched off.
 
+        **Matched on `_directive_key`, not `startswith` (#209).** The prefix
+        test read `StartLimitInterval` as a different directive from
+        `StartLimitIntervalSec`, when systemd treats them as one field, and it
+        would equally have matched a longer name that merely starts the same.
+
         **`None` rather than a raise on a value this cannot parse.** systemd
         accepts `30s`, `2min` and `infinity`; a bare `int()` turns each into a
         `ValueError` traceback where the caller needed the sentence. That is the
@@ -953,7 +1153,7 @@ def test_the_units_start_limit_is_where_systemd_reads_it() -> None:
         Parsing systemd's time spans properly is not this test's job. Refusing
         to guess is.
         """
-        found = [d.split("=", 1)[1].strip() for d in directives if d.startswith(name)]
+        found = [d.split("=", 1)[1].strip() for d in directives if _directive_key(d) == name]
         if not found:
             return None
         effective = found[-1]
@@ -962,15 +1162,39 @@ def test_the_units_start_limit_is_where_systemd_reads_it() -> None:
     # A repeated directive is how this goes wrong in practice, and systemd takes
     # the LAST one. Checked separately from the values so the message says "you
     # have two of these" rather than silently reporting whichever survived.
-    keys = [d.split("=", 1)[0] for d in limits]
+    #
+    # Keyed through `_directive_key` so the alias counts as the same field. It
+    # is what catches `StartLimitInterval=` with no value, which is unparseable
+    # rather than zero and so cannot be caught by the value check below.
+    keys = [_directive_key(d) for d in limits]
     repeated = sorted({key for key in keys if keys.count(key) > 1})
     assert not repeated, (
         f"{repeated} appears more than once, and systemd takes the LAST "
-        f"assignment, so what a reader sees here and what systemd does differ"
+        f"assignment, so what a reader sees here and what systemd does differ. "
+        f"`StartLimitInterval` and `StartLimitIntervalSec` are ONE field."
     )
+
+    # **The arithmetic below assumes `RestartSec` IS the gap, and two directives
+    # make that false (#209).** `RestartSteps=` and `RestartMaxDelaySec=`
+    # (systemd 254+) turn `RestartSec` into an initial delay with exponential
+    # backoff after it, so the real span of `burst` attempts far exceeds
+    # `burst * gap`, sails past the window, and the limit never fires while
+    # every assertion here still passes. Refused rather than modelled: this test
+    # is not going to reimplement systemd's backoff curve.
+    backoff = [
+        d
+        for d in sections["Service"]
+        if _directive_key(d) in {"RestartSteps", "RestartMaxDelaySec"}
+    ]
+    assert not backoff, (
+        f"{backoff} makes RestartSec an INITIAL delay with exponential backoff, "
+        f"so `burst * RestartSec` below understates the real span and the window "
+        f"check stops meaning anything. Model the curve or drop the directive."
+    )
+
     window = _value(limits, "StartLimitIntervalSec")
     burst = _value(limits, "StartLimitBurst")
-    gap = _value(sections["Service"], "RestartSec=")
+    gap = _value(sections["Service"], "RestartSec")
     assert window is not None and burst is not None and gap is not None, (
         f"a limit needs StartLimitIntervalSec, StartLimitBurst and RestartSec to "
         f"mean anything, and this unit has window={window} burst={burst} gap={gap}. "
@@ -990,22 +1214,47 @@ def test_the_units_start_limit_is_where_systemd_reads_it() -> None:
         f"{burst} restarts {gap}s apart span {burst * gap}s, which is outside the "
         f"{window}s window, so the limit can never fire and the loop is unbounded"
     )
-    # #201. The budget still has to outlast a real network bring up, and the
-    # margin is thinner than it looks.
+    # #201, and #209 replaced the argument this floor used to carry.
     #
-    # **What #201 withdrew is the CAUSE, not this floor.** It used to say here
-    # that a race with `After=network.target` killed the service. It did not:
-    # every observed outage was missing hardware, and `After=network.target` is
-    # inert in a user unit anyway, because the user manager has no such unit.
+    # **What #201 withdrew is the CAUSE, not this floor.** It used to say a race
+    # with `After=network.target` killed the service. It did not: every observed
+    # outage was missing hardware, and `After=network.target` is inert in a user
+    # unit anyway, because the user manager has no such unit.
     #
-    # The race is real and tight. Boot -3 of 2026-09-06 had the adapter
-    # connected, took its DHCP lease 15s into the boot, and this unit's first
-    # start came 7s later. Seven seconds of margin is the reason for a floor.
+    # **The seven seconds is gone, and #209 is why.** The framing said this unit
+    # "won by 7s" against a DHCP lease, generalised from a start offset measured
+    # across boots. That offset is not comparable across boots: hitchrail starts
+    # 3 to 18 MILLISECONDS after `user@1000.service` every time, so it measures
+    # when the user manager came up and nothing else.
+    #
+    # What survives is one same-boot, origin-independent observation, and it is
+    # stated as the single measurement it is: on boot -3 of 2026-09-06 the
+    # carrier came up at 35.172s, the DHCP lease landed at 35.328s, and this
+    # unit first started at 42.714s. 7.386s of margin, once.
     assert burst * gap >= 60, (
-        f"{burst} restarts {gap}s apart give up after {burst * gap}s. A boot that "
-        f"has to acquire a DHCP lease took 15s to do it and this unit won by 7s, "
-        f"so a named bind needs more margin than a couple of attempts. See #201."
+        f"{burst} restarts {gap}s apart give up after {burst * gap}s. On one "
+        f"measured boot this unit started 7.4s after the DHCP lease landed, so a "
+        f"named bind needs more margin than a couple of attempts. One data point, "
+        f"not a distribution. See #201 and #209."
     )
+
+
+def test_the_units_start_limit_is_where_systemd_reads_it() -> None:
+    """The backstop for everything `RestartPreventExitStatus` cannot name.
+
+    That directive bounds ONE status. An unhandled exception exits 1 and would
+    loop by the same mechanism, so the limit is what makes any loop terminate.
+
+    **It has to be in `[Unit]`.** These moved out of `[Service]` at systemd 230
+    and are silently ignored there now, which is the worst failure available to
+    a limit: it reads as configured and does nothing.
+
+    The window is checked too, because the default one cannot fire here.
+    systemd allows five starts in ten seconds and `RestartSec` spaces attempts
+    further apart than that, which is why 37 restarts in a row were never rate
+    limited.
+    """
+    _assert_start_limit(_unit_sections(UNIT.read_text()))
 
 
 def test_the_start_limit_is_not_what_keeps_a_refusal_stopped() -> None:
@@ -1021,7 +1270,7 @@ def test_the_start_limit_is_not_what_keeps_a_refusal_stopped() -> None:
     restarts. The two directives are therefore asserted together rather than
     apart, because it is the PAIR that is correct.
     """
-    sections = _unit_sections()
+    sections = _unit_sections(UNIT.read_text())
     prevented = [d for d in sections["Service"] if d.startswith("RestartPreventExitStatus=")]
     assert prevented == ["RestartPreventExitStatus=2"], (
         "the unit no longer prevents restarting exit 2, so a deliberate "
@@ -1204,4 +1453,229 @@ def test_the_photographed_prefix_carries_no_run_identity() -> None:
     assert not any(c.isdigit() for c in shot_prefix), (
         f"SHOT_PREFIX is {shot_prefix!r} and carries digits, so the published "
         f"screenshots would show run identity. See #177 and README.md's alt text."
+    )
+
+
+# -- #206: a unit whose ExecStart is continued across lines -------------------
+
+# The maintainer's own installed unit, reduced. Five `--root` flags on one line
+# would be unreadable, so it uses the backslash continuations systemd defines,
+# and `packaging/hitchrail.service` is one flag away from the same shape.
+_CONTINUED_UNIT = """[Unit]
+Description=hitchrail
+
+[Service]
+ExecStart=/usr/bin/hitchrail \\
+  --root work=%h/work \\
+  --root play=%h/play \\
+  --host 127.0.0.1
+Restart=on-abnormal
+"""
+
+
+def test_a_unit_whose_exec_start_is_continued_is_read_as_one_command() -> None:
+    """#206. `shlex.split` on a line ending in a lone backslash raises
+    `ValueError: No escaped character`, from inside a stdlib generator.
+
+    Shape 4 of the rotten green taxonomy, a crash standing in for a failure: the
+    operator gets a traceback instead of the sentence naming which flag the
+    template uses that the CLI does not accept.
+
+    **The crash is the loud half. The quiet half is what this asserts.** Reading
+    only the first physical line would leave `argv` as
+    `["/usr/bin/hitchrail"]`, and every flag on the continuation lines would go
+    unchecked while the test reported success. So this pins the flags from the
+    LATER lines specifically, not merely that nothing was raised.
+    """
+    argv = _exec_start_argv(_CONTINUED_UNIT)
+
+    assert argv[0] == "/usr/bin/hitchrail"
+    assert "--host" in argv, (
+        f"the continuation lines were dropped, so nothing on them is checked: {argv}"
+    )
+    assert argv.count("--root") == 2, f"a continued flag went unread: {argv}"
+    # The real parser, which is the point of the test this supports: a name
+    # check passes when a flag stops taking a value.
+    parse_args(argv[1:])
+
+
+def test_a_continued_unit_still_fails_on_a_flag_the_cli_rejects() -> None:
+    """The repair must not have bought parsing at the cost of the assertion.
+
+    A unit that continues its lines AND names a flag the CLI removed has to fail
+    the way a single line one does, through the parser, rather than passing
+    because the joining swallowed something.
+    """
+    wrong = _CONTINUED_UNIT.replace("--host 127.0.0.1", "--port-number 8787")
+
+    with pytest.raises(SystemExit):
+        parse_args(_exec_start_argv(wrong)[1:])
+
+
+def test_an_exec_start_that_cannot_be_split_is_refused_with_a_sentence() -> None:
+    """Joining fixes the continuation. It does not make every ExecStart
+    splittable, and the residue must not go back to being a traceback.
+
+    An unbalanced quote is the reachable case: systemd accepts quotes, so a unit
+    can carry one, and `shlex` raises the same bare `ValueError` for it.
+    """
+    unbalanced = '[Service]\nExecStart=/usr/bin/hitchrail --root "work=/srv/work\n'
+
+    with pytest.raises(AssertionError, match="ExecStart"):
+        _exec_start_argv(unbalanced)
+
+
+# -- #209: systemd's compatibility alias for the start limit window -----------
+
+# A minimal unit in the shape the shipped one has: window 120, burst 12, gap 5,
+# so `burst * gap` is 60, inside the window and at the floor.
+_SOUND_UNIT = """[Unit]
+Description=Hitchrail
+StartLimitIntervalSec=120
+StartLimitBurst=12
+
+[Service]
+RestartSec=5
+"""
+
+
+def test_the_alias_spelling_cannot_switch_rate_limiting_off() -> None:
+    """#209. `StartLimitInterval=` is systemd's supported compatibility alias
+    for `StartLimitIntervalSec=`. It sets the same field, and
+    last-assignment-wins applies ACROSS the two spellings.
+
+    Verified on systemd 255 by loading real units: the alias after the Sec form
+    gives `StartLimitIntervalUSec=0`, rate limiting OFF.
+
+    The check matched on the text before `=`, so it read the two spellings as
+    different directives and neither the value lookup nor the duplicate set saw
+    a conflict. Reproduced against the shipped unit before the fix:
+
+        appended StartLimitIntervalSec=0   ->  1 failed   (caught)
+        appended StartLimitInterval=0      ->  2 passed   (SURVIVED)
+        appended StartLimitInterval=       ->  2 passed   (SURVIVED)
+
+    **This is the spelling a hand edit reaches for**, because every pre-230
+    example on the internet uses it, which is where somebody copies from.
+    """
+    appended = _SOUND_UNIT.replace(
+        "StartLimitBurst=12", "StartLimitBurst=12\nStartLimitInterval=0"
+    )
+
+    with pytest.raises(AssertionError):
+        _assert_start_limit(_unit_sections(appended))
+
+
+def test_a_unit_written_in_the_alias_form_is_not_failed_for_it() -> None:
+    """The converse, and it is the half that insults the operator.
+
+    A unit written entirely in the alias form is valid systemd. The check failed
+    it, and the message told them to "write plain seconds so the check stays
+    honest", which is exactly what they had done.
+    """
+    aliased = _SOUND_UNIT.replace("StartLimitIntervalSec=120", "StartLimitInterval=120")
+
+    _assert_start_limit(_unit_sections(aliased))
+
+
+def test_the_alias_is_still_caught_when_it_is_the_repeated_one() -> None:
+    """Folding the two spellings must reach the DUPLICATE set too, not only the
+    value lookup. One directive assigned twice under two names is the case the
+    ticket's third mutation covers, `StartLimitInterval=` with no value, which
+    is unparseable rather than zero and so cannot be caught by the value check.
+    """
+    appended = _SOUND_UNIT.replace(
+        "StartLimitBurst=12", "StartLimitBurst=12\nStartLimitInterval="
+    )
+
+    with pytest.raises(AssertionError, match="more than once"):
+        _assert_start_limit(_unit_sections(appended))
+
+
+def test_exponential_backoff_would_make_the_window_arithmetic_a_lie() -> None:
+    """#209's low, made live rather than left latent.
+
+    `RestartSteps=` and `RestartMaxDelaySec=` (systemd 254+) turn `RestartSec`
+    into an INITIAL delay with exponential backoff after it. The real span of
+    `burst` attempts then far exceeds `burst * RestartSec`, so it can sail past
+    the window while `burst * gap < window` still passes and the limit never
+    fires.
+
+    Neither directive is in the shipped unit, so this is a guard against the
+    edit rather than a fix. It is here because the arithmetic below is stated as
+    if `RestartSec` were the whole gap, and the day that stops being true
+    nothing else would notice.
+    """
+    with_backoff = _SOUND_UNIT.replace("RestartSec=5", "RestartSec=5\nRestartSteps=8")
+
+    with pytest.raises(AssertionError, match="RestartSteps"):
+        _assert_start_limit(_unit_sections(with_backoff))
+
+
+# -- #214: criterion 4, a tier cannot be selected by accident -----------------
+
+
+@pytest.mark.parametrize("marker", ["screenshots", "device"])
+def test_a_tier_that_must_be_asked_for_is_not_collected_by_another_tiers_run(
+    marker: str,
+) -> None:
+    """#214. `addopts` carries `-m "not screenshots and not device"`, and pytest
+    REPLACES that whole expression when a run brings its own `-m`.
+
+    So `uv run pytest -m e2e`, which `.claude/CLAUDE.md` documents as the command for
+    the browser tier, used to collect the seven screenshot captures as well, and
+    an ordinary developer running the browser tier rewrote the published images.
+    That is how run identity reached `docs/screenshots/` in a1c0acb.
+
+    Asserted by RUNNING pytest's collector rather than by reading `addopts`,
+    because the defect was that `addopts` says one thing and a flag undoes it.
+    A test that read the config would have agreed with the bug.
+    """
+    run = subprocess.run(
+        [sys.executable, "-m", "pytest", "-m", "e2e", "--collect-only", "-q", "--no-header"],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        check=False,
+    )
+    collected = run.stdout
+
+    # **The guard was delivered to nothing, and round 1 measured it.** Every
+    # offender is derived from this subprocess's stdout, so a run that fails to
+    # collect at all produces zero lines, zero offenders, and a PASS. Verified:
+    # a broken inner run exits 4 with an empty stdout and both parametrizations
+    # went green. That is the condition under which this guard is most wanted,
+    # a missing playwright or a collection error, and it was exactly when it
+    # stopped looking.
+    assert run.returncode == 0, (
+        f"the inner collection failed with exit {run.returncode}, so this guard "
+        f"inspected nothing and would have passed:\n{run.stdout[-2000:]}\n{run.stderr[-2000:]}"
+    )
+    # A positive control. `-m e2e` must reach the browser tier, or "no
+    # screenshot tests were collected" is true for the wrong reason.
+    # **Floored on the tier, not on one file (#236 F4).** This named
+    # `test_starting.py`, so renaming or splitting that file would fail here
+    # with "collected no browser tier tests at all", which is not what happened.
+    # It cannot simply widen to `tests/e2e/`, because `test_screenshots.py`
+    # lives there and is exactly what must not be collected.
+    browser_tier = [
+        line
+        for line in collected.splitlines()
+        if line.startswith("tests/e2e/") and "test_screenshots.py" not in line
+    ]
+    assert browser_tier, (
+        f"`-m e2e` collected no browser tier tests at all, so finding no "
+        f"`{marker}` tests proves nothing:\n{collected[-2000:]}"
+    )
+
+    offenders = [
+        line
+        for line in collected.splitlines()
+        if marker == "screenshots" and "test_screenshots.py" in line
+    ] + [line for line in collected.splitlines() if marker == "device" and "device/" in line]
+
+    assert not offenders, (
+        f"`pytest -m e2e` collected {len(offenders)} test(s) from the `{marker}` "
+        f"tier, which must be asked for by name. `addopts` cannot enforce this: "
+        f"any `-m` replaces it. See the collection hook in tests/conftest.py."
     )

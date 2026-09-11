@@ -269,16 +269,17 @@ async def test_a_running_session_offers_the_link_you_talk_to_it_through(
     """Hitchrail is a launcher, not a terminal.
 
     It has no input control and the log drawer is read only, so this link is
-    the whole of how a person reaches the agent it started. Claude Code prints
-    it on startup as "Continue here, on your phone, or at ...", which is where
-    the label comes from.
+    the whole of how a person reaches the agent it started. The label used to
+    be the vendor's own word for it, borrowed out of the sentence that
+    explained it (#163); it now names the action and its object, and the
+    accessible name is exactly that, with the external mark hidden from it.
     """
     server.seed(running=["vessel"])
     expected = server.publish_link("vessel")
     await page.goto(server.base)
 
     row = page.locator(f'[data-project="{server.project("vessel")}"]')
-    link = row.get_by_role("link", name="Continue")
+    link = row.get_by_role("link", name="Open session")
     await expect(link).to_be_visible()
     await expect(link).to_have_attribute("href", expected)
     await expect(link).to_have_attribute("target", "_blank")
@@ -309,12 +310,50 @@ async def test_a_session_with_no_link_yet_says_so_rather_than_pretending(
     server.seed(running=["vessel"])
     await page.goto(server.base)
     row = page.locator(f'[data-project="{server.project("vessel")}"]')
-    assert await row.get_by_role("link", name="Continue").count() == 0
+    assert await row.get_by_role("link", name="Open session").count() == 0
 
-    await row.get_by_role("button", name="Get link").click()
+    await row.get_by_role("button", name="Open session").click()
     dialog = page.locator("[data-dialog]")
     await expect(dialog).to_contain_text("No link yet")
     await expect(dialog).to_contain_text("waiting for an answer in the terminal")
+
+
+async def test_no_row_control_is_labelled_open_or_after_the_vendor(
+    page: Page, server: Harness
+) -> None:
+    """#162 and #163, the negatives. `Open` was the one control that did not
+    open the session, and `Continue` was the vendor's word. Neither may come
+    back by copy-paste while the other label is being edited, and no label
+    names the vendor: a second vendor must never make an operator relearn a
+    row, which is the rule `test_no_vendor_name_is_in_the_operator_contract`
+    applies to flags.
+    """
+    server.seed(running=["vessel"], stopped=["alpha"])
+    server.publish_link("vessel")
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row.get_by_role("link", name="Open session")).to_be_visible()
+    labels = await page.locator(".row-actions button, .row-actions a").all_inner_texts()
+    assert len(labels) >= 3, f"too few row controls rendered to assert on: {labels}"
+    for label in labels:
+        assert label.strip() != "Open", labels
+        assert label.strip() != "Continue", labels
+        assert "claude" not in label.lower(), labels
+
+
+async def test_the_session_link_is_visibly_a_link_that_leaves_the_page(
+    page: Page, server: Harness
+) -> None:
+    """#163. The row's other controls are buttons that act here; this one
+    navigates to another origin, and a control identical to its neighbours
+    hides that. The mark is decorative: the accessible name stays the words."""
+    server.seed(running=["vessel"])
+    server.publish_link("vessel")
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    link = row.get_by_role("link", name="Open session", exact=True)
+    await expect(link).to_be_visible()
+    await expect(link.locator("[aria-hidden='true']")).to_have_text("\u2197")
 
 
 async def test_asking_again_picks_up_a_link_that_has_since_appeared(
@@ -323,12 +362,12 @@ async def test_asking_again_picks_up_a_link_that_has_since_appeared(
     server.seed(running=["vessel"])
     await page.goto(server.base)
     row = page.locator(f'[data-project="{server.project("vessel")}"]')
-    await expect(row.get_by_role("button", name="Get link")).to_be_visible()
+    await expect(row.get_by_role("button", name="Open session")).to_be_visible()
 
     expected = server.publish_link("vessel")
-    await row.get_by_role("button", name="Get link").click()
+    await row.get_by_role("button", name="Open session").click()
 
-    link = row.get_by_role("link", name="Continue")
+    link = row.get_by_role("link", name="Open session")
     await expect(link).to_be_visible()
     await expect(link).to_have_attribute("href", expected)
 
@@ -348,7 +387,7 @@ async def test_a_link_that_does_not_point_at_claude_is_not_rendered(
     server.publish_link("vessel")
     await page.goto(server.base)
     row = page.locator(f'[data-project="{server.project("vessel")}"]')
-    await expect(row.get_by_role("link", name="Continue")).to_be_visible()
+    await expect(row.get_by_role("link", name="Open session")).to_be_visible()
 
     for hostile in ("javascript:alert(1)", "https://evil.example/code/session_1", "/code/x"):
         rendered = await page.evaluate(
@@ -480,7 +519,7 @@ async def test_a_running_row_with_every_control_does_not_crush_its_name(
     test here until now.
 
     A running row whose session link has not arrived carries a badge and three
-    controls: Open, Get link, Stop. `.row-actions` is `flex-shrink: 0` and sat
+    controls: Logs, Open session, Stop. `.row-actions` is `flex-shrink: 0` and sat
     INSIDE `.row-head`, so the name was the only thing in that line that could
     give, and `overflow-wrap: anywhere` let it give all the way down to one
     character per line. The screenshot showed `alpha` as five stacked letters
@@ -496,7 +535,7 @@ async def test_a_running_row_with_every_control_does_not_crush_its_name(
     await expect(row).to_be_visible()
     # The state that produces the widest row: no session link yet, so `Get
     # link` is there too.
-    await expect(row.get_by_role("button", name="Get link")).to_be_visible()
+    await expect(row.get_by_role("button", name="Open session")).to_be_visible()
 
     overflow = await page.evaluate(
         "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
@@ -542,9 +581,11 @@ async def test_a_stuck_row_says_so_without_the_page_asking(
     # sweep's answer or nothing.
     await expect(row).to_contain_text("waiting for an answer", timeout=15_000)
 
-    # And the badge still reads `running`, which is #183 rather than an
-    # oversight here: `awaiting_trust` replaces the badge and `awaiting_input`
-    # does not, so the two overlays that both mean "a person is needed" look
-    # different at a glance. Asserted so the day that is decided, this test
-    # fails and is updated deliberately rather than drifting.
-    await expect(row.locator(".badge")).to_have_text("running")
+    # And the badge says so too (#183). It used to read `running` while the
+    # meta line carried the truth: `awaiting_trust` replaced the badge and
+    # `awaiting_input` did not, so the one row on a fifty row list that needed
+    # a person looked exactly like the forty nine that did not. Both overlays
+    # mean "go to the pane", so both are `waiting`; the state underneath is
+    # still `running`, because this is an overlay and not a fifth state.
+    await expect(row.locator(".badge")).to_have_text("waiting")
+    await expect(row).to_have_attribute("data-state", "running")

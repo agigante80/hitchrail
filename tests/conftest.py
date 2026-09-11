@@ -6,6 +6,7 @@ now it holds the one guard that keeps the hermetic tier honest.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from collections.abc import Callable
 
@@ -346,3 +347,63 @@ def procs_from(text: str) -> Callable[[], ProcTable]:
 def failing_procs() -> ProcTable:
     """What `snapshot` returns when `ps` itself failed: empty AND not ok."""
     return ProcTable([], ok=False)
+
+
+# -- #214: the tiers that must never run unasked ------------------------------
+
+# **`addopts` is not a guard, and criterion 4 of Phase 10 is that it stops
+# pretending to be one.** `-m "not screenshots and not device"` lives in
+# `addopts`, and pytest REPLACES the whole `-m` when a run supplies its own. So
+# `uv run pytest -m e2e`, which `.claude/CLAUDE.md` documents as the command for the
+# browser tier, collects the seven screenshot captures too, and an ordinary
+# developer running the browser tier rewrites the published images.
+#
+# That is how run identity reached `docs/screenshots/` in a1c0acb: not by
+# anybody running the capture tier, but by running the tier next to it.
+#
+# The `device` tier is the same hole with a worse floor. It drives a real
+# Android phone over wireless adb, and #104's argument is that it is never
+# silently skipped BECAUSE it is never silently selected. `-m e2e` selected it
+# by accident just as readily.
+#
+# So the rule moves out of configuration a flag can drop and into collection:
+# these markers run when a run ASKS for them by name, and not otherwise.
+_NEVER_UNASKED = ("screenshots", "device")
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Deselect the ask-for-me-by-name tiers unless the run named them.
+
+    **Deselected rather than skipped**, deliberately: a skip is a green line
+    saying a test did not run, and `.claude/CLAUDE.md` is explicit that a tier which
+    skips everywhere looks like coverage while proving less than none. A
+    deselection is counted and silent, which is what these are.
+
+    **The `-m` expression is trusted when it MENTIONS the marker**, in either
+    direction. `-m screenshots` selects them; `-m "not screenshots"` excludes
+    them; both are a run that has thought about it, and neither needs this. Only
+    an expression that never names the marker gets the rule applied, which is
+    the accident this exists for.
+    """
+    # **Identifiers, not a substring (round 1 review).** `marker not in named`
+    # over the raw expression means `-m "not devices"`, one plural typo, stands
+    # the hook down for `device` and collects the real-Android tier. Measured
+    # before the fix: 3 device tests collected. `--strict-markers` does not
+    # catch it, because it validates marks on ITEMS, not the names inside a
+    # `-m` expression, so an unregistered `devices` evaluates false and
+    # `not devices` is true for everything.
+    #
+    # The same trap fires for any future marker holding one of these as a
+    # substring: `-m device_farm` would have selected the phone tier.
+    named = set(re.findall(r"[A-Za-z_]\w*", config.option.markexpr or ""))
+    dropped = [
+        item
+        for item in items
+        if any(
+            item.get_closest_marker(marker) and marker not in named for marker in _NEVER_UNASKED
+        )
+    ]
+    if not dropped:
+        return
+    config.hook.pytest_deselected(items=dropped)
+    items[:] = [item for item in items if item not in dropped]

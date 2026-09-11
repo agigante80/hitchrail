@@ -28,6 +28,7 @@
   --muted: #6B5A48;
   --accent: #A8642E;
   --danger: #9A3B2B;
+  --danger-on-tint: #923829;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -35,9 +36,10 @@
     --surface: #4A3E31;
     --line: #6B5A48;
     --ink: #F3ECE1;
-    --muted: #A2917D;
-    --accent: #D08A4A;
+    --muted: #B7AA9B;
+    --accent: #A8642E;
     --danger: #9A3B2B;
+    --danger-on-tint: #E19D92;
   }
 }
 * { box-sizing: border-box; }
@@ -115,7 +117,9 @@ button {
   cursor: pointer;
 }
 .warn { color: var(--ink); font-weight: 600; }
-.bad { color: var(--danger); font-weight: 600; }
+/* #69. The on-tint shade, because `--danger` itself is 1.5:1 on the dark
+   surface, and this line is the warning about what the key can do. */
+.bad { color: var(--danger-on-tint); font-weight: 600; }
 [hidden] { display: none !important; }
 </style>
 </head>
