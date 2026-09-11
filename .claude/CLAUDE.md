@@ -18,16 +18,27 @@ across a folder of projects. Phone first. Python, standalone, no bash dependency
 
 ## Read first
 
-- `docs/roadmap.md` is the only place that says what is built. Never state a
-  phase count, a plan count or a test count here: each decayed within a phase,
-  and `tests/test_docs_are_true.py` checks this file for the claims that did.
+- `docs/roadmap.md` says which phases exist and what state each is in, in
+  forge-kit's `roadmap-phases` shape: a `## Phase:` block per phase whose
+  heading is the milestone's title, a `state:` line (`planned`, `open`,
+  `done`, `backlog`), and a `plan:` line once the phase has started. GitHub's
+  milestones say which phase each ticket is in, and the closed milestones plus
+  `CHANGELOG.md` say what is built: phases closed before 2026-09-11 are not
+  in the file. Never state a phase count, a plan count or a test count here:
+  each decayed within a phase, and `tests/test_docs_are_true.py` checks this
+  file for the claims that did.
 - `docs/superpowers/specs/2026-08-25-hitchrail-design.md` is the argument.
   Follow it or change it deliberately; never drift from it.
-- `docs/superpowers/plans/` holds one plan per phase, written BEFORE the phase
-  starts. Tasks are numbered continuously across plans in dependency order. A
-  phase in progress or done links a plan that exists, at most one phase is in
-  progress, and a done plan's unticked items say MOVED OUT or NOT BUILT with an
-  issue number on the same line. `tests/test_docs_are_true.py` asserts all four.
+- `docs/superpowers/plans/` holds one plan per phase, written when the phase
+  opens, from the roadmap prose AND the tickets that accumulated in its
+  milestone while it was a bucket. Five sections: Goal, Done looks like,
+  Fails if (a premortem, never a risk list), Expected work, Out of scope.
+  Tasks are numbered continuously across plans in dependency order. An open or
+  done phase declares a plan that exists and has a `Fails if` section, at most
+  one phase is open, exactly one is the backlog, and a done plan's unticked
+  items say MOVED OUT or NOT BUILT with an issue number on the same line.
+  `tests/test_docs_are_true.py` asserts all of that offline;
+  `scripts/check-phases.sh` asserts the rest against the milestones.
 - `docs/tech-guidelines.md` is binding for all code here.
 - `docs/api.md` is the HTTP reference, checked against the server both ways: a
   status code the server can return and the document omits fails, and so does a
@@ -207,10 +218,14 @@ a named regression test that fails if it is removed.
 - **Every ticket gets a milestone and an area label.** The milestone is a phase
   from `docs/roadmap.md`, or `Backlog`. Empty means UNTRIAGED, so
   `is:open no:milestone` is the triage queue, and a ticket wanting two
-  milestones wants splitting. `scripts/check-roadmap-matches-milestones.sh` and
-  `scripts/check-ticket-hygiene.sh` need the network and an authenticated `gh`,
-  so run them before planning a phase and before a release; they cannot be a
-  pytest gate.
+  milestones wants splitting. `scripts/check-phases.sh` (every open ticket
+  has a phase, roadmap and milestone states agree, a done phase holds no open
+  ticket) and `scripts/check-ticket-hygiene.sh` need the network and an
+  authenticated `gh`, so run them before planning a phase and before a
+  release; they cannot be a pytest gate. After editing the roadmap,
+  `scripts/sync-phases.sh --check`, then without the flag: it creates and
+  closes milestones and never deletes or reopens one. Both find
+  `forge-lib.sh` in the forge-kit-devops plugin and say so when they cannot.
 - **Test the refusals.** A security control with only a happy path test is
   untested. Full rules in `.claude/rules/security.md`.
 - **Verify, do not recall.** Anything version dependent or security sensitive is

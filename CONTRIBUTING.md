@@ -18,7 +18,8 @@ label. An empty milestone means untriaged rather than unphased, so
 single source of truth for what a ready ticket contains. The issue templates
 collect it and the `ticket-gate` check scores against it.
 
-Read [`docs/roadmap.md`](docs/roadmap.md) for what is built and what is next,
+Read [`docs/roadmap.md`](docs/roadmap.md) for what is next and why, the
+closed milestones and `CHANGELOG.md` for what is built,
 and the design in `docs/superpowers/specs/` for the argument. **The design is
 something to follow or to change deliberately, never to drift from.** If your
 change departs from it, amend it in the same pull request and say why.

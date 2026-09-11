@@ -168,120 +168,107 @@ def test_every_module_that_exists_is_named_in_claude_md() -> None:
 
 PLANS = ROOT / "docs" / "superpowers" / "plans"
 
+# The roadmap format is forge-kit's `roadmap-phases`, parsed by
+# `scripts/roadmap-lib.sh` for the two scripts that talk to the host. These
+# guards are the offline half, rule 2 and the one-open-phase half of rule 3,
+# so a clone and every CI leg check what needs no network. Rules 1, 3 and 4
+# need the milestones and stay in `scripts/check-phases.sh`.
+_STATES = {"planned", "open", "done", "backlog"}
+
 
 class _Phase(NamedTuple):
-    """One phase section of the roadmap, with the three things guards ask of it."""
+    """One `## Phase:` block of the roadmap, with the three things guards ask of it."""
 
     name: str
-    status: str  # "done" | "in progress" | "planned"
-    plan: str | None  # the linked plan's filename, if the section links one
+    state: str
+    plan: str | None  # the declared plan path, relative to the repository root
 
 
 def _phases() -> list[_Phase]:
-    """Every phase section, read as structure rather than searched for text.
+    """Every phase block, read the way `roadmap-lib.sh` reads it.
 
-    **Both spellings of done are read, and that is the whole reason this helper
-    exists.** The guard below used to match `^## Phase N ... (done)`, the suffix
-    form, which is Phases 4, 5 and 6 and nothing else. Every phase closed since
-    then marks itself with the `**Status: done**` line the file's own convention
-    requires, so the guard covered three phases of nine and had never had
-    anything to say. It was green while Phase 9 carried an unticked plan item
-    and while Phase 8 carried seven.
+    A `state:` or `plan:` line binds to the nearest `## Phase:` heading above
+    it, and a block with no state or an unknown one is a failure of THIS helper
+    rather than a phase quietly skipped: the shell library refuses the whole
+    file on one malformed block, and a guard that read a subset would report
+    phases as compliant that were never read.
     """
     found: list[_Phase] = []
-    road = ROADMAP.read_text()
-    for match in re.finditer(r"^## (Phase \d+)[^\n]*$(.*?)(?=^## |\Z)", road, re.M | re.S):
-        heading, body = match.group(0).split("\n")[0], match.group(2)
-        if "**Status: done" in body or "(done)" in heading:
-            status = "done"
-        elif "**Status: in progress" in body:
-            status = "in progress"
-        else:
-            status = "planned"
-        link = re.search(r"\(superpowers/plans/([^)]+)\)", body)
-        found.append(_Phase(match.group(1), status, link.group(1) if link else None))
+    name: str | None = None
+    state = ""
+    plan = ""
+
+    def flush() -> None:
+        if name is None:
+            return
+        assert state, f"{ROADMAP.name}: phase {name!r} has no `state:` line"
+        assert state in _STATES, (
+            f"{ROADMAP.name}: phase {name!r} has state {state!r}; one of {sorted(_STATES)}"
+        )
+        found.append(_Phase(name, state, plan or None))
+
+    for line in ROADMAP.read_text().splitlines():
+        if line.startswith("## Phase:"):
+            flush()
+            name, state, plan = line[len("## Phase:") :].strip(), "", ""
+        elif line.startswith("state:"):
+            state = line[len("state:") :].strip()
+        elif line.startswith("plan:"):
+            plan = line[len("plan:") :].strip()
+    flush()
 
     assert found, (
-        f"{ROADMAP} yielded no phase sections, so every guard below would pass on "
+        f"{ROADMAP} yielded no phase blocks, so every guard below would pass on "
         "nothing. A rewritten heading style must fail here."
     )
     return found
 
 
-# **Phases that started before the plan rule was written down, tracked rather
-# than excused.** Same mechanism as the size `caps` table: an exception carries
-# its reason and the ticket that retires it, and the test below fails once the
-# exception stops being true, so it cannot outlive its cause.
-_STARTED_WITHOUT_A_PLAN = {
-    # Design, and the design IS the artefact: `docs/superpowers/specs/` holds it.
-    # A plan for producing a spec would be a plan for writing a plan.
-    "Phase 0": "the design spec is the deliverable, and it is in specs/",
-    # **Permanent, decided on #225.** Eleven issues closed with no plan. Writing
-    # one now would be a document nobody used: a plan's value is ordering decided
-    # BEFORE the work, and a reconstruction from the commit log reads like a plan
-    # that was followed while never having been one, which is worse than an
-    # admitted gap because the next reader cannot tell. The reasoning is not
-    # lost: this phase's roadmap section is the longest in the file and carries
-    # what it decided.
-    "Phase 7": "no plan; the roadmap section is the record, decided on #225",
-    # Same decision, and a sharper fact: Phase 12 ran in the same week as 8 and
-    # 9, both of which HAD plans, so it skipped a convention that was in active
-    # use rather than one that did not exist yet. That is precisely what this
-    # rule now makes checkable, and it is the argument for the rule.
-    "Phase 12": "no plan; ran without one while 8 and 9 had theirs (#225)",
-}
+def test_a_phase_that_has_started_declares_a_plan_with_a_premortem() -> None:
+    """Rule 2. **Written before the phase starts, and reviewed while it runs.**
+    A phase with no plan is a milestone with an objective attached, and what it
+    loses is the ordering and the premortem: what would make the phase fail
+    rather than finish.
 
-
-def test_a_phase_that_has_started_links_a_plan_that_exists() -> None:
-    """**Written before the phase starts, and reviewed while it runs.** A phase
-    with no plan is a milestone with an objective attached, and what it loses is
-    the ordering: which ticket blocks which, what has to be true before a batch
-    begins, and what would make the phase fail rather than finish.
-
-    "Started" is done or in progress. A planned phase deliberately has none: a
-    plan written a month before its phase describes tickets that have since
-    moved, which is the drift #92 is about.
+    "Started" is open or done, and done is included so a phase moved straight
+    from planned to done cannot skip the state where a plan is required. A
+    planned phase deliberately has none: a plan written a month before its
+    phase describes tickets that have since moved, which is the drift #92 is
+    about. "Fails if" is the section a plan cannot be without, because a plan
+    that only says what finishing looks like cannot tell you to stop.
     """
-    missing = [
-        f"{p.name} ({p.status})"
-        for p in _phases()
-        if p.status in {"done", "in progress"}
-        and p.name not in _STARTED_WITHOUT_A_PLAN
-        and (p.plan is None or not (PLANS / p.plan).exists())
-    ]
-    assert not missing, (
-        "these phases have started and link no plan that exists: "
-        + ", ".join(missing)
-        + f". Write one in {PLANS.relative_to(ROOT)}, or record the phase in "
-        "_STARTED_WITHOUT_A_PLAN with its reason and a ticket."
+    problems: list[str] = []
+    for p in _phases():
+        if p.state not in {"open", "done"}:
+            continue
+        if p.plan is None:
+            problems.append(f"{p.name} is {p.state} and declares no plan")
+            continue
+        path = ROOT / p.plan
+        if not path.exists():
+            problems.append(f"{p.name} declares {p.plan}, which does not exist")
+        elif not re.search(r"^#{1,4}\s*Fails if", path.read_text(), re.M | re.I):
+            problems.append(f"{p.name}'s plan {p.plan} has no 'Fails if' section")
+    assert not problems, "; ".join(problems) + (
+        f". A started phase's `plan:` names a file under {PLANS.relative_to(ROOT)} "
+        "with a 'Fails if' premortem."
     )
 
 
-def test_the_exemption_from_the_plan_rule_retires_itself() -> None:
-    """An exemption that outlives its cause is how a rule becomes advice.
-
-    `test_every_module_is_under_the_size_guideline` proved this mechanism works
-    when #33 brought `discovery.py` under the guideline and the suite failed
-    until the stale entry was removed.
-    """
-    stale = [
-        p.name
-        for p in _phases()
-        if p.name in _STARTED_WITHOUT_A_PLAN and p.plan and (PLANS / p.plan).exists()
-    ]
-    assert not stale, (
-        "these phases now link a plan and are still exempted from needing one: "
-        + ", ".join(stale)
-        + ". Remove them from _STARTED_WITHOUT_A_PLAN."
-    )
+def test_at_most_one_phase_is_open() -> None:
+    """One phase at a time. Two open is either a phase somebody forgot to close
+    or two half-phases, and both mean "the current phase" names nothing. The
+    backlog is a state, not an open phase, so it does not count."""
+    running = [p.name for p in _phases() if p.state == "open"]
+    assert len(running) <= 1, f"more than one phase is open: {', '.join(running)}"
 
 
-def test_at_most_one_phase_is_in_progress() -> None:
-    """The roadmap says one phase at a time. Two in progress is either a phase
-    somebody forgot to close or two half-phases, and both mean the exit criteria
-    of at least one of them are not being read."""
-    running = [p.name for p in _phases() if p.status == "in progress"]
-    assert len(running) <= 1, f"more than one phase is in progress: {', '.join(running)}"
+def test_exactly_one_phase_is_the_backlog() -> None:
+    """Every ticket has a phase only because a ticket with no home has this one
+    to go to. A roadmap without it makes rule 1 impossible to satisfy honestly;
+    two of them make the answer to "where does this go" ambiguous again."""
+    backlog = [p.name for p in _phases() if p.state == "backlog"]
+    assert len(backlog) == 1, f"expected one backlog phase, found {backlog}"
 
 
 # An unticked box means two different things, and this is the marker that tells
@@ -301,10 +288,10 @@ def test_the_roadmap_marks_a_phase_done_only_when_its_plan_is_finished() -> None
     is the direction that keeps this from becoming a way to close a phase early.
     """
     for phase in _phases():
-        if phase.status != "done" or phase.plan is None:
+        if phase.state != "done" or phase.plan is None:
             continue
-        path = PLANS / phase.plan
-        assert path.exists(), f"{phase.name} links a plan that is not there: {phase.plan}"
+        path = ROOT / phase.plan
+        assert path.exists(), f"{phase.name} declares a plan that is not there: {phase.plan}"
 
         pending: list[str] = []
         for item in re.findall(r"^- \[ \] (.*?)(?=^- \[|\Z)", path.read_text(), re.M | re.S):
@@ -401,7 +388,7 @@ def test_the_api_doc_documents_no_code_the_server_cannot_return() -> None:
 # -- the README, which is the only one a stranger reads ---------------------
 
 
-def test_the_readme_does_not_claim_a_phase_is_unbuilt_that_the_roadmap_closed() -> None:
+def test_the_readme_does_not_claim_there_is_no_server() -> None:
     """The file a stranger meets first was the only one with no guard.
 
     It said "Phases 1 to 3 of 7 are built; there is no runnable server yet" and
@@ -411,24 +398,15 @@ def test_the_readme_does_not_claim_a_phase_is_unbuilt_that_the_roadmap_closed() 
     left.
 
     This is the same failure `.claude/CLAUDE.md` records about ITSELF, in the
-    docstring at the top of this file, repeated in the one document that guard
-    did not cover. Two copies of a claim, one checked.
-
-    Checked against the ROADMAP rather than against a number written here, so
-    closing a phase updates the expectation instead of breaking the test.
+    docstring at the top of this file, repeated in the one document a stranger
+    reads. The phase-count half of the old guard is gone with the counts: the
+    README names no phase number any more, and the roadmap no longer lists the
+    closed ones to compare against.
     """
     readme = README.read_text()
-    closed = re.findall(r"^## (Phase \d+)[^\n]*\((?:done|closed)\)", ROADMAP.read_text(), re.M)
-    assert closed, "the roadmap marks no phase done, so this cannot check anything"
-    highest = max(int(p.split()[1]) for p in closed)
-
-    for match in re.finditer(r"[Pp]hases? (\d+) to (\d+) of \d+ are built", readme):
-        claimed = int(match.group(2))
-        assert claimed >= highest, (
-            f"README says phases up to {claimed} are built; the roadmap closed "
-            f"Phase {highest}. The README is the only document a stranger reads."
-        )
-
+    assert not re.search(r"[Pp]hases? \d+ to \d+ of \d+ are built", readme), (
+        "README states a phase count again; it decayed by several last time"
+    )
     # The specific sentence that was wrong, in the shape it was wrong in.
     for absent in ("there is no runnable server", "no runnable server yet"):
         assert absent not in readme.lower(), (

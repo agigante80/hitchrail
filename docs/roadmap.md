@@ -1,1319 +1,317 @@
 # Hitchrail: roadmap
 
-The design says what to build. This says in what order, and what "done" means
-at each stop. One phase at a time, each ending in something that runs.
+The design says what to build. This file says which phases exist, what state
+each is in, and why each one sits where it does. One phase at a time, each
+ending in something that runs and has been watched running.
 
 Design: [`superpowers/specs/2026-08-25-hitchrail-design.md`](superpowers/specs/2026-08-25-hitchrail-design.md)
 Rules: [`tech-guidelines.md`](tech-guidelines.md)
 
-## How the phases are cut
-
-Small phases, each with a demonstrable exit. A phase you cannot show somebody
-is a phase you cannot tell is finished.
-
-Two ordering rules decide what goes where:
-
-1. **Dependency order.** Nothing is built before what it consumes.
-2. **Risk order, where dependencies allow a choice.** The security boundary
-   needs only the configuration, so it comes before the engine rather than
-   after it. Its argument is the one the whole design rests on, and finding out
-   late that the token cannot reach the event stream is expensive. It happened
-   in the first draft of this plan, which put security at task 12 of 15 and did
-   not notice until review that `EventSource` cannot send an `Authorization`
-   header.
-3. **Cost-of-delay order, which was added on 2026-09-04 and has exactly one
-   member so far.** A phase whose cost rises with every day it is not done
-   comes forward, even past phases that are more valuable in themselves.
-
-**Phase 12 ran next, ahead of 9, 10 and 11, and closed on 2026-09-05.** The
-argument was that it changes what a project is called on the wire, so every
-saved link and every API caller written against 0.1.0 changed with it: a MINOR
-while the version is `0.y.z` and a MAJOR after 1.0, and 0.1.0 had been published
-the day before with no installed base. The break was free that week and more
-expensive every week after. Phases 9, 10 and 11 got better by waiting and cost
-nothing for it.
-
-**It is recorded as taken rather than deleted**, because rule 3 above has one
-member and this is it: the next candidate for jumping the queue is argued
-against this one.
-
-The renumbering that would follow from having moved it is deliberately not done.
-The milestones are the queryable record and renaming five of them to reorder one
-is churn that breaks every link into them. The SECTION sits in numeric position;
-the order it ran in is what this paragraph says.
-
-**An open phase links its milestone rather than listing its tickets, since
-2026-09-07.** Every phase used to type its issue numbers into this file, and
-every one of those lists was wrong. Phase 10's was short by seventeen while the
-paragraph directly beneath it said the list had "gained the six tickets filed
-into this milestone since it was written": a sentence about drift, drifting.
-A count typed into a document is a count nobody checks, which is #92, and the
-fix for a count nobody checks is to stop typing it. The milestone is the
-queryable record; the phase section says what done means, which is the part a
-query cannot answer.
-
-A CLOSED phase keeps its list. It cannot drift once no ticket can be added to
-it, and it is then a record of what shipped rather than a claim about what is
-left.
-
-<!--
-Every closed phase carries a `**Status: done**` line directly under its
-heading, with the closing date and the issues. Three phases had their milestone
-closed and every issue closed while saying nothing here at all, because the
-file was using three conventions at once: a status line on 0 and 1, a `(done)`
-suffix on 4, 5 and 6, and nothing on 2, 3 and 7.
-
-The suffix is kept where it is rather than churned. It is now read by
-`_phases()` in `tests/test_docs_are_true.py` alongside the status line, which is
-the correction to what this comment used to say: it claimed the suffix was kept
-BECAUSE the guard read it, and the guard read nothing else, so it covered three
-phases of nine and was green while two closed phases carried unfinished plans.
-
-A phase is in exactly one of three states, and the guards read all three:
-
-- `**Status: done**`, with the closing date and the issues.
-- `**Status: in progress**`, on at most one phase at a time.
-- neither, which means planned.
-
-A phase in either of the first two states MUST link a plan under
-`docs/superpowers/plans/`, and a done phase's plan must have no unticked item
-that is not marked MOVED OUT or NOT BUILT with an issue number on the same line.
-Phases that started before this rule are tracked in `_STARTED_WITHOUT_A_PLAN`
-with their reason, and that exemption fails once it stops being true.
-
-`.claude/CLAUDE.md` says this file is the one place that says what is built, and for three
-phases it was not saying.
--->
-
-## Phase 0: Design
-
-**Status: done.**
-
-Design approved, technical guidelines written, interface drawn and clickable,
-name secured on both registries.
-
-## Phase 1: Foundations
-
-**Status: done**, closed 2026-08-25 at `2c9be3b`. Issues #1, #2, #3 and #7.
-All six exit criteria in the plan are ticked with the evidence that closed them.
-
-**Plan: [`superpowers/plans/2026-08-25-hitchrail-phase-1-foundations.md`](superpowers/plans/2026-08-25-hitchrail-phase-1-foundations.md)**
-
-The skeleton, the gates, the configuration and the path boundary. Three tasks.
-
-Delivers: `pyproject.toml` with every tool configured from it, the module stubs
-that make the import contract enforceable from the first commit, CI on three
-interpreters, the `Config` that refuses a network bind without a token, and the
-name allowlist that makes traversal impossible.
-
-**Done when:** all five gates are green on 3.11, 3.12 and 3.13; a wildcard bind
-produces an allowlist that actually contains the machine's own address; and a
-name containing a separator, a parent reference or a leading hyphen is refused.
-
-All three held, confirmed on the real runner and against this machine's real
-network configuration. Two things worth carrying forward:
-
-- Review of the batch found the path allowlist **failing open**. `NAME_PATTERN`
-  was anchored with `$`, which matches before a trailing newline, so `evil\n`
-  became a real directory and a 64 character name plus a newline walked past
-  the pattern's own length cap. Every hand written payload in the ticket's test
-  list passed that pattern. Future guards here want fuzzing or property tests,
-  not only enumeration.
-- Seven deferred items came out of the phase. Phase 2 closed four of them:
-  #6 (a TLS proxy on a non standard port is refused by the origin check), #7
-  (folders with a space or a non ASCII name are silently invisible), #8
-  (normalise every host in one place) and #9 (`RootUnavailable` is a client
-  error, and an intra-root alias is two projects). Still open: #4 (pin actions
-  to SHAs before Phase 7 introduces a publish token), #5 (the plans' snippets
-  are no longer checked by any tool) and #10 (the mypy gate checks 3.11 on all
-  three matrix legs).
-
-**The review loop was stopped by its trip wire, not by running clean.** Three
-rounds found nine findings each, and rounds 2 and 3 each found defects inside
-the previous round's fixes: the `contextlib.suppress` placement fixed in round
-1 had the same defect one line above it, and the `extra_hosts` validation added
-in round 2 left the same hole open on `host`. The user's `CLAUDE.md` says to
-stop immediately when two consecutive rounds do that, because past that point
-iteration removes value rather than adding it.
-
-Fourteen findings were fixed across rounds 1 and 2, every one with a named
-regression test verified to fail on revert. The nine from round 3 are #8, #9
-and #10, to be done as deliberate work rather than a fourth round of point
-patches. #8 in particular argues for one normalisation function rather than
-per entry point validation, which is the shape all three rounds kept
-rediscovering.
-
-## Phase 2: The security boundary
-
-**Status: done**, closed 2026-08-25. Issues #6, #8, #9, #13, #14, #15 and #16.
-
-**Plan: [`superpowers/plans/2026-08-25-hitchrail-phase-2-security.md`](superpowers/plans/2026-08-25-hitchrail-phase-2-security.md)**
-
-The controls that stand between a web page and a shell, built before there is
-anything to serve. Three tasks.
-
-Delivers: the host allowlist, the origin check with scheme and port, and token
-authentication over three carriers (header, cookie, and a one time query grant
-that redirects the token out of the URL bar).
-
-**Done when:** a real socket refuses a forged `Host`, refuses a mutating request
-with a foreign or missing `Origin`, refuses a wrong token, and accepts a request
-shaped the way `EventSource` sends one. The host check is proven to run before
-the token check.
-
-**Not done if:** the only proof is an `ASGITransport` test. That proves the
-middleware is configured, not that the deployed server refuses anything.
-
-All of it held. `tests/test_live_socket.py` binds a real loopback socket and
-drives every refusal through uvicorn's own HTTP parser, and the middleware
-order is asserted by a test rather than left to the order somebody typed. Four
-things worth carrying forward:
-
-- **The same defect shape ran through all three review rounds:** a value
-  accepted after normalisation and then used in its raw form. `--allow-host
-  box.lan:8787` validated and never matched. `--allow-origin https://box.lan:443`
-  validated and never matched. `Config(host="[::1]")` validated and could not
-  be bound. The fix that finally held was one canonical function each for hosts
-  (`normalise_host`) and origins (`origin_forms`), used by every door, rather
-  than a validator per entry point. Per entry point validation is how the
-  allowlist ended up holding two spellings of one host and disagreeing with
-  itself.
-- **A redirect hides a secret from the browser, not from the server.** The
-  `?token=` grant redirects the token out of the address bar, and it was still
-  written to uvicorn's access log in cleartext on every use, because uvicorn
-  builds that line after the app returns from the same scope dict the app was
-  handed. The fix overwrites `scope["query_string"]` once the token is spent.
-  The suite could not see this because its own fixture ran at
-  `log_level="warning"`; a test tier that silences the component under test
-  cannot observe it.
-- The three security controls landing together broke two host and origin tests
-  that bound a network address, because such a bind now demands a token. That
-  is the suite catching a real cross ticket interaction, and it is the argument
-  for building the boundary as one phase rather than three.
-- `tests/conftest.py` now stubs `local_addresses` for every test that is not
-  marked `live`. Around twenty tests in the tier the guidelines call hermetic
-  were doing real DNS, and their answers changed with the machine. A rule that
-  every test author has to remember had already decayed by the time it was
-  written down, so it is enforced by an autouse fixture instead.
-
-**The review loop ran its full four rounds and was stopped by the hard bound,
-not by running clean.** Round 1 found nine. Round 2 found five, three of them
-defects inside round 1's own fixes. Round 3 found five, none of them in round
-2's fixes, which broke the consecutive streak the trip wire watches for and is
-why the loop continued. Round 4 then found defects in round 3's fixes.
-
-Three of the four rounds found a defect in the previous round's work, which is
-above the 7 to 29 percent bad fix injection rate that the user's `CLAUDE.md`
-cites as normal, and it is the argument for the bound existing at all.
-
-The worst injection was mine and it is worth naming, because it is the failure
-mode this phase kept teaching. Round 3 stripped the FQDN root dot in
-`normalise_host` to fix an accepted-then-never-matches case, and by doing it on
-the config side only it created a fresh accepted-then-never-matches case
-(`box.lan..` stored as `box.lan.`) while removing the one spelling that had
-worked. A fix aimed at a defect class produced a new instance of that class.
-
-The resolution was a revert rather than a fifth patch. A revert restores a
-state that already survived three rounds and cannot inject anything; a
-cleverer two line fix at the hard stop would have shipped unreviewed with this
-batch's injection rate as the prior. Both remaining defects are tickets: #19
-for the root dot done on both sides, #20 for the access log leak on the paths
-the grant fix does not reach. A ticket is a finished outcome for a finding.
-
-## Phase 3: The adapters
-
-**Status: done**, closed 2026-08-26. Issues #11, #18, #19, #22, #23, #24,
-#25, #26, #27, #29 and #31.
-
-**Plan: [`superpowers/plans/2026-08-25-hitchrail-phase-3-adapters.md`](superpowers/plans/2026-08-25-hitchrail-phase-3-adapters.md)**
-
-One module per external surface, each pure, injectable and testable without a
-machine. Four tasks.
-
-Delivers: the tmux adapter carrying its footguns, the process table snapshot,
-the Claude Code quarantine, and the memory guard.
-
-**Done when:** each of the four addressing footguns in the design's section 4.2
-(1, 2, 3 and 5) has a named regression test that fails if its workaround is
-removed, and nothing in this layer imports Starlette. Footgun 4, serialising
-concurrent starts, belongs to Phase 4: starting is an engine operation and
-there is nothing in this layer to serialise.
-
-All of it held. The four adapters are built and every one of the ten exit
-criteria was verified by driving the modules rather than by reading the
-tickets. Three things worth carrying forward:
-
-- **The hermetic tmux tests could not have caught a wrong belief.** Every one
-  asserts the argv the adapter sent, which proves the code builds what we
-  intended and can never falsify the intention, because the fake encodes the
-  same belief. `tests/test_live_tmux.py` runs the real thing, and all four
-  addressing premises reproduce on tmux 3.4. This is the same gap Phase 2
-  closed with a live socket, and it is worth assuming it exists wherever a
-  fake stands in for an external tool.
-- **That live tier leaked four tmux servers before it caught itself**, through
-  the exact footgun it exists to prove: teardown killed the name it asked for,
-  and tmux had stored a different one. Its first leak check was vacuous
-  because it ran after the socket was deleted. A teardown assertion that
-  cannot fail is worse than none, because it reads as proof.
-- **`sanitize` was not injective**, which was its only requirement, and the
-  digest design in this plan is what made it so. A project literally named
-  `a-b-<the digest of a.b>` collided with `a.b`, and that name is computable
-  by anyone who can create a folder. Injective by construction beat injective
-  by hash.
-
-## Phase 4: The engine (done)
-
-**Plan: [`superpowers/plans/2026-08-25-hitchrail-phase-4-engine.md`](superpowers/plans/2026-08-25-hitchrail-phase-4-engine.md)**
-
-All nine exit criteria in the plan are ticked with the evidence that closed
-them. The last one, driving a real agent with no web server involved, is the
-one that found the stale `stopping` marker that every fake had missed.
-
-State derivation and the session lifecycle, with no HTTP anywhere. Four tasks.
-
-Delivers: the event bus, derivation across all four states, start with a grace
-window and a start lock, and the three step stop with its non persisted marker.
-
-**Done when:** a Python session, with no web server involved, starts a real
-Claude session, watches it become `running`, gracefully stops it, and kills it.
-All four states have a passing test, `detached` included.
-
-## Phase 5: The HTTP API and the CLI (done)
-
-**Plan: [`superpowers/plans/2026-08-25-hitchrail-phase-5-api.md`](superpowers/plans/2026-08-25-hitchrail-phase-5-api.md)**
-
-All twelve exit criteria are ticked with the evidence that closed them. A real
-Claude agent was started, watched, gracefully stopped and killed through the
-API by hand, which is what the "not done if" clause below asks for.
-
-The thin layer on top. Three tasks.
-
-Delivers: the REST surface and its stable error envelope, the event stream over
-`sse-starlette`, and the command line entry point.
-
-**Done when:** `uvx hitchrail --root ~/dev` serves an API a person can drive with
-`curl`. It starts a real session, reports it accurately, stops it gracefully,
-kills it when told to, refuses to bind to a network interface without a token,
-and refuses a forged `Host` on a live socket.
-
-**Not done if:** the suite passes but nobody has watched it start and stop a real
-Claude session.
-
-## Phase 6: Interface (done)
-
-**Plan: [`superpowers/plans/2026-08-27-hitchrail-phase-6-interface.md`](superpowers/plans/2026-08-27-hitchrail-phase-6-interface.md)**
-
-**Closed 2026-09-03.** All six tasks implemented and all eleven exit criteria
-ticked with evidence.
-
-The browser interface from the design canvas, and the end to end tier that
-proves it. Six tasks, 18 to 23. Delivers: the single page and its assets, the
-list with search and filter, the start and stop flows including the escalation,
-the log drawer, the new folder sheet, the memory footer, live updates over SSE
-with reconnection, the token screen, dark theme, and the Playwright end to end
-tests running against a private tmux server and a fake `claude` shim.
-
-**What the last criterion cost, because it is the point of the phase.** "Every
-flow works on a real phone against a real machine" sat unticked for six days
-while everything else was green, and running it produced defects no tier could
-reach:
-
-| Found by | What |
-|---|---|
-| The first hour against a real root | #84 a tmux server's own argv read as a detached agent, #88 a session stuck on a trust prompt reported as `running`, #83 a `Kill pid` button with no handler, #81 a timeout asserting from a listing it never read, #89 a "graceful" stop that was a double interrupt quit |
-| Running #89's sequence mid task | #101, the stop opening a prompt and leaving the agent on it |
-| Two Android devices, three browser engines | #103 the keyboard burying the sheet's primary action, a row crushing its name to one character per line, and assets served with no `cache-control` so a fix could ship and not be seen |
-
-Every one of those was invisible to a suite that was passing. The phase's own
-standing rule is why they were found at all: a phase is finished when the
-behaviour has been watched working in the running application.
-
-**The criterion was ticked on partial evidence, deliberately.** Three of the
-seven flows were walked; thumb reach and a real radio dropping are not
-simulable, and no iOS device exists on this network, which leaves #103's
-`visualViewport` fallback unexercised on the platform it was written for. The
-plan records it and #75 carries the full account. Residual findings get their
-own tickets rather than holding a phase open.
-
-**Test coverage:** this is where the browser tier arrived. `tests/e2e/` runs
-Playwright against the real server on a temporary root with a fake `claude`
-shim, and it drives a PRIVATE tmux server for the same reason the live tmux
-tier does. It is the only tier that can see SSE reconnection after a
-backgrounded tab, the stop escalation in the state the user is really in, and
-the layout holding at a phone viewport. That was #38.
-
-## Phase 7: The security argument holds
-
-**Status: done**, closed 2026-09-03. Issues #4, #35, #77, #79, #80, #91,
-#108, #109, #111, #112 and #115.
-
-**Objective: everything the design promises about safety is true and asserted,
-before anything is published.**
-
-This comes BEFORE the release and did not used to. The roadmap's own words are
-why: prove the security tests actually assert *before* shipping something that
-spawns an agent with permissions skipped, "because three defects in this project
-shipped green at 98% branch coverage". A release is the one step that cannot be
-taken back, and every ticket here is a claim the design makes that nothing
-currently checks.
-
-Delivers: security headers on every response, mutation testing over the five
-modules between a web page and a shell, the threat model naming the powers the
-API actually has, and the CI supply chain pinned.
-
-**Done when:** a changed line in any of those five modules makes a test fail,
-every response carries the headers with a test per refusal, and section 5 names
-keystroke injection and pid signalling as capabilities rather than leaving them
-to be discovered.
-
-**Closed 2026-09-03.** All three exit criteria ticked with evidence, and every
-ticket resolved.
-
-| Done | |
-|---|---|
-| #4 | every action pinned to a SHA, and a guard so the next one cannot arrive on a tag |
-| #35 | mutation testing on the five modules: 836 mutants, 680 killed, the survivors read and categorised |
-| #77 | nosniff, framing refused, a CSP per route |
-| #79 | the fragment grant asserted against the server's log rather than the browser's |
-| #91 | keystroke injection and pid signalling named in section 5, and a grep keeping the first one narrow |
-| #108 | the token demand follows reach, not the bind address |
-| #109 | `HITCHRAIL_TOKEN`, because argv is world readable |
-| #111 | the documented middleware order was the reverse of the real one |
-| #112 | token before origin was a promise nothing checked |
-
-**#80 was closed by doing something else, and the reason is worth carrying.**
-It asked where to move the `?token=` carrier so `security.py` would come back
-under its cap. Measured, that was unreachable: the movable unit is 101 lines
-against a 542 line file, landing near 435 with the exception intact. The query
-grant was never what made the file long.
-
-Reviewing it turned up the better question. The carrier existed so "an already
-saved link does not break", and **nothing had shipped**: no tags, no release,
-and nothing had generated a query link since the banner moved to
-`/grant#token=`. It protected compatibility with a version that was never
-published, and the window in which deleting it was free closed at Phase 8, the
-next phase. #115 deleted it: 135 lines, `security.py` at 409, exception gone.
-
-What left with it mattered more than the lines. `_scrub_grant_param` existed
-only to keep that carrier's token out of uvicorn's access line, and rested on
-where uvicorn emits that line rather than on anything ASGI guarantees. A
-control whose correctness depends on another project's call ordering is one
-worth not needing.
-
-Three tickets came out of the work rather than into it: #113 (a spawned agent
-inherits `HITCHRAIL_TOKEN`, Phase 9), #114 (two tests that failed in CI and
-passed on rerun, Phase 10), and #107, which moved to Phase 9 because it depended
-on two tickets that live there.
-
-**What the phase was for, in two examples.** #35 found that
-`_safe_redirect_path` could be turned into an open redirect by changing
-`path[1:2]` to `path[2:2]`, while the test written for exactly that case could
-not fail: httpx resolves `//evil.example` as a netloc, so the application never
-saw it. A test that had been green since Phase 2 was asserting nothing about
-the thing it was named for.
-
-And #80 was a ticket about where to put code, which turned into deleting it,
-because reviewing the argument found that its premise had expired. **Both
-findings came from checking a claim rather than reading one.**
-
-#107 moved to Phase 9 on 2026-09-03. It depends on #96 and #85, which live
-there, and a phase cannot depend on a later one. Its documentation half, the
-section 5 paragraph naming pid signalling, stayed in #91 so the exit criterion
-below keeps an owner.
-
-## Phase 8: Release
-
-**Status: done**, closed 2026-09-06. Issues #58, #59, #60, #61, #62, #105,
-#106, #110, #116, #117, #170 and #195.
-
-**Plan: [`superpowers/plans/2026-09-04-hitchrail-phase-8-release.md`](superpowers/plans/2026-09-04-hitchrail-phase-8-release.md)**
-
-**Marked on 2026-09-07, and it was closed on GitHub for a day before this line
-existed** (#222). Its plan then held seven unticked boxes, three of which read
-as skipped work and were not: the TestPyPI rehearsal and the reviewer decision
-are both written up in `docs/releasing.md`, and the clean machine install was
-done in a container the same day. Each box now carries its evidence.
-
-**Objective: a stranger can install it, understand it, and report a hole in it.**
-
-The original Phase 7, narrowed back to what it actually said it was. Everything
-that accumulated in it because "Release" was the only bucket left has moved to a
-phase about that thing instead.
-
-Delivers: PyPI publication as `hitchrail`, a tagged GitHub release, a README a
-stranger can follow with screenshots of the phone case, a security policy, and
-the contribution rules written where a person and a non Claude agent can both
-find them.
-
-**Done when:** `uvx hitchrail` works on a machine that has never seen this
-repository, and the security section is the first thing a reader meets after
-learning what the tool does.
-
-**And two more, added by #110** rather than left implicit in "install and
-understand". A tool whose point is reaching agents from a phone is not
-installable in any useful sense while the only documented way to run it is a
-foreground shell:
-
-- `packaging/hitchrail.service` exists as a user unit template, its flags are
-  asserted against the real CLI parser, and it is documented as a file to edit
-  rather than to install blindly.
-- `docs/guides/phone-access.md` exists, ordered overlay first, named address
-  second, wildcard never, each with its exposure stated rather than only its
-  instruction.
-
-**Plan: [`superpowers/plans/2026-09-04-hitchrail-phase-8-release.md`](superpowers/plans/2026-09-04-hitchrail-phase-8-release.md)**
-Started 2026-09-04. Six tasks, 24 to 29.
-
-Tickets: #58, #59, #60, #61, #62, #105, #110, #116, #117, #170.
-
-**#170 arrived late and belongs here rather than in a later phase**, because it
-is a defect in the unit template #110 shipped. `Restart=on-failure` restarts on
-any non-zero exit and a config refusal exits 2, so an `EnvironmentFile` with a
-blank token loops: measured at 37 restarts and 38 copies of the same message,
-never rate limited because `RestartSec=5` keeps it under systemd's default. The
-template's comment claims `on-failure` prevents exactly that. Verified fix is
-`RestartPreventExitStatus=2`, and a uvicorn bind failure exits 3, so the case
-where retrying IS right still retries.
-
-**Phase 8 therefore reopens for two items**, both on the same file: #110's
-manual reboot verification, and this.
-
-**#106 was the gate and is closed**, by decision rather than by the objects
-being purged. What it described remains true: the pre-rewrite objects are served
-by SHA until GitHub collects them, nothing references the commit, and the remedy
-is a Support request, which has been sent. The owner accepted the residual
-exposure rather than hold the phase for it, and the reasoning is on the ticket.
-The plan records it as a risk accepted rather than a problem solved. One part of
-it survives as a live requirement: a screenshot or fixture carrying a real
-project name would be the same failure through a door this phase opens itself.
-
-**Two deliverables had no ticket, and both were found the same way**, by reading
-the exit criteria against the ticket list rather than the list against itself.
-
-#116: the objective delivers a PyPI publication and a tagged release, and the
-eight tickets on the milestone were documentation, screenshots, a funding link
-and the blocker. Every one could have closed with nothing shipped.
-
-#117: "the security section is the first thing a reader meets" was owned by
-nobody, and the plan's task 27 read "README assembly", a task line standing in
-for a ticket that did not exist.
-
-**Twice in one phase is a pattern rather than an oversight.** Every check this
-project has reads from the ticket list: `ticket-gate` scores a ticket that
-exists, `check-ticket-hygiene.sh` sweeps for missing milestones, and
-`test_docs_are_true.py` checks claims about code. A deliverable nobody ticketed
-is invisible to all of them, because there is nothing to inspect. #118 carries
-the guard, in Phase 10 where the gates are made to check what they claim to.
-
-Also on review: #110 and #116 swapped, because #110's own dependencies name the
-publish and it had been scheduled first, and #17 moved to Backlog, because a
-funding link serves none of install, understand or report.
-
-## Phase 9: The truth on a shared machine
-
-**Status: done**, closed 2026-09-05 at `ccfa3c3`. Issues #93, #96, #102, #46,
-#49, #95, #97, #113, #85, #100 and #32. Every exit criterion is ticked with
-evidence, and #107 left the phase rather than being skipped in it.
-
-**Objective: derivation is right on a machine Hitchrail does not own.**
-
-Every defect in this phase was found the same way: by running against a real
-root with another tool's sessions on it. The suite's fixtures describe a machine
-where Hitchrail is the only thing that has ever run, which is why none of these
-was reachable from it.
-
-Delivers: derivation that agrees with itself in both directions, adapters that
-survive a tmux they did not start, and the input box check that stopped being
-fragile.
-
-**Done when:** an agent inside another tool's session, a tmux binary under
-another name, and a terminal that emits an unusual escape all produce an honest
-answer rather than a confident wrong one.
-
-**Plan: [`superpowers/plans/2026-09-05-hitchrail-phase-9-shared-machine.md`](superpowers/plans/2026-09-05-hitchrail-phase-9-shared-machine.md)**
-Started 2026-09-05. Twelve tickets, tasks 30 to 41, in six batches.
-
-Tickets: #93, #96, #102, #85, #46, #49, #95, #97, #100, #32, #113, #107.
-
-**That list gained two and was reordered, both deliberately.** #113 arrived from
-Phase 7's retrospective and #107 from #83, after the original line was written,
-so this section named ten while the milestone held twelve. The order is now the
-plan's batch order rather than the order they were filed, because the ordering is
-a dependency: #107 must follow #96 and #85, since it builds a destructive control
-on top of an identification that has been wrong twice this month.
-
-**Eight shipped, then four decisions were taken on 2026-09-05, two of them
-became code the same day, and the phase closed.** #93, #96, #102, #46, #49, #95, #97 and #113 are
-done and closed with their commits. #85, #100 and #32 were escalated rather than
-implemented, and #107 was blocked behind #85. Each of the four was a decision
-rather than an implementation, and each is now decided on the ticket:
-
-- **#85: `detached` is redefined, and the missing fact becomes an overlay.** The
-  four options were a fifth state, `running` qualified, the label redefined, and
-  reporting `stopped`. What settled it is that a foreign-owned agent and a true
-  orphan are operationally identical - start refuses, graceful stop is
-  impossible, kill-by-session is impossible for both - and differ only in what
-  the row should say. That is what this project's overlays are for, and the
-  discriminator is free: `list-panes -a` already returns the foreign panes and
-  `pane_pids` discards them. The design's section 4.1 wording moves with it.
-- **#100: the capture is paid for, capped at ten.** Measured rather than argued:
-  `capture-pane` costs 3.0 ms against a warm server on the development machine,
-  so ten stuck rows is +30 ms on a listing and fifty is +149 ms, and the browser
-  refreshes every 700 ms for a whole stop wait. Two corrections came out of
-  reading the code: `input_is_clear` cannot be reused, because its anchor was
-  shortened so a modal and a person's draft both read as "not clear", and the
-  free "no link yet" signal cannot replace the capture, because a link is not
-  written for every session.
-- **#32: closed as a decision.** Option B, keying sessions off the resolved path,
-  now contradicts two settled arguments rather than one open question: #119's
-  `<root-label>~<folder>` identity, and `sanitize`'s own "injective by
-  construction beats injective by hash". The behaviour, its docstring and the
-  test that pins it are unchanged, and the work went to the cause instead.
-- **#107 is unblocked and smaller.** With an owner name on the wire it refuses
-  whenever a foreign session owns the agent, so the first unscoped destructive
-  path applies only to agents nothing is known to own. The race its body accepts
-  is closable rather than only narrowable: this project declares Linux and 3.11,
-  so a pidfd pins the process the pid was reused from, and the ordering is
-  acquire-then-verify.
-
-**Two tickets left for Backlog, both causes rather than defects.** #172 was the
-cgroup owner test, which would see the sockets and terminals the pane map
-cannot. **It is closed, and the reason is worth reading**: measured twice on a
-real machine, cgroups are inherited across fork, so a tmux server started from
-inside a pane sits in that pane's scope and the proposed rule called a LIVE tmux
-server an orphan. The mechanism also yields a bare UUID, so it could never have
-delivered the session name it promised. #189 carries the question it was asking,
-by ancestry rather than by cgroup, scoped as row wording and explicitly not as a
-gate. #173 asks whether `NAME_PATTERN` must still refuse a space, which is
-what makes the alias in #32 the obvious response to our own error message; it
-also records that `pane_pids` parses `#{session_name} #{pane_pid}` on the first
-space, so widening the pattern is not a one-line change.
-
-**How the four actually ended.**
-
-- **#85 built** at `0b24fbb`, with review round 1 at `acafafc` and `ccfa3c3`.
-  The row names the session that owns a foreign agent; where none can be seen it
-  says so rather than claiming there is none. The first exit criterion is
-  ticked, proven against a real tmux and through a browser rather than only
-  against a fake.
-- **#100 built** at `ccfa3c3`, and the cost decision went the other way from the
-  ticket: the capture runs on the sweep, never on the listing route, so the cost
-  scales with the state of the machine rather than with how often a browser
-  polls. `test_list_captures_no_pane` keeps its assertion untouched, which is
-  the outcome the placement was chosen for.
-- **#32 closed as a decision**, unchanged behaviour, with the reasoning on the
-  ticket and the cause filed as #173.
-- **#107 moved to Phase 14**, not skipped. The gate found its scoping premise
-  false: `foreign_session is None` means no owner was SEEN, not that there is
-  none, and that bucket holds agents under another socket, under screen, under a
-  plain terminal, and another user's, since tmux sockets are per uid and the
-  process table is not. Signalling on that basis is the warning #85 just added
-  to the interface, inverted. It was moved to Phase 14 behind #172, which was to
-  establish orphanhood positively.
-
-  **That dependency was withdrawn the same evening**, and the correction belongs
-  here rather than only on the ticket. #172's mechanism turned out to be wrong,
-  and it was never the right prerequisite: `pidfd_send_signal` returns `EPERM`
-  across uids, so the case that worried us most is refused by the kernel rather
-  than by us, and #107's real safety property is acquire-then-verify with a
-  pidfd, which does not depend on knowing who owns the process. Requiring a
-  signal with a demonstrated false positive and a measured false negative to
-  AUTHORISE a destructive action is control 7 inverted. What is left is one
-  honest sentence in the confirmation, and #107 is unblocked.
-
-**Six tickets came out of this work rather than being fixed inside it**, which
-is the phase behaving as intended: #172, now closed, and #173 from the
-decisions, #174 from a
-control count that had drifted across three documents, and #175, #176 and #177
-from the review of #85. Two of those name tests this phase itself added that
-could not fail on what they claimed, which is the failure Phase 10 exists for
-and worth noticing in a phase about honest answers.
-
-## Phase 10: A suite that would notice
-
-**Status: done**, 2026-09-07 to 2026-09-09.
-
-**Plan: [`superpowers/plans/2026-09-07-hitchrail-phase-10-suite.md`](superpowers/plans/2026-09-07-hitchrail-phase-10-suite.md)**
-
-**Objective: the tests fail when the code is wrong, and only then.**
-
-**Narrowed on 2026-09-07, because this phase had become where everything went.**
-It held a mypy matrix flag, a changelog format, five source comments citing an
-untracked file, a tmux parser and an engine race. Those are all real and none of
-them is a suite that would notice. A phase whose objective is "quality" absorbs
-every finding and therefore never ends: it went from 16 tickets to 39 while six
-were being closed.
-
-What stays here is the machinery that decides whether a test can fail: tiers,
-fixtures, mutation, and the guards that check the guards. Prose contradicted by
-code moved to **Phase 17**. Files doing more than one thing moved to
-**Phase 18**.
-
-The recurring failure this phase exists for: a fixture written to agree with the
-code. It happened three times in one session, and each time the test passed
-while the thing it named was broken.
-
-Delivers: fixtures that cannot agree with the bug, a tier that reads the real
-machine without depending on it, a device tier that makes the phone flows
-repeatable, and the gates checking what they claim to.
-
-**Done when**, and each of these is checkable rather than felt:
-
-1. **A fixture cannot agree with the bug.** Every fixture that stands in for a
-   real thing is built from the production path or from captured bytes, never
-   written from a description of them. The recurring failure this phase exists
-   for is a fixture written to agree with the code.
-2. **No tier's result depends on what the machine happens to have**, with one
-   stated exception: a tier may require hardware if it is opt in and FAILS
-   rather than skips when the hardware is absent. `device` is that exception and
-   is the only one.
-3. **The mutation sweep's survivors have been read**, and each is either killed
-   or recorded with the reason it is not worth killing.
-4. **No tier can be selected by accident.** `addopts` deselection is replaced by
-   any `-m`, so a tier that must not run unasked enforces it in collection.
-
-The third exit criterion this phase used to carry, "a phase's progress count in
-prose is checked", moved to Phase 17 with the rest of the documents work.
-
-### Closed 2026-09-09, reported against those four rather than rewritten to fit
-
-**The criteria above are left exactly as they were written.** Amending one after
-the fact to match what was done is the move this phase spent twelve tickets
-removing from the suite, and it would be a worse thing to do to the roadmap than
-to a test.
-
-**2 and 4 are met.** Criterion 4 is enforced in collection by
-`tests/conftest.py` and asserted by a test that runs pytest's own collector: any
-`-m` replaces the `addopts` deselection, so `-m e2e` used to collect the seven
-screenshot captures, which is how run identity reached `docs/screenshots/`.
-
-Criterion 2 was NOT met when this phase started and is now. It says `device` is
-the only tier allowed to depend on the machine, and that such a tier must FAIL
-rather than skip. `test_live_tmux.py` and the browser harness both SKIPPED on a
-missing tmux, so on such a machine two tiers went green having proved nothing,
-and a `grep` for the word `skipped` in `ci.yml` was the only thing that noticed.
-Both fail now, and
-`test_no_tier_skips_itself_when_the_machine_is_missing_something` is what keeps
-the claim true, with an allowlist by FILE and by REASON: the permitted skips all
-turn on a fact about the repository, never about the machine.
-
-**1 is met in practice and is not checkable, which the line above it claims.**
-Nothing can mechanically tell a fixture built from the production path from one
-written from a description of it. What the phase has instead is evidence: the
-per-run pid prefix, the `_child_env` guard, `_shoot`'s required `showing`
-locator, and a capture that could not fail publishing the wrong screenshot for
-months. **Three fixtures written from a description were found and fixed during
-this phase**, two of them written by the agent doing the fixing. Treat the
-criterion as a practice with a record, and read the line above it as aspiration.
-
-**3 is met for three modules and carried for five.** The sweep went from 264
-survivors to 139, and from 13 with no covering test to none. `hostnames`,
-`projectnames` and `tmux` are read: each survivor killed, or recorded as
-equivalent with a test that checks the reason rather than a comment asserting
-it. **#237 carries `security`, `roots`, `discovery`, `config` and `tmuxnames`**,
-in Backlog rather than in a phase, because this phase's own narrowing note says a
-quality objective absorbs every finding and therefore never ends.
-
-What the three finished modules established is worth more than the count: a diff
-classification called about 59 survivors productive and **33 were real**, and the
-ratio is not predictive per module. `hostnames` was 20 of 25 because a whole
-function had no test at all; `projectnames` was 4 of 19 because most of its
-survivors sit inside error messages.
-
-**Tickets: [the Phase 10 milestone](https://github.com/agigante80/hitchrail/milestone/12).**
-
-**#51 moved to Phase 17**, not to Backlog as this said. It corrects two commit
-messages that describe a different change, which is a document contradicted by
-the thing it describes, and that is now a phase.
-
-**And this paragraph used to say the list "gained the six tickets filed into
-this milestone since it was written".** It was twenty three by 2026-09-07. A
-sentence about drift, drifting, inside the phase about claims that are not
-checked. That is where the convention at the top of this file came from: the fix
-for a count nobody checks is to stop writing counts.
-
-## Phase 11: The interface in every state
-
-**Status: in progress**, since 2026-09-11.
-
-**Plan: [`superpowers/plans/2026-09-11-hitchrail-phase-11-interface-states.md`](superpowers/plans/2026-09-11-hitchrail-phase-11-interface-states.md)**
-
-**Objective: every state the interface can be in says something true, legibly.**
-
-What is left of the browser work after Phase 6 closed: the states that are rare
-and the wordings that are wrong.
-
-Delivers: a stream that reports its own failures honestly, dialogs whose titles
-match what happened, colour that passes AA on its own tints, and a memory footer
-with a ceiling.
-
-**Done when:** no screen states something it did not read, and every token pair
+## How to read this file
+
+Rolling wave planning, in the shape `forge-kit`'s `roadmap-phases` skill
+defines and `scripts/check-phases.sh` enforces. Two stores hold two different
+facts, so nothing is written twice and nothing can drift:
+
+- **This file owns which phases exist and what state each is in.** A phase is
+  a `## Phase:` block with a `state:` line and, once it has started, a `plan:`
+  line naming its plan file. The heading is the milestone's title, exactly.
+- **GitHub owns which phase each ticket is in**, as the milestone. No ticket
+  number is typed here for that reason: every list this file ever carried was
+  wrong within a week, and a count nobody checks is a count that decays.
+
+The four states: `planned` is a bucket, declared and ordered, taking tickets
+as they occur to somebody and committing to nothing; `open` is the one phase
+in progress, and it has a plan; `done` is closed in both places; `backlog` is
+the permanent holding phase, a decision to decide later. At most one phase is
+`open`. A phase that stalls is re-shaped, never extended: closing it forces
+every unfinished ticket somewhere explicit.
+
+Phases appear in the order they are meant to run. Three rules decide that
+order: dependency first, then risk where dependency allows a choice, then cost
+of delay, which has been invoked once, when Phase 12 jumped ahead of 9, 10 and
+11 because the wire format it changed was free to break that week and more
+expensive every week after. The next candidate for jumping the queue is argued
+against that one.
+
+**Phases 1 to 10 and 12 closed before this format was adopted on 2026-09-11
+and are not written into it.** Rewriting finished work to look planned in a
+format it never used would be less honest than saying where the format
+started. Their closed milestones hold their tickets, `superpowers/plans/`
+holds the plans the ones that had plans wrote, and `CHANGELOG.md` says what
+each release shipped.
+
+**The standing rule.** A phase is not finished because its code exists and the
+suite is green. It is finished when the behaviour has been watched working in
+the running application, on the phone it is for. See
+[`tech-guidelines.md`](tech-guidelines.md) section 7.
+
+## Phase: Phase 11: The interface in every state
+state: open
+plan: docs/superpowers/plans/2026-09-11-hitchrail-phase-11-interface-states.md
+
+Every state the interface can be in says something true, legibly. Phase 6
+built the interface for the states a demo reaches; this is the rest: the
+dialog a person sees once a week, at the moment they are deciding whether to
+kill a process with unsaved work, and it sends them to the wrong place, tells
+them the opposite of what happened, or puts the destructive action nearest the
+thumb.
+
+Delivers: a stream that reports its own failures honestly, dialogs whose
+titles match what happened, colour that passes AA on its own tints, computed
+rather than judged, and a memory footer with a ceiling.
+
+Done when no screen states something it did not read, and every token pair
 passes AA.
 
-**`app.js` left this phase for Phase 18 on 2026-09-07**, and this section used
-to deliver its split and exit on "no file in `web/` does more than one thing".
-The split is still wanted; it is #68, and a module past the size guideline is a
-phase now. Nothing about that split depends on a screen saying something true,
-and keeping it here meant Phase 11 could not close until an unrelated refactor
-did.
+Two things were cut out of it on the day it opened, and the plan is the
+precedent the next reviewer cites. The stop redesign is Phase 19: it changes
+what Stop means, in the engine and `claude_ipc`, and nothing about it is a
+screen saying something true. The `app.js` split is Phase 18. Two engine
+tickets stay, because each is the reason one badge lies; a third goes to its
+own phase or to Backlog.
 
-**Tickets: [the Phase 11 milestone](https://github.com/agigante80/hitchrail/milestone/13).**
+## Phase: Phase 13: Fifty rows on a phone
+state: planned
 
-**Opened on 2026-09-11 with four of its tickets already shipped and none of
-them closed.** #204, #169 and the mechanism half of #166 landed on 2026-09-06
-with 0.5.0 and stayed open with every acceptance box unticked; #204's body
-called #165 shipped and pointed at the log drawer, which is the pane view and
-not the dialog #165 names, so #165 stays. The plan checks each remaining ticket
-against the tree before it is given a task, because this is the third time in
-a week a ticket here described a version that no longer existed.
+The interface stays usable when there are fifty projects across five roots,
+and says what it knows about each. Phase 11 is about states saying something
+true; this is about a person finding the row they want among a lot of them,
+and about the page answering what it currently cannot: which build is this,
+since when, as whom.
 
-**#242 and #239 left for Phase 19 the same day.** Stop sending a wrap up prompt
-first changes what Stop means, in the engine and `claude_ipc`, and nothing
-about it is a screen saying something true. Keeping them here meant this phase
-could not close until a stop-semantics sub decision was made, which is the
-shape Phase 10 was narrowed to escape.
-
-**#169 is the one to read, because it is a dead end and its justification was
-false.** It shipped on 2026-09-06 at `2779cab`, and the argument stays here
-because it is the argument. A stop whose input box will not clear refuses to type, correctly, and
-the resulting dialog offers only Close. The comment above it justifies
-withholding a kill by saying "Kill is still on the row". `renderRow` renders
-Open, Get link, Start, Stop and Clear, and no kill at all; `killNow` is
-reachable from three places and all three are downstream of a `DELETE` that
-succeeded. So the session cannot be ended from the interface, and the reasoning
-that made that acceptable pointed at an affordance nobody had built.
-
-That is #83's defect inverted. There, a button existed with no route behind it
-and a browser test asserted only that it was visible. Here a route exists with
-no button, and a comment asserts a button that does not.
-
-**Section 7 forbids escalation by DEFAULT, not availability**, and the two
-timeout dialogs already resolve the identical situation the other way, with the
-kill second and styled danger. Three terminal dialogs, two offering a decision
-and one offering Close; the inconsistency was the bug. The operator's position
-is recorded on the ticket as the decision: a force kill is always theirs to
-choose. Putting a kill on the row itself stays out, because that WOULD be
-escalation by default, and it gets its own ticket if it is ever wanted.
-
-**Three arrived from using it and they are the shape this phase was cut for.**
-#161 is a defect with a measured cause: every dialog is pinned to the bottom of
-the viewport, because `margin-bottom` resolving to `0px` replaces the user
-agent's `margin-bottom: auto` and collapses the centring. A regression from
-#103's keyboard fix, whose reasoning is right and whose default is not, and
-whose test covered only the keyboard-open direction. It matters more than a
-misplaced box: `showDialog` orders actions safest first so the dangerous one is
-furthest from the thumb, and a bottom-pinned dialog inverts that.
-
-#162 and #163 are "the wordings that are wrong", literally. `Open` is the one
-control that does not open the session, and `Continue` is Claude Code's own word
-borrowed out of the sentence that explained it. **They are one decision filed as
-two tickets**, and both say so: renaming the log control to `Logs` is what frees
-`open` for the control that actually opens a session.
-
-## Phase 12: More than one root
-
-**Status: done**, closed 2026-09-05. Issues #119, #120, #121, #122 and #129.
-
-**Marked on 2026-09-07** (#222). It shipped on 2026-09-05 and this section went
-on saying it "runs next" for two days, while the paragraph in "How the phases
-are cut" said the same. It also sat after the Superseded heading at the end of
-the file, which is where it was put while it was jumping the queue, and which
-reads as though the phase itself had been superseded. Both are corrected here.
-
-**#119 was decided on 2026-09-04.** A project is `<root-label>~<folder>`,
-always, including with one root. The reasoning, the three options that lost and
-the questions that followed from the answer are in the design, section 6.0.
-
-**Objective: a project is still one thing when there is more than one place to
-keep projects.**
-
-`--root` takes one folder and every directory inside it is a project, so
-somebody with a client tree and a personal tree cannot see both in one
-Hitchrail. Running two instances is the obvious workaround and it is unsafe:
-the session name is derived from the project name and nothing else, so two
-roots containing a folder of the same name collide.
-
-```
-~/work/vessel      -> hr-vessel
-~/personal/vessel  -> hr-vessel
-```
-
-**The failure is silent and destructive.** The second project reads as
-`running` on the first one's session, and tapping Stop there stops the other
-one's agent.
-
-Delivers: several roots in one instance, a project identity that stays unique
-across them, and an interface that shows which root a row is in.
-
-**Done when:** two roots each containing a folder of the same name are two rows
-that can be started and stopped independently, proven against a real tmux
-rather than a fake, and a single root deployment is unchanged.
-
-**This has to land before 1.0.** `docs/versioning.md` cuts 1.0 when the HTTP
-interface is one you are willing to keep, and this phase decides what
-identifies a project on the wire. After 1.0 that is a MAJOR break with saved
-links and any client to migrate; before it, it is a MINOR under the `0.y.z`
-rule.
-
-**#119 gates the rest of the phase and is a decision rather than work.** Four
-options are written up with what each costs. Everything else here is written
-against a question and will need rewriting against the answer, which is said on
-each ticket rather than left to be discovered.
-
-Tickets: #119, #120, #121, #122, #129. **The list said four while the
-milestone held five**, which is the drift #92 names and the reason an open
-phase now links its milestone instead.
-
-The interim workaround was #123, kept out of this phase because it was a
-workaround for the limitation this phase removed. **It is now in Phase 14**, on
-its merits rather than as an interim anything: one instance takes several roots,
-so nobody needs two, and `session_prefix` is simply a setting the operator
-cannot reach.
-
-## Phase 13: Fifty rows on a phone
-
-**Objective: the interface stays usable when there are fifty projects across
-five roots, and says what it knows about each.**
-
-Phase 11 is about states saying something true. This is about a person finding
-the row they want among a lot of them, and about the page answering questions it
-currently cannot: which version am I looking at, since when, as whom.
-
-Cut from a real five root install rather than from the design. Every ticket here
-came from using it, which is also why none of them is a new power: the list is
-complete and correct, and what is missing is navigation and provenance.
+Cut from a real five root install rather than from the design. None of it is a
+new power: the list is complete and correct, and what is missing is
+navigation and provenance.
 
 Delivers: filtering by root, a header that survives scrolling, a footer that
 names the version and links to the source, the server's own start time and
-account, logs at a URL you can bookmark, and an icon set.
+account, logs at a URL you can bookmark, bulk stop composed from the stop each
+row already has, and an icon set.
 
-**Done when:** a fifty row list can be narrowed to one root in one tap, the
-primary action is reachable at any scroll position, and the page answers "which
-build is this and who is it running as" without an SSH session.
+Done when a fifty row list can be narrowed to one root in one tap, the primary
+action is reachable at any scroll position, and the page answers "which build
+is this and who is it running as" without an SSH session.
 
-**Tickets: [the Phase 13 milestone](https://github.com/agigante80/hitchrail/milestone/15).**
+Two decisions are already taken and the tickets argue them. The badge glyphs
+are a SET, vendored from a library and never generated, because a set has to
+agree with itself on grid and stroke and that agreement is what generation
+gets wrong; the application's own mark is one drawing that agrees with
+nothing, so it is drawn. And framing the vendor's session view under our
+header is measurably impossible: it refuses framing twice, by header and by
+CSP, so what remains of that idea is the header question underneath it.
 
-**#179 came from a phone, and it is a rule whose premise moved rather than a
-regression.** A stopped row crushes its name to one or two characters per line:
-an eighteen character name over three lines, a six character one over two. The
-guard for exactly
-this exists, from #75, and covers `running`, `stale` and `detached`, because
-when it was written a stopped row carried a name, a badge and one button, which
-fit. #122 then added the root chip, `flex-shrink: 0` like everything else on
-that line, so the name became the only item that could give and
-`overflow-wrap: anywhere` let it give all the way down.
+## Phase: Phase 14: The perimeter, chosen rather than assumed
+state: planned
 
-It belongs here rather than in Phase 11 because the fix spends vertical space
-this phase is otherwise trying to save: a stopped row roughly doubles in height,
-which at fifty rows is about 2,200px of scroll becoming 4,400px. #150 is what
-gives that space back, by turning six word badges into glyphs, so the two should
-be read together.
+The operator chooses how this is reached and how it is proved, instead of
+being handed one answer. Every ticket here touches a security control, so each
+is a decision before it is work, and they are together because they interact:
+TLS changes what a sign-in costs, and both change what the README's stated
+limitations say.
 
-**#150 was rewritten from twenty icons to seven, and the two icon tickets pull
-in opposite directions on purpose.** #150 is a SET, so it is vendored from an
-existing library and never generated: a set has to agree with itself on grid,
-stroke weight and optical alignment, and that agreement is what generation gets
-wrong. #160 is the application's own MARK, one drawing that has to agree with
-nothing and that no library ships, so drawing it is the right call there.
+Delivers: HTTPS from the server itself rather than only from a proxy in front
+of it; a way for a person holding a token to get in without the saved link;
+roots and the session prefix from configuration the operator can reach rather
+than only from a unit's `ExecStart`; and a settings page with the line drawn
+between what it shows and what a request may change.
 
-The seven are the six state badges plus the protected row. The badge is the one
-place a shape does something a word cannot, because a list of fifty is scanned
-rather than read, and because it stops six states being told apart by colour
-alone while #69 is open. Everything else keeps its word: an argument that Stop
-and Clear needed distinct glyphs did not survive reading the code, since Stop
-renders only on a running row and Clear only on a stale one, so the pair never
-appears together.
+Two of those are deliberately not what was first asked for, and the tickets
+argue it rather than quietly narrowing. Replacing a 192 bit token with a
+password a person can type on a phone is a downgrade on an API equivalent to a
+shell, with no rate limiting anywhere in this codebase, so enrolling a device
+is solved another way. And a route that takes a PATH removes the root boundary
+outright: the credential that lists projects would become one that runs an
+agent anywhere the user can write, so roots come from a file the operator
+edits on the machine and a UI can only toggle what is already in it.
 
-**One of these closed a question rather than opening one.** #149 was filed as
-"research how to improve the header, iframed?". Measured on `claude.ai`:
-`x-frame-options: SAMEORIGIN`, plus a CSP that says the same thing. Framing the
-session view under our header is refused by the browser, twice, and the only
-workarounds are a proxy that strips a vendor's frame guard on an authenticated
-session or a browser extension. It is recorded as impossible rather than left
-open as untried, and what remains is the real question underneath it.
-
-## Phase 14: The perimeter, chosen rather than assumed
-
-**Objective: the operator chooses how this is reached and how it is proved,
-instead of being handed one answer.**
-
-Every ticket here touches a security control, so each is a decision before it is
-work. **No count in this line**: it said "three" while the milestone held four,
-then six, which is the decay `.claude/CLAUDE.md` already refuses for phases and modules.
-The list at the end of this section is the record. They are together because they interact: TLS changes what a
-sign-in form costs, and both change what the README's stated limitations say.
-
-Delivers: HTTPS from the server itself rather than only from a proxy in front of
-it; a sign-in page for people who have a token but not the saved link; and roots
-that come from a config file rather than only from a unit's `ExecStart`.
-
-**Two of the three are deliberately NOT what was asked for**, and the tickets
-argue it rather than quietly narrowing the scope:
-
-- **#153.** A prompt is missing and should exist. Replacing a 192 bit token with
-  a password a person can type on a phone is a downgrade on an API equivalent to
-  a shell, with no rate limiting anywhere in this codebase. Stage 1 is a form
-  that accepts the token. A passphrase ships only with a slow KDF, rate
-  limiting, and a refusal off loopback without TLS, and that list is the cost
-  rather than an obstacle course.
-- **#154.** A route that takes a PATH removes control 5 outright: the credential
-  that lists projects would become one that runs an agent anywhere the user can
-  write. The answer is a config file the operator edits on the machine, and a UI
-  that can only toggle roots already in it. That is most of what was wanted and
-  none of what it would have cost.
-
-**Done when:** a LAN deployment can be HTTPS without a second daemon, a person
+Done when a LAN deployment can be HTTPS without a second daemon, a person
 holding a token can get in without a saved link, and adding a folder does not
 mean editing a systemd unit.
 
-**Tickets: [the Phase 14 milestone](https://github.com/agigante80/hitchrail/milestone/16).**
+## Phase: Phase 15: The package as strangers meet it
+state: planned
 
-**#123 moved here from Backlog.** `session_prefix` is a config field with
-validation and no flag, which is the same shape as #154's problem: configuration
-that exists in the code and cannot be reached by the operator. #154 says taking
-it first makes this a two-line addition, and the Backlog note below no longer
-means anything now that Phase 12 has closed.
-
-## Phase 15: The package as strangers meet it
-
-**Objective: somebody who has never seen this project can install it, tell what
-it is, see that it is maintained, and be helped when it goes wrong.**
-
-Everything here came from looking at the published PyPI page beside our own
-README and finding they disagree, or say nothing.
-
-**The last clause of the objective was added for #167 rather than #167 being
-squeezed under the original.** Logging is not part of meeting a package, and
-answering a stranger's bug report is the other half of publishing one. Widening
-the phase is the honest move; filing it here under "installation" would not
-have been.
+Somebody who has never seen this project can install it, tell what it is, see
+that it is maintained, and be helped when it goes wrong. Everything here came
+from looking at the published PyPI page beside our own README and finding they
+disagree, or say nothing, and from failing to answer a support question about
+this machine because the journal held uvicorn's access lines and nothing else.
 
 Delivers: `pip` acknowledged as an install route, the deprecated licence
 classifier removed and the licence made clickable, a badge row on the first
-screen, and a bot that keeps the dependencies and the pinned actions honest.
+screen, `--help` that shows its defaults and an example, a banner that offers
+only links the server is listening on, and logging with a handler, a level and
+a timestamp, so that "was the stop request sent" has an answer.
 
-**#155 is P0 and the only P0 open.** Every third party action here is pinned to a
-commit SHA on purpose, because a tag is a mutable pointer. That pin is correct
-and it cannot update itself, so today nothing tells anybody a newer version
-exists. A supply chain that only updates when somebody remembers is not a
-control, and this package is installed with `uvx` on other people's machines.
+Done when the PyPI page and the README agree, the licence is one clickable
+statement rather than four scattered ones, and a stranger's bug report can be
+answered from the journal.
 
-**Done when:** the PyPI page and the README agree, the licence is one clickable
-statement rather than four scattered ones, and a direct dependency going stale
-arrives as a pull request against `develop`.
+## Phase: Phase 16: What survives a reboot
+state: planned
 
-**Tickets: [the Phase 15 milestone](https://github.com/agigante80/hitchrail/milestone/17).**
+Decide whether Hitchrail remembers anything, and if so what. Small in tickets
+and a phase because of what it changes rather than how big it is.
 
-**#167 came from failing to answer a support question about this machine.** An
-operator asked whether a stop request had actually been sent. The journal held
-uvicorn's access lines and nothing else: not the keystrokes, not the pane check,
-not the decision to stop waiting. Measured afterwards, the nine `logger` calls
-in the tree have no handler at all, so a warning prints as a bare message with
-no timestamp and no level, and `info` and `debug` are discarded entirely. Two of
-the nine are therefore dead in every deployment. That is the gap to close before
-strangers start filing bug reports.
-
-## Phase 16: What survives a reboot
-
-**Objective: decide whether Hitchrail remembers anything, and if so what.**
-
-One ticket, and it is a phase rather than a Backlog entry because of what it
-changes rather than how big it is.
-
-**Hitchrail holds no state.** The security argument says so in as many words:
-no database, no session registry, every answer derived from the operating
-system on demand. That is why nothing can get out of sync, nothing needs
-migrating, and no file's contents decide what runs.
-
-Remembering which sessions were running is the first persistent state in the
-product, and it is specifically a file that decides what gets spawned. The
-ticket is written for the requested default of ON, and it lists the six things
-that have to be true for that default to be defensible: the memory guard
+Hitchrail holds no state. The security argument says so in as many words: no
+database, no session registry, every answer derived from the operating system
+on demand. That is why nothing can get out of sync, nothing needs migrating,
+and no file's contents decide what runs. Remembering which sessions were
+running is the first persistent state in the product, and specifically a file
+that decides what gets spawned. The ticket is written for a default of ON and
+lists what has to be true for that default to be defensible: the memory guard
 re-evaluated between each restored start, a cap, never doubling an agent that
 survived, a command line kill switch, protection against a restart loop
-multiplying it, and restored rows being visibly restored. If any of the six is
-not built, the default is off and the feature still ships.
+multiplying it, and restored rows visibly restored. If any of those is not
+built, the default is off and the feature still ships.
 
-**Done when:** a reboot brings back what was running, exactly once each, without
-a person tapping anything, and the security argument has been rewritten rather
+The unit's own behaviour across a reboot belongs here too: an address that
+arrives after boot must not be a cliff the service falls off, and socket
+activation for a named bind comes with the token rule it needs.
+
+Done when a reboot brings back what was running, exactly once each, without a
+person tapping anything, and the security argument has been rewritten rather
 than quietly outgrown.
 
-**Tickets: [the Phase 16 milestone](https://github.com/agigante80/hitchrail/milestone/18).**
+## Phase: Phase 17: Documents that are true
+state: planned
 
-## Phase 17: Documents that are true
+Every claim a document, comment or guard makes is checked against the thing it
+describes, or it is not written. Counts are generated, never typed.
 
-**Objective: every claim a document, comment or guard makes is checked against
-the thing it describes, or it is not written. Counts are generated, never
-typed.**
+Cut out of Phase 10 on 2026-09-07, because eleven of that phase's tickets were
+not about a suite that would notice. They were about a sentence, a comment, a
+label or a count that disagreed with the thing standing next to it: one defect
+in eleven costumes, and inside a phase about tests it looked like eleven
+unrelated chores.
 
-**Cut out of Phase 10 on 2026-09-07.** Eleven of that phase's tickets were not
-about a suite that would notice. They were about a sentence, a comment, a label
-or a count that disagreed with the thing standing next to it: `AGENTS.md` claims
-to map the modules completely (#200), source comments cite the untracked pointer
-as the authority (#199), the changelog says it follows the one format the release
-cannot parse (#185), and two docstrings promise more than the code does (#181).
-Section 5 has eight controls and two tracked documents that count them say seven,
-which is #174 and is the only one of those whose numbers were re-measured against
-the tree on 2026-09-07. One defect in eleven costumes, and inside a phase about
-tests it looked like eleven unrelated chores.
+The guards are in scope, not only the prose, and they are the harder half. A
+lockstep guard that compares version markers proves the marker moved, which is
+not the claim. Every hygiene check reads from the ticket list, so a
+deliverable nobody ticketed is invisible to all of them at once. A governance
+guard that skips silently looks identical to one that passed.
 
-**#200's and #199's own counts did not survive that measurement**, which is the
-phase arguing for itself: `AGENTS.md` omits at most `__init__.py` rather than the
-four #200 names, and the pointer is cited nine times across seven files rather
-than the five #199 names. The tickets are right about the shape and wrong about
-the size, so this section describes the shape.
+Delivers: counts derived from what they count, comments and docstrings that
+name something which exists and does what they say, and guards whose
+expectation comes from the thing described rather than from a second copy of
+the answer.
 
-**The guards are in scope, not only the prose, and they are the harder half.**
-#136 is the one to read: the lockstep guard compares version markers, so the
-templates contradicted the document while the guard stayed green. A check that
-reads a marker it also controls proves that the marker was updated, which is not
-the claim. #118 is the same shape one level up: every hygiene check reads from
-the ticket list, so a deliverable nobody ticketed is invisible to all of them at
-once. #86 is what that costs in practice, a sweep that never checks Priority and
-therefore no agent-filed ticket that has one.
+Done when, and each is checkable rather than felt: no document states a count
+a person typed; every comment or docstring that names a file, a ticket or a
+behaviour names one that exists and does what it says, enforced by a guard;
+and no guard proves only that its own marker moved.
 
-Delivers: counts derived from what they count, comments and docstrings that name
-something which exists and does what they say, and guards whose expectation
-comes from the thing described rather than from a second copy of the answer.
+## Phase: Phase 18: Modules that do one thing
+state: planned
 
-**Done when**, and each of these is checkable rather than felt:
+A file is one thing, or the file says why it is not. Cut out of Phase 10 on
+2026-09-07, with the files that carry a split ticket and the one place an
+answer is computed twice.
 
-1. **No document states a count a person typed.** Every count of controls,
-   phases, tickets or modules is either generated or checked by a guard against
-   what it counts.
-2. **Every comment or docstring that names a file, a ticket or a behaviour names
-   one that exists and does what it says**, enforced by a guard rather than by
-   somebody reading carefully.
-3. **No guard proves only that its own marker moved.** Where a check compares
-   two copies of an answer, one of them is derived from the thing described.
+The guideline is 400 lines and the mechanism around it already works, which is
+why this is a set of splits rather than a policy: `test_config.py` holds a
+`caps` table, a module over the guideline fails unless it is tracked there
+with the ticket that splits it, and the table retires its own exceptions. No
+line count is written here or in the tickets on purpose. Every count they held
+was stale twice over; the table is generated from the files and was right
+about all of them.
 
-**Tickets: [the Phase 17 milestone](https://github.com/agigante80/hitchrail/milestone/19).**
+Each file is over for a different reason, and the reason decides the cut.
+`server.py` because routes accumulated, and its seam is what the handlers
+touch; its ticket also says what must NOT happen, which outranks the split:
+the per route error ladders stay at the route, because `docs/api.md` is
+checked against the server in both directions and a ladder at the route is
+what makes a route's refusals readable. `discovery.py` because the plural root
+layer sits on top of the single root one, two layers deep rather than two jobs
+wide. `app.js` because the browser code all landed in one file and it has a
+seam it already follows. `test_config.py` because it does not split along the
+seam its own source has, and it is the file the guard cannot see, since `caps`
+reads `src/` and this is where `caps` lives. And one computation done twice:
+`preflight` resolves the agent binary and throws the answer away, and the
+spawn resolves the bare name again in a different environment.
 
-**#51 arrived here from Phase 10 by way of Backlog, and it is the ticket that
-had nowhere to go.** It corrects two commit messages that describe a different
-change. The trees are right and the gates were green, so nothing in a suite
-would have caught it and nothing proposed would: that was a correct argument for
-removing it from Phase 10 and a wrong one for shelving it. A commit message
-contradicted by its own diff is precisely this phase, which is why the phase had
-to exist before the ticket had a home.
+Done when every file over the guideline has either been split along a seam
+that already existed, or carries in `caps` the argument for why it is one
+thing. `claude_ipc.py` is the standing example that the second answer is
+legitimate: it is over on purpose, because when Claude Code moves exactly one
+file changes. `engine.py` is the other, and most of its length is comments
+recording footguns that cost real debugging to find. A split that moves lines
+without moving responsibility is refused; length is the trigger for looking,
+never the reason for cutting.
 
-## Phase 18: Modules that do one thing
+## Phase: Phase 19: Stop means wrap up
+state: planned
 
-**Objective: a file is one thing, or the file says why it is not.**
+A session stopped from a phone leaves the same record as one closed by hand.
+Cut out of Phase 11 on 2026-09-11.
 
-**Cut out of Phase 10 on 2026-09-07**, with the four files that carry a split
-ticket and the one place an answer is computed twice.
+Stop today types `C-u`, `Escape`, `/exit`, `Enter` and nothing else: the agent
+is interrupted mid task and asked to exit, and whatever it knew about the work
+in flight leaves with it. The operator's stated model of Stop is "run the
+closing skill, summarise everything, then close the session", and the code did
+none of that. Decided over the concern that a typed instruction on the
+operator's behalf is impersonation: what keeps it relay is that the prompt is
+authored on the machine only, sent only on a tapped Stop, and sent with
+`send-keys -l`.
 
-**The guideline is 400 lines, and the mechanism around it already works**, which
-is why this phase is a set of splits rather than a policy. `test_config.py`
-holds a `caps` table: a module over the guideline fails unless it is tracked
-there with the ticket that splits it and a note saying what added the lines. It
-retires its own exceptions, which was demonstrated rather than asserted when #33
-brought `discovery.py` under and the test failed until the stale entry was
-removed. Seven modules sit in that table today. Four files carry a ticket to
-split them, and those splits are what this phase owes.
-
-**No line count is written into this section on purpose, and the tickets no
-longer carry one either.** Every count they held was stale, twice over in two
-cases: #68 and #30 were each filed with a number, re-measured on 2026-09-05 with
-a second number, and both of those were wrong again within days, one of them by
-about 150 lines. #205's was wrong by the time this phase was cut. The `caps`
-table is generated from the files and was right about all seven modules; every
-count typed beside it was not, so on 2026-09-07 the three tickets were rewritten
-to describe the shape and let the guard hold the number. That is Phase 17's rule
-applied inside the phase next door, which is where it was easiest to see.
-
-Each of the four is over for a different reason, and the reason decides the cut:
-
-- **`server.py`** (#205) is over because routes accumulated, and its seam is
-  what the handlers touch: the session lifecycle, the read-only views, and the
-  grant and auth pair. Its ticket also names what must NOT happen, and that
-  constraint outranks the split: the per-route `_error` ladders must not be
-  centralised into a mapping of exception type to code, because `docs/api.md`
-  is checked against the server in both directions, and a ladder at the route
-  is what makes a route's refusals visible to whoever is reading that route.
-- **`discovery.py`** (#127) is over because the plural root layer sits on top of
-  the single root one. It is two layers deep rather than two jobs wide, and the
-  seam is between the layers.
-- **`app.js`** (#68) is over because the browser code all landed in one file,
-  and it has a seam it already follows.
-- **`test_config.py`** (#30) is over because it does not split along the seam
-  its own source has, which is the split to make. It is also the file the guard
-  cannot see: `caps` reads `src/hitchrail/*.py`, so this one is outside the
-  mechanism that found the other three, and it is the file that mechanism
-  lives in.
-
-**#196 is here even though it is not about length**, because it is the same
-defect in the small: `preflight` resolves the agent binary and throws the answer
-away, and the spawn resolves the bare name again somewhere else. Those are two
-different environments, since a pane inherits the environment of the tmux SERVER
-as recorded at #113, so this is one answer computed twice in two places that can
-disagree.
-
-**Done when:** every file over the guideline has either been split along a seam
-that already existed, or carries in `caps` the argument for why it is one thing.
-`claude_ipc.py` is the standing example that the second answer is legitimate: it
-is over on purpose, because its whole value is that when Claude Code moves
-exactly one file changes, and the seam anybody would cut on puts undocumented
-vendor knowledge on both sides of it. `engine.py` is the other, and it is the
-largest module in the project: most of its length is comments recording footguns
-that cost real debugging to find, and deleting those to satisfy a line count
-would be the worst trade on offer.
-
-**Tickets: [the Phase 18 milestone](https://github.com/agigante80/hitchrail/milestone/20).**
-
-**A split that moves lines without moving responsibility is refused**, and the
-`caps` note on `engine.py` is the precedent. An earlier version of it said to
-cut the graceful stop overlay next; measured rather than guessed, that cut moved
-64 lines, left the file still over the guideline, and split one stop sequence
-across two files to buy nothing. The note was corrected in place instead of
-followed. Length is the trigger for looking, never the reason for cutting.
-
-## Phase 19: Stop means wrap up
-
-**Objective: a session stopped from a phone leaves the same record as one
-closed by hand.**
-
-**Cut out of Phase 11 on 2026-09-11.** Stop today types `C-u`, `Escape`,
-`/exit`, `Enter` and nothing else: the agent is interrupted mid task and asked
-to exit, and whatever it knew about the work in flight leaves with it. The
-operator's stated model of Stop is "run the closing skill, summarise
-everything, then close the session", and the code did none of that. Decided
-over the #91 concern that a typed instruction on the operator's behalf is
-exactly the "sole call site" sentence names: what keeps it relay rather than
-impersonation is that the prompt is authored on the machine only, sent only on
-a tapped Stop, and sent with `send-keys -l`.
-
-It is a phase rather than a Phase 11 ticket for the reason Phase 16 is one
-ticket: what it changes, not how big it is. It changes design section 4.3, the
-stop sequence, and the two tickets carry an open sub decision, the order in
-which the interrupt and the prompt are sent, that is the operator's to make.
+A phase rather than a ticket for the reason Phase 16 is one: what it changes,
+not how big it is. It changes design section 4.3, the stop sequence, and it
+carries an open sub decision, the order in which the interrupt and the prompt
+are sent, that is the operator's to make.
 
 Delivers: a configured prompt sent before the exit sequence, the closing skill
 by default, with a per session wait for the pane to show an idle input box
 under a ceiling; and an opt in, off by default, that lets a stop ending on a
 prompt end the session anyway because the operator said so ahead of time.
 
-**Done when:** a session stopped from the interface has run the closing skill
+Done when a session stopped from the interface has run the closing skill
 before it exits, a stop that ends on a prompt still does nothing on its own
 unless the operator opted in before tapping, and `stop_prompt` cannot be set
 through any HTTP route.
 
-**The deferral under "Deliberately later" still binds**, and this phase is
-written against it rather than around it: the prompt is configuration on the
-machine, never text from the page, and the page's only verb is still Stop. A
-box carrying words from a browser to an agent stays the different product.
+The deferral under "Deliberately later" still binds, and this phase is written
+against it rather than around it: the prompt is configuration on the machine,
+never text from the page, and the page's only verb is still Stop.
 
-**Tickets: [the Phase 19 milestone](https://github.com/agigante80/hitchrail/milestone/21).**
+## Phase: Backlog
+state: backlog
+
+Triaged, real, and belonging to no phase yet. A ticket whose home is unknown
+goes here rather than into the nearest phase with room, because a phase whose
+objective absorbs every finding never ends: Phase 10 went from sixteen tickets
+to thirty nine while six were being closed, and was narrowed to escape it.
+Every time a phase opens, this is read for what now belongs in it.
 
 ## Deliberately later
 
 Not scheduled, and not to be smuggled into an earlier phase:
 
-- Restart as its own operation. It is stop then start, and the interface can
-  compose it.
-- More than one root.
-- Authentication beyond a single shared token. #153 is not this: it adds a way
-  to TYPE the existing credential, and says why a second kind of credential is a
-  downgrade rather than a feature.
-- Streaming logs. A tail on demand is enough until it demonstrably is not. #151
-  gives the tail its own URL and deliberately does not stream it.
-- Sending input to a session. Hitchrail starts and stops agents; it is not a
-  terminal, and making it one is a different product. #159 restores sessions
-  and deliberately does not reach into an agent's own conversation state.
+- **Restart as its own operation.** It is stop then start, and the interface
+  can compose it.
+- **Authentication beyond a single shared token.** Phase 14 adds ways to
+  present the existing credential and says why a second kind of credential is
+  a downgrade rather than a feature.
+- **Streaming logs.** A tail on demand is enough until it demonstrably is not.
+  Phase 13 gives the tail its own URL and deliberately does not stream it.
+- **Sending input to a session.** Hitchrail starts and stops agents; it is not
+  a terminal, and making it one is a different product. Phase 16 restores
+  sessions and deliberately does not reach into an agent's own conversation
+  state.
 
-  **#204 shipped one keystroke, and this deferral still stands**, because the
-  two are different things and the line between them is now in code rather than
-  only on a ticket.
-
-  What shipped: `POST /api/sessions/{name}/answer` carries ONE key from
-  `claude_ipc.ANSWER_KEYS`, a literal frozenset, to a session whose pane is
-  showing a question, in reply to words the operator read in that pane. Three
-  conditions hold it there, and each has a test that fails if it is widened:
-
-  - the key set is a literal, asserted member by member, and the browser's copy
-    is asserted equal to the server's. A pattern in place of the literal is how
-    this becomes a terminal one commit at a time.
-  - the pane is re-read INSIDE the send, so a screen that moved on refuses. The
-    function takes no parameter carrying an earlier capture, and a test asserts
-    the signature so that adding one fails there rather than in review.
-  - `answerPad` must not build an `<input>`, asserted as text.
-
-  What is still deferred, unchanged: a box carrying arbitrary text to an agent
-  on demand. That is a client rather than a launcher, and #159 still does not
-  reach into an agent's conversation state.
-
-  **#204 widened exactly one of #166's four conditions** and kept the other
-  three. #166 allowed answering only a prompt Hitchrail's own stop provoked;
-  #204 allows any prompt the pane is showing, because the case that actually
-  stranded an operator was #88's trust modal at session START, which #166
-  excluded by construction. The security argument for that widening is on #204,
-  and its core is that the root boundary already bounds it: Hitchrail starts
-  sessions only inside a configured `--root`, so an answerable prompt is a
-  subset of a trust decision the operator already made on the command line.
-
-  If a free text field, an automatic choice, or a key sent without re-reading
-  the pane ever appears, this becomes the deferred item and the deferral binds.
-
-## Deliberate additions to the design
-
-Recorded here rather than left to drift. Both come from the design's own
-section 6, which names error codes the first plan draft did not deliver:
-
-- **`GET /api/sessions/{name}/url`** is a route the design's table does not list.
-  It exists because listing must stay cheap: deriving the session link from the
-  terminal costs a `capture-pane` per running row, and doing that on every list
-  request is what turns a 50 row page into 50 subprocess calls. The list reports
-  the link only when Claude's own state file has already written it; the
-  interface asks this route when the user taps a row whose link is still
-  pending, and that is where the design's `url_pending` code is returned.
-- **`HostAllowlistMiddleware` replaces `TrustedHostMiddleware`**, which the
-  design's section 5.1 names. Starlette's does `host.split(":")[0]`, so every
-  IPv6 literal becomes `"["` and `http://[::1]:8787/` is refused whatever the
-  allowlist holds, which makes a phone on an IPv6 network unable to reach
-  Hitchrail at all. Its `www_redirect` default also answers an unrecognised
-  host with a 307 built from that same untrusted header. The control is
-  unchanged; only the mechanism is, which is why this is recorded here rather
-  than superseding the design.
-- **`--allow-origin`** is a configuration option the design does not mention.
-  `allowed_origins` used to derive `https://{host}` for every allowed host,
-  which made any HTTPS service on port 443 of the same machine a same origin
-  caller. A TLS terminating proxy's origin cannot be derived at all, because
-  the scheme and the port are both the proxy's, so it is configured.
-- **`no_agent`** is returned when the derived state rules the action out, and
-  **a stale row offers Clear rather than Stop**. Both come from #98, and #83
-  widened the first: a stop finds nothing to ask in a `stale` or `detached`
-  session, and a kill finds nothing to kill in a `detached` one, because a kill
-  targets the tmux session and that state is defined by not having one.
-  The design's stop flow assumes there is an agent to ask, and two of the four
-  derived states have none: `stale` is a tmux session whose agent is gone, and
-  `detached` is an agent with no tmux session. Verified against a real tmux
-  rather than assumed, because the old behaviour looked like it worked: the
-  quit command an agent understands is not one a shell does, so a stale
-  session survived the graceful stop and the whole thirty second wait before
-  offering a kill. Stop on such a row could only ever refuse, and the
-  interface's own rule is that offering a tap that refuses has already failed
-  the person holding the phone. Clear is the kill route, confirmed and styled
-  as destructive, because `stale` says only that no AGENT is in the session
-  and the pane may be running something else.
-- **`locked`** is returned when a start arrives while another start is in flight
-  for the same folder. The design asks for concurrent starts to serialize; a web
-  UI makes double submission easy, and answering the second tap immediately and
-  honestly is better than holding its connection open behind a lock.
-
-## The standing rule
-
-A phase is not finished because its code exists and the suite is green. It is
-finished when the behaviour has been watched working in the running
-application. See [`tech-guidelines.md`](tech-guidelines.md) section 7.
-
-## Superseded
-
-`superpowers/plans/2026-08-25-hitchrail-core.md` was a single 15 task phase
-covering everything from the skeleton to the CLI. It was replaced by phases 1
-to 5 above after a review found four defects that a smaller phase boundary would
-have caught earlier, including a start path that would have reported failure on
-every successful start. The file is deleted rather than kept alongside its
-replacement, because two plans for the same work is the drift this project
-exists to avoid. Git has it.
-
+  `POST /api/sessions/{name}/answer` shipped one keystroke, and this deferral
+  still stands, because the line between the two is now in code rather than
+  only on a ticket. The route carries ONE key from `claude_ipc.ANSWER_KEYS`, a
+  literal frozenset, to a session whose pane is showing a question, in reply
+  to words the operator read in that pane. Three conditions hold it there and
+  each has a test that fails if it is widened: the key set is a literal,
+  asserted member by member, with the browser's copy asserted equal to the
+  server's; the pane is re-read INSIDE the send, so a screen that moved on
+  refuses, and the function's signature is asserted so a parameter carrying
+  an earlier capture fails in the suite rather than in review; and the answer
+  pad must not build an `<input>`. The root boundary already bounds it:
+  Hitchrail starts sessions only inside a configured `--root`, so an
+  answerable prompt is a subset of a trust decision the operator made on the
+  command line. If a free text field, an automatic choice, or a key sent
+  without re-reading the pane ever appears, this becomes the deferred item and
+  the deferral binds.

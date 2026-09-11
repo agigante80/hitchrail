@@ -2,10 +2,6 @@
 
 **Objective: every state the interface can be in says something true, legibly.**
 
-Twelve tickets, tasks 54 to 65, in five batches. Work the batches in order and
-the tickets within a batch in the order given; the ordering is dependency, not
-taste.
-
 ## Goal
 
 No screen states something it did not read, and every token pair passes AA.
@@ -64,7 +60,12 @@ inverts the one thing `showDialog` promises: safest action first, the
 dangerous one furthest from the thumb. Every dialog this phase touches is
 measured after it, and none can be measured before.
 
-## Batch 1: the dialogs sit where the design says, task 54
+## Expected work
+
+Twelve tasks in five batches, one ticket each. Work the batches in order and the tickets within a batch in the order given; the ordering is
+dependency, not taste.
+
+### Batch 1: the dialogs sit where the design says, task 54
 
 - [x] **Task 54, #161.** Every dialog is pinned to the bottom of the viewport.
       `margin-bottom: var(--keyboard-inset, 0px)` at `app.css:392` resolves to
@@ -91,7 +92,7 @@ measured after it, and none can be measured before.
       edge of 844px in an 844px viewport before the fix, and with the inset
       line removed entirely #103's test fails instead.
 
-## Batch 2: the screen that decides a kill, and the two facts behind its badge, tasks 55 to 57
+### Batch 2: the screen that decides a kill, and the two facts behind its badge, tasks 55 to 57
 
 - [ ] **Task 55, #165.** The `is waiting for you` dialog knows where the prompt
       is and does not show it. The engine captured that pane one screen
@@ -123,7 +124,7 @@ measured after it, and none can be measured before.
       against a real pty in the live tier, and `send_answer`'s signature still
       refusing a capture handed in from outside.
 
-## Batch 3: the wordings that are wrong, tasks 58 to 60
+### Batch 3: the wordings that are wrong, tasks 58 to 60
 
 - [ ] **Task 58, #162.** `Open` is the one control that does not open the
       session; it opens the pane tail. Rename it to the word `docs/api.md`,
@@ -149,7 +150,7 @@ measured after it, and none can be measured before.
       it knows, the request was sent and the reply could not be read, and
       that the list will catch up.
 
-## Batch 4: a stream that reports its own failures honestly, tasks 61 and 62
+### Batch 4: a stream that reports its own failures honestly, tasks 61 and 62
 
 Both live in the stream's fatal error branch, which `2dc9396` made testable:
 a refused stream AND a refused listing installed before `goto`, with the
@@ -171,7 +172,7 @@ pass. Build on that harness rather than beside it.
       refused and listing answering 503, which neither existing `blind` test
       does.
 
-## Batch 5: measured rather than felt, tasks 63 to 65
+### Batch 5: measured rather than felt, tasks 63 to 65
 
 - [ ] **Task 63, #69.** Four palette pairs put a colour on its own tint and
       fall under 4.5:1; the dark `--danger` pair is 1.5:1, and `detached` is
@@ -215,9 +216,9 @@ pass. Build on that harness rather than beside it.
 - [ ] The release that ships this phase runs `uv run pytest -m screenshots`
       and commits `docs/screenshots/`, because three of the twelve change a
       label or a dialog those images show.
-- [ ] The roadmap's Phase 11 section carries `**Status: done**` with the
-      closing date and the issues, and this plan has no unticked box without
-      a marker.
+- [ ] The roadmap's Phase 11 block says `state: done`, the milestone is closed,
+      `scripts/check-phases.sh` is clean, and this plan has no unticked box
+      without a marker.
 
 ## Fails if
 
