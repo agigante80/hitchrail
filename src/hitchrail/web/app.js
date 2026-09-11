@@ -627,6 +627,7 @@ function showDialog({ title, body, actions, extra, forProject }) {
   const dialog = $("[data-dialog]");
   if (!dialog) return;
   dialog.replaceChildren();
+  delete dialog.dataset.refusal;
   if (forProject === undefined) {
     delete dialog.dataset.for;
   } else {
@@ -915,11 +916,22 @@ function showRefusal(result, project) {
     //
     // Relative, for the reason `grant.html` argues at length: this page is
     // served from the app root, wherever that is.
+    //
+    // #71. Left alone if it is already up. The stream's fatal branch asks
+    // once per fatal error and the reopen backs off forever, so a phone
+    // holding a stale token reached this once a minute, and `showDialog`
+    // starts with `replaceChildren`: the screen was torn down and rebuilt
+    // under the reader, focus on Sign in included. Same reason, same dialog,
+    // nothing to redraw. `showDialog` clears the tag, so any other dialog
+    // opened in between makes this one fresh again.
+    const dialog = $("[data-dialog]");
+    if (dialog?.open && dialog.dataset.refusal === "signed-out") return;
     showDialog({
       title: "Not signed in any more",
       body: "This browser is no longer accepted. Sign in again with your access key.",
       actions: [["Sign in", "accent", () => window.location.assign("grant")]],
     });
+    if (dialog) dialog.dataset.refusal = "signed-out";
     return;
   }
   if (code === "no_agent") {
@@ -1407,10 +1419,21 @@ let reopenDelay = REOPEN_MS;
 /* Backed off and capped. The motivating case is a token the server stopped
    accepting, which no amount of asking will fix, so a fixed five seconds would
    be one refused request every five seconds for as long as the tab is open. */
+/* Overridable only so the browser tier can watch several reopen attempts
+   without waiting fifteen seconds per test (#71). Same shape and same
+   argument as `setStopPatience`: not read from the server, and a client that
+   shortened it would only make itself impatient. */
+let reopenPaceMs = null;
+
+export function setReopenPace(ms) {
+  reopenPaceMs = ms;
+  reopenDelay = ms;
+}
+
 function scheduleReopen() {
   if (reopenTimer !== null) return;
   const delay = reopenDelay;
-  reopenDelay = Math.min(reopenDelay * 2, REOPEN_CEILING_MS);
+  reopenDelay = reopenPaceMs ?? Math.min(reopenDelay * 2, REOPEN_CEILING_MS);
   reopenTimer = setTimeout(() => {
     reopenTimer = null;
     openStream();
@@ -1610,7 +1633,16 @@ async function refresh() {
     // that, whether the root went away, tmux broke or the server faulted.
     // None of them is `down`: reporting a network problem for a root that was
     // unmounted sends somebody to look at their wifi instead of their mount.
-    setStreamState("blind");
+    //
+    // #72. Unless the stream is provably NOT live. The fatal branch calls this
+    // after the stream closed for good, and "Live, but this machine cannot be
+    // read" at that moment is the lie the strip exists to prevent. CLOSED is
+    // the test, not OPEN: at boot this runs while the stream is still
+    // connecting, and an unreadable machine then is still `blind`, which the
+    // recovery branch below already agrees with when it clears it.
+    if (!stream || stream.readyState !== EventSource.CLOSED) {
+      setStreamState("blind");
+    }
     return result;
   }
   if (document.documentElement.getAttribute("data-stream") === "blind") {
@@ -1703,6 +1735,7 @@ window.__hitchrail = {
   state,
   api,
   setStopPatience,
+  setReopenPace,
   openStream,
   get stream() {
     return stream;

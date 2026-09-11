@@ -586,6 +586,102 @@ async def test_a_two_hundred_the_page_cannot_read_is_not_a_success(
     assert errors == [], errors
 
 
+async def test_a_permanently_refused_stream_leaves_its_refusal_screen_alone(
+    page: Page, server: Harness
+) -> None:
+    """#71. The fatal branch asks once per fatal error, and the reopen backs
+    off forever, so a phone holding a stale token had its refusal dialog torn
+    down and rebuilt on every attempt, focus and all: `showDialog` starts with
+    `replaceChildren`. A person reaching for Sign in could have it taken out
+    from under their thumb.
+
+    Built on the harness below: stream and listing both refused, the listing
+    succeeding exactly once so boot's own `refresh()` cannot raise the screen.
+    Asserted by IDENTITY, a mark on the heading node, across at least two
+    further reopen attempts: the rebuild produces identical text, so text
+    proves nothing. The reopen pace is shortened through the seam, since the
+    real backoff is 5s then 10s.
+    """
+    server.seed(stopped=["vessel"])
+    listings = {"seen": 0}
+    events = {"seen": 0}
+
+    async def listing(route: Route) -> None:
+        listings["seen"] += 1
+        if listings["seen"] == 1:
+            await route.continue_()
+            return
+        await route.fulfill(
+            status=401,
+            content_type="application/json",
+            body='{"code": "unauthorized", "message": "a valid token is required"}',
+        )
+
+    async def refused_stream(route: Route) -> None:
+        events["seen"] += 1
+        await route.fulfill(status=401)
+
+    await page.route("**/api/events*", refused_stream)
+    await page.route("**/api/projects", listing)
+    await page.goto(server.base)
+    await page.evaluate("() => window.__hitchrail.setReopenPace(200)")
+
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text("Not signed in any more", timeout=15_000)
+    await dialog.locator("h2").evaluate("(h) => { h.dataset.mark = 'first'; }")
+    seen_then = events["seen"]
+
+    # At least two more reopen attempts, each of which used to rebuild it.
+    deadline = time.time() + 15
+    while events["seen"] < seen_then + 2 and time.time() < deadline:
+        await page.wait_for_timeout(100)
+    assert events["seen"] >= seen_then + 2, f"only {events['seen']} stream attempts"
+    assert listings["seen"] >= seen_then + 2, "the reopen attempts stopped asking"
+
+    await expect(dialog).to_contain_text("Not signed in any more")
+    assert await dialog.locator("h2").get_attribute("data-mark") == "first", (
+        "the refusal dialog was rebuilt under the reader: the marked heading is gone"
+    )
+
+
+async def test_a_dead_stream_is_never_reported_as_live_but_unreadable(
+    page: Page, server: Harness
+) -> None:
+    """#72. The fatal branch's `refresh()` could reach `blind`, whose copy is
+    "Live, but this machine cannot be read", at the one moment the stream is
+    provably not live: it just closed for good. `blind` now requires a stream
+    that is not closed, the way the recovery path already checks before
+    clearing it. Both conditions at once, stream fatally refused and the
+    listing answering 503, which neither existing `blind` test does."""
+    server.seed(stopped=["vessel"])
+    listings = {"seen": 0}
+
+    async def listing(route: Route) -> None:
+        listings["seen"] += 1
+        if listings["seen"] == 1:
+            await route.continue_()
+            return
+        await route.fulfill(
+            status=503,
+            content_type="application/json",
+            body='{"code": "machine_unreadable", "message": "tmux could not be read"}',
+        )
+
+    await page.route("**/api/events*", lambda route: route.fulfill(status=401))
+    await page.route("**/api/projects", listing)
+    await page.goto(server.base)
+
+    await expect(page.locator("html")).to_have_attribute("data-stream", "down", timeout=15_000)
+    deadline = time.time() + 15
+    while listings["seen"] < 2 and time.time() < deadline:
+        await page.wait_for_timeout(100)
+    assert listings["seen"] >= 2, "the fatal branch never asked"
+    # Give the 503 time to be rendered if it was going to be.
+    await page.wait_for_timeout(300)
+    await expect(page.locator("html")).to_have_attribute("data-stream", "down")
+    await expect(page.locator("[data-stream-note]")).not_to_contain_text("Live")
+
+
 async def test_a_stream_the_server_stops_accepting_reaches_the_screen_on_its_own(
     page: Page, server: Harness
 ) -> None:
