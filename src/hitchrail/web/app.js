@@ -382,6 +382,13 @@ function sessionLink(href, label) {
   const link = document.createElement("a");
   link.className = "btn ghost";
   link.textContent = label;
+  // #163. The only control on a row that leaves the page, so it says so. The
+  // mark is decorative and hidden from the accessible name, which stays the
+  // words: a screen reader and a sighted person hear and read the same label.
+  const mark = document.createElement("span");
+  mark.setAttribute("aria-hidden", "true");
+  mark.textContent = " \u2197";
+  link.append(mark);
   link.href = href;
   link.target = "_blank";
   // `noreferrer` as much as `noopener`. Without it the outbound request
@@ -436,7 +443,7 @@ async function showSessionLink(project) {
       "This link was read off the terminal rather than published by the "
       + "session, so it may belong to an earlier session in the same pane.",
     actions: [["Close", "ghost", () => closeDialog()]],
-    extra: sessionLink(href, "Continue anyway"),
+    extra: sessionLink(href, "Open it anyway"),
   });
 }
 
@@ -451,19 +458,21 @@ function buildActions(project, actions) {
   };
 
   if (isRunning(project) || project.state === "stale") {
-    add("Open", "ghost").addEventListener("click", () => openLogs(project));
+    // #162. The word the route, `docs/api.md` and `openLogs` use. It was
+    // `Open`, the one control on the row that did not open the session.
+    add("Logs", "ghost").addEventListener("click", () => openLogs(project));
   }
   if (isRunning(project)) {
-    // "Continue" is Claude Code's own word for it, from the line it prints on
-    // start. `Open` next to it is the pane; this is the conversation.
+    // #163. The action and its object, no vendor word. One label for one
+    // action in two states: a link when the session has published one, and
+    // a button that asks for it when it has not, because the listing will not
+    // learn of a link arriving on its own. The stream announces state changes
+    // and this is not one, so it is asked for rather than waited for.
     const href = sessionHref(project.url);
     if (href !== null) {
-      actions.append(sessionLink(href, "Continue"));
+      actions.append(sessionLink(href, "Open session"));
     } else {
-      // A session that has not published a link yet. The listing will not
-      // learn of one arriving, because the stream announces state changes and
-      // this is not one, so it is asked for rather than waited for.
-      add("Get link", "ghost").addEventListener("click", () => showSessionLink(project));
+      add("Open session", "ghost").addEventListener("click", () => showSessionLink(project));
     }
   }
   if (project.state === "stopped") {

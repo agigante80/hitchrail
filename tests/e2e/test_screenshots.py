@@ -311,7 +311,7 @@ async def test_capture_the_log_drawer(page: Page, shots_server: Harness) -> None
     # names it `Open`. The old lookup found nothing every time, and because the
     # click was guarded rather than asserted, the tier photographed the plain
     # list and published it as the drawer (#215).
-    await row(page, shots_server, "vessel").get_by_role("button", name="Open").click()
+    await row(page, shots_server, "vessel").get_by_role("button", name="Logs").click()
     drawer = page.locator("[data-dialog]")
     await expect(drawer).to_contain_text("last 40 lines of the pane")
     await _shoot(page, "phone-logs", drawer)

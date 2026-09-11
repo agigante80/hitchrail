@@ -170,7 +170,7 @@ async def test_the_log_drawer_shows_the_pane_tail(page: Page, server: Harness) -
     await page.goto(server.base)
     row = page.locator(f'[data-project="{server.project("vessel")}"]')
     await expect(row).to_be_visible()
-    await row.get_by_role("button", name="Open").click()
+    await row.get_by_role("button", name="Logs").click()
 
     dialog = page.locator("[data-dialog]")
     await expect(dialog).to_contain_text("last 40 lines of the pane")
