@@ -1202,10 +1202,17 @@ async def page() -> AsyncIterator[Page]:
     A fresh context per test is the isolation that matters anyway: the theme
     lives in `localStorage`, and a leaked one would make a dark theme test
     pass because the previous test set it.
+
+    **A phone viewport by default**, since Phase 11. Playwright's default is
+    1280x720, so every dialog and row this tier proved was proved on a desktop
+    and #161 sat on the bottom edge of every phone for a week while the tier
+    was green. This is the product's own viewport; a test that wants the
+    desktop says so with `set_viewport_size`, the way the #161 test does for
+    both.
     """
     async with async_playwright() as driver:
         browser = await driver.chromium.launch()
-        context = await browser.new_context()
+        context = await browser.new_context(viewport={"width": 390, "height": 844})
         try:
             yield await context.new_page()
         finally:
