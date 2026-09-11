@@ -237,11 +237,10 @@ before the retune.
       test that proves each fix runs there.
 - [x] `uv run pytest` carries a test that computes every foreground and
       background pair from `app.css` and fails under 4.5:1, and it passes.
-- [ ] NOT BUILT in the phase, by design (#244 carries the artboards' side of
-      the same drift): the release that ships this phase runs
-      `uv run pytest -m screenshots` and commits `docs/screenshots/`, step 4
-      of `docs/releasing.md`, because three of the twelve change a label or a
-      dialog those images show.
+- [x] `uv run pytest -m screenshots` run and `docs/screenshots/` committed on
+      2026-09-11, ahead of the release rather than at it, because three of the
+      twelve change a label or a dialog those images show. #244 carries the
+      artboards' side of the same drift.
 - [x] The roadmap's Phase 11 block says `state: done`, the milestone is closed,
       `scripts/check-phases.sh` is clean, and this plan has no unticked box
       without a marker.
