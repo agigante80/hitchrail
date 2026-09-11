@@ -32,7 +32,11 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
-Phase 11: the interface in every state.
+## 0.6.0 - 2026-09-11
+
+Phase 11: the interface in every state. Upgrading is safe with no action.
+Two row controls have new names, `Logs` and `Open session`, and the colours
+have moved slightly so that every label passes AA, mostly in dark mode.
 
 ### Changed
 
