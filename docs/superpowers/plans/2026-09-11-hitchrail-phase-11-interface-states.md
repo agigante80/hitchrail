@@ -52,7 +52,7 @@ next reviewer cites.
 
 | Criterion | Tasks |
 |---|---|
-| 1. No screen states something it did not read | 55, 56, 57, 58, 59, 60, 61, 62, 64, 65 |
+| 1. No screen states something it did not read | 55, 56, 57, 66, 58, 59, 60, 61, 62, 64 |
 | 2. Every token pair passes AA | 63 |
 
 Task 54 serves neither directly and goes first, because a bottom-pinned dialog
@@ -62,7 +62,7 @@ measured after it, and none can be measured before.
 
 ## Expected work
 
-Twelve tasks in five batches, one ticket each. Work the batches in order and the tickets within a batch in the order given; the ordering is
+Twelve tasks in five batches, one ticket each, after one swap on 2026-09-11. Work the batches in order and the tickets within a batch in the order given; the ordering is
 dependency, not taste.
 
 ### Batch 1: the dialogs sit where the design says, task 54
@@ -92,7 +92,7 @@ dependency, not taste.
       edge of 844px in an 844px viewport before the fix, and with the inset
       line removed entirely #103's test fails instead.
 
-### Batch 2: the screen that decides a kill, and the two facts behind its badge, tasks 55 to 57
+### Batch 2: the screen that decides a kill, the badge, and the two facts behind it, tasks 55 to 57 and 66
 
 - [ ] **Task 55, #165.** The `is waiting for you` dialog knows where the prompt
       is and does not show it. The engine captured that pane one screen
@@ -123,6 +123,18 @@ dependency, not taste.
       captured row behind every new belief about Claude Code's layout, proven
       against a real pty in the live tier, and `send_answer`'s signature still
       refusing a capture handed in from outside.
+
+- [ ] **Task 66, #183.** `badgeFor` renders `waiting` for `awaiting_trust` and
+      `running` for `awaiting_input`, under a comment whose every clause is
+      true of both. Moved in from Phase 13 on 2026-09-11: it is criterion 1
+      word for word, and tasks 56 and 57 are the two facts behind this badge.
+      The ticket's first option: `awaiting_input` beside `awaiting_trust`, both
+      `waiting`, so the badge means "a person is needed" rather than naming the
+      prompt. The precedence over `stopping` is stated in the code, not left to
+      branch order, and `test_a_stuck_row_says_so_without_the_page_asking`
+      asserts the badge deliberately instead of pinning `running` with a
+      pointer here. Descriptive only: the flag gates no action, which is the
+      property #91 requires of an agent controllable signal.
 
 ### Batch 3: the wordings that are wrong, tasks 58 to 60
 
@@ -173,7 +185,7 @@ pass. Build on that harness rather than beside it.
       refused and listing answering 503, which neither existing `blind` test
       does.
 
-### Batch 5: measured rather than felt, tasks 63 to 65
+### Batch 5: measured rather than felt, tasks 63 and 64
 
 - [ ] **Task 63, #69.** Four palette pairs put a colour on its own tint and
       fall under 4.5:1; the dark `--danger` pair is 1.5:1, and `detached` is
@@ -197,13 +209,11 @@ pass. Build on that harness rather than beside it.
       short with an argument behind each member, and the next person to add
       one will cite this.
 
-- [ ] **Task 65, #90.** The footer shows memory used with no ceiling. "1.4 GB"
-      beside "no limit" is a different sentence from "1.4 GB of 4 GB", and the
-      reading is free where the setting is not ours: Hitchrail is a launcher
-      and does not own cgroup policy. Read the ceiling through the injected
-      memory seam, show it where it exists, say "no limit" where it does not,
-      and never set one. The control half of the ticket stays out, argued on
-      the ticket.
+- [ ] **Task 65, #90. MOVED OUT to Phase 13 on 2026-09-11, split into #243
+      (the seam) and #90 (the row).** "1.4 GB with nothing beside it" is an
+      incomplete answer rather than a screen that lies, and the reading is a
+      cgroup ancestry walk in the engine, which is the third engine ticket this
+      plan's own rule keeps out. #183 took its place as task 66.
 
 ## Done looks like
 
@@ -261,6 +271,7 @@ made it believable, and each with the rule that stops it.
 - Splitting `app.js`, #68: **Phase 18**.
 - A kill control on the row itself: escalation by default, and its own
   ticket if it is ever wanted, per #169.
-- Setting `MemoryHigh` on a scope: not Hitchrail's, argued on #90.
+- The memory ceiling beside a row's figure, #90 and #243: **Phase 13**, an
+  incomplete answer rather than a lie, and an engine seam.
 - A free text field to a session: deferred in the roadmap, and #204's three
   conditions are the line.

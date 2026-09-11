@@ -58,8 +58,9 @@ them the opposite of what happened, or puts the destructive action nearest the
 thumb.
 
 Delivers: a stream that reports its own failures honestly, dialogs whose
-titles match what happened, colour that passes AA on its own tints, computed
-rather than judged, and a memory footer with a ceiling.
+titles match what happened, a badge that says a person is needed whichever
+prompt is asking, and colour that passes AA on its own tints, computed rather
+than judged.
 
 Done when no screen states something it did not read, and every token pair
 passes AA.
@@ -86,8 +87,9 @@ navigation and provenance.
 
 Delivers: filtering by root, a header that survives scrolling, a footer that
 names the version and links to the source, the server's own start time and
-account, logs at a URL you can bookmark, bulk stop composed from the stop each
-row already has, and an icon set.
+account, a row's memory figure with what bounds it, logs at a URL you can
+bookmark, bulk stop composed from the stop each row already has, and an icon
+set.
 
 Done when a fifty row list can be narrowed to one root in one tap, the primary
 action is reachable at any scroll position, and the page answers "which build
