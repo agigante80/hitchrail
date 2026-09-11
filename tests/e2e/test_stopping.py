@@ -582,3 +582,64 @@ async def test_a_timeout_on_a_prompt_says_so_rather_than_it_has_not_finished(
     await dialog.get_by_role("button", name="Leave it").click()
     row = page.locator(f'[data-project="{server.project("vessel")}"]')
     await expect(row.locator(".badge")).to_have_text("waiting")
+
+
+async def test_the_waiting_dialog_shows_the_question_and_the_keys(
+    page: Page, server: Harness
+) -> None:
+    """#165, reported from a real install where every part worked and the
+    dialog was still the wrong screen.
+
+    The engine captured the pane one screen earlier to decide the flag this
+    dialog renders, then offered `Leave it` and `Kill it` and sent the reader
+    to "that terminal", which is the one surface the prompt is never on. The
+    operator opened the session link, saw nothing, and concluded the exit
+    request had never been sent.
+
+    The pane view is the one `openLogs` renders, keypad included since #204,
+    which is how #166's last clause ("from the waiting dialog") lands here.
+    Ordering as `showDialog` requires: the pane and its keys above `Leave it`,
+    `Kill it` last and furthest from the thumb.
+    """
+    server.seed(running=["vessel"], prompts_after_stop=True, stop_timeout=2.0)
+    await _stop_and_hold(page, server, patience_ms=6000)
+
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text("is waiting for you", timeout=20_000)
+
+    # The question itself, as the shim painted it, without leaving the dialog.
+    await expect(dialog.locator(".log-pane")).to_contain_text("Exit and stop tasks")
+    # The keys, and they are above the decision. Compared as document order,
+    # since two visible things can only be ordered by where they sit.
+    keys = dialog.get_by_role("button", name="Send Enter")
+    await expect(keys).to_be_visible()
+    order = await dialog.evaluate(
+        """(d) => {
+          const key = d.querySelector('[aria-label="Send Enter"]');
+          const buttons = [...d.querySelectorAll('.dialog-actions button')];
+          return [key.compareDocumentPosition(buttons[0]) & Node.DOCUMENT_POSITION_FOLLOWING,
+                  buttons.map((b) => b.textContent)];
+        }"""
+    )
+    assert order[0], "the keys are not above the actions"
+    assert order[1] == ["Leave it", "Kill it"], order[1]
+
+    # Pane, not terminal: the reader has two surfaces and only one has the prompt.
+    text = await dialog.inner_text()
+    assert "that terminal" not in text, text
+    assert "pane" in text.lower(), text
+
+
+async def test_the_waiting_dialog_goes_when_the_agent_does(page: Page, server: Harness) -> None:
+    """#165's unhappy path. A prompt for a process that is gone is a dialog
+    inviting a key into nothing; when the row leaves `running`, so does it."""
+    server.seed(running=["vessel"], prompts_after_stop=True, stop_timeout=2.0)
+    await _stop_and_hold(page, server, patience_ms=6000)
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text("is waiting for you", timeout=20_000)
+
+    # Through the engine, so the stopped row is announced on the stream: that
+    # is the path a person answering at the pane produces, and the one the
+    # page can act on without polling.
+    server.kill("vessel")
+    await expect(dialog).not_to_be_visible(timeout=15_000)

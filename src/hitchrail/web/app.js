@@ -798,7 +798,7 @@ function showLostTrack(project) {
   });
 }
 
-function showTimedOut(project) {
+async function showTimedOut(project) {
   // #101. The wait can end two ways and they need different words.
   //
   // The engine looks at the pane ONCE when the wait expires, and says whether
@@ -813,13 +813,27 @@ function showTimedOut(project) {
   // predates it.
   const current = state.projects.find((p) => p.name === project.name) ?? project;
   if (current.awaiting_input) {
+    // #165. The engine captured this pane one screen ago to set the flag this
+    // dialog renders, and the first version then sent the reader to "that
+    // terminal", which is the one surface the prompt is never on: an operator
+    // opened the session link, saw nothing, and concluded the exit request
+    // had never been sent. So the question is shown here, in the same pane
+    // view `openLogs` renders, keys included, and this is the second capture
+    // of that screen: one from the sweep and one for the dialog, affordable
+    // because a wait expiring on a prompt is rare and this is the moment the
+    // person is deciding whether to kill a process with unsaved work.
+    //
+    // Fails closed if the pane cannot be read: a note saying so, never an
+    // empty box that reads as "the agent is asking nothing".
+    const extra = await paneView(current);
     showDialog({
       title: `${project.name} is waiting for you`,
       body:
-        "It was asked to exit and answered with a prompt. Only somebody at "
-        + "that terminal can reply to it, so Hitchrail has stopped waiting.",
+        "It was asked to exit and answered with a prompt, shown below. Reply "
+        + "with a key here or at the pane; Hitchrail has stopped waiting.",
+      extra,
       forProject: project.name,
-      // Kill is still here, and still second. The person may well want it, and
+      // Kill is still here, and still last. The person may well want it, and
       // the warning is the same one: the difference is that they now know what
       // they would be interrupting rather than being told nothing happened.
       actions: [
@@ -1166,13 +1180,23 @@ function answerPad(project, pane) {
 
 /* -- the log drawer ---------------------------------------------------- */
 
-async function openLogs(project) {
+/* The pane, with the keypad when the row is waiting on a person. ONE renderer,
+   used by the log drawer and by the waiting dialog (#165): `app.js` is past
+   the size guideline and #68 is open about it, and the size guard does not
+   read `web/`, so this comment is the rule. Never null: an unreadable pane
+   yields a note saying so, because a dialog built on this must not show an
+   empty box that reads as "nothing is being asked". */
+async function paneView(project) {
   const result = await api(
     `/api/sessions/${encodeURIComponent(project.name)}/logs?lines=40`,
   );
+  const extra = document.createElement("div");
   if (!result.ok) {
-    showRefusal(result);
-    return;
+    const note = document.createElement("p");
+    note.className = "meta";
+    note.textContent = `The pane could not be read: ${result.body.message}`;
+    extra.appendChild(note);
+    return extra;
   }
   const pane = document.createElement("pre");
   pane.className = "log-pane";
@@ -1184,11 +1208,16 @@ async function openLogs(project) {
   //
   // The flag is a hint, never the guard. It is up to 30s old by `attention.TTL_S`,
   // and the server re-reads the pane inside the send regardless.
-  const waiting = project.awaiting_trust || project.awaiting_input;
-  const extra = document.createElement("div");
   extra.appendChild(pane);
-  if (waiting) extra.appendChild(answerPad(project, pane));
+  if (project.awaiting_trust || project.awaiting_input) {
+    extra.appendChild(answerPad(project, pane));
+  }
+  return extra;
+}
 
+async function openLogs(project) {
+  const waiting = project.awaiting_trust || project.awaiting_input;
+  const extra = await paneView(project);
   showDialog({
     title: project.name,
     body: waiting
@@ -1452,6 +1481,13 @@ function applySession(session) {
     return;
   }
   state.projects[index] = session;
+  // #165. The confirm, the wait and the waiting dialog all carry `forProject`,
+  // and all three are about a RUNNING session's stop. When the row leaves
+  // `running`, the process they were about is gone and a waiting dialog would
+  // go on showing a prompt nobody can answer, inviting a key into nothing.
+  // Any other dialog, a log view or a new folder sheet, carries no `for` and
+  // is left alone.
+  if (session.state !== "running") closeDialog(session.name);
   render();
 }
 
