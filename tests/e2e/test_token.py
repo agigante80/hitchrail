@@ -107,6 +107,17 @@ async def test_an_arrival_with_no_key_can_type_one(page: Page, server: Harness) 
     )
 
 
+async def test_an_arrival_with_a_trailing_slash_reaches_the_same_screen(
+    page: Page, server: Harness
+) -> None:
+    """#78. The address a messaging app or a phone keyboard produces."""
+    server.seed(stopped=["vessel"], token=TOKEN)
+    await page.goto(f"{server.base}/grant/")
+    await expect(page.get_by_role("dialog")).to_contain_text(
+        "Anyone with this key can run code on that machine as you."
+    )
+
+
 async def test_a_wrong_key_says_so_without_confirming_anything(
     page: Page, server: Harness
 ) -> None:

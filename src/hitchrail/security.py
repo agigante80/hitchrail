@@ -61,6 +61,15 @@ UNAUTHENTICATED: frozenset[tuple[str, str, str]] = frozenset(
         # different route from the one that runs. `/api/grant` is POST only, so
         # it gets no HEAD for the same reason.
         ("http", "HEAD", GRANT_PAGE_PATH),
+        # #78. The slashed spelling, because phones and messaging apps add the
+        # slash on their own and the router's `redirect_slashes` never sees a
+        # request this middleware has already refused. Nothing is served at
+        # this path: the router answers it with a redirect to the page, so the
+        # grant page's CSP and its inline hashes stay with `/grant` exactly.
+        # This set is meant to be short with an argument behind each entry,
+        # and this is the argument for these two; the next entry needs its own.
+        ("http", "GET", GRANT_PAGE_PATH + "/"),
+        ("http", "HEAD", GRANT_PAGE_PATH + "/"),
         ("http", "POST", GRANT_API_PATH),
     }
 )

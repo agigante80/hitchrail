@@ -438,6 +438,30 @@ async def test_an_exempt_path_is_matched_exactly(tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
+async def test_a_trailing_slash_on_the_grant_page_is_not_a_dead_end(tmp_path: Path) -> None:
+    """#78. `GET /grant/` answered a raw JSON 401 in a phone browser.
+
+    Starlette's `redirect_slashes` would send it to `/grant`, but the token
+    middleware answers before the router sees the request, and `/grant/` was
+    not exempt. Safe direction, and still the dead end
+    `test_an_arrival_with_no_key_can_type_one` was written about: phones and
+    messaging apps add the slash on their own. The router's redirect is the
+    fix once the request reaches it, so the exemption names the slashed
+    spelling and nothing else about the boundary moves.
+    """
+    app = Starlette(
+        routes=[Route("/grant", _ok, methods=["GET"])],
+        middleware=middleware_stack(make_config(tmp_path, host="0.0.0.0", token=TOKEN)),
+    )
+    response = await call(app, path="/grant/", headers=HOST)
+    assert response.status_code == 307, response.status_code
+    assert response.headers["location"].endswith("/grant")
+    # And the neighbours are still exactly as refused as before.
+    for path in ("/grant//", "/grant/x"):
+        assert (await call(app, path=path, headers=HOST)).status_code == 401, path
+
+
+@pytest.mark.integration
 async def test_an_exempt_path_still_answers_to_the_host_allowlist(tmp_path: Path) -> None:
     """Host is outermost, and the exemption is inside it. A rebound request
     must not reach the one page that is served without a token either."""
@@ -482,7 +506,7 @@ async def test_head_on_the_grant_page_is_exempt_like_get(tmp_path: Path) -> None
     assert (await call(app, "HEAD", path="/grant", headers=HOST)).status_code == 200
 
 
-def test_the_exemption_is_exactly_three_entries() -> None:
+def test_the_exemption_is_exactly_these_entries() -> None:
     """The cheapest guard there is, and it was the missing one.
 
     Every other test here probes paths a test file chose, so adding
@@ -490,13 +514,19 @@ def test_the_exemption_is_exactly_three_entries() -> None:
     says an added entry needs the argument #21 made; this is what mechanically
     notices there is one. It NAMES the entries rather than counting them, which
     is the difference between this and the comment beside the set, which said
-    "two long" for a while after the set had three.
+    "two long" for a while after the set had three, and which is why the name
+    of this test no longer counts them either.
+
+    The slashed pair is #78: nothing is served there, the router redirects it
+    to the page, and the argument sits beside the entries in `security.py`.
     """
     assert (
         frozenset(
             {
                 ("http", "GET", "/grant"),
                 ("http", "HEAD", "/grant"),
+                ("http", "GET", "/grant/"),
+                ("http", "HEAD", "/grant/"),
                 ("http", "POST", "/api/grant"),
             }
         )
