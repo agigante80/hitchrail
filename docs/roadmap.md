@@ -734,6 +734,10 @@ for a count nobody checks is to stop writing counts.
 
 ## Phase 11: The interface in every state
 
+**Status: in progress**, since 2026-09-11.
+
+**Plan: [`superpowers/plans/2026-09-11-hitchrail-phase-11-interface-states.md`](superpowers/plans/2026-09-11-hitchrail-phase-11-interface-states.md)**
+
 **Objective: every state the interface can be in says something true, legibly.**
 
 What is left of the browser work after Phase 6 closed: the states that are rare
@@ -755,8 +759,23 @@ did.
 
 **Tickets: [the Phase 11 milestone](https://github.com/agigante80/hitchrail/milestone/13).**
 
+**Opened on 2026-09-11 with four of its tickets already shipped and none of
+them closed.** #204, #169 and the mechanism half of #166 landed on 2026-09-06
+with 0.5.0 and stayed open with every acceptance box unticked; #204's body
+called #165 shipped and pointed at the log drawer, which is the pane view and
+not the dialog #165 names, so #165 stays. The plan checks each remaining ticket
+against the tree before it is given a task, because this is the third time in
+a week a ticket here described a version that no longer existed.
+
+**#242 and #239 left for Phase 19 the same day.** Stop sending a wrap up prompt
+first changes what Stop means, in the engine and `claude_ipc`, and nothing
+about it is a screen saying something true. Keeping them here meant this phase
+could not close until a stop-semantics sub decision was made, which is the
+shape Phase 10 was narrowed to escape.
+
 **#169 is the one to read, because it is a dead end and its justification was
-false.** A stop whose input box will not clear refuses to type, correctly, and
+false.** It shipped on 2026-09-06 at `2779cab`, and the argument stays here
+because it is the argument. A stop whose input box will not clear refuses to type, correctly, and
 the resulting dialog offers only Close. The comment above it justifies
 withholding a kill by saying "Kill is still on the row". `renderRow` renders
 Open, Get link, Start, Stop and Clear, and no kill at all; `killNow` is
@@ -1149,6 +1168,43 @@ cut the graceful stop overlay next; measured rather than guessed, that cut moved
 64 lines, left the file still over the guideline, and split one stop sequence
 across two files to buy nothing. The note was corrected in place instead of
 followed. Length is the trigger for looking, never the reason for cutting.
+
+## Phase 19: Stop means wrap up
+
+**Objective: a session stopped from a phone leaves the same record as one
+closed by hand.**
+
+**Cut out of Phase 11 on 2026-09-11.** Stop today types `C-u`, `Escape`,
+`/exit`, `Enter` and nothing else: the agent is interrupted mid task and asked
+to exit, and whatever it knew about the work in flight leaves with it. The
+operator's stated model of Stop is "run the closing skill, summarise
+everything, then close the session", and the code did none of that. Decided
+over the #91 concern that a typed instruction on the operator's behalf is
+exactly the "sole call site" sentence names: what keeps it relay rather than
+impersonation is that the prompt is authored on the machine only, sent only on
+a tapped Stop, and sent with `send-keys -l`.
+
+It is a phase rather than a Phase 11 ticket for the reason Phase 16 is one
+ticket: what it changes, not how big it is. It changes design section 4.3, the
+stop sequence, and the two tickets carry an open sub decision, the order in
+which the interrupt and the prompt are sent, that is the operator's to make.
+
+Delivers: a configured prompt sent before the exit sequence, the closing skill
+by default, with a per session wait for the pane to show an idle input box
+under a ceiling; and an opt in, off by default, that lets a stop ending on a
+prompt end the session anyway because the operator said so ahead of time.
+
+**Done when:** a session stopped from the interface has run the closing skill
+before it exits, a stop that ends on a prompt still does nothing on its own
+unless the operator opted in before tapping, and `stop_prompt` cannot be set
+through any HTTP route.
+
+**The deferral under "Deliberately later" still binds**, and this phase is
+written against it rather than around it: the prompt is configuration on the
+machine, never text from the page, and the page's only verb is still Stop. A
+box carrying words from a browser to an agent stays the different product.
+
+**Tickets: [the Phase 19 milestone](https://github.com/agigante80/hitchrail/milestone/21).**
 
 ## Deliberately later
 
