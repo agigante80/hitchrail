@@ -575,3 +575,10 @@ async def test_a_timeout_on_a_prompt_says_so_rather_than_it_has_not_finished(
     # Kill stays available: the person may want it, and now they know what
     # they would be interrupting.
     await expect(dialog.get_by_role("button", name="Kill it")).to_be_visible()
+
+    # #183. Leave it, and the row itself says a person is needed: the stop
+    # marker expired with the wait, so `stopping` no longer outranks the
+    # overlay and the badge reads `waiting`, not `running`.
+    await dialog.get_by_role("button", name="Leave it").click()
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row.locator(".badge")).to_have_text("waiting")

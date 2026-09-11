@@ -195,13 +195,27 @@ function badgeFor(project) {
   // The canvas: `live && live.controller ? 'controller' : 'running'`. The
   // controller badge replaces the state badge rather than sitting beside it.
   if (project.protected) return "controller";
+  // `stopping` outranks `waiting`, and the order of these lines is the
+  // statement, not an accident (#183). A stop in flight is the action the
+  // person already took, and the wait dialog is where a prompt met during it
+  // is reported, with the pane and the keys. A row that is both is one whose
+  // stop ran into a question, and the badge names the thing they are waiting
+  // ON rather than the thing they are waiting FOR.
   if (project.stopping) return "stopping";
   // #88. `running` is true and useless here: the agent is alive and sitting on
   // a prompt that only somebody at a terminal can answer, so it will sit there
   // forever. A row saying nothing but "running" is the interface asserting
   // something it knows to be misleading, which the design forbids everywhere
   // else. An overlay like `stopping`, not a fifth state.
-  if (project.awaiting_trust) return "waiting";
+  //
+  // #183. Every clause of that is true of `awaiting_input` too. The two flags
+  // are kept apart in `sessions.py` because they are FOUND differently and
+  // cost differently, which is a fact about derivation and not about what a
+  // row should look like: both answers are "go to the pane", so the badge
+  // means "a person is needed" rather than naming which prompt. The meta line
+  // still says which. Descriptive only, as #91 requires of a signal an agent
+  // can produce: the badge gates nothing.
+  if (project.awaiting_trust || project.awaiting_input) return "waiting";
   return project.state;
 }
 

@@ -542,9 +542,11 @@ async def test_a_stuck_row_says_so_without_the_page_asking(
     # sweep's answer or nothing.
     await expect(row).to_contain_text("waiting for an answer", timeout=15_000)
 
-    # And the badge still reads `running`, which is #183 rather than an
-    # oversight here: `awaiting_trust` replaces the badge and `awaiting_input`
-    # does not, so the two overlays that both mean "a person is needed" look
-    # different at a glance. Asserted so the day that is decided, this test
-    # fails and is updated deliberately rather than drifting.
-    await expect(row.locator(".badge")).to_have_text("running")
+    # And the badge says so too (#183). It used to read `running` while the
+    # meta line carried the truth: `awaiting_trust` replaced the badge and
+    # `awaiting_input` did not, so the one row on a fifty row list that needed
+    # a person looked exactly like the forty nine that did not. Both overlays
+    # mean "go to the pane", so both are `waiting`; the state underneath is
+    # still `running`, because this is an overlay and not a fifth state.
+    await expect(row.locator(".badge")).to_have_text("waiting")
+    await expect(row).to_have_attribute("data-state", "running")
