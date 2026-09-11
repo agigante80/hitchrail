@@ -127,8 +127,9 @@ dependency, not taste.
 ### Batch 3: the wordings that are wrong, tasks 58 to 60
 
 - [ ] **Task 58, #162.** `Open` is the one control that does not open the
-      session; it opens the pane tail. Rename it to the word `docs/api.md`,
-      the route and the drawer heading already use, measured to fit a running
+      session; it opens the pane tail. Rename it to `Logs`, the word `docs/api.md`,
+      the route and `openLogs` already use (the drawer's heading is the project
+      name, not a word), measured to fit a running
       row at 390px beside the other controls and the badge, accessible name
       equal to the visible label, and the `app.js` comment that disambiguates
       the two controls deleted rather than left describing a distinction the
