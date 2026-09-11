@@ -434,7 +434,7 @@ survive.
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | how a change is expected to arrive |
 | [`CHANGELOG.md`](CHANGELOG.md) | what upgrading costs you |
 | [`docs/releasing.md`](docs/releasing.md) | how a release is cut and published |
-| [`AGENTS.md`](AGENTS.md) | the architecture and the non negotiables |
+| [`.claude/CLAUDE.md`](.claude/CLAUDE.md) | the architecture and the non negotiables, for humans and agents alike |
 
 ## Not affiliated with Anthropic
 

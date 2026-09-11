@@ -79,7 +79,7 @@ def the_console_script_exists() -> None:
     """Fails, never skips.
 
     A tier that skips when its subject is missing looks like coverage while
-    proving less than none, which `AGENTS.md` says in as many words. If the
+    proving less than none, which `.claude/CLAUDE.md` says in as many words. If the
     console script is absent the environment is not set up, and that is worth
     a red line rather than a quiet pass.
     """

@@ -2324,7 +2324,7 @@ def test_a_graceful_stop_waits_through_the_engines_injected_sleep(root: Path) ->
     """#95. `request_stop` defaulted its settle to a real `time.sleep`, going
     round the clock seam the architecture says every external surface uses.
 
-    `AGENTS.md`: "Every external surface is injected: tmux, the process table,
+    `.claude/CLAUDE.md`: "Every external surface is injected: tmux, the process table,
     memory readings, the Claude state directory, the clock. That is what makes
     the engine testable without a real machine."
 

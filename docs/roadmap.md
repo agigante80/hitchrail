@@ -81,7 +81,7 @@ that is not marked MOVED OUT or NOT BUILT with an issue number on the same line.
 Phases that started before this rule are tracked in `_STARTED_WITHOUT_A_PLAN`
 with their reason, and that exemption fails once it stops being true.
 
-AGENTS.md says this file is the one place that says what is built, and for three
+`.claude/CLAUDE.md` says this file is the one place that says what is built, and for three
 phases it was not saying.
 -->
 
@@ -920,7 +920,7 @@ instead of being handed one answer.**
 
 Every ticket here touches a security control, so each is a decision before it is
 work. **No count in this line**: it said "three" while the milestone held four,
-then six, which is the decay `AGENTS.md` already refuses for phases and modules.
+then six, which is the decay `.claude/CLAUDE.md` already refuses for phases and modules.
 The list at the end of this section is the record. They are together because they interact: TLS changes what a
 sign-in form costs, and both change what the README's stated limitations say.
 

@@ -122,7 +122,7 @@ markers = [
   "cli: runs the installed console script as a subprocess and reads its output",
   # Not a tier that runs anywhere. It drives a REAL Android over wireless adb,
   # so it needs hardware that is not in CI and is not always on the desk, and it
-  # is deselected below for the same reason the screenshot marker is. AGENTS.md:
+  # is deselected below for the same reason the screenshot marker is. `.claude/CLAUDE.md`:
   # a tier that skips everywhere looks like coverage while proving less than
   # none. This one is never silently skipped because it is never silently
   # selected. See #104.

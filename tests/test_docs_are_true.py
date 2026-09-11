@@ -4,8 +4,8 @@ Every guard this project has protects the SOURCE: five gates, an import
 contract, module size caps, a tier partition, a template lockstep. Nothing
 protected the prose, and the prose is what an outside reader meets first.
 
-The cost was not hypothetical. The conventions file, then `.claude/CLAUDE.md`
-and now `AGENTS.md`, told every reader that
+The cost was not hypothetical. The conventions file, `.claude/CLAUDE.md` and
+for a while `AGENTS.md`, told every reader that
 `engine.py`, `server.py`, `events.py` and `cli.py` were one line placeholders
 for three phases after all four were implemented, and that is the file an agent
 reads before it touches anything. The design's route table stayed correct while
@@ -38,19 +38,23 @@ from support import make_config
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src" / "hitchrail"
-AGENTS_MD = ROOT / "AGENTS.md"
+CLAUDE_MD = ROOT / ".claude" / "CLAUDE.md"
 
 # **These guards used to skip on a clone, and now they do not.**
 #
-# The conventions lived in `.claude/CLAUDE.md`, which is untracked, so every
-# check below ran only in the maintainer's checkout: CI validated the roadmap
-# and not the file an agent reads first. #60 moved them to `AGENTS.md` at the
-# root, for the wider reason that exactly one tool read the old location, and
-# this is the side effect worth naming. The guard that caught a reversed
-# middleware order now runs on every push, for every contributor.
+# The conventions lived in `.claude/CLAUDE.md` while `.gitignore` excluded the
+# whole of `.claude/`, so every check below ran only in the maintainer's
+# checkout: CI validated the roadmap and not the file an agent reads first. #60
+# moved them to `AGENTS.md` at the root for that reason. On 2026-09-11 they
+# moved back, because Claude Code reads `CLAUDE.md` and not `AGENTS.md`, and
+# `.gitignore` now excludes `.claude/*` and re-admits this one file, which is
+# the git spelling that lets a file under an ignored directory be tracked. The
+# guard that caught a reversed middleware order still runs on every push, for
+# every contributor, and `test_the_conventions_file_is_tracked` is what keeps
+# a `.gitignore` edit from quietly taking it back out of CI.
 #
-# There is no skip mark any more. A missing `AGENTS.md` is a failure, not a
-# reason to pass quietly.
+# There is no skip mark any more. A missing `.claude/CLAUDE.md` is a failure,
+# not a reason to pass quietly.
 ROADMAP = ROOT / "docs" / "roadmap.md"
 README = ROOT / "README.md"
 
@@ -63,7 +67,7 @@ def _modules() -> dict[str, int]:
     return {p.name: len(p.read_text().splitlines()) for p in SRC.glob("*.py")}
 
 
-@pytest.mark.parametrize("doc", [AGENTS_MD, ROADMAP], ids=lambda p: p.name)
+@pytest.mark.parametrize("doc", [CLAUDE_MD, ROADMAP], ids=lambda p: p.name)
 def test_no_document_calls_an_implemented_module_a_placeholder(doc: Path) -> None:
     """The exact failure that prompted this file.
 
@@ -85,7 +89,26 @@ def test_no_document_calls_an_implemented_module_a_placeholder(doc: Path) -> Non
         )
 
 
-@pytest.mark.parametrize("doc", [AGENTS_MD, ROADMAP, README], ids=lambda p: p.name)
+def test_the_conventions_file_is_tracked() -> None:
+    """`.gitignore` excludes `.claude/*` and re-admits `.claude/CLAUDE.md`. Fold
+    that back into a bare `.claude/` and the file stays on this machine while
+    every guard in this module fails in CI on a file that is not there. Asked of
+    git rather than of the ignore file's text, because the text can say
+    `!.claude/CLAUDE.md` under a pattern that makes it inert."""
+    listed = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", str(CLAUDE_MD.relative_to(ROOT))],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert listed.returncode == 0, (
+        f"{CLAUDE_MD.relative_to(ROOT)} is not tracked: {listed.stderr.strip()}. "
+        "It is the file every contributor and CI leg reads; see .gitignore."
+    )
+
+
+@pytest.mark.parametrize("doc", [CLAUDE_MD, ROADMAP, README], ids=lambda p: p.name)
 def test_no_document_hardcodes_a_test_count(doc: Path) -> None:
     """ "519 tests" was true once. A number that decays silently is worse than
     no number, because it reads as precision."""
@@ -97,9 +120,9 @@ def test_no_document_hardcodes_a_test_count(doc: Path) -> None:
     )
 
 
-def _named_in_agents_md() -> set[str]:
+def _named_in_claude_md() -> set[str]:
     """The modules the architecture block claims exist, by their listed name."""
-    return set(re.findall(r"^\s{2}(\w+\.py)\s", AGENTS_MD.read_text(), re.M))
+    return set(re.findall(r"^\s{2}(\w+\.py)\s", CLAUDE_MD.read_text(), re.M))
 
 
 # `__init__.py` is a package marker rather than a module anybody navigates to,
@@ -109,14 +132,14 @@ def _named_in_agents_md() -> set[str]:
 _NOT_ON_THE_MAP = {"__init__.py"}
 
 
-def test_every_module_named_in_agents_md_exists() -> None:
+def test_every_module_named_in_claude_md_exists() -> None:
     """The architecture block lists the modules. A rename that misses it leaves
     a map pointing at a road that is not there."""
-    missing = {n for n in _named_in_agents_md() if not (SRC / n).exists()}
-    assert not missing, f"AGENTS.md names modules that do not exist: {sorted(missing)}"
+    missing = {n for n in _named_in_claude_md() if not (SRC / n).exists()}
+    assert not missing, f".claude/CLAUDE.md names modules that do not exist: {sorted(missing)}"
 
 
-def test_every_module_that_exists_is_named_in_agents_md() -> None:
+def test_every_module_that_exists_is_named_in_claude_md() -> None:
     """#126. The inverse of the guard above, and the direction that was missing.
 
     **The asymmetry was not theoretical.** The guard above was green while the
@@ -132,9 +155,9 @@ def test_every_module_that_exists_is_named_in_agents_md() -> None:
     was safe to touch that neither existed.
     """
     on_disk = {p.name for p in SRC.glob("*.py")} - _NOT_ON_THE_MAP
-    unlisted = on_disk - _named_in_agents_md()
+    unlisted = on_disk - _named_in_claude_md()
     assert not unlisted, (
-        "AGENTS.md does not name "
+        ".claude/CLAUDE.md does not name "
         + ", ".join(
             f"{n} ({len((SRC / n).read_text().splitlines())} lines)" for n in sorted(unlisted)
         )
@@ -428,11 +451,11 @@ _CONTROL_CLASSES = {
 }
 
 
-def test_agents_md_states_the_middleware_order_the_code_uses(tmp_path: Path) -> None:
+def test_claude_md_states_the_middleware_order_the_code_uses(tmp_path: Path) -> None:
     from hitchrail.security import middleware_stack
 
-    line = re.search(r"^\s{2}security\.py\s+(.+)$", AGENTS_MD.read_text(), re.M)
-    assert line, "AGENTS.md's architecture block no longer describes security.py"
+    line = re.search(r"^\s{2}security\.py\s+(.+)$", CLAUDE_MD.read_text(), re.M)
+    assert line, ".claude/CLAUDE.md's architecture block no longer describes security.py"
 
     described = [
         _CONTROL_CLASSES[part]
@@ -449,7 +472,7 @@ def test_agents_md_states_the_middleware_order_the_code_uses(tmp_path: Path) -> 
     ]
 
     assert described == actual, (
-        f"AGENTS.md says {described}, middleware_stack returns {actual}. "
+        f".claude/CLAUDE.md says {described}, middleware_stack returns {actual}. "
         "Fix the document: the stack order is deliberate and documented in its "
         "own docstring."
     )
@@ -533,7 +556,7 @@ def test_the_security_policy_names_a_private_channel() -> None:
     )
 
 
-def test_contributing_and_agents_list_the_same_gates() -> None:
+def test_contributing_and_claude_md_list_the_same_gates() -> None:
     """Both files tell somebody which checks are blocking, so both are copies of
     one fact. The copy that drifts is the one a contributor happens to read.
 
@@ -542,10 +565,10 @@ def test_contributing_and_agents_list_the_same_gates() -> None:
     """
     pattern = re.compile(r"^uv run ([a-z-]+)", re.M)
     contributing = set(pattern.findall(CONTRIBUTING.read_text()))
-    agents = set(pattern.findall(AGENTS_MD.read_text()))
+    claude_md = set(pattern.findall(CLAUDE_MD.read_text()))
     gates = {"pytest", "ruff", "mypy", "lint-imports"}
     assert gates <= contributing, f"CONTRIBUTING.md omits gates: {sorted(gates - contributing)}"
-    assert gates <= agents, f"AGENTS.md omits gates: {sorted(gates - agents)}"
+    assert gates <= claude_md, f".claude/CLAUDE.md omits gates: {sorted(gates - claude_md)}"
 
 
 def test_contributing_points_at_documents_that_exist() -> None:
@@ -1621,7 +1644,7 @@ def test_a_tier_that_must_be_asked_for_is_not_collected_by_another_tiers_run(
     """#214. `addopts` carries `-m "not screenshots and not device"`, and pytest
     REPLACES that whole expression when a run brings its own `-m`.
 
-    So `uv run pytest -m e2e`, which `AGENTS.md` documents as the command for
+    So `uv run pytest -m e2e`, which `.claude/CLAUDE.md` documents as the command for
     the browser tier, used to collect the seven screenshot captures as well, and
     an ordinary developer running the browser tier rewrote the published images.
     That is how run identity reached `docs/screenshots/` in a1c0acb.

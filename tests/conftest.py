@@ -354,7 +354,7 @@ def failing_procs() -> ProcTable:
 # **`addopts` is not a guard, and criterion 4 of Phase 10 is that it stops
 # pretending to be one.** `-m "not screenshots and not device"` lives in
 # `addopts`, and pytest REPLACES the whole `-m` when a run supplies its own. So
-# `uv run pytest -m e2e`, which `AGENTS.md` documents as the command for the
+# `uv run pytest -m e2e`, which `.claude/CLAUDE.md` documents as the command for the
 # browser tier, collects the seven screenshot captures too, and an ordinary
 # developer running the browser tier rewrites the published images.
 #
@@ -375,7 +375,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     """Deselect the ask-for-me-by-name tiers unless the run named them.
 
     **Deselected rather than skipped**, deliberately: a skip is a green line
-    saying a test did not run, and `AGENTS.md` is explicit that a tier which
+    saying a test did not run, and `.claude/CLAUDE.md` is explicit that a tier which
     skips everywhere looks like coverage while proving less than none. A
     deselection is counted and silent, which is what these are.
 

@@ -8,7 +8,7 @@ installs. #75 found four such defects by hand on two Android devices, and #104
 exists because a walk done by hand happens once.
 
 **Deselected by default, like the screenshot tier and for the same reason.** It
-needs hardware that is not in CI and is not always on the desk, and `AGENTS.md`
+needs hardware that is not in CI and is not always on the desk, and `.claude/CLAUDE.md`
 is explicit that a tier which skips everywhere looks like coverage while proving
 less than none. This one is never silently skipped, because it is never silently
 selected:
@@ -170,7 +170,7 @@ def device_serial() -> str:
 
     Fails rather than skips, and this tier is opt in so that is right: being
     selected means somebody asked for it, and a silent skip is the coverage lie
-    `AGENTS.md` names. The message is long on purpose, because the usual cause
+    `.claude/CLAUDE.md` names. The message is long on purpose, because the usual cause
     is a port that moved and the fix is four taps on the phone.
     """
     tried: list[str] = []

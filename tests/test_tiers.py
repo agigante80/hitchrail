@@ -379,7 +379,7 @@ def test_no_other_test_reads_the_real_process_table() -> None:
 # the only thing that noticed. A grep on a log is not the criterion.
 _MAY_SKIP = {
     # Not tiers. These skip on a FACT ABOUT THE REPOSITORY rather than about
-    # the machine: no tags yet, no publish workflow yet, `.claude/` gitignored
+    # the machine: no tags yet, no publish workflow yet, `.claude/rules/` gitignored
     # out of a worktree. A different checkout is not a different machine.
     "test_workflows_are_pinned.py",
     "test_docs_are_true.py",
@@ -397,7 +397,7 @@ def test_no_tier_skips_itself_when_the_machine_is_missing_something() -> None:
     """Criterion 2, made checkable rather than felt.
 
     A tier that skips looks like coverage while proving less than none, which
-    `AGENTS.md` states and which this project has already paid for: the browser
+    `.claude/CLAUDE.md` states and which this project has already paid for: the browser
     tier and the live tmux tier both skipped on a missing tmux, and tmux is a
     RUNTIME prerequisite of Hitchrail, so such a machine cannot run the tool
     either.

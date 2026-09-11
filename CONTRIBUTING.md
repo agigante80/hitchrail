@@ -128,6 +128,6 @@ says what is in scope and where to send it.
 
 ## Agents
 
-[`AGENTS.md`](AGENTS.md) holds the architecture, the non negotiables and the
+[`.claude/CLAUDE.md`](.claude/CLAUDE.md) holds the architecture, the non negotiables and the
 footguns that cost real debugging to find. It is worth reading whether or not
 you are one.

@@ -136,7 +136,7 @@ The candidates in this repository, and what each one owns:
 | `docs/roadmap.md` | phase scope, exit criteria, and the retrospective once a phase closes |
 | `docs/tech-guidelines.md` | a rule that generalises beyond this ticket |
 | `.claude/rules/*.md` | the same rule, where it loads automatically for the files it governs |
-| `AGENTS.md` | project shape, commands, architecture, and the non negotiables. Tracked, and the canonical copy since #60; `.claude/CLAUDE.md` is a pointer |
+| `.claude/CLAUDE.md` | project shape, commands, architecture, and the non negotiables. Tracked, the one file `.gitignore` re-admits from `.claude/`, and the canonical copy since 2026-09-11; it was `AGENTS.md` from #60 until then |
 | `docs/versioning.md` | anything that changes the operator contract |
 
 Three cases where this section may **not** be N/A, because these are the ones that were

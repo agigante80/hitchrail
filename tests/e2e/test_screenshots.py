@@ -69,7 +69,7 @@ SHOTS = pathlib.Path(__file__).resolve().parents[2] / "docs" / "screenshots"
 # `rmtree`s it at setup, so two concurrent capture runs delete each other's root
 # and both fail confusingly. That is accepted rather than fixed, and the reason
 # has to be the true one: an earlier note here said the tier "runs deliberately
-# at a release, never twice at once", and that was false. `AGENTS.md` documents
+# at a release, never twice at once", and that was false. `.claude/CLAUDE.md` documents
 # `uv run pytest -m e2e` as the browser tier's command, and any `-m` replaces
 # the `-m "not screenshots"` in `addopts`, so an ordinary developer running the
 # browser tier used to capture these images.

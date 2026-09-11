@@ -1551,7 +1551,7 @@ def _mutmut_config() -> dict[str, list[str]]:
     **Fails rather than skips when the section is missing or unparseable.** A
     configuration guard that passes when it cannot find its configuration is
     the exact failure mode this exists to prevent, and it is how the
-    `AGENTS.md` guards used to pass quietly on a clone.
+    `.claude/CLAUDE.md` guards used to pass quietly on a clone.
     """
     import tomllib
 
@@ -1609,7 +1609,7 @@ def test_every_mutated_module_can_be_imported_from_the_mutants_tree() -> None:
 
     The check is a `tomllib` read and an `ast` walk, so it costs milliseconds
     and needs no mutation run. That shape is the point: the expensive sweep
-    stays on demand, per `AGENTS.md`, and the cheap invariant that keeps it
+    stays on demand, per `.claude/CLAUDE.md`, and the cheap invariant that keeps it
     RUNNABLE becomes a gate. A check exempt from CI is a check that can rot
     without anybody learning.
 
@@ -1796,10 +1796,13 @@ def test_every_mutated_module_loads_the_security_rules_when_it_is_edited() -> No
     says nothing about one nobody has classified yet, and #126's lesson is that
     the unclassified direction is where things actually go missing.
 
-    **It skips rather than fails without `.claude/`**, which is gitignored, so
-    this is not a gate: it runs on the machine where the list is edited and on
-    no CI leg. That is the honest cost of deriving the check from a file the
-    repository does not carry.
+    **It skips rather than fails without `.claude/rules/`**, which is
+    gitignored, so this is not a gate: it runs on the machine where the list is
+    edited and on no CI leg. That is the honest cost of deriving the check from
+    a file the repository does not carry. The directory asked about is `rules/`
+    and not `.claude/` itself: `.claude/CLAUDE.md` is tracked since 2026-09-11,
+    so `.claude/` exists in every clone, and asking about it would have turned
+    this skip into a failure on every CI leg.
 
     **It is deliberately NOT in `[tool.mutmut] pytest_add_cli_args`, against the
     ticket's own instruction.** #198 required a `--deselect` entry beside the
@@ -1816,17 +1819,17 @@ def test_every_mutated_module_loads_the_security_rules_when_it_is_edited() -> No
 
     **The skip is on the DIRECTORY, and a missing file is a failure.** They are
     not the same condition, and conflating them is how this guard would have
-    died quietly: `.claude/` absent is a checkout that cannot carry the rule,
-    while `.claude/` present without the rule file is the rule having been
+    died quietly: `.claude/rules/` absent is a checkout that cannot carry the
+    rule, while `.claude/rules/` present without the rule file is the rule having been
     renamed, moved into a subdirectory, or deleted, which is #198 recurring with
     the guard green. Review round 1 produced exactly that state and got a skip
     whose stated reason was false.
     """
-    if not (_REPO / ".claude").exists():
-        pytest.skip("`.claude/` is not in this checkout (it is gitignored)")
+    if not _SECURITY_RULE.parent.exists():
+        pytest.skip("`.claude/rules/` is not in this checkout (it is gitignored)")
 
     assert _SECURITY_RULE.exists(), (
-        f"`.claude/` is here but {_SECURITY_RULE} is not, so this guard has stopped "
+        f"`.claude/rules/` is here but {_SECURITY_RULE} is not, so this guard has stopped "
         "checking rather than been skipped. Restore the file, or move this constant "
         "to wherever the path scoped security rules now live."
     )

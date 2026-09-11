@@ -289,7 +289,7 @@ E2E_PREFIX = f"hrx{os.getpid()}-"
 # single-instance by construction before this. The pin adds no new constraint.
 #
 # **Not because it "only runs at a release".** That reason was written here once
-# and is false: `AGENTS.md` documents `uv run pytest -m e2e` as the command for
+# and is false: `.claude/CLAUDE.md` documents `uv run pytest -m e2e` as the command for
 # the browser tier, and `-m e2e` OVERRIDES the `-m "not screenshots"` in addopts.
 # So an ordinary developer running the browser tier captures these images, which
 # is precisely how the pid reached them. #214 carries the concurrency question
