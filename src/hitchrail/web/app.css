@@ -385,11 +385,22 @@ dialog[data-dialog] {
      and makes both numbers below zero on Android. These two are the fallback
      for Safari on iOS, which has no such key.
 
-     `margin-bottom` works because the centring is `margin: auto`: reserving
-     the occluded height at the bottom re-centres the sheet in what is left. */
+     #161. The reservation is the bottom INSET, not `margin-bottom`, and the
+     difference is the whole bug. A modal dialog is centred by the user agent
+     with `inset-block: 0` and `margin: auto`, the two autos splitting the free
+     space. `margin-bottom` was the first version of this line, and a length
+     there replaces one auto: `0px` is not "reserve nothing", it hands every
+     free pixel to `margin-top`, so with no keyboard at all every dialog sat
+     flush against the bottom edge, and the dangerous action `showDialog`
+     puts furthest from the thumb was nearest it. Raising the bottom inset
+     instead shrinks the band the autos centre within, so zero is genuinely
+     no adjustment and an open keyboard re-centres the sheet in what is left,
+     which is what the earlier comment claimed of the margin. The
+     tracker in `app.js` writes `0px` when nothing is covered, and now that
+     is a correct thing for it to write. */
   max-height: var(--visible-height, 100dvh);
   overflow-y: auto;
-  margin-bottom: var(--keyboard-inset, 0px);
+  inset-block-end: var(--keyboard-inset, 0px);
 }
 dialog[data-dialog]::backdrop { background: rgba(46, 37, 28, 0.55); }
 .dialog-title { font-family: 'Zilla Slab', Georgia, serif; font-size: 20px; margin: 0 0 8px; }

@@ -66,7 +66,7 @@ measured after it, and none can be measured before.
 
 ## Batch 1: the dialogs sit where the design says, task 54
 
-- [ ] **Task 54, #161.** Every dialog is pinned to the bottom of the viewport.
+- [x] **Task 54, #161.** Every dialog is pinned to the bottom of the viewport.
       `margin-bottom: var(--keyboard-inset, 0px)` at `app.css:392` resolves to
       `0px` with no keyboard, which replaces the user agent's
       `margin-bottom: auto` and collapses the centring. A regression from #103,
@@ -82,6 +82,14 @@ measured after it, and none can be measured before.
       defines and at a desktop one, both directions**: centred with no
       keyboard, primary action visible with one. The regression test fails
       against today's stylesheet before it passes.
+
+      **Done 2026-09-11.** The ticket's option 2 shape rather than its
+      recommended option 1: the reservation became `inset-block-end`, which
+      shrinks the band the user agent's two autos centre within, so `0px`
+      genuinely reserves nothing and the tracker's `0px` needs no rewriting
+      to `auto`. Both directions are guarded: the new test read a bottom
+      edge of 844px in an 844px viewport before the fix, and with the inset
+      line removed entirely #103's test fails instead.
 
 ## Batch 2: the screen that decides a kill, and the two facts behind its badge, tasks 55 to 57
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from playwright.async_api import Page, expect
+from playwright.async_api import Page, ViewportSize, expect
 
 from .conftest import Harness
 
@@ -243,4 +243,47 @@ async def test_the_dialog_lifts_clear_of_a_reported_keyboard_inset(
     assert after["y"] < before["y"] - 100, (
         f"the sheet sat at {before['y']:.0f} and moved to {after['y']:.0f} for a "
         "400px inset, so it is not reading the property"
+    )
+
+
+@pytest.mark.parametrize(
+    "viewport",
+    [
+        pytest.param(ViewportSize(width=390, height=844), id="phone"),
+        pytest.param(ViewportSize(width=1280, height=800), id="desktop"),
+    ],
+)
+async def test_a_dialog_with_no_keyboard_is_centred_in_the_viewport(
+    page: Page, server: Harness, viewport: ViewportSize
+) -> None:
+    """#161. The other direction of #103, which its test above never took.
+
+    With no keyboard the page still publishes what the keyboard covers, and
+    what it covers is nothing, so `--keyboard-inset` is `0px`. A dialog is
+    centred by the user agent with `margin: auto`, and a length in place of
+    one of those autos is not "no adjustment": it hands every pixel of free
+    space to the other side, and the sheet sits flush against the bottom of
+    the screen. `showDialog` orders actions safest first so the dangerous one
+    is furthest from the thumb; a bottom-pinned dialog inverts that.
+
+    Measured as a centre, not as "not at the bottom": a fix that pinned the
+    sheet to the TOP would clear the second assertion and fail the first.
+    Nothing here sets the property by hand, because the bug is what the
+    page's own tracker writes on a viewport with nothing covered.
+    """
+    server.seed(stopped=["alpha"])
+    await page.set_viewport_size(viewport)
+    await page.goto(server.base)
+    await page.get_by_role("button", name="New").click()
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_be_visible()
+
+    box = await dialog.bounding_box()
+    assert box is not None
+    centre = box["y"] + box["height"] / 2
+    expected = viewport["height"] / 2
+    assert abs(centre - expected) <= 4, (
+        f"the dialog's centre is at {centre:.0f}px in a {viewport['height']}px "
+        f"viewport, expected {expected:.0f}px: its bottom edge is at "
+        f"{box['y'] + box['height']:.0f}px"
     )
