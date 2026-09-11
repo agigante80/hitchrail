@@ -1194,7 +1194,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # two layers deep rather than two jobs wide, so it is tracked here
         # instead of split mid migration. #127 carries the split.
         "discovery.py": 440,
-        "security.py": 409,
+        # 409 to 418 for #78: two entries in the exemption and the argument
+        # beside them, which the set's own rule requires of every entry.
+        "security.py": 418,
         # rather than one. A refusal handler is the shape this file is made of.
         # 513 to 517 for #120. The listing payload reports every configured
         # root as a labelled list rather than one path string, and the comment

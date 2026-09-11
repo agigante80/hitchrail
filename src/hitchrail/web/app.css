@@ -3,6 +3,17 @@
    stylesheet: two sheets decay the moment somebody edits one of them, and
    section 7 calls dark a first class requirement rather than an addition.
 
+   #69. Retuned on 2026-09-11 so that every text pair the rules produce
+   passes AA, computed by `tests/test_palette.py` rather than judged by eye,
+   and the artboards predate that: where a value here differs from the
+   canvas, this is the one that was measured. Each moved token is the
+   smallest lightness shift that clears 4.5:1 with hue and saturation held.
+   `--accent` is never text, only a surface under white and an outline, so
+   the dark palette's lighter accent bought nothing AA allows and it now
+   matches light. The `-on-tint` pair exist because `--danger` and `--warn`
+   are also backgrounds under white and borders, and moving them to suit
+   their own tints would have moved all three uses.
+
    Defined three times on purpose. Bare :root is light. The media query follows
    the system when no explicit choice has been made. [data-theme] wins over
    both, so a person who picks a theme keeps it under either system setting. */
@@ -14,16 +25,18 @@
   --ink: #2E251C;
   --ink-soft: #4A3E31;
   --muted: #6B5A48;
-  --muted-2: #806E5A;
+  --muted-2: #776654;
   --muted-3: #A2917D;
   --accent: #A8642E;
   --accent-hover: #8C5124;
-  --running: #5C7F4F;
+  --running: #5A7C4D;
   --running-dark: #45663A;
   --danger: #9A3B2B;
   --danger-tint: #E3C6C0;
-  --warn: #B07D2A;
+  --danger-on-tint: #923829;
+  --warn: #976B24;
   --warn-tint: #FBF0DC;
+  --warn-on-tint: #8B6321;
 
   --touch: 44px;            /* section 7, and tests/e2e measures it */
   --radius: 10px;
@@ -38,16 +51,18 @@
     --line: #6B5A48;
     --ink: #F3ECE1;
     --ink-soft: #E8DFD1;
-    --muted: #A2917D;
-    --muted-2: #806E5A;
+    --muted: #B7AA9B;
+    --muted-2: #B9AB9B;
     --muted-3: #6B5A48;
-    --accent: #D08A4A;
-    --accent-hover: #A8642E;
-    --running: #5C7F4F;
+    --accent: #A8642E;
+    --accent-hover: #8C5124;
+    --running: #5A7C4D;
     --danger: #9A3B2B;
     --danger-tint: #4A3E31;
-    --warn: #B07D2A;
+    --danger-on-tint: #E19D92;
+    --warn: #976B24;
     --warn-tint: #4A3E31;
+    --warn-on-tint: #D6A555;
   }
 }
 
@@ -58,13 +73,15 @@
   --line: #6B5A48;
   --ink: #F3ECE1;
   --ink-soft: #E8DFD1;
-  --muted: #A2917D;
-  --muted-2: #806E5A;
+  --muted: #B7AA9B;
+  --muted-2: #B9AB9B;
   --muted-3: #6B5A48;
-  --accent: #D08A4A;
-  --accent-hover: #A8642E;
+  --accent: #A8642E;
+  --accent-hover: #8C5124;
   --danger-tint: #4A3E31;
+  --danger-on-tint: #E19D92;
   --warn-tint: #4A3E31;
+  --warn-on-tint: #D6A555;
 }
 
 * { box-sizing: border-box; }
@@ -233,11 +250,13 @@ button[disabled] { color: var(--muted-3); cursor: not-allowed; }
   margin: 0;
   padding: 0;
   font-size: 13px;
-  /* `--ink` on the tint, not the tint's own hue on the tint. `--warn` on
-     `--warn-tint` is 3.2:1 and `--danger` on `--danger-tint` is 1.5:1 in dark,
-     which is fine for a badge you recognise by shape and position and not for
-     the one line on the page whose whole job is to be read. The hue carries on
-     the rule at the edge instead, where contrast is not a legibility question. */
+  /* `--ink` on the tint, not the tint's own hue on the tint. When this was
+     written `--warn` on `--warn-tint` was 3.2:1 and `--danger` on its tint
+     1.5:1 in dark, and #69 has since given the badges `-on-tint` tokens that
+     pass. Kept deliberately: this is the one line on the page whose whole job
+     is to be read, `--ink` is the highest contrast the palette has, and the
+     hue carries on the rule at the edge, where contrast is not a legibility
+     question. */
   color: var(--ink);
   background: var(--warn-tint);
   border-bottom: 1px solid var(--line);
@@ -311,8 +330,8 @@ main { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
   background: var(--surface-alt); color: var(--muted);
 }
 .badge[data-badge="running"] { background: var(--running); color: #FFFDFA; }
-.badge[data-badge="detached"] { background: var(--danger-tint); color: var(--danger); }
-.badge[data-badge="stale"] { background: var(--warn-tint); color: var(--warn); }
+.badge[data-badge="detached"] { background: var(--danger-tint); color: var(--danger-on-tint); }
+.badge[data-badge="stale"] { background: var(--warn-tint); color: var(--warn-on-tint); }
 .badge[data-badge="controller"] { background: var(--accent); color: #FFFDFA; }
 .badge[data-badge="stopping"] { background: var(--warn); color: #FFFDFA; }
 /* #88. Warn rather than running: the agent is alive and going nowhere until
