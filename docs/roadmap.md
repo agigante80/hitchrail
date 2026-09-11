@@ -47,8 +47,13 @@ the running application, on the phone it is for. See
 [`tech-guidelines.md`](tech-guidelines.md) section 7.
 
 ## Phase: Phase 11: The interface in every state
-state: open
+state: done
 plan: docs/superpowers/plans/2026-09-11-hitchrail-phase-11-interface-states.md
+
+**Done, 2026-09-11.** Every task landed. One swap on the day it opened,
+recorded in the plan, and one ticket filed out of the work rather than into
+it (#244). The palette task found 54 failing text pairs where its ticket had
+measured four, and the browser tier now runs at a phone viewport by default.
 
 Every state the interface can be in says something true, legibly. Phase 6
 built the interface for the states a demo reaches; this is the rest: the

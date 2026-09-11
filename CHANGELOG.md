@@ -32,6 +32,58 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+Phase 11: the interface in every state.
+
+### Changed
+
+**Two row controls are renamed.** `Open`, which opened the pane tail and not
+the session, is `Logs`, the word the API already uses. `Continue`, the
+vendor's word borrowed out of the sentence that explained it, is
+`Open session`, and it keeps that label while the session has no link yet:
+tapping it then asks for one. The link is marked as leaving the page.
+
+**The palette is retuned so that every text pair passes AA**, computed from
+the stylesheet rather than judged. Most of what moved is in dark mode, where
+muted text and the warning badges were well under the line; each token moved
+by the smallest lightness shift that clears 4.5:1 with its hue held, and the
+accent in dark mode now matches light, since it is only ever a surface under
+white text. The two tinted badges use their own foreground tokens.
+
+**A row waiting for an answer wears the `waiting` badge**, the same one a
+row waiting to be trusted has worn since 0.3. It used to read `running` while
+only its meta line said a person was needed.
+
+### Fixed
+
+**Every dialog sat flush against the bottom of the screen**, with the
+dangerous action nearest the thumb, since the keyboard fix in 0.4. The
+keyboard reservation is the bottom inset now, so with nothing covered the
+dialog is centred again.
+
+**The dialog that says an agent is waiting for you shows what it asked**, in
+the same pane view the log drawer uses, with the keys to answer it, above
+`Leave it` and `Kill it`. It used to send you to "that terminal", which is
+the one place the prompt never is. It also goes away when the agent does.
+
+**A modal the agent had already scrolled past no longer counts as a question.**
+The badge lingered; since 0.5 the same mistake could send a key into a
+working agent. The output below the prompt is the evidence it moved on.
+
+**A "waiting for an answer" claim re-confirmed after it expired is announced
+again.** Closing the phone for thirty seconds and reopening it left the row
+unflagged while the server knew better.
+
+**An answer the page could not read is no longer reported as "That did not
+work".** On a 2xx the action did work; the screen now says the request was
+sent and the reply could not be read, and the list catches up.
+
+**A refused stream no longer rebuilds its sign-in dialog on every reopen
+attempt**, and it no longer reports "Live, but this machine cannot be read"
+at the one moment it is provably not live.
+
+**`/grant/` with a trailing slash reaches the grant page** instead of a raw
+JSON 401. Phones and messaging apps add the slash on their own.
+
 ## 0.5.1 - 2026-09-06
 
 ### Fixed

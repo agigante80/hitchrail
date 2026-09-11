@@ -94,7 +94,7 @@ dependency, not taste.
 
 ### Batch 2: the screen that decides a kill, the badge, and the two facts behind it, tasks 55 to 57 and 66
 
-- [ ] **Task 55, #165.** The `is waiting for you` dialog knows where the prompt
+- [x] **Task 55, #165.** The `is waiting for you` dialog knows where the prompt
       is and does not show it. The engine captured that pane one screen
       earlier to set the flag this dialog renders; the dialog then offers
       `Leave it` and `Kill it`, and "that terminal" points the reader at the
@@ -109,14 +109,14 @@ dependency, not taste.
       is unchanged, and the capture count is written down: one from the sweep
       and one from the dialog is affordable and must be deliberate.
 
-- [ ] **Task 56, #218.** A "waiting for an answer" claim re-confirmed AFTER its
+- [x] **Task 56, #218.** A "waiting for an answer" claim re-confirmed AFTER its
       TTL is kept and announced to nobody, so the server knows and the page
       shows nothing. Two representations of one fact, the store and
       `attention.standing`, and the prune sits on the wrong side of the
       renewal. The test asserts an EVENT was published, not a flag, and
       `aging = []` no longer survives the suite.
 
-- [ ] **Task 57, #208.** `awaits_answer` scans backwards for the ornament, so a
+- [x] **Task 57, #208.** `awaits_answer` scans backwards for the ornament, so a
       modal already answered and scrolled up reads as live while the agent
       works. Harmless when it drew a badge; #204 turned it into a keystroke
       into a working agent. Fix it in `claude_ipc` and nowhere else, with a
@@ -124,7 +124,7 @@ dependency, not taste.
       against a real pty in the live tier, and `send_answer`'s signature still
       refusing a capture handed in from outside.
 
-- [ ] **Task 66, #183.** `badgeFor` renders `waiting` for `awaiting_trust` and
+- [x] **Task 66, #183.** `badgeFor` renders `waiting` for `awaiting_trust` and
       `running` for `awaiting_input`, under a comment whose every clause is
       true of both. Moved in from Phase 13 on 2026-09-11: it is criterion 1
       word for word, and tasks 56 and 57 are the two facts behind this badge.
@@ -138,7 +138,7 @@ dependency, not taste.
 
 ### Batch 3: the wordings that are wrong, tasks 58 to 60
 
-- [ ] **Task 58, #162.** `Open` is the one control that does not open the
+- [x] **Task 58, #162.** `Open` is the one control that does not open the
       session; it opens the pane tail. Rename it to `Logs`, the word `docs/api.md`,
       the route and `openLogs` already use (the drawer's heading is the project
       name, not a word), measured to fit a running
@@ -147,7 +147,7 @@ dependency, not taste.
       the two controls deleted rather than left describing a distinction the
       words now make.
 
-- [ ] **Task 59, #163.** `Continue` is Claude Code's own word, borrowed out of
+- [x] **Task 59, #163.** `Continue` is Claude Code's own word, borrowed out of
       the sentence that explained it. One decision with task 58, filed as two:
       renaming the log control is what frees `open` for the control that
       actually opens a session. The label names the action and its object, no
@@ -155,7 +155,7 @@ dependency, not taste.
       noreferrer"` if it opens a new context, and `Get link` reads as the same
       action in a not-ready state or the difference is argued in place.
 
-- [ ] **Task 60, #82.** `showRefusal` renders `unreadable_answer` as "That did
+- [x] **Task 60, #82.** `showRefusal` renders `unreadable_answer` as "That did
       not work", and for a stop, a kill, a start or a create that is a guess
       which guesses wrong: on a 2xx the action DID work and only reading the
       reply failed. The next thing a person does is tap Stop again or reach
@@ -170,14 +170,14 @@ a refused stream AND a refused listing installed before `goto`, with the
 listing succeeding exactly once so boot's own `refresh()` cannot fake the
 pass. Build on that harness rather than beside it.
 
-- [ ] **Task 61, #71.** The fatal branch asks once per fatal error, and the
+- [x] **Task 61, #71.** The fatal branch asks once per fatal error, and the
       reopen backs off forever, so a phone holding a stale token has its
       refusal dialog torn down and rebuilt every minute, focus and all. A
       refusal already open for the same reason is left alone, asserted at the
       browser tier by dialog IDENTITY across at least two reopen attempts:
       the rebuild produces identical text, so text proves nothing.
 
-- [ ] **Task 62, #72.** The fatal branch's `refresh()` can reach
+- [x] **Task 62, #72.** The fatal branch's `refresh()` can reach
       `setStreamState("blind")`, whose copy is "Live, but this machine cannot
       be read", at the one moment the stream is provably not live. `blind`
       requires an open stream the way the recovery path already does when
@@ -187,7 +187,7 @@ pass. Build on that harness rather than beside it.
 
 ### Batch 5: measured rather than felt, tasks 63 and 64
 
-- [ ] **Task 63, #69.** Four palette pairs put a colour on its own tint and
+- [x] **Task 63, #69.** Four palette pairs put a colour on its own tint and
       fall under 4.5:1; the dark `--danger` pair is 1.5:1, and `detached` is
       the state the design says must never be missed. Not "darken the token":
       `--danger` is also a background under `#FFFDFA` and a border, so a
@@ -200,7 +200,7 @@ pass. Build on that harness rather than beside it.
       premortem below names the alternative: tokens retuned by eye until they
       look fine, and "passes AA" asserted by nobody.
 
-- [ ] **Task 64, #78.** `GET /grant/` answers a raw JSON 401 in a phone
+- [x] **Task 64, #78.** `GET /grant/` answers a raw JSON 401 in a phone
       browser, because `TokenMiddleware` answers before the router's
       `redirect_slashes` sees it and `/grant/` is not in `UNAUTHENTICATED`.
       Safe direction, and still the dead end `test_an_arrival_with_no_key_can_type_one`
@@ -215,19 +215,34 @@ pass. Build on that harness rather than beside it.
       cgroup ancestry walk in the engine, which is the third engine ticket this
       plan's own rule keeps out. #183 took its place as task 66.
 
+## Closed 2026-09-11, done
+
+Twelve tasks in five batches, eleven of the twelve tickets the plan opened
+with plus one swap on the day it opened: #183 in from Phase 13, because a
+badge that reads `running` while a person is needed is criterion 1 word for
+word, and #90 out to Phase 13, split into #243, because its reading is an
+engine seam and its answer was incomplete rather than untrue. Every task
+landed; the palette task found 54 failing pairs where its ticket had
+measured four, and the browser tier now runs at a phone viewport by default,
+which is premortem 1's rule made mechanical. One ticket came out of the
+work rather than into it: #244, the artboards carrying the palette from
+before the retune.
+
 ## Done looks like
 
-- [ ] Every task above is ticked, or is marked MOVED OUT with the issue that
+- [x] Every task above is ticked, or is marked MOVED OUT with the issue that
       carries it, per the convention in `.claude/CLAUDE.md`.
-- [ ] Every dialog and every row control this phase touched has been seen at
+- [x] Every dialog and every row control this phase touched has been seen at
       the phone viewport, in the e2e tier, not only under a desktop one. The
       test that proves each fix runs there.
-- [ ] `uv run pytest` carries a test that computes every foreground and
+- [x] `uv run pytest` carries a test that computes every foreground and
       background pair from `app.css` and fails under 4.5:1, and it passes.
-- [ ] The release that ships this phase runs `uv run pytest -m screenshots`
-      and commits `docs/screenshots/`, because three of the twelve change a
-      label or a dialog those images show.
-- [ ] The roadmap's Phase 11 block says `state: done`, the milestone is closed,
+- [ ] NOT BUILT in the phase, by design (#244 carries the artboards' side of
+      the same drift): the release that ships this phase runs
+      `uv run pytest -m screenshots` and commits `docs/screenshots/`, step 4
+      of `docs/releasing.md`, because three of the twelve change a label or a
+      dialog those images show.
+- [x] The roadmap's Phase 11 block says `state: done`, the milestone is closed,
       `scripts/check-phases.sh` is clean, and this plan has no unticked box
       without a marker.
 
