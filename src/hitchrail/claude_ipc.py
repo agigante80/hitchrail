@@ -118,6 +118,16 @@ _PROMPT = "\u276f"
 # draft without it, which is the only thing that tells the two apart.
 _DIM = "\x1b[2m"
 
+# #208. How many rows of content may follow the ornament row for it to be the
+# LIVE one. A modal is drawn where the input box was, so below the selected
+# option there are only the modal's own rows: the remaining options and the
+# hint. Both captured screens (the exit modal on #165, the trust modal on #88)
+# show two. Three is one row of slack for a modal with one more option, and no
+# more, because the failure direction to prefer is a missing warning over a
+# key into a working agent. A number, and a fact about the vendor's layout,
+# which is why it lives here and nowhere else.
+_MODAL_TAIL_ROWS = 3
+
 
 # CSI and OSC sequences, for deciding whether what is left is only padding.
 #
@@ -292,6 +302,24 @@ def input_is_clear(pane: str) -> bool | None:
     return _without_escapes(after).strip() == ""
 
 
+def _live_ornament_row(pane: str) -> str | None:
+    """The last row carrying the ornament, if it is still the live UI (#208).
+
+    Scanning backwards finds the last ornament row, and the last one is not
+    always the current one: a modal that was answered and scrolled up still
+    wins while the agent works, if nothing newer has drawn an ornament row.
+    The agent's output below it is the evidence that it moved on. Rows that
+    are blank once their escapes are gone do not count: a terminal pads to the
+    pane height, and a redraw can leave a bare colour reset behind.
+    """
+    rows = pane.splitlines()
+    index = next((i for i in range(len(rows) - 1, -1, -1) if _PROMPT in rows[i]), None)
+    if index is None:
+        return None
+    below = sum(1 for row in rows[index + 1 :] if _without_escapes(row).strip())
+    return rows[index] if below <= _MODAL_TAIL_ROWS else None
+
+
 def shows_input_box(pane: str) -> bool | None:
     """Whether the agent is sitting at an ORDINARY input box (#100).
 
@@ -320,14 +348,17 @@ def shows_input_box(pane: str) -> bool | None:
     else.
 
     `None` when no ornament row is present at all, which is an ordinary state:
-    an agent mid turn has printed over it. Unknown is not "stuck", and the
-    caller must test `is False` rather than falsiness.
+    an agent mid turn has printed over it. Also `None` when the last ornament
+    row has more than `_MODAL_TAIL_ROWS` rows of content below it (#208): that
+    is a modal or a box the agent has scrolled past, and the output under it
+    is the evidence. Unknown is not "stuck", and the caller must test
+    `is False` rather than falsiness.
 
     **This covers modals nobody has captured yet, but only those that reuse the
     ornament.** One drawn without it returns `None` and goes unflagged, which
     is the honest failure direction: a missing warning rather than a false one.
     """
-    row = next((line for line in reversed(pane.splitlines()) if _PROMPT in line), None)
+    row = _live_ornament_row(pane)
     if row is None:
         return None
     return row.split(_PROMPT, 1)[1].startswith("\xa0")
@@ -353,24 +384,14 @@ def awaits_answer(pane: str) -> bool | None:
     So this returns the same three-valued answer and the caller must test
     `is True`. Control 7: refuse rather than guess.
 
-    **KNOWN GAP, #208: a modal still in the scrollback reads as live.** The row
-    is found by scanning backwards for the ornament, so a modal that has been
-    answered and scrolled up still wins while the agent works, if nothing newer
-    has drawn an ornament row:
-
-        awaits_answer(MODAL + "\n" + twelve lines of build output) is True
-
-    Usually self correcting, because Claude Code redraws an input box after a
-    modal and that box carries the ornament LATER in the pane. It is not
-    correcting during the window where the agent is mid turn.
-
-    Inherited from `shows_input_box` and harmless there: #100 uses it to draw a
-    badge, and a badge that lingers a few seconds is a cosmetic fault. #204
-    turns the same answer into a KEYSTROKE, so the same staleness becomes a key
-    delivered to a working agent. Not fixed here, because every fix is a
-    heuristic about how a vendor's screen behaves, which is the class of fact
-    this module exists to quarantine and the class this project has got wrong
-    three times. #208 carries the analysis.
+    **A modal still in the scrollback used to read as live (#208).** The row
+    is found by scanning backwards for the ornament, so a modal that had been
+    answered and scrolled up still won while the agent worked, if nothing
+    newer had drawn an ornament row. Harmless while #100 only drew a badge;
+    #204 turned the same answer into a keystroke into a working agent. Fixed
+    in `_live_ornament_row`, which `shows_input_box` and therefore this share:
+    the output below the row is the evidence it is no longer the live UI, and
+    the allowance is a captured fact about the vendor's layout, kept here.
     """
     box = shows_input_box(pane)
     if box is None:

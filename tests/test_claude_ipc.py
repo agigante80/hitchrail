@@ -838,6 +838,60 @@ def test_a_modal_awaits_an_answer_and_an_input_box_does_not() -> None:
     assert awaits_answer(pane_text(CLEAR_BOX)) is False
 
 
+# The exit modal as a real install drew it, reported on #165 and the screen
+# #208 measured against. The selected option carries the ornament; below it
+# are the modal's OWN rows, the other option and the hint, and nothing else.
+EXIT_MODAL_SCREEN = (
+    "some output\n"
+    " Background work is running\n"
+    " The following will stop when you exit:\n"
+    "   monitor \u00b7 hubbub messages\n"
+    "\x1b[39m \x1b[38;5;153m\u276f\x1b[39m \x1b[38;5;153m1. Exit and stop tasks\n"
+    "   2. Stay\n"
+    " Enter to confirm \u00b7 Esc to cancel\n"
+)
+
+
+def test_a_modal_in_the_scrollback_is_not_answerable() -> None:
+    """#208. Found by scanning backwards for the ornament, a modal that was
+    answered and scrolled up still won while the agent worked, provided
+    nothing newer had drawn an ornament row. Harmless for a badge; #204 turned
+    it into a keystroke into a working agent.
+
+    The belief behind the fix, with the captured screens behind it: a modal
+    is drawn where the input box was, so below the selected option there are
+    only the modal's own rows. Twelve lines of build output under it is not a
+    modal anybody can answer.
+    """
+    assert awaits_answer(EXIT_MODAL_SCREEN) is True, "the live modal must still read"
+    scrolled = EXIT_MODAL_SCREEN + "".join(f"  writing file {i}.py\n" for i in range(12))
+    assert awaits_answer(scrolled) is None, (
+        "a modal with twelve lines of output below it read as live, so a key "
+        "would be sent into a working agent. See #208."
+    )
+    # And the badge's predicate, which is where this was inherited from.
+    assert shows_input_box(scrolled) is None
+
+
+def test_the_modal_tail_allowance_is_one_row_past_the_captured_screens() -> None:
+    """The number is layout knowledge and this is where it is quarantined.
+
+    Both captured modals show two rows below the selected option. The
+    allowance is three: one row of slack for a modal with one more option,
+    and no more, because the failure direction to prefer is a missing
+    warning over a key into a working agent.
+    """
+    assert claude_ipc._MODAL_TAIL_ROWS == 3
+    at_the_edge = EXIT_MODAL_SCREEN + "  one more line\n"
+    assert awaits_answer(at_the_edge) is True
+    past_it = at_the_edge + "  and another\n"
+    assert awaits_answer(past_it) is None
+    # Blank rows and rows holding only escapes are not content: a terminal
+    # pads to the pane height and a redraw can leave a bare colour reset.
+    padded = EXIT_MODAL_SCREEN + "\n\n\x1b[39m\n   \n"
+    assert awaits_answer(padded) is True
+
+
 def test_an_unreadable_pane_is_not_answerable() -> None:
     """`None`, and specifically NOT False and specifically not True.
 

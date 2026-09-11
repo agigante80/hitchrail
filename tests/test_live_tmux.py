@@ -783,6 +783,54 @@ def test_a_key_reaches_a_real_pty_and_the_screen_changes(server: PrivateTmux) ->
     pytest.fail(f"the key never reached the pty; pane was:\n{tmux.capture_pane(project)}")
 
 
+# #208. The modal row, then the agent moves on and keeps printing: the row is
+# still in the scrollback and nothing newer has drawn an ornament. The loop
+# prints one line a tick so the pane grows while a key could be sent.
+_SCROLLED_SCRIPT = (
+    f'printf "{_MODAL_ROW}\\n"; i=0; while [ $i -lt 40 ]; do '
+    'printf "  writing file %s.py\\n" "$i"; i=$((i+1)); sleep 0.05; done; '
+    'read -r answer; printf "ANSWERED:%s\\n" "$answer"; sleep 30'
+)
+
+
+def test_a_modal_left_in_the_scrollback_refuses_the_key(server: PrivateTmux) -> None:
+    """#208 on the tier that can prove it: a real pty, a real capture.
+
+    The hermetic test builds the scrolled screen from captured rows. This one
+    lets a terminal do the scrolling, because the belief under test is about
+    what `capture-pane` returns once output has moved a modal up: rows below
+    the ornament, padded or not, escapes or not, as a real pane emits them.
+
+    The refusal is the assertion, not the badge: this is the path that turns
+    the predicate into a keystroke.
+    """
+    project = "scrolled"
+    name = sanitize(f"{PREFIX}{project}")
+    server.run("new-session", "-d", "-s", name, "sh", "-c", _SCROLLED_SCRIPT)
+    server.created.append(name)
+    tmux = adapter(server)
+
+    # Wait until the output has clearly moved past the modal.
+    deadline = time.time() + TIMEOUT
+    while time.time() < deadline:
+        pane = tmux.capture_pane(project, escapes=True)
+        if "writing file 10.py" in pane:
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail(
+            f"the pane never scrolled past the modal; pane was:\n{tmux.capture_pane(project)}"
+        )
+
+    assert "\u276f" in pane, "the modal row is meant to still be in the scrollback"
+    assert claude_ipc.awaits_answer(pane) is None, (
+        "a modal with the agent's output below it still reads as live on a real pane"
+    )
+    with pytest.raises(claude_ipc.AnswerNotSafe):
+        claude_ipc.send_answer(tmux, project, "Enter")
+    assert "ANSWERED:" not in tmux.capture_pane(project), "a key reached the pty anyway"
+
+
 # -- #94: the namespace itself, which the guard in test_tiers.py cannot see ---
 
 

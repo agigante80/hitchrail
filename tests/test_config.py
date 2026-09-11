@@ -984,7 +984,11 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # predicate rather than only in the ticket. A stale modal reads as live,
         # which is cosmetic for #100's badge and a keystroke for #204, and the
         # next reader of this function is the one who needs to know that.
-        "claude_ipc.py": 800,
+        # 800 to 821 for closing #208: `_live_ornament_row` and the allowance
+        # it reads. The predicate is five lines; the rest is the belief behind
+        # the number and the two captured screens that justify it, which is
+        # exactly the kind of vendor layout fact this module quarantines.
+        "claude_ipc.py": 821,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.
@@ -1062,7 +1066,11 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # declined to renew; round 2 found that hoisting the expiry above the
         # renewal loop popped a claim the same sweep had just written, so the
         # ordering is now spelled out where it can be read.
-        "engine.py": 1185,
+        # 1185 to 1198 for #218. The prune moved above `changed`, and the
+        # comment says which side of the renewal it is on and why the other
+        # side was round 1 of #182's regression: the two look alike in a diff
+        # and are opposite in effect, so the next review needs the reason.
+        "engine.py": 1198,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
