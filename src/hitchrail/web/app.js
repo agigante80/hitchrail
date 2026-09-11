@@ -999,6 +999,25 @@ function showRefusal(result, project) {
     });
     return;
   }
+  if (code === "unreadable_answer") {
+    // #82. The server answered and the answer did not arrive in one piece.
+    // For a stop, a kill, a start or a create, "That did not work" is a guess
+    // and it guesses wrong: on a 2xx the action DID happen on the machine, and
+    // the next thing a person does about "did not work" is tap Stop again or
+    // reach for Kill. The page says exactly what it knows, which is that the
+    // request was sent and the reply was unusable, and lets the listing say
+    // the rest. `api` keeps the real status for this code, so this branch
+    // cannot be reached by a refusal.
+    showDialog({
+      title: "The reply could not be read",
+      body:
+        "The request was sent and the server answered, but the answer did "
+        + "not arrive in one piece. Nothing here says whether it worked. The "
+        + "list will catch up.",
+      actions: [["Close", "ghost", () => closeDialog()]],
+    });
+    return;
+  }
   showDialog({
     title: code === "self_protected" ? "That one is protected" : "That did not work",
     body: message,

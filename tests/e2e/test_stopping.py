@@ -7,7 +7,7 @@ it is a sequence over time, not a status code.
 from __future__ import annotations
 
 import pytest
-from playwright.async_api import Page, expect
+from playwright.async_api import Page, Route, expect
 
 from .conftest import Harness, grant_and_land
 
@@ -431,6 +431,48 @@ async def test_a_stop_that_never_reached_the_server_says_so(
     await expect(dialog).not_to_contain_text("Waiting for it to finish")
     # And the session is untouched, because nothing was ever sent.
     assert server.is_running("vessel")
+
+
+async def test_a_reply_the_page_cannot_read_is_not_reported_as_a_failure(
+    page: Page, server: Harness
+) -> None:
+    """#82. Tap Stop; the server accepts it, begins the stop and answers 202;
+    the body arrives broken. The page used to say "That did not work", and
+    the next thing a person does about that is tap Stop again or reach for
+    Kill, for a session that is already stopping.
+
+    The request goes THROUGH to the real server here and only the reply is
+    corrupted, so the session really is stopping when the words appear.
+    """
+    server.seed(running=["vessel"])
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row).to_have_attribute("data-state", "running")
+
+    async def corrupt_the_reply(route: Route) -> None:
+        response = await route.fetch()
+        await route.fulfill(
+            status=response.status, content_type="application/json", body="{ truncated"
+        )
+
+    await page.route(
+        lambda url: "/api/sessions/" in url and not url.endswith("/logs"), corrupt_the_reply
+    )
+
+    await row.get_by_role("button", name="Stop").click()
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop", exact=True).click()
+
+    await expect(dialog).to_contain_text("could not be read")
+    text = await dialog.inner_text()
+    assert "That did not work" not in text, text
+    assert "was sent" in text, text
+    # Nothing on this screen may suggest nothing happened, and the way out is
+    # Close, not a second Stop and not a Kill.
+    await expect(dialog.get_by_role("button", name="Close")).to_be_visible()
+    assert await dialog.get_by_role("button", name="Kill it").count() == 0
+    # And it did work: the shim exits on the graceful request.
+    server.wait_until_the_agents_are_gone()
 
 
 # -- #98: a session with no agent in it ------------------------------------
