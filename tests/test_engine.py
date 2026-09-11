@@ -3250,6 +3250,55 @@ def test_a_claim_reconfirmed_after_the_ttl_is_kept_not_expired(root: Path) -> No
     )
 
 
+async def test_a_claim_reconfirmed_after_the_ttl_is_announced(root: Path) -> None:
+    """#218. The test above proves the claim is KEPT; this one proves it is TOLD.
+
+    Two representations of one fact: `changed` asked the store (`in
+    self._stuck`), the interface asks the view (`attention.standing`, filtered
+    by the TTL), and inside the gap they disagreed. A name past `TTL_S` was
+    still in the dict, so a sweep that re-confirmed it computed "nothing
+    changed" and announced nothing, while the page, which had read `standing`
+    on reconnect, showed the row as not waiting. The server knew; nobody was
+    told. Closing a phone for thirty seconds reaches it, because the prune
+    lived inside the sweep and an unwatched engine prunes nothing.
+
+    **Asserted on the EVENT, not on `awaiting_input`.** Every existing test
+    read the flag or the dict, and the flag reads True either way once the
+    entry is renewed, which is exactly why this survived.
+    """
+    clock = FakeClock()
+    bus = EventBus()
+    engine, tmux = engine_for(
+        root,
+        sessions={proj("vessel"): PANE},
+        table=running_table(etime_s=60),
+        clock=clock,
+    )
+    engine._bus = bus
+    name = proj("vessel")
+    tmux.pane_text[name] = MODAL_PANE
+    seen: list[dict[str, object]] = []
+    bus.publish = lambda payload: seen.append(payload)  # type: ignore[assignment]
+
+    with bus.subscribe():
+        assert engine.scan_for_stuck() == [name]
+        assert [p["name"] for p in seen] == [name], "the first claim was never announced"
+
+        # Past the TTL with nobody sweeping: the page that reconnects now reads
+        # `standing` and shows the row as NOT waiting.
+        clock.now += attention.TTL_S + 1
+        assert name not in engine._needs_a_person()
+
+        seen.clear()
+        engine.scan_for_stuck()
+
+    assert [(p["name"], p["awaiting_input"]) for p in seen] == [(name, True)], (
+        "a claim re-confirmed after its TTL was kept and announced to nobody: "
+        "the store still held the name, so `changed` said nothing changed, "
+        "while the interface had already read it as expired. See #218."
+    )
+
+
 def test_a_discarded_sweep_ages_nothing(root: Path) -> None:
     """The other half, which round 2 found had no test at all.
 

@@ -965,6 +965,33 @@ class Engine:
                 # stale evidence is the safe direction, and refusing to drop it
                 # would leave a person told they are needed when they are not.
                 stuck = []
+            # **The prune comes BEFORE `changed`, and before the renewal.** Two
+            # representations of one fact: `changed` asks the store, the
+            # interface asks `attention.standing`, which filters by the TTL,
+            # and inside the gap they disagreed (#218). A name past `TTL_S`
+            # was still in the dict, so a sweep re-confirming it computed
+            # "nothing changed" and told nobody, while a page that reconnected
+            # in the meantime had read `standing` and showed the row as not
+            # waiting. Pruning first makes the store agree with the view, so
+            # `in self._stuck` below is safe everywhere rather than only where
+            # somebody remembered the TTL, and a re-confirmed name reads as
+            # new, announces, and is renewed by the loop after.
+            #
+            # This is NOT round 1 of #182, which looks the same in a diff and
+            # is the opposite: that version popped AFTER the renewal, so a
+            # re-confirmed entry was written with `now` and then removed by the
+            # same block, silently. This pops before the renewal, and the
+            # renewal puts a re-confirmed name back.
+            #
+            # **Skipped on a discarded sweep**, which is round 1's own point: a
+            # standing observation stays alive by being rewritten, so aging an
+            # entry this scan declined to renew drops a row on evidence the
+            # sweep does not trust. Nothing is announced for an aged name that
+            # this sweep did not re-confirm: `standing` already hid it from
+            # every reader, so there is no change to report.
+            if not discarded:
+                for name in attention.expired(self._stuck, now):
+                    self._stuck.pop(name, None)
             # What CHANGED, computed under the lock beside the write, because
             # announcing what did not change is how a page that is already
             # right redraws itself once a second.
@@ -972,21 +999,7 @@ class Engine:
             changed += [name for name in clear if name in self._stuck]
             for name in stuck:
                 self._stuck[name] = now
-            # **After the renewal, and that ordering is the whole of it.**
-            # Computed before it, a name that is both past `TTL_S` and
-            # re-confirmed by THIS sweep is written with `now` and then popped
-            # by the same block, and `changed` cannot announce the loss because
-            # the name was already in `_stuck`. Reachable whenever scanning
-            # pauses for longer than the TTL: no SSE subscriber, or a truncated
-            # budget. Introduced by round 1 of #182 and caught by round 2.
-            #
-            # **Empty on a discarded sweep**, which is round 1's own point: a
-            # standing observation stays alive by being rewritten, so aging an
-            # entry this scan declined to renew drops a row on evidence the
-            # sweep does not trust. It drops silently, because `changed` is
-            # empty when `stuck` is.
-            aging = [] if discarded else attention.expired(self._stuck, now)
-            for name in clear + aging:
+            for name in clear:
                 self._stuck.pop(name, None)
         # Announced, OUTSIDE the lock, exactly as `expire_stops` does it and
         # for the reason its docstring gives: outside a stop wait the page does
