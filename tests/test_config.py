@@ -1221,9 +1221,11 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # stops the scan. It cancels the AWAIT; `in_thread` is run_in_executor
         # and a thread cannot be cancelled, so the worker runs to the call
         # timeout and the process waits for it at executor shutdown. Measured.
-        # +11 for #147: the per server constants, read once in create_app
-        # and sent on the listing, with the sentence saying why not a route.
-        "server.py": 640,
+        # 631 to 669 for #147 and #148: the per server constants, read once
+        # in create_app and sent on the listing, with the sentence saying why
+        # not a route, and the account fallback with the sentence saying why
+        # not $USER. Both are seams, so the signature grew too.
+        "server.py": 669,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

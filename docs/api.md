@@ -95,6 +95,8 @@ in both directions by the suite:
 | `roots` | every configured root as `{label, path}`, one root still a list |
 | `server` | this server, as distinct from this machine |
 | `server.version` | the version the installed distribution carries, the string `hitchrail --version` prints; null from a bare checkout |
+| `server.user` | the account this server runs as, which is the account every session it starts runs as; the numeric uid when the account has no passwd entry |
+| `server.started_at` | when this process started, Unix seconds; format it in the viewer's timezone, never the server's |
 
 ### `POST /api/sessions/{name}/answer`
 

@@ -10,8 +10,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import functools
+import getpass
 import json
 import logging
+import os
+import time
 from collections.abc import AsyncIterator, Callable
 from typing import TypeVar
 
@@ -117,8 +120,19 @@ async def _routing_error(request: Request, exc: Exception) -> Response:
     )
 
 
-def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
+def create_app(
+    engine: eng.Engine,
+    config: Config,
+    bus: EventBus,
+    *,
+    now: Callable[[], float] = time.time,
+    user: Callable[[], str] = getpass.getuser,
+) -> Starlette:
     """The bus is REQUIRED, and the caller owns it.
+
+    `now` and `user` are the two seams #148 added, wall clock and account,
+    read once below. Wall clock rather than the engine's monotonic one,
+    because the value is shown to a person beside a journal timestamp.
 
     An earlier draft took it optionally and reconciled it against `engine.bus`.
     There is no such attribute: `Engine` has a private `_bus` and
@@ -133,7 +147,22 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
     # page already fetches, never on a route of their own: a second round trip
     # for a string is a round trip on a phone. `None` for the version is a
     # bare checkout, and the page omits it rather than rendering a guess.
-    server_facts = {"version": hitchrail.installed_version()}
+    #
+    # #148. Since when, as whom. Both are constant for the life of the
+    # process, so a per request syscall for either is the shape this codebase
+    # already refuses for the pane map. `getpass.getuser` consults passwd,
+    # where `$USER` is inherited and lies under sudo, a unit and su; it raises
+    # for a uid with no entry, the ordinary case in a container, and the
+    # number is then the honest answer. Never a guessed name.
+    try:
+        account: str = user()
+    except (KeyError, OSError, ImportError):
+        account = str(os.getuid())
+    server_facts = {
+        "version": hitchrail.installed_version(),
+        "user": account,
+        "started_at": now(),
+    }
 
     async def list_projects(request: Request) -> Response:
         # ONE scan, one thread hop, one consistent answer.

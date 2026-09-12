@@ -137,7 +137,7 @@ const state = {
   unsupportedTotal: 0,
   root: "",
   memory: { available_mb: null, total_mb: null },
-  server: { version: null },
+  server: { version: null, user: null, started_at: null },
   tab: "all",
   query: "",
 };
@@ -598,6 +598,38 @@ function renderFooter() {
   if (version) {
     version.textContent = state.server.version === null ? "" : `hitchrail ${state.server.version}`;
   }
+  // #148. Since when, as whom. Formatted HERE, in the viewer's own locale and
+  // timezone, and that is not a preference: the server's timezone is the
+  // machine's and the phone's is the person's, and a server rendered 15:45
+  // is wrong for anybody elsewhere in a way that looks right. Absolute with
+  // the relative beside it: relative alone cannot be compared against a
+  // journal entry, absolute alone makes a person do arithmetic on a phone.
+  const since = $("[data-since]");
+  if (since) since.textContent = describeStart(state.server);
+}
+
+function describeStart({ user, started_at: startedAt }) {
+  const parts = [];
+  if (typeof startedAt === "number") {
+    const started = new Date(startedAt * 1000);
+    const sameDay = started.toDateString() === new Date().toDateString();
+    const clock = sameDay
+      ? started.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : started.toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+    parts.push(`since ${clock} (${formatAgo(Date.now() / 1000 - startedAt)})`);
+  }
+  if (typeof user === "string" && user !== "") parts.push(`as ${user}`);
+  return parts.join("  \u00b7  ");
+}
+
+/* Coarse on purpose: the number answers "did this restart while I was not
+   looking", and minutes are the finest that question needs. */
+function formatAgo(seconds) {
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
 }
 
 export function render() {

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 import pathlib
 import re
 import shutil
@@ -210,6 +211,53 @@ async def test_a_bare_checkout_reports_no_version_rather_than_a_guess(
         response = await c.get("/api/projects", headers=HEADERS)
     assert response.status_code == 200
     assert response.json()["server"]["version"] is None
+
+
+async def test_projects_says_since_when_and_as_whom(config: Config, engine: Engine) -> None:
+    """#148. A row's uptime is the AGENT's; the server's own is the number that
+    says whether the unit restarted at 04:00 and quietly invalidated the token
+    you are holding. And every session runs as the account that started
+    Hitchrail, with permissions skipped, so "as whom" is the difference
+    between an agent that can read your ~/.claude and one that cannot.
+
+    Read ONCE at startup and held: two listings taken apart in time report an
+    identical instant, which fails if the value is read per request.
+    """
+    ticks = iter([1_700_000_000.0, 1_700_000_500.0, 1_700_000_900.0])
+    app = create_app(
+        engine=engine,
+        config=config,
+        bus=EventBus(),
+        now=lambda: next(ticks),
+        user=lambda: "alien",
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://localhost"
+    ) as c:
+        first = (await c.get("/api/projects", headers=HEADERS)).json()["server"]
+        second = (await c.get("/api/projects", headers=HEADERS)).json()["server"]
+    assert first["user"] == "alien"
+    assert first["started_at"] == 1_700_000_000.0, "not the instant the app was built"
+    assert second["started_at"] == first["started_at"], "the start instant was re-read"
+
+
+async def test_a_uid_with_no_passwd_entry_renders_the_number(
+    config: Config, engine: Engine
+) -> None:
+    """The normal case in a container: `getpass.getuser` raises when the uid
+    has no entry. The number is the honest answer and the page never guesses
+    a name. `os.environ["USER"]` would be the wrong fallback: it is inherited,
+    so it lies under sudo, under a unit and under su."""
+
+    def no_entry() -> str:
+        raise KeyError("getpwuid(): uid not found")
+
+    app = create_app(engine=engine, config=config, bus=EventBus(), user=no_entry)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://localhost"
+    ) as c:
+        server = (await c.get("/api/projects", headers=HEADERS)).json()["server"]
+    assert server["user"] == str(os.getuid())
 
 
 def _listing_fields_documented() -> set[str]:

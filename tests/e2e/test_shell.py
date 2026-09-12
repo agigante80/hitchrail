@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from playwright.async_api import Page, ViewportSize, expect
 
@@ -315,3 +317,37 @@ async def test_the_footer_names_the_version_and_links_to_the_source(
         "() => document.documentElement.scrollWidth > window.innerWidth"
     )
     assert not overflow, "the footer pushed the page wider than the viewport at 360px"
+
+
+async def test_the_footer_says_since_when_and_as_whom_in_the_viewers_clock(
+    page: Page, server: Harness
+) -> None:
+    """#148. Absolute with the relative beside it, formatted by the BROWSER:
+    the server's timezone is the machine's and the phone's is the person's,
+    and a server rendered 15:45 is wrong for anybody elsewhere in a way that
+    looks right. The harness runs as this user, so the name is known."""
+    import getpass
+
+    server.seed(stopped=["alpha"])
+    await page.goto(server.base)
+    about = page.locator("[data-about]")
+    await expect(about).to_contain_text(f"as {getpass.getuser()}")
+    await expect(about).to_contain_text("since ")
+    assert re.search(r"\((just now|\d+[mhd] ago)\)", await about.inner_text())
+    # Formatted where the viewer is: the same instant reads differently from
+    # a browser fourteen hours east, which a server rendered string could
+    # not do. A second context with its own timezone, same server.
+    here = await page.locator("[data-since]").inner_text()
+    browser = page.context.browser
+    assert browser is not None
+    far = await browser.new_context(
+        viewport={"width": 390, "height": 844}, timezone_id="Pacific/Kiritimati"
+    )
+    try:
+        other = await far.new_page()
+        await other.goto(server.base)
+        await expect(other.locator("[data-since]")).not_to_be_empty()
+        there = await other.locator("[data-since]").inner_text()
+    finally:
+        await far.close()
+    assert here != there, f"the start time reads {here!r} in both timezones"
