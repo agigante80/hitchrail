@@ -735,6 +735,14 @@ The canvas linked in section 1 is the reference. The decisions it encodes:
   as impatience rather than as an alternative ("Do not wait, kill it now"), and
   stays available for the whole wait. On a phone the destructive path must never
   sit under the thumb at the same weight as the safe one.
+
+  **This holds for the list as it does for the row, decided 2026-09-12 (#241).**
+  A kill on a row was declined on #169 and a standalone Kill all on #241, for
+  the same reason: either is a kill reachable before any graceful attempt.
+  Stop all (#240) is the stop each row already has, issued for each row, and
+  its bulk kill lives inside its wait as the escalation. The cost of the rule
+  is one tap and a few seconds of key sending; the next request for a bare
+  kill finds the decision here rather than re-arguing it.
 - **The timeout screen states the risk before offering the kill**, because that
   is the moment the user is most likely to reach for it and least likely to have
   thought about uncommitted work.
@@ -744,7 +752,9 @@ The canvas linked in section 1 is the reference. The decisions it encodes:
 
 Palette and type are defined in the canvas: warm neutral ground, a saddle tan
 accent, sage for running, brick for destructive, Zilla Slab for display, Karla
-for body, IBM Plex Mono for machine values.
+for body, IBM Plex Mono for machine values. Since 2026-09-11 the stylesheet's
+values are the measured ones: every text pair passes AA by computation
+(`tests/test_palette.py`, #69), and #244 asks for the canvas to follow.
 
 ## 8. Technology and versions
 
