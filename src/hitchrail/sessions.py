@@ -188,6 +188,11 @@ class Session:
     state: State
     pid: int | None = None
     ram_mb: int = 0
+    # What bounds the process, the tightest `memory.max` or `memory.high` on
+    # its cgroup ancestry (#243). `None` is "nothing this can see", which
+    # covers no limit, an unreadable tree and cgroup v1 alike: the same to the
+    # person holding the phone, and different to nobody.
+    ram_limit_mb: int | None = None
     uptime_s: int = 0
     url: str | None = None
     stopping: bool = False
@@ -235,6 +240,7 @@ class Session:
             "state": str(self.state),
             "pid": self.pid,
             "ram_mb": self.ram_mb,
+            "ram_limit_mb": self.ram_limit_mb,
             "uptime_s": self.uptime_s,
             "url": self.url,
             "stopping": self.stopping,

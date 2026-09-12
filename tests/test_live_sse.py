@@ -211,6 +211,7 @@ async def test_the_stream_carries_the_whole_session_shape(live: Fixture) -> None
         "state",
         "pid",
         "ram_mb",
+        "ram_limit_mb",
         "uptime_s",
         "url",
         "stopping",

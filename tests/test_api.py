@@ -260,11 +260,31 @@ async def test_a_uid_with_no_passwd_entry_renders_the_number(
     assert server["user"] == str(os.getuid())
 
 
+def _session_fields_documented() -> set[str]:
+    text = pathlib.Path(__file__).parent.parent.joinpath("docs", "api.md").read_text()
+    start = text.index("### The session payload")
+    end = text.index("\n### ", start + 1)
+    return set(re.findall(r"^\| `([a-z_]+)` \|", text[start:end], re.M))
+
+
+async def test_the_api_doc_describes_the_session_payload_in_both_directions(
+    client: httpx.AsyncClient,
+) -> None:
+    """#243 added `ram_limit_mb` and found the session shape documented
+    nowhere. Held to `Session.as_dict` both ways, like the listing above."""
+    body = (await client.get("/api/projects", headers=HEADERS)).json()
+    served = set(body["projects"][0])
+    documented = _session_fields_documented()
+    assert documented, "no session payload table parsed out of docs/api.md"
+    assert served - documented == set(), f"undocumented: {sorted(served - documented)}"
+    assert documented - served == set(), f"not served: {sorted(documented - served)}"
+
+
 def _listing_fields_documented() -> set[str]:
     """The `field` column of the listing payload table in docs/api.md."""
     text = pathlib.Path(__file__).parent.parent.joinpath("docs", "api.md").read_text()
     start = text.index("### The listing payload")
-    end = text.index("\n## ", start)
+    end = text.index("\n### ", start + 1)
     return set(re.findall(r"^\| `([a-z_.]+)` \|", text[start:end], re.M))
 
 

@@ -98,6 +98,26 @@ in both directions by the suite:
 | `server.user` | the account this server runs as, which is the account every session it starts runs as; the numeric uid when the account has no passwd entry |
 | `server.started_at` | when this process started, Unix seconds; format it in the viewer's timezone, never the server's |
 
+### The session payload
+
+One project, as `projects` lists it, as `POST` and `DELETE` on
+`/api/sessions/{name}` return it, and as the event stream sends it:
+
+| Field | What it holds |
+|---|---|
+| `name` | the qualified identifier, `<root-label>~<folder>` |
+| `state` | one of the four states below |
+| `pid` | the agent's process id, null when there is none |
+| `ram_mb` | resident memory of the agent and its descendants |
+| `ram_limit_mb` | the tightest `memory.max` or `memory.high` on the agent's cgroup ancestry; null when nothing bounds it that Hitchrail can see, which includes an unreadable tree and cgroup v1 |
+| `uptime_s` | how long the agent has run |
+| `url` | the session link once the agent has published one, else null |
+| `stopping` | a graceful stop is in flight |
+| `protected` | the self project; refuses every mutating route |
+| `awaiting_trust` | the agent is sitting on its trust prompt |
+| `awaiting_input` | the agent is sitting on a question only a person can answer |
+| `foreign_session` | the tmux session another tool runs the agent under, when one is visible; null otherwise |
+
 ### `POST /api/sessions/{name}/answer`
 
 Body: `{"key": "Enter"}`. One key, from a fixed set, delivered to a session that

@@ -111,6 +111,7 @@ class Engine:
         tmux: Tmux | None = None,
         procs_fn: Callable[[], ProcTable] | None = None,
         meminfo_fn: Callable[[], str] | None = None,
+        ceiling_fn: Callable[[int], int | None] | None = None,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
         bus: EventBus | None = None,
@@ -126,6 +127,13 @@ class Engine:
         )
         self._procs_fn = procs_fn or snapshot
         self._meminfo_fn = meminfo_fn or ram.read_meminfo
+        # #243. Cached per pid for `ram.CEILING_TTL_S`, because the reader is
+        # ten sysfs reads and the listing route asks once per running row on
+        # every poll; the cost paragraph on `memory_ceiling_mb` has the
+        # numbers. Keyed by pid only: a pid reused inside the window is read
+        # afresh on the next expiry, the bound the attention overlay accepts.
+        self._ceiling_fn = ceiling_fn or ram.memory_ceiling_mb
+        self._ceilings: dict[int, tuple[float, int | None]] = {}
         self._clock = clock
         self._sleep = sleep
         self._bus: EventBus | None = bus
@@ -188,7 +196,25 @@ class Engine:
     # -- reading -------------------------------------------------------
 
     def _look(self) -> Machine:
-        return derive.look(self._procs_fn, self.tmux, self.config.agent_config_path)
+        return derive.look(
+            self._procs_fn, self.tmux, self.config.agent_config_path, self._ceiling_mb
+        )
+
+    def _ceiling_mb(self, pid: int) -> int | None:
+        """`ram.memory_ceiling_mb`, remembered per pid for the TTL."""
+        now = self._clock()
+        cached = self._ceilings.get(pid)
+        if cached is not None and now - cached[0] < ram.CEILING_TTL_S:
+            return cached[1]
+        ceiling = self._ceiling_fn(pid)
+        self._ceilings[pid] = (now, ceiling)
+        # Bounded: the table is a snapshot and pids come and go, so entries
+        # older than the TTL are dropped here rather than kept for the life of
+        # the process.
+        self._ceilings = {
+            p: v for p, v in self._ceilings.items() if now - v[0] < ram.CEILING_TTL_S
+        }
+        return ceiling
 
     def _derive(
         self, name: str, machine: Machine, needs_a_person: frozenset[str] | None = None

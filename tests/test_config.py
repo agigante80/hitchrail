@@ -1070,7 +1070,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # comment says which side of the renewal it is on and why the other
         # side was round 1 of #182's regression: the two look alike in a diff
         # and are opposite in effect, so the next review needs the reason.
-        "engine.py": 1198,
+        # 1198 to 1224 for #243: the ceiling seam and its per pid cache, and
+        # the comment carrying the measured cost that justifies the cache.
+        "engine.py": 1224,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon

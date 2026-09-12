@@ -51,10 +51,19 @@ class Machine:
     # the alternative is a `capture-pane` per running row on every listing,
     # which is the cost the design refused for the session link.
     trusted: frozenset[str] | None = None
+    # What bounds a process, by pid (#243). A callable rather than a map,
+    # because it is asked only for the pids that derive as sessions, a
+    # handful, where a map would read the ancestry of every process in the
+    # table. The engine supplies a cached reader; `look` defaults to none so
+    # a machine looked at without one reports every ceiling as unknown.
+    ceiling_mb: Callable[[int], int | None] = lambda pid: None
 
 
 def look(
-    procs_fn: Callable[[], ProcTable], tmux: Tmux, agent_config: Path | None = None
+    procs_fn: Callable[[], ProcTable],
+    tmux: Tmux,
+    agent_config: Path | None = None,
+    ceiling_mb: Callable[[int], int | None] = lambda pid: None,
 ) -> Machine:
     """One tmux call and one `ps` call, whatever the project count.
 
@@ -117,6 +126,7 @@ def look(
         owned=frozenset(owned),
         foreign_owners=foreign_owners,
         trusted=claude_ipc.trusted_folders(agent_config) if agent_config else None,
+        ceiling_mb=ceiling_mb,
     )
 
 
@@ -329,6 +339,7 @@ def live(
         state=state,
         pid=pid,
         ram_mb=machine.table.tree_rss_mb(pid),
+        ram_limit_mb=machine.ceiling_mb(pid),
         uptime_s=proc.etime_s if proc else 0,
         # `bridge_url` reads a file. `session_url` would capture a pane,
         # which is a subprocess per running row on every list. The link is
