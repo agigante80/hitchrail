@@ -424,8 +424,15 @@ class Harness:
         agent_shows_a_modal: bool = False,
         token: str | None = None,
         also_in: dict[str, list[str]] | None = None,
+        ceiling_mb: int | None = None,
     ) -> None:
         """Set the world up BEFORE the page loads.
+
+        `ceiling_mb` is what every session's cgroup ceiling reads as (#243).
+        Injected, never read from this machine: the development box carries
+        an 8 GiB `memory.high` on the tmux scope and CI carries none, and a
+        tier whose rows said different things on each would be the machine
+        dependence rule 2 of Phase 10 forbids. `None` is "no limit".
 
         `also_in` maps a root LABEL to the projects running in it, and it is
         what the two root tests use. The folders are created under a sibling
@@ -679,7 +686,11 @@ class Harness:
         self._config = build(e2e_id(self_project) if self_project else None)
         # Read through the attribute rather than closed over, so `break_machine`
         # can make the reading unreadable mid test.
-        self.engine = Engine(config=self._config, meminfo_fn=lambda: self._meminfo)
+        self.engine = Engine(
+            config=self._config,
+            meminfo_fn=lambda: self._meminfo,
+            ceiling_fn=lambda pid: ceiling_mb,
+        )
         self.start()
 
     # -- lifecycle ------------------------------------------------------

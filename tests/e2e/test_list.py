@@ -589,3 +589,27 @@ async def test_a_stuck_row_says_so_without_the_page_asking(
     # still `running`, because this is an overlay and not a fifth state.
     await expect(row.locator(".badge")).to_have_text("waiting")
     await expect(row).to_have_attribute("data-state", "running")
+
+
+# -- #90: the figure, and what bounds it -------------------------------------
+
+
+async def test_a_running_row_says_what_bounds_its_memory(page: Page, server: Harness) -> None:
+    """#90. "1.4 GB" beside nothing is a different sentence from "1.4 GB of
+    4 GB", and the reading is free where the setting is not ours."""
+    server.seed(running=["vessel"], ceiling_mb=4096)
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row.locator(".meta")).to_contain_text("of 4.0 GB")
+
+
+async def test_a_running_row_says_plainly_when_nothing_bounds_it(
+    page: Page, server: Harness
+) -> None:
+    """The other half, and the one that matters on the reporting machine:
+    "no limit" is a fact worth reading next to a figure, not an absence."""
+    server.seed(running=["vessel"], ceiling_mb=None)
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row.locator(".meta")).to_contain_text("no limit")
+    await expect(row.locator(".meta")).not_to_contain_text(" of ")

@@ -121,6 +121,18 @@ export function formatMb(mb) {
   return `${(mb / 1024).toFixed(1)} GB`;
 }
 
+/* #90. The figure and what bounds it, in one phrase: "1.4 GB of 4.0 GB" is
+   a different sentence from "1.4 GB", and "no limit" is a fact worth reading
+   beside a number rather than an absence. The ceiling is the tightest one
+   on the process's cgroup ancestry, read by the server; null means nothing
+   Hitchrail can see bounds it, which reads the same to the person holding
+   the phone whether the tree was unreadable or genuinely unlimited. */
+export function formatMemory(project) {
+  const used = formatMb(project.ram_mb);
+  const limit = project.ram_limit_mb;
+  return typeof limit === "number" ? `${used} of ${formatMb(limit)}` : `${used}, no limit`;
+}
+
 export function formatUptime(seconds) {
   if (!seconds || seconds < 60) return `${Math.max(0, Math.round(seconds || 0))}s`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
@@ -252,7 +264,7 @@ function metaFor(project) {
   // sitting there waiting for somebody.
   if (project.awaiting_input) return "waiting for an answer  ·  open the pane to answer";
   if (project.pid === null) return "";
-  return `${formatMb(project.ram_mb)}  ·  up ${formatUptime(project.uptime_s)}`;
+  return `${formatMemory(project)}  ·  up ${formatUptime(project.uptime_s)}`;
 }
 
 /* The states whose row is a column: a badge and up to three controls cannot
@@ -1155,7 +1167,7 @@ function showHardMemory(project, body) {
     body:
       `Only ${formatMb(body.available_mb)} free. Hitchrail will not start a `
       + "session into that."
-      + (largest ? ` The largest is ${largest.name}, ${formatMb(largest.ram_mb)}.` : ""),
+      + (largest ? ` The largest is ${largest.name}, ${formatMemory(largest)}.` : ""),
     actions,
   });
 }
