@@ -23,6 +23,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+import hitchrail
 from hitchrail import discovery, pages
 from hitchrail import engine as eng
 from hitchrail import security as sec
@@ -128,6 +129,11 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
     """
     engine.attach_bus(bus)
     events = bus
+    # #147. Per server constants, read ONCE here and sent on the listing the
+    # page already fetches, never on a route of their own: a second round trip
+    # for a string is a round trip on a phone. `None` for the version is a
+    # bare checkout, and the page omits it rather than rendering a guess.
+    server_facts = {"version": hitchrail.installed_version()}
 
     async def list_projects(request: Request) -> Response:
         # ONE scan, one thread hop, one consistent answer.
@@ -179,6 +185,9 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
                 # client that special cased "one root" would be wrong the
                 # day a second was added.
                 "roots": [{"label": r.label, "path": str(r.path)} for r in config.roots],
+                # This server rather than this machine: what a person holding
+                # a phone needs before trusting the rest of the page (#147).
+                "server": server_facts,
             }
         )
 

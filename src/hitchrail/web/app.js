@@ -137,6 +137,7 @@ const state = {
   unsupportedTotal: 0,
   root: "",
   memory: { available_mb: null, total_mb: null },
+  server: { version: null },
   tab: "all",
   query: "",
 };
@@ -589,6 +590,14 @@ function renderFooter() {
 
   const count = $("[data-run-count]");
   if (count) count.textContent = `${state.projects.filter(isRunning).length} running`;
+
+  // #147. Omitted, not guessed, when the server cannot say: a bare checkout
+  // has no distribution metadata, and a wrong number here defeats the one
+  // question the line exists to answer.
+  const version = $("[data-version]");
+  if (version) {
+    version.textContent = state.server.version === null ? "" : `hitchrail ${state.server.version}`;
+  }
 }
 
 export function render() {
@@ -1666,6 +1675,7 @@ async function refresh() {
   state.roots = roots;
   state.root = roots.length === 1 ? roots[0].path : "";
   state.memory = result.body.memory;
+  state.server = result.body.server ?? state.server;
   render();
   return result;
 }

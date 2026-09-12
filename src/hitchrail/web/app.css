@@ -350,10 +350,27 @@ main { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
 /* -- footer ------------------------------------------------------------- */
 .footer {
   position: fixed; left: 0; right: 0; bottom: 0;
-  display: flex; align-items: center; gap: 12px;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
   background: var(--surface); border-top: 1px solid var(--line);
   font-size: 13px; color: var(--muted);
+}
+/* #147. A second row, full width, under the machine figures: the server's
+   own facts. `overflow-wrap: anywhere` so a long development version string
+   wraps inside the footer rather than pushing the page wider at 360px. */
+.about {
+  flex-basis: 100%; margin: 0;
+  font-size: 12px; color: var(--muted-2);
+  display: flex; gap: 8px; flex-wrap: wrap; overflow-wrap: anywhere;
+}
+/* 44px to tap, 17px on the page: section 7's minimum hit target, and the
+   footer is the surface with the least room to spend on it. The negative
+   block margin gives the tap box its height without giving the row any; the
+   pixels it reaches into above and below hold nothing interactive. */
+.about a {
+  color: var(--muted-2);
+  display: inline-flex; align-items: center;
+  min-height: var(--touch); margin-block: -13px;
 }
 .mem-figure { white-space: nowrap; }
 .mem-track { flex: 1; height: 8px; border-radius: 999px; background: var(--surface-alt); overflow: hidden; }

@@ -14,6 +14,7 @@ import httpx
 import pytest
 from starlette.responses import Response
 
+import hitchrail
 from conftest import (
     CLEAR_INPUT_BOX,
     DIRTY_INPUT_BOX,
@@ -185,6 +186,53 @@ async def test_projects_lists_every_folder_with_its_state(client: httpx.AsyncCli
 async def test_projects_reports_available_memory(client: httpx.AsyncClient) -> None:
     body = (await client.get("/api/projects", headers=HEADERS)).json()
     assert body["memory"]["available_mb"] == 24608
+
+
+async def test_projects_carries_the_version_this_server_runs(
+    client: httpx.AsyncClient,
+) -> None:
+    """#147. On the payload the page already fetches, never a route of its own:
+    a second round trip for a constant is a round trip on a phone. The same
+    string `hitchrail --version` prints, so "is the fix in the one I am
+    looking at" is answerable from the device least able to open a shell."""
+    body = (await client.get("/api/projects", headers=HEADERS)).json()
+    assert body["server"]["version"] == hitchrail.__version__
+
+
+async def test_a_bare_checkout_reports_no_version_rather_than_a_guess(
+    config: Config, engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A source checkout with no install has no distribution metadata. The
+    field is null and the page omits it; a wrong number is worse than none,
+    because the whole point is answering "which one is this"."""
+    monkeypatch.setattr(hitchrail, "installed_version", lambda: None)
+    async with client_for(engine, config) as c:
+        response = await c.get("/api/projects", headers=HEADERS)
+    assert response.status_code == 200
+    assert response.json()["server"]["version"] is None
+
+
+def _listing_fields_documented() -> set[str]:
+    """The `field` column of the listing payload table in docs/api.md."""
+    text = pathlib.Path(__file__).parent.parent.joinpath("docs", "api.md").read_text()
+    start = text.index("### The listing payload")
+    end = text.index("\n## ", start)
+    return set(re.findall(r"^\| `([a-z_.]+)` \|", text[start:end], re.M))
+
+
+async def test_the_api_doc_describes_the_listing_payload_in_both_directions(
+    client: httpx.AsyncClient,
+) -> None:
+    """#147. Every top level field, and every field of the `server` object,
+    documented; nothing documented that the server does not send. The error
+    table has had this guard since #58, and the payload is what an integrator
+    reads second."""
+    body = (await client.get("/api/projects", headers=HEADERS)).json()
+    served = set(body) | {f"server.{k}" for k in body["server"]}
+    documented = _listing_fields_documented()
+    assert documented, "no listing payload table parsed out of docs/api.md"
+    assert served - documented == set(), f"undocumented: {sorted(served - documented)}"
+    assert documented - served == set(), f"not served: {sorted(documented - served)}"
 
 
 async def test_start_returns_the_new_session(config: Config) -> None:
@@ -1436,11 +1484,22 @@ async def test_the_interface_asks_no_third_party_for_anything(
     Asserted against BOTH pages and as "no external origin at all" rather than
     "no Google": the next font, analytics snippet or icon set is the same
     defect, and naming one vendor tests the symptom.
+
+    **What LOADS, not what a person may tap.** A `<link href>` or any `src`
+    is fetched when the page opens; an `<a href>` fetches nothing until it is
+    tapped, and a tap is a decision. #147 put one anchor in the footer, to
+    the repository, and it is pinned here by value so a second one has to be
+    argued in this docstring rather than slipped in beside it. The session
+    links are built by `app.js` from what the agent published and never
+    appear in the served markup, which is why they are not in this set.
     """
     for path in ("/", "/grant"):
         body = (await client.get(path, headers=HEADERS)).text
-        external = re.findall(r"""(?:href|src)=["'](https?://[^"']+)""", body)
-        assert not external, f"{path} loads {external} from off this machine"
+        loaded = re.findall(r"""(?:<link[^>]+href|src)=["'](https?://[^"']+)""", body)
+        assert not loaded, f"{path} loads {loaded} from off this machine"
+        navigable = set(re.findall(r"""<a[^>]+href=["'](https?://[^"']+)""", body))
+        allowed = {"https://github.com/agigante80/hitchrail"} if path == "/" else set()
+        assert navigable == allowed, f"{path} links off this machine to {sorted(navigable)}"
 
 
 async def test_every_font_the_stylesheet_names_is_actually_served(

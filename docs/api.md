@@ -81,6 +81,21 @@ client that meant to be gentle is never one query parameter away from a kill.
 The graceful call returns as soon as the request is sent and reports progress
 over the event stream like every other state change.
 
+### The listing payload
+
+`GET /api/projects` answers one object. The fields, checked against the server
+in both directions by the suite:
+
+| Field | What it holds |
+|---|---|
+| `projects` | every project under every root, each in the shape the event stream sends |
+| `unsupported` | folders that cannot be projects, each with the rule it broke, capped |
+| `unsupported_total` | the true count behind that cap |
+| `memory` | the machine's `available_mb` and `total_mb`, null when unreadable |
+| `roots` | every configured root as `{label, path}`, one root still a list |
+| `server` | this server, as distinct from this machine |
+| `server.version` | the version the installed distribution carries, the string `hitchrail --version` prints; null from a bare checkout |
+
 ### `POST /api/sessions/{name}/answer`
 
 Body: `{"key": "Enter"}`. One key, from a fixed set, delivered to a session that

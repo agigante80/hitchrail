@@ -287,3 +287,31 @@ async def test_a_dialog_with_no_keyboard_is_centred_in_the_viewport(
         f"viewport, expected {expected:.0f}px: its bottom edge is at "
         f"{box['y'] + box['height']:.0f}px"
     )
+
+
+async def test_the_footer_names_the_version_and_links_to_the_source(
+    page: Page, server: Harness
+) -> None:
+    """#147. From the phone, "which build is this" used to need an SSH session.
+    The version is the same string `hitchrail --version` prints, and the link
+    is the one outbound link on the page besides the session links."""
+    import hitchrail
+
+    server.seed(stopped=["alpha"])
+    await page.goto(server.base)
+    about = page.locator("[data-about]")
+    await expect(about).to_contain_text(f"hitchrail {hitchrail.__version__}")
+    link = about.get_by_role("link", name="source")
+    await expect(link).to_have_attribute("href", "https://github.com/agigante80/hitchrail")
+    await expect(link).to_have_attribute("rel", "noopener noreferrer")
+    # The footer must not push the page into horizontal scroll at a narrow
+    # phone, even with a long development version string.
+    await page.set_viewport_size(ViewportSize(width=360, height=740))
+    await page.evaluate(
+        """() => { document.querySelector('[data-version]').textContent
+                    = 'hitchrail 1.10.0.dev0+g1234567'; }"""
+    )
+    overflow = await page.evaluate(
+        "() => document.documentElement.scrollWidth > window.innerWidth"
+    )
+    assert not overflow, "the footer pushed the page wider than the viewport at 360px"
