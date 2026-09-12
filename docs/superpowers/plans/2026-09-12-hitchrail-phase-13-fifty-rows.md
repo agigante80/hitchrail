@@ -84,7 +84,7 @@ is fetched already and a second round trip for a string is a round trip on a
 phone. The footer gains one line under what is there. `docs/api.md` is checked
 against the server both ways, so each field is documented or the suite fails.
 
-- [ ] **Task 67, #147.** The footer says which version this is and where it
+- [x] **Task 67, #147.** The footer says which version this is and where it
       came from. `hitchrail.__version__` on the listing payload, `null` when
       `importlib.metadata` cannot answer (a source checkout with no install),
       and the footer omits it rather than rendering a guess. One link, to the
@@ -92,13 +92,13 @@ against the server both ways, so each field is documented or the suite fails.
       only outbound link on the page besides the session links. Fits at 360px
       with a long dev version string.
 
-- [ ] **Task 68, #148.** Since when, as whom. `getpass.getuser()` falling back
+- [x] **Task 68, #148.** Since when, as whom. `getpass.getuser()` falling back
       to the numeric uid, and `time.time()` at startup, both read ONCE and held,
       asserted by a test that two listings taken apart in time report an
       identical start instant. Formatted in the viewer's timezone by the
       browser, absolute with the relative beside it. Same payload as task 67.
 
-- [ ] **Task 69, #243.** A session's memory ceiling, read from the tightest
+- [x] **Task 69, #243.** A session's memory ceiling, read from the tightest
       `memory.max` along its cgroup ancestry, never the leaf's: #172 measured
       that cgroups are inherited across fork, so a pid can sit in the scope of
       the shell that started the tmux server. A seam in `ram.py`, driven in
@@ -107,7 +107,7 @@ against the server both ways, so each field is documented or the suite fails.
       wrong file. `ram_limit_mb` on the session payload, and the cost with
       fifty running rows measured and written in the reader's docstring.
 
-- [ ] **Task 70, #90.** The row shows "1.4 GB of 4 GB" where a ceiling exists
+- [x] **Task 70, #90.** The row shows "1.4 GB of 4 GB" where a ceiling exists
       and says "no limit" plainly where none does, and the hard floor refusal
       names the largest session with its ceiling. Display only; the reading is
       task 69's and this cannot start before it.
