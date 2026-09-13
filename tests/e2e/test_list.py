@@ -613,3 +613,23 @@ async def test_a_running_row_says_plainly_when_nothing_bounds_it(
     row = page.locator(f'[data-project="{server.project("vessel")}"]')
     await expect(row.locator(".meta")).to_contain_text("no limit")
     await expect(row.locator(".meta")).not_to_contain_text(" of ")
+
+
+# -- Phase 13: fifty rows ----------------------------------------------------
+
+
+async def test_fifty_rows_across_five_roots_all_render(page: Page, server: Harness) -> None:
+    """The fixture the phase's premortem asked for, proved before anything is
+    built on it: fifty folders, five roots, every one a row, at the phone
+    viewport, with two of them running."""
+    server.seed_fifty(running=["p00", "p01"])
+    await page.goto(server.base)
+    rows = page.locator("[data-project]")
+    await expect(rows).to_have_count(50, timeout=15_000)
+    await expect(page.locator("[data-run-count]")).to_have_text("2 running")
+    labels = {
+        (await row.get_attribute("data-project") or "").split("~")[0]
+        for row in await rows.all()
+    }
+    assert labels == set(Harness.FIFTY_LABELS), labels
+
