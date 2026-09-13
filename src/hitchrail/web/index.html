@@ -8,6 +8,12 @@
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
+<!-- #149. Everything that acts on the whole list stays on screen: the bar
+     with New and the theme toggle, the stream notice, the tabs, the root
+     chips and the search. Sticky as one block, so a filter you cannot reach
+     is not a filter you stop using. On scroll the identity gives way, the
+     root line and the title's size, and the controls do not. -->
+<div class="top" data-top>
 <header class="bar">
   <div class="bar-titles">
     <h1>hitchrail</h1>
@@ -40,6 +46,7 @@
          autocomplete="off" data-search>
   <ul id="search-options" class="suggestions" role="listbox" aria-label="Matching folders"
       data-suggestions hidden></ul>
+</div>
 </div>
 
 <!-- No `aria-live` on the list. It was announced on every render, which used

@@ -843,3 +843,81 @@ async def test_the_search_matches_the_folder_and_not_the_root_label(
     await page.get_by_role("combobox", name="Search folders").fill("bravo")
     await expect(page.locator("[data-project]")).to_have_count(0)
     await expect(page.get_by_role("listbox")).to_be_hidden()
+
+
+# -- #149: the header stays ---------------------------------------------------
+
+# Measured on 2026-09-13 at 390x844 with five roots, before this change: the
+# bar 80px, the tabs 56, the chips 54, the search 68, 258 in all. Premortem 3
+# of the Phase 13 plan: every strip is individually right and together they
+# eat the screen, so the header may cost no more at rest than it did.
+TOP_AT_REST_BEFORE = 258
+
+
+async def _top_height(page: Page) -> float:
+    height = await page.locator("[data-top]").evaluate("e => e.getBoundingClientRect().height")
+    return float(height)
+
+
+async def test_new_and_the_filters_are_reachable_at_the_bottom_of_fifty_rows(
+    page: Page, server: Harness
+) -> None:
+    """#149. The header scrolled away with the list, so on a fifty row list
+    New and the filters were gone as soon as you started scrolling. The
+    controls that act on the whole list survive scrolling; the identity can
+    shrink."""
+    server.seed_fifty(running=["p00"])
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(50, timeout=15_000)
+    await page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+    await page.wait_for_timeout(200)
+
+    new = page.get_by_role("button", name="New")
+    box = await new.bounding_box()
+    assert box is not None and box["y"] >= 0 and box["y"] + box["height"] <= 844, box
+    for control in (
+        page.get_by_role("tab", name=re.compile("^Running")),
+        _chip(page, "bravo"),
+        page.get_by_role("combobox", name="Search folders"),
+    ):
+        b = await control.bounding_box()
+        assert b is not None and b["y"] >= 0 and b["y"] + b["height"] <= 844, b
+
+    await new.click()
+    await expect(page.get_by_label("Folder name")).to_be_visible()
+
+
+async def test_the_header_costs_no_more_at_rest_and_less_when_scrolled(
+    page: Page, server: Harness
+) -> None:
+    """Measured, not felt. At rest the top stack is no taller than it was
+    before it became sticky, and scrolled it is shorter: the root line goes
+    and the title shrinks, because identity can give way and controls
+    cannot."""
+    server.seed_fifty(running=["p00"])
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(50, timeout=15_000)
+    at_rest = await _top_height(page)
+    assert at_rest <= TOP_AT_REST_BEFORE, f"the header grew to {at_rest}px at rest"
+
+    await page.evaluate("() => window.scrollTo(0, 600)")
+    await page.wait_for_timeout(200)
+    scrolled = await _top_height(page)
+    assert scrolled < at_rest - 20, f"scrolled {scrolled}px is not under {at_rest}px by much"
+    assert await page.locator("[data-top]").evaluate("e => e.getBoundingClientRect().top") == 0
+
+    await page.evaluate("() => window.scrollTo(0, 0)")
+    await page.wait_for_timeout(200)
+    assert await _top_height(page) == at_rest, "the header did not come back at the top"
+
+
+async def test_a_short_list_leaves_no_gap_under_the_header(page: Page, server: Harness) -> None:
+    """With the list shorter than the viewport the sticky block must sit
+    exactly where the static one did: no gap and no double border."""
+    server.seed(stopped=["vessel"])
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(1)
+    top = page.locator("[data-top]")
+    top_bottom = await top.evaluate("e => e.getBoundingClientRect().bottom")
+    list_top = await page.locator("main").evaluate("e => e.getBoundingClientRect().top")
+    assert abs(top_bottom - list_top) < 1, (top_bottom, list_top)

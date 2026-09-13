@@ -1944,6 +1944,27 @@ async function refresh() {
   return result;
 }
 
+/* #149. Collapse the header once the list has scrolled under it, and bring
+   it back at the top. With hysteresis: collapsing takes ~30px out of the
+   page, and on a page barely taller than the viewport that alone can move
+   `scrollY` back under a single threshold and flip the header forever. So
+   the collapse waits for 48px and the return waits for under 16px, and a
+   page that cannot scroll that far never collapses at all. */
+function trackScroll() {
+  const root = document.documentElement;
+  const update = () => {
+    const scrolled = "scrolled" in root.dataset;
+    const y = window.scrollY;
+    if (!scrolled && y > 48 && root.scrollHeight - window.innerHeight > 96) {
+      root.dataset.scrolled = "";
+    } else if (scrolled && y < 16) {
+      delete root.dataset.scrolled;
+    }
+  };
+  window.addEventListener("scroll", update, { passive: true });
+  update();
+}
+
 /* Report how much of the viewport an on screen keyboard is covering (#103).
 
    Only Safari on iOS needs this. `interactive-widget=resizes-content` in the
@@ -1985,6 +2006,7 @@ function boot() {
   $("[data-new]")?.addEventListener("click", () => showNewFolder());
   document.addEventListener("visibilitychange", onVisible);
   openStream();
+  trackScroll();
   const search = $("[data-search]");
   search?.addEventListener("input", (event) => {
     state.query = event.target.value;

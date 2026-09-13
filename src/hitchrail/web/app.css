@@ -211,11 +211,28 @@ button.ghost, .btn.ghost { background: transparent; color: var(--muted); }
 button[disabled] { color: var(--muted-3); cursor: not-allowed; }
 
 /* -- the bar ------------------------------------------------------------ */
+/* #149. The whole top stack is one sticky block on the ground colour, so the
+   list scrolls under it with nothing showing through the gaps between its
+   strips. The safe area inset is paid here, once, since the viewport is
+   `viewport-fit=cover`. */
+.top {
+  position: sticky; top: 0; z-index: 3;
+  background: var(--ground);
+  padding-top: env(safe-area-inset-top);
+}
 .bar {
   display: flex; align-items: center; justify-content: space-between;
   gap: var(--gap); padding: 14px 16px;
   background: var(--surface); border-bottom: 1px solid var(--line);
 }
+/* Scrolled: the identity shrinks and the controls keep their size. The root
+   line is the first thing to go, because it is the one part of the bar a
+   person does not act on, and the title drops a size. `app.js` sets the
+   attribute with hysteresis, so a collapse that shortens the page cannot
+   flip itself back. */
+:root[data-scrolled] .bar { padding: 6px 16px; }
+:root[data-scrolled] .bar h1 { font-size: 18px; }
+:root[data-scrolled] .root { display: none; }
 .bar h1 { font-size: 22px; font-weight: 700; }
 .root { margin: 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
 .bar-actions { display: flex; gap: 8px; flex-shrink: 0; }
@@ -417,7 +434,7 @@ main { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
 /* -- desktop is the same data at a wider viewport, not a second interface */
 @media (min-width: 900px) {
   main { max-width: 1100px; margin: 0 auto; }
-  .bar, .tabs, .search, .unsupported { max-width: 1100px; margin-inline: auto; }
+  .bar, .tabs, .chips, .search, .unsupported { max-width: 1100px; margin-inline: auto; }
   .row[data-state="running"], .row[data-state="detached"], .row[data-state="stale"] {
     flex-direction: row; align-items: center;
   }
