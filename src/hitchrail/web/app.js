@@ -157,6 +157,11 @@ const state = {
   // reload and is intersected with the roots actually present on every
   // listing, so a stale or forged value can only ever show MORE rows.
   rootFilter: new Set(),
+  // #164. The identifier a suggestion chose, or null. Choosing is exact where
+  // typing is a substring: picking `vessel` from the list must not also show
+  // `vessel-social`, and the suggestion carried its root, so this is the
+  // whole identifier. Cleared the moment the text is edited again.
+  chosen: null,
 };
 
 const ROOTS_KEY = "hitchrail.roots";
@@ -193,9 +198,118 @@ function visibleProjects() {
     if (state.rootFilter.size > 0 && !state.rootFilter.has(splitProject(project.name).label)) {
       return false;
     }
-    if (query && !project.name.toLowerCase().includes(query)) return false;
+    // #164. The FOLDER, not the qualified string: roots have chips, and a
+    // search over `root~folder` matched the `work` root by coincidence and a
+    // folder called `homework` in any root on purpose nobody had.
+    if (state.chosen !== null) return project.name === state.chosen;
+    if (query && !splitProject(project.name).folder.toLowerCase().includes(query)) return false;
     return true;
   });
+}
+
+/* -- #164: the search suggests ----------------------------------------
+   The suggestions are the rows the query would show, from `state.projects`
+   and nothing fetched: the filter and the popup are two views of one query,
+   so the list underneath is always right while the popup is open. */
+const SUGGESTION_CAP = 8;
+let activeSuggestion = -1;
+
+function suggestions() {
+  return state.query.trim() ? visibleProjects().slice(0, SUGGESTION_CAP) : [];
+}
+
+function renderSuggestions() {
+  const box = $("[data-search]");
+  const list = $("[data-suggestions]");
+  if (!box || !list) return;
+  const items = suggestions();
+  if (items.length === 0 || document.activeElement !== box) {
+    closeSuggestions();
+    return;
+  }
+  if (activeSuggestion >= items.length) activeSuggestion = -1;
+  list.replaceChildren(
+    ...items.map((project, index) => {
+      const { label, folder } = splitProject(project.name);
+      const item = document.createElement("li");
+      item.id = `search-option-${index}`;
+      item.setAttribute("role", "option");
+      item.setAttribute("aria-selected", String(index === activeSuggestion));
+      item.textContent = folder;
+      if (severalRoots() && label) {
+        const where = document.createElement("span");
+        where.className = "row-root";
+        where.textContent = label;
+        item.append(where);
+      }
+      // `mousedown` rather than `click`: a click follows the input's blur, and
+      // the blur has closed the popup by then.
+      item.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        chooseSuggestion(project);
+      });
+      return item;
+    }),
+  );
+  list.hidden = false;
+  box.setAttribute("aria-expanded", "true");
+  const active = activeSuggestion >= 0 ? `search-option-${activeSuggestion}` : "";
+  if (active) box.setAttribute("aria-activedescendant", active);
+  else box.removeAttribute("aria-activedescendant");
+}
+
+function closeSuggestions() {
+  const box = $("[data-search]");
+  const list = $("[data-suggestions]");
+  if (list) {
+    list.hidden = true;
+    list.replaceChildren();
+  }
+  if (box) {
+    box.setAttribute("aria-expanded", "false");
+    box.removeAttribute("aria-activedescendant");
+  }
+  activeSuggestion = -1;
+}
+
+function chooseSuggestion(project) {
+  const box = $("[data-search]");
+  const { folder } = splitProject(project.name);
+  state.query = folder;
+  state.chosen = project.name;
+  if (box) box.value = folder;
+  closeSuggestions();
+  renderList();
+}
+
+/* The reference pattern's keys and nothing invented: Down and Up move the
+   active option, Enter chooses it, Escape closes the popup and leaves the
+   text, and a second Escape clears the field. Nothing is chosen by typing. */
+function onSearchKey(event) {
+  const items = suggestions();
+  const open = !$("[data-suggestions]")?.hidden;
+  if (event.key === "ArrowDown" && items.length) {
+    event.preventDefault();
+    activeSuggestion = (activeSuggestion + 1) % items.length;
+    renderSuggestions();
+  } else if (event.key === "ArrowUp" && items.length) {
+    event.preventDefault();
+    activeSuggestion = activeSuggestion <= 0 ? items.length - 1 : activeSuggestion - 1;
+    renderSuggestions();
+  } else if (event.key === "Enter" && open && activeSuggestion >= 0) {
+    event.preventDefault();
+    chooseSuggestion(items[activeSuggestion]);
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    if (open) {
+      closeSuggestions();
+    } else {
+      state.query = "";
+      state.chosen = null;
+      event.target.value = "";
+      renderList();
+    }
+  }
 }
 
 /* #146. One button per root, pressed or not, with how many rows it holds.
@@ -741,6 +855,10 @@ export function render() {
   renderTabs();
   renderChips();
   renderList();
+  // A listing or an event arriving while somebody is typing: the popup is a
+  // view of the same query and must not go on showing the old answer, or
+  // stay closed because the first keystroke beat the first listing.
+  renderSuggestions();
   renderUnsupported();
   renderFooter();
 }
@@ -1867,10 +1985,17 @@ function boot() {
   $("[data-new]")?.addEventListener("click", () => showNewFolder());
   document.addEventListener("visibilitychange", onVisible);
   openStream();
-  $("[data-search]")?.addEventListener("input", (event) => {
+  const search = $("[data-search]");
+  search?.addEventListener("input", (event) => {
     state.query = event.target.value;
+    state.chosen = null;
+    activeSuggestion = -1;
     renderList();
+    renderSuggestions();
   });
+  search?.addEventListener("keydown", onSearchKey);
+  search?.addEventListener("focus", renderSuggestions);
+  search?.addEventListener("blur", closeSuggestions);
   refresh();
 }
 

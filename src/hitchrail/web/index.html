@@ -29,8 +29,17 @@
      options, and roots are a set the operator chose. -->
 <div class="chips" role="group" aria-label="Filter by root" data-roots hidden></div>
 
+<!-- #164. An editable combobox with list autocomplete, the WAI-ARIA pattern
+     by that name: the input keeps focus, `aria-activedescendant` moves the
+     screen reader's attention through the listbox, nothing is chosen until
+     Enter or a tap. Hand built rather than a `<datalist>`, because a
+     suggestion has to say which root it is in and a datalist cannot. -->
 <div class="search">
-  <input type="search" role="searchbox" placeholder="Search folders" aria-label="Search folders" data-search>
+  <input type="search" role="combobox" placeholder="Search folders" aria-label="Search folders"
+         aria-autocomplete="list" aria-controls="search-options" aria-expanded="false"
+         autocomplete="off" data-search>
+  <ul id="search-options" class="suggestions" role="listbox" aria-label="Matching folders"
+      data-suggestions hidden></ul>
 </div>
 
 <!-- No `aria-live` on the list. It was announced on every render, which used

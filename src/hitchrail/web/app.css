@@ -292,7 +292,24 @@ button[disabled] { color: var(--muted-3); cursor: not-allowed; }
   background: var(--ink); border-color: var(--ink); color: var(--surface);
 }
 
-.search { padding: 12px 16px; }
+.search { padding: 12px 16px; position: relative; }
+/* #164. The suggestions, under the field and over the list. Capped in
+   height so a phone keyboard leaves some of them on screen. */
+.suggestions {
+  position: absolute; left: 16px; right: 16px; z-index: 2;
+  margin: 4px 0 0; padding: 4px 0; list-style: none;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(46, 37, 28, 0.18);
+  max-height: 40vh; overflow-y: auto;
+}
+.suggestions[hidden] { display: none; }
+.suggestions li {
+  min-height: var(--touch); padding: 0 14px;
+  display: flex; align-items: center; gap: 10px;
+  cursor: pointer;
+}
+.suggestions li[aria-selected="true"] { background: var(--surface-alt); }
+.suggestions .row-root { margin-left: auto; }
 .search input {
   width: 100%; min-height: var(--touch); padding: 0 14px;
   border: 1px solid var(--line); border-radius: var(--radius);

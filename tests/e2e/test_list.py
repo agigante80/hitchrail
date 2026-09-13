@@ -148,9 +148,9 @@ async def test_search_filters_and_says_so_when_nothing_matches(
     # without failing anything the non-browser suite runs: a search term that
     # matches nothing is a passing unit test and an empty list here. Any rename
     # of the seeds above has to come back to this line.
-    await page.get_by_role("searchbox").fill("med")
+    await page.get_by_role("combobox", name="Search folders").fill("med")
     await expect(page.locator("[data-project]")).to_have_count(1)
-    await page.get_by_role("searchbox").fill("zzz")
+    await page.get_by_role("combobox", name="Search folders").fill("zzz")
     await expect(page.get_by_text("Nothing matches")).to_be_visible()
     await expect(page.get_by_text("No folder here is called that.")).to_be_visible()
 
@@ -253,14 +253,14 @@ async def test_an_empty_list_announces_itself_once(page: Page, server: Harness) 
     await expect(region).to_have_count(1)
     await expect(region).to_have_text("")
 
-    await page.get_by_role("searchbox").fill("nothing-matches-this")
+    await page.get_by_role("combobox", name="Search folders").fill("nothing-matches-this")
     await expect(region).to_have_text("No folders match.")
     # Not the words the visible empty state uses. Two nodes carrying the same
     # string would be read out twice, and would put the page's own search test
     # into a strict mode violation, since `.offscreen` clips rather than hides.
     await expect(page.get_by_text("Nothing matches")).to_be_visible()
 
-    await page.get_by_role("searchbox").fill("")
+    await page.get_by_role("combobox", name="Search folders").fill("")
     await expect(region).to_have_text("")
 
 
@@ -755,3 +755,91 @@ async def test_the_empty_state_says_which_filter_emptied_the_list(
     empty = page.locator(".empty-body")
     await expect(empty).to_contain_text("bravo")
     await expect(empty).to_contain_text("running")
+
+
+# -- #164: the search suggests -----------------------------------------------
+
+
+async def test_typing_suggests_folders_and_a_tap_chooses_one(
+    page: Page, server: Harness
+) -> None:
+    """#164. On a phone keyboard the distinguishing part of a folder name is
+    the cost; a suggestion list under the field makes it one tap. Built from
+    the projects already in memory: no request produces a suggestion."""
+    server.seed_fifty(running=["p00"])
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(50, timeout=15_000)
+    requests: list[str] = []
+    page.on("request", lambda r: requests.append(r.url) if "/api/" in r.url else None)
+
+    box = page.get_by_role("combobox", name="Search folders")
+    await box.fill("p0")
+    listbox = page.get_by_role("listbox")
+    await expect(listbox).to_be_visible()
+    await expect(box).to_have_attribute("aria-expanded", "true")
+    options = listbox.get_by_role("option")
+    assert await options.count() > 0
+    # Each suggestion names its root, since there is more than one.
+    await expect(options.first).to_contain_text("main")
+
+    await options.first.click()
+    await expect(box).to_have_attribute("aria-expanded", "false")
+    # Choosing is exact: the one project the suggestion named, not every
+    # folder called p00 across the five roots and not p01 to p09 either.
+    await expect(page.locator("[data-project]")).to_have_count(1)
+    assert not [u for u in requests if "/api/projects" in u], "a suggestion cost a request"
+
+
+async def test_the_suggestion_list_follows_the_reference_keyboard_pattern(
+    page: Page, server: Harness
+) -> None:
+    """The ARIA editable combobox with list autocomplete: focus stays on the
+    input while `aria-activedescendant` moves attention, nothing is
+    auto-selected as you type, Down and Up move, Enter chooses, Escape closes
+    the popup and leaves the text, a second Escape clears the field."""
+    server.seed(stopped=["vessel", "vessel-social", "koala"])
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(3)
+    box = page.get_by_role("combobox", name="Search folders")
+    await box.fill("ves")
+    listbox = page.get_by_role("listbox")
+    await expect(listbox).to_be_visible()
+    # Typing selected nothing.
+    assert await box.get_attribute("aria-activedescendant") in (None, "")
+    await expect(page.locator("[data-project]")).to_have_count(2)
+
+    await box.press("ArrowDown")
+    active = await box.get_attribute("aria-activedescendant")
+    assert active, "Down did not move the active option"
+    focused = await page.evaluate("() => document.activeElement.getAttribute('role')")
+    assert focused == "combobox", "focus left the input"
+    await box.press("ArrowDown")
+    assert await box.get_attribute("aria-activedescendant") != active
+    await box.press("ArrowUp")
+    assert await box.get_attribute("aria-activedescendant") == active
+
+    await box.press("Enter")
+    await expect(box).to_have_attribute("aria-expanded", "false")
+    await expect(page.locator("[data-project]")).to_have_count(1)
+
+    await box.fill("ves")
+    await expect(listbox).to_be_visible()
+    await box.press("Escape")
+    await expect(box).to_have_attribute("aria-expanded", "false")
+    assert await box.input_value() == "ves"
+    await box.press("Escape")
+    assert await box.input_value() == ""
+    await expect(page.locator("[data-project]")).to_have_count(3)
+
+
+async def test_the_search_matches_the_folder_and_not_the_root_label(
+    page: Page, server: Harness
+) -> None:
+    """`includes` over the qualified string matched the `work` root for `work`
+    and a folder called `homework` in any root. Roots have chips now."""
+    server.seed_fifty(running=["p00"])
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(50, timeout=15_000)
+    await page.get_by_role("combobox", name="Search folders").fill("bravo")
+    await expect(page.locator("[data-project]")).to_have_count(0)
+    await expect(page.get_by_role("listbox")).to_be_hidden()
