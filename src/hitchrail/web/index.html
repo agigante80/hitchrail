@@ -22,6 +22,12 @@
 <p class="stream-note" role="status" data-stream-note></p>
 
 <nav class="tabs" role="tablist" aria-label="Filter projects" data-tabs></nav>
+<!-- #146. Roots, as chips: multi select, OR among themselves, AND with the
+     tab and the search. Present only with more than one root, the same rule
+     the row's root chip follows. A group of toggle buttons rather than more
+     tabs, because a segmented control is single select and expects three
+     options, and roots are a set the operator chose. -->
+<div class="chips" role="group" aria-label="Filter by root" data-roots hidden></div>
 
 <div class="search">
   <input type="search" role="searchbox" placeholder="Search folders" aria-label="Search folders" data-search>
@@ -40,7 +46,7 @@
 
 <template data-empty-template>
   <p class="empty-title">Nothing matches</p>
-  <p class="empty-body">No folder here is called that.</p>
+  <p class="empty-body" data-empty-reason>No folder here is called that.</p>
 </template>
 
 <section class="unsupported" data-unsupported hidden>
@@ -52,6 +58,10 @@
   <div class="mem-figure" data-mem-label></div>
   <div class="mem-track"><div class="mem-bar" data-mem-bar></div></div>
   <div class="run-count" data-run-count></div>
+  <!-- #146. Empty unless a filter hides rows. The footer is fixed, so this
+       is readable from anywhere in the list: an applied filter must stay
+       visible after the strip that set it has scrolled away. -->
+  <div class="shown" data-shown></div>
   <!-- #147. This server, not this machine: the one line that answers "which
        build is this" from the phone. The repository link is the only outbound
        link on the page besides the session links, and it is a real anchor for

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import tempfile
@@ -633,3 +634,124 @@ async def test_fifty_rows_across_five_roots_all_render(page: Page, server: Harne
     }
     assert labels == set(Harness.FIFTY_LABELS), labels
 
+
+# -- #146: filtering by root -------------------------------------------------
+
+
+def _chip(page: Page, label: str):  # type: ignore[no-untyped-def]
+    return page.locator("[data-roots]").get_by_role("button", name=re.compile(rf"^{label}\b"))
+
+
+async def test_root_chips_or_together_and_and_with_the_state_tab(
+    page: Page, server: Harness
+) -> None:
+    """#146. Roots compose with OR among themselves and with AND against the
+    state tab and the search, the convention a person already expects and
+    the one that is classically got backwards."""
+    server.seed_fifty(running=["p00", "p01"])
+    await page.goto(server.base)
+    rows = page.locator("[data-project]")
+    await expect(rows).to_have_count(50, timeout=15_000)
+
+    await _chip(page, "bravo").click()
+    await expect(rows).to_have_count(10)
+    await _chip(page, "charlie").click()
+    await expect(rows).to_have_count(20)
+    for row in await rows.all():
+        label = (await row.get_attribute("data-project") or "").split("~")[0]
+        assert label in {"bravo", "charlie"}, label
+
+    # AND with the state tab: nothing in bravo or charlie is running.
+    await page.get_by_role("tab", name=re.compile("^Running")).click()
+    await expect(rows).to_have_count(0)
+    # And the machine's own count is untouched by the filter.
+    await expect(page.locator("[data-run-count]")).to_contain_text("2 running")
+
+
+async def test_every_chip_deselected_is_all_and_never_none(page: Page, server: Harness) -> None:
+    """Zero rows for a full machine is the failure worth a named test: a
+    filter silently hiding a running session is the dangerous direction."""
+    server.seed_fifty(running=["p00"])
+    await page.goto(server.base)
+    rows = page.locator("[data-project]")
+    await expect(rows).to_have_count(50, timeout=15_000)
+    await _chip(page, "delta").click()
+    await expect(rows).to_have_count(10)
+    await _chip(page, "delta").click()
+    await expect(rows).to_have_count(50)
+
+
+async def test_a_single_root_renders_no_chip_strip(page: Page, server: Harness) -> None:
+    """The same rule the row chip follows (#121): a single root deployment
+    does not pay for a feature it is not using. And a selection stored by a
+    previous multi root configuration must not filter the one root to
+    nothing."""
+    server.seed(stopped=["vessel", "koala"])
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(2)
+    await page.evaluate("() => localStorage.setItem('hitchrail.roots', '[\"bravo\"]')")
+    await page.reload()
+    await expect(page.locator("[data-project]")).to_have_count(2)
+    assert await page.locator("[data-roots]").is_hidden()
+
+
+async def test_the_selection_survives_a_reload_and_a_vanished_root_is_dropped(
+    page: Page, server: Harness
+) -> None:
+    """A filter that survives a reload is the difference between a filter and
+    a fidget. The restored value is untrusted browser input: intersected
+    with the roots actually present, and an unparseable value is no filter
+    rather than an exception."""
+    server.seed_fifty(running=["p00"])
+    await page.goto(server.base)
+    rows = page.locator("[data-project]")
+    await expect(rows).to_have_count(50, timeout=15_000)
+    await _chip(page, "echo").click()
+    await expect(rows).to_have_count(10)
+
+    await page.reload()
+    await expect(rows).to_have_count(10, timeout=15_000)
+    await expect(_chip(page, "echo")).to_have_attribute("aria-pressed", "true")
+
+    await page.evaluate("() => localStorage.setItem('hitchrail.roots', '[\"echo\", \"gone\"]')")
+    await page.reload()
+    await expect(rows).to_have_count(10, timeout=15_000)
+    assert await page.locator("[data-roots] button[aria-pressed='true']").count() == 1
+
+    await page.evaluate("() => localStorage.setItem('hitchrail.roots', '{not json')")
+    errors: list[str] = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    await page.reload()
+    await expect(rows).to_have_count(50, timeout=15_000)
+    assert errors == [], errors
+
+
+async def test_the_applied_filter_is_visible_from_the_bottom_of_the_list(
+    page: Page, server: Harness
+) -> None:
+    """Applied filters must remain readable from the list screen itself: on a
+    phone the strip that set them has scrolled away. The fixed footer says
+    how many of the machine's rows are shown, so a filtered list never reads
+    as the whole machine."""
+    server.seed_fifty(running=["p00"])
+    await page.goto(server.base)
+    rows = page.locator("[data-project]")
+    await expect(rows).to_have_count(50, timeout=15_000)
+    await expect(page.locator("[data-shown]")).to_have_text("")
+    await _chip(page, "bravo").click()
+    await page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+    await expect(page.locator("[data-shown]")).to_have_text("10 of 50 shown")
+    assert await page.locator("[data-shown]").is_visible()
+
+
+async def test_the_empty_state_says_which_filter_emptied_the_list(
+    page: Page, server: Harness
+) -> None:
+    server.seed_fifty(running=["p00"])
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(50, timeout=15_000)
+    await _chip(page, "bravo").click()
+    await page.get_by_role("tab", name=re.compile("^Running")).click()
+    empty = page.locator(".empty-body")
+    await expect(empty).to_contain_text("bravo")
+    await expect(empty).to_contain_text("running")

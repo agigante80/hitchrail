@@ -159,7 +159,7 @@ async def test_the_new_folder_sheet_says_which_root_and_lets_you_change_it(
     ).to_have_attribute("data-state", "running", timeout=15_000)
 
     await page.get_by_role("button", name="New").click()
-    picker = page.get_by_label("Root")
+    picker = page.locator("[data-dialog]").get_by_label("Root", exact=True)
     await expect(picker).to_be_visible()
 
     await picker.select_option("personal")
@@ -180,4 +180,5 @@ async def test_one_root_gets_no_root_control_at_all(page: Page, server: Harness)
     await page.goto(server.base)
     await page.get_by_role("button", name="New").click()
     await expect(page.get_by_label("Folder name")).to_be_visible()
-    await expect(page.get_by_label("Root")).to_have_count(0)
+    sheet = page.locator("[data-dialog]")
+    await expect(sheet.get_by_label("Root", exact=True)).to_have_count(0)

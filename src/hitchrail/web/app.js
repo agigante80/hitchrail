@@ -152,7 +152,31 @@ const state = {
   server: { version: null, user: null, started_at: null },
   tab: "all",
   query: "",
+  // #146. Root labels to show; empty means all. A Set, never persisted as
+  // the source of truth: `localStorage` is a convenience that survives a
+  // reload and is intersected with the roots actually present on every
+  // listing, so a stale or forged value can only ever show MORE rows.
+  rootFilter: new Set(),
 };
+
+const ROOTS_KEY = "hitchrail.roots";
+
+function storedRoots() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ROOTS_KEY) ?? "[]");
+    return Array.isArray(parsed) ? parsed.filter((v) => typeof v === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberRoots() {
+  try {
+    localStorage.setItem(ROOTS_KEY, JSON.stringify([...state.rootFilter]));
+  } catch {
+    /* a private window; the filter still applies for this page */
+  }
+}
 
 /* `Stopped` is NOT the stopped STATE. The canvas computes it as
    `all.length - runNames.length`, so a stale or detached row belongs there:
@@ -165,9 +189,68 @@ function visibleProjects() {
   return state.projects.filter((project) => {
     if (state.tab === "running" && !isRunning(project)) return false;
     if (state.tab === "stopped" && isRunning(project)) return false;
+    // #146. OR among roots, AND with the rest: an empty set is no filter.
+    if (state.rootFilter.size > 0 && !state.rootFilter.has(splitProject(project.name).label)) {
+      return false;
+    }
     if (query && !project.name.toLowerCase().includes(query)) return false;
     return true;
   });
+}
+
+/* #146. One button per root, pressed or not, with how many rows it holds.
+   Nothing here is a server side parameter: it filters a list the client
+   already has in full, and the failure direction is showing MORE rows than
+   asked for, never fewer. Labels reach the DOM as text. */
+function renderChips() {
+  const strip = $("[data-roots]");
+  if (!strip) return;
+  const roots = state.roots ?? [];
+  if (roots.length <= 1) {
+    strip.hidden = true;
+    strip.replaceChildren();
+    return;
+  }
+  strip.hidden = false;
+  const counts = new Map();
+  for (const project of state.projects) {
+    const { label } = splitProject(project.name);
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  strip.replaceChildren(
+    ...roots.map((root) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.setAttribute("aria-pressed", String(state.rootFilter.has(root.label)));
+      button.dataset.root = root.label;
+      // A space before the count, so the accessible name is "bravo 10" and
+      // not "bravo10": read aloud, one is a root and a number and the other
+      // is a word nobody named anything.
+      button.append(`${root.label} `);
+      const count = document.createElement("span");
+      count.className = "tab-count";
+      count.textContent = String(counts.get(root.label) ?? 0);
+      button.append(count);
+      button.addEventListener("click", () => {
+        if (state.rootFilter.has(root.label)) state.rootFilter.delete(root.label);
+        else state.rootFilter.add(root.label);
+        rememberRoots();
+        render();
+      });
+      return button;
+    }),
+  );
+}
+
+/* Why the list is empty, in the filters' own words, so a person is not told
+   "nothing matches" by a filter they set and forgot. */
+function emptyReason() {
+  const where = state.rootFilter.size > 0 ? ` in ${[...state.rootFilter].join(", ")}` : " here";
+  const query = state.query.trim();
+  if (query) return `No folder${where} is called that.`;
+  if (state.tab === "running") return `Nothing${where} is running.`;
+  if (state.tab === "stopped") return `Nothing${where} is stopped.`;
+  return `No folder${where}.`;
 }
 
 function renderTabs() {
@@ -546,9 +629,19 @@ function renderList() {
   // same string put the page's own test into a strict mode violation, and
   // saying it twice is what a person navigating the page would then hear.
   announce(visible.length === 0 ? "No folders match." : "");
+  const shown = $("[data-shown]");
+  if (shown) {
+    shown.textContent =
+      visible.length === state.projects.length
+        ? ""
+        : `${visible.length} of ${state.projects.length} shown`;
+  }
   if (visible.length === 0) {
     const template = $("[data-empty-template]");
-    list.replaceChildren(template.content.cloneNode(true));
+    const empty = template.content.cloneNode(true);
+    const reason = empty.querySelector("[data-empty-reason]");
+    if (reason) reason.textContent = emptyReason();
+    list.replaceChildren(empty);
     return;
   }
   list.replaceChildren(...visible.map(renderRow));
@@ -646,6 +739,7 @@ function formatAgo(seconds) {
 
 export function render() {
   renderTabs();
+  renderChips();
   renderList();
   renderUnsupported();
   renderFooter();
@@ -1718,6 +1812,14 @@ async function refresh() {
   state.unsupportedTotal = result.body.unsupported_total;
   state.roots = roots;
   state.root = roots.length === 1 ? roots[0].path : "";
+  // #146. The remembered selection, intersected with what is actually here:
+  // a root removed from the command line drops out of the filter, and one
+  // root means no filter at all, so a selection stored by an earlier multi
+  // root configuration cannot filter the one root to nothing.
+  const present = new Set(roots.map((r) => r.label));
+  state.rootFilter = new Set(
+    roots.length > 1 ? [...state.rootFilter, ...storedRoots()].filter((l) => present.has(l)) : [],
+  );
   state.memory = result.body.memory;
   state.server = result.body.server ?? state.server;
   render();
