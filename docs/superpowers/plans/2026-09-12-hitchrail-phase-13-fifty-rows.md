@@ -120,7 +120,7 @@ header and the bulk stop are each proved at the size the phase is named for.
 Five rows prove nothing about fifty; the phase has that number in its title
 and no test had ever rendered it.
 
-- [ ] **Task 71, #146.** Root chips, multi-select, in a strip below the state
+- [x] **Task 71, #146.** Root chips, multi-select, in a strip below the state
       tabs and above the search, present only with more than one root. OR
       among roots, AND with the state tab and the search text. Persisted per
       viewer in `localStorage`, intersected with the roots actually present so
@@ -129,7 +129,7 @@ and no test had ever rendered it.
       full machine is the named failure. The empty state says which filter
       emptied the list. Not a server side parameter.
 
-- [ ] **Task 72, #164.** Suggestions under the search, from `state.projects`,
+- [x] **Task 72, #164.** Suggestions under the search, from `state.projects`,
       no request. The ARIA editable combobox with list autocomplete: focus
       stays on the input, `aria-activedescendant` moves attention, nothing is
       auto-selected, down, up, Enter and Escape as the reference pattern
@@ -137,7 +137,7 @@ and no test had ever rendered it.
       this follows task 71: roots have their own chips by then. Each
       suggestion shows its root when there is more than one.
 
-- [ ] **Task 73, #149.** The header collapses to a compact row on scroll and
+- [x] **Task 73, #149.** The header collapses to a compact row on scroll and
       keeps New and the theme toggle; the tabs, the chips and the search stay
       sticky beneath it. `env(safe-area-inset-*)` respected. The iframe idea
       is already recorded as impossible on the ticket with the measured
