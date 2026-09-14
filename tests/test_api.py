@@ -33,6 +33,7 @@ from hitchrail.config import Config
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
 from hitchrail.procs import ProcTable
+from hitchrail.security import UNAUTHENTICATED_ASSETS
 from hitchrail.server import create_app
 from hitchrail.tmux import Panes, TmuxUnavailable
 from support import DEFAULT_LABEL, make_config
@@ -1236,6 +1237,73 @@ async def test_the_logs_page_does_not_choose_a_file_by_name(client: httpx.AsyncC
     assert proj("vessel") not in response.text
 
 
+# -- #160: the mark, and the tile a phone makes of it -------------------------
+
+
+@pytest.mark.parametrize(
+    ("path", "content_type"),
+    [
+        ("/icon.svg", "image/svg+xml"),
+        ("/icon-180.png", "image/png"),
+        ("/icon-512.png", "image/png"),
+        ("/manifest.webmanifest", "application/manifest+json"),
+    ],
+)
+async def test_the_mark_and_the_manifest_are_served_without_a_token(
+    config: Config, engine: Engine, path: str, content_type: str
+) -> None:
+    """#160. The grant page is the first one a new phone ever loads and it must
+    not be nameless, and a touch icon cannot be a data URL. These four files
+    carry nothing from the machine: a drawing, and a manifest that names the
+    application. They are the ONLY assets served without a token, pinned in
+    `security.UNAUTHENTICATED_ASSETS` with the argument beside them."""
+    app = create_app(
+        engine=engine, config=make_config(config.roots[0].path, token="t0k"), bus=EventBus()
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://localhost"
+    ) as c:
+        response = await c.get(path, headers={"host": "localhost"})
+    assert response.status_code == 200, path
+    assert response.headers["content-type"].startswith(content_type)
+
+
+async def test_the_manifest_names_icons_that_exist(client: httpx.AsyncClient) -> None:
+    manifest = (await client.get("/manifest.webmanifest", headers=HEADERS)).json()
+    assert manifest["name"] == "hitchrail" and manifest["short_name"] == "hitchrail"
+    assert manifest["icons"], "no icons in the manifest"
+    for icon in manifest["icons"]:
+        served = await client.get(icon["src"], headers=HEADERS)
+        assert served.status_code == 200, icon
+        assert served.headers["content-type"].startswith(icon["type"]), icon
+
+
+@pytest.mark.parametrize("page_path", ["/", "/grant", "/logs/main~vessel"])
+async def test_every_document_page_carries_the_mark(
+    client: httpx.AsyncClient, page_path: str
+) -> None:
+    """A third page added later cannot ship nameless: every page the server
+    serves as a document links the icon, the touch icon, the manifest and a
+    theme colour."""
+    body = (await client.get(page_path, headers=HEADERS)).text
+    assert 'rel="icon" href="/icon.svg"' in body, page_path
+    assert 'rel="apple-touch-icon" href="/icon-180.png"' in body, page_path
+    assert 'rel="manifest" href="/manifest.webmanifest"' in body, page_path
+    assert 'name="theme-color"' in body, page_path
+
+
+def test_the_mark_is_one_drawing_with_nothing_to_fetch() -> None:
+    """Paths only: no raster, no font, no filter, no external reference. It has
+    to survive being scaled from 512 to 16 and being drawn by a favicon
+    renderer that does very little."""
+    svg = pages.WEB.joinpath("icon.svg").read_text()
+    assert "<path" in svg
+    # The namespace declaration is the one URL an SVG must carry.
+    body = svg.replace('xmlns="http://www.w3.org/2000/svg"', "")
+    for forbidden in ("<image", "<text", "<filter", "href=", "url(", "http"):
+        assert forbidden not in body, forbidden
+
+
 async def test_the_page_route_exists_and_is_html(client: httpx.AsyncClient) -> None:
     """`/` used to be a routing 404 and is now the interface. Asserted so the
     envelope test above cannot quietly start covering a route that moved."""
@@ -1335,8 +1403,12 @@ async def test_every_route_but_the_two_grant_ones_needs_a_token(
             for method in sorted(methods - {"HEAD", "OPTIONS"}):
                 if (method, path) in {("GET", "/grant"), ("POST", "/api/grant")}:
                     continue
+                # #160. The mark and the manifest are read without a token by
+                # design; the set is pinned in test_security_token.py, and the
+                # sweep asserts they are the ONLY assets so answered.
+                expected = 200 if path in UNAUTHENTICATED_ASSETS else 401
                 r = await c.request(method, path, headers={"host": "localhost"})
-                assert r.status_code == 401, f"{method} {path} -> {r.status_code}"
+                assert r.status_code == expected, f"{method} {path} -> {r.status_code}"
                 checked += 1
     assert checked >= 10, f"only {checked} routes were swept"
 

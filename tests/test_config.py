@@ -1202,7 +1202,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         "discovery.py": 440,
         # 409 to 418 for #78: two entries in the exemption and the argument
         # beside them, which the set's own rule requires of every entry.
-        "security.py": 418,
+        # 418 to 436 for #160: the unauthenticated asset set and the argument
+        # for it, which the rule beside the exemption requires of every entry.
+        "security.py": 436,
         # rather than one. A refusal handler is the shape this file is made of.
         # 513 to 517 for #120. The listing payload reports every configured
         # root as a labelled list rather than one path string, and the comment

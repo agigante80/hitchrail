@@ -1,3 +1,5 @@
+<img src="src/hitchrail/web/icon.svg" width="56" height="56" alt="">
+
 # hitchrail
 
 A web UI for starting and stopping headless Claude Code sessions across a

@@ -30,6 +30,13 @@ ASSETS = {
     "/app.css": ("app.css", "text/css; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/logs.js": ("logs.js", "text/javascript; charset=utf-8"),
+    # #160. The mark, the tile a phone makes of it, and the manifest that
+    # names the tile. Served without a token, the only assets that are: see
+    # `security.UNAUTHENTICATED_ASSETS` for the argument.
+    "/icon.svg": ("icon.svg", "image/svg+xml"),
+    "/icon-180.png": ("icon-180.png", "image/png"),
+    "/icon-512.png": ("icon-512.png", "image/png"),
+    "/manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json"),
     # Self hosted, not fetched from Google (#76). Six faces, and only six: the
     # ones the stylesheet can actually reach. See `app.css` for why the display
     # face needs 500 rather than 400, which is not obvious.

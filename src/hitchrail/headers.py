@@ -100,9 +100,15 @@ def _grant_csp() -> str:
     # Every header assertion still passed, because the header was exactly what
     # we said it would be. The browser tier is what found it, which is the
     # argument for that tier existing.
+    # #160. `img-src 'self'` and `manifest-src 'self'` for the mark and the
+    # manifest, the four files this page may fetch besides its one POST: they
+    # are served without a token and carry nothing from the machine, and a
+    # tab or a tile of the first page a phone loads must not be nameless.
+    # Everything else stays at 'none'.
     return (
         f"default-src 'none'; script-src {' '.join(scripts)}; "
-        f"style-src {' '.join(styles)}; connect-src 'self'; {_COMMON}"
+        f"style-src {' '.join(styles)}; connect-src 'self'; img-src 'self'; "
+        f"manifest-src 'self'; {_COMMON}"
     )
 
 

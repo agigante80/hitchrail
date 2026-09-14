@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- #160. The mark: a hitching rail, drawn as the list it holds. A row of
+       short posts on a baseline, one taller and filled: four projects
+       standing ready, one of them running. Direction 3 of the ticket,
+       chosen because it says what the product does rather than what it is
+       named after, and because it survives 16px. One drawing, paths only,
+       no raster, no font, no filter, on a 24 unit grid; the colour follows
+       the tab strip's theme through the media query below, since a favicon
+       inherits nothing from the page. -->
+  <style>
+    .ink { fill: #2E251C; }
+    .live { fill: #A8642E; }
+    @media (prefers-color-scheme: dark) {
+      .ink { fill: #F3ECE1; }
+      .live { fill: #D08A4A; }
+    }
+  </style>
+  <path class="ink" d="M3 19.5a1.25 1.25 0 0 1 1.25-1.25h15.5a1.25 1.25 0 1 1 0 2.5H4.25A1.25 1.25 0 0 1 3 19.5z"/>
+  <path class="ink" d="M5.5 11a1.5 1.5 0 0 1 3 0v5.5a1.5 1.5 0 0 1-3 0zM15.5 11a1.5 1.5 0 0 1 3 0v5.5a1.5 1.5 0 0 1-3 0z"/>
+  <path class="live" d="M10.25 6.75A1.75 1.75 0 0 1 12 5a1.75 1.75 0 0 1 1.75 1.75V16.5a1.75 1.75 0 0 1-3.5 0z"/>
+</svg>

@@ -25,6 +25,7 @@ from hitchrail.config import Config
 from hitchrail.security import (
     TOKEN_COOKIE,
     UNAUTHENTICATED,
+    UNAUTHENTICATED_ASSETS,
     middleware_stack,
     route_path,
     token_matches,
@@ -554,6 +555,26 @@ def test_the_exemption_is_exactly_these_entries() -> None:
         )
         == UNAUTHENTICATED
     )
+    # #160. The mark and the manifest, the only assets a phone needs before
+    # it has a token: a drawing and a name, nothing from the machine. Named
+    # here for the same reason as the routes above.
+    assert (
+        frozenset({"/icon.svg", "/icon-180.png", "/icon-512.png", "/manifest.webmanifest"})
+        == UNAUTHENTICATED_ASSETS
+    )
+
+
+@pytest.mark.integration
+async def test_an_unauthenticated_asset_is_only_ever_read(tmp_path: Path) -> None:
+    """GET and HEAD, nothing else: the exemption is for fetching a drawing,
+    and a POST to the icon's path is a request nothing should answer."""
+    app = Starlette(
+        routes=[Route("/icon.svg", _ok, methods=["GET", "POST"])],
+        middleware=middleware_stack(make_config(tmp_path, host="0.0.0.0", token=TOKEN)),
+    )
+    assert (await call(app, path="/icon.svg", headers=HOST)).status_code == 200
+    assert (await call(app, method="POST", path="/icon.svg", headers=HOST)).status_code == 401
+    assert (await call(app, path="/icon.svg/x", headers=HOST)).status_code == 401
 
 
 @pytest.mark.integration

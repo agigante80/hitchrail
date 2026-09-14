@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import re
 import time
 
 import pytest
@@ -205,8 +206,18 @@ async def test_kill_appears_once_the_wait_is_under_way_and_stays(
     # two samples with a guess between them is the wrong shape: it can miss a
     # gap either side. This polls until the wait actually ends, which is the
     # timeout screen arriving, and fails on the first frame the control is gone.
+    #
+    # **A wait has three ends, and this watches until any of them.** "No
+    # answer from" is the ordinary one. "Lost track of" is #81's: a listing
+    # that could not be read at the deadline, which on a loaded machine is a
+    # tmux call timing out, and the control then goes deliberately, because
+    # offering a kill on a reading that failed is the thing #81 forbids. It
+    # failed here twice in full runs on a loaded box before that was written
+    # down. "is waiting for you" is #101's, unreachable for this shim, named
+    # for completeness.
+    ended = dialog.get_by_text(re.compile("No answer from|Lost track of|is waiting for you"))
     watched = 0
-    while not await dialog.get_by_text("No answer from").is_visible():
+    while not await ended.is_visible():
         assert await kill.is_visible(), (
             f"the kill control vanished {watched * 100}ms into the wait, so "
             f"somebody reaching for it finds it gone"
