@@ -78,8 +78,13 @@ tickets stay, because each is the reason one badge lies; a third goes to its
 own phase or to Backlog.
 
 ## Phase: Phase 13: Fifty rows on a phone
-state: open
+state: done
 plan: docs/superpowers/plans/2026-09-12-hitchrail-phase-13-fifty-rows.md
+
+**Done, 2026-09-14.** Every task landed, reviewed in two bounded loops
+whose eleven findings were fixed as ordinary work before the close; the
+plan records the loops and where each stopped. The browser tier runs on a
+fifty row fixture now, which is the premortem's first rule made permanent.
 
 The interface stays usable when there are fifty projects across five roots,
 and says what it knows about each. Phase 11 is about states saying something

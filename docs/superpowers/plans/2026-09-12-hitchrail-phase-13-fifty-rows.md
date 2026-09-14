@@ -197,19 +197,37 @@ and no test had ever rendered it.
       the README. Nothing fetched off the machine, no service worker with the
       reason written down, and the wheel's asset check grows to include it.
 
+## Closed 2026-09-14, done
+
+Twelve tasks in five batches, all landed, each proved in the browser tier
+at the phone viewport and the ones the premortem named on the fifty row
+fixture. Then the review loop the earlier phases had not had: two loops,
+one over batches 1 to 4 (3 medium, 5 low in round 1; round 2 found four
+lows in round 1's fix and stopped at its bound) and one over batch 5
+(1 medium, 2 low; round 2 found a high in round 1's fix; round 3 found a
+low in round 2's fix, which tripped the wire). Eleven tickets came out of
+the loops, nine of them fixed as ordinary work before this close and two
+folded into the fixes, so the milestone closes empty. Two premortem
+rules fired during the work as designed: a third bar button grew the
+header and was refused, and a fifty row seed was the first thing built.
+
 ## Done looks like
 
-- [ ] Every task above is ticked, or is marked MOVED OUT with the issue that
+- [x] Every task above is ticked, or is marked MOVED OUT with the issue that
       carries it.
-- [ ] The fifty row fixture exists and tasks 71, 72, 73, 75 and 76 have a test
-      that runs against it at the phone viewport.
-- [ ] `docs/api.md` documents every field this phase added to the listing and
+- [x] The fifty row fixture exists and tasks 71, 72, 73, 75 and 76 have a test
+      that runs against it at the phone viewport. Met as written for 71, 73
+      and 76 and for 72's tap test; 72's keyboard test seeds three folders,
+      and 75's tests seed one, because a page for one project does not depend
+      on the row count. The box named 75 without allowing for that; ticked
+      with this note rather than rewritten to fit.
+- [x] `docs/api.md` documents every field this phase added to the listing and
       session payloads, and the round trip tests pass.
-- [ ] The premortem's four rules each have the assertion named below, in the
+- [x] The premortem's four rules each have the assertion named below, in the
       suite.
-- [ ] `uv run pytest -m screenshots` regenerated and committed, since the
+- [x] `uv run pytest -m screenshots` regenerated and committed, since the
       footer, the header, the chips and the badges all appear in them.
-- [ ] The roadmap's Phase 13 block says `state: done`, the milestone is closed,
+- [x] The roadmap's Phase 13 block says `state: done`, the milestone is closed,
       `scripts/check-phases.sh` is clean, and this plan has no unticked box
       without a marker.
 

@@ -32,6 +32,49 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+Phase 13: fifty rows on a phone. Upgrading is safe with no action. Four
+files are now served without a token, the mark and its manifest; nothing
+else about the boundary moves, and the argument is in `security.py`.
+
+### Added
+
+**Filter by root.** A strip of chips, one per root, present only with more
+than one root; chips OR together and AND with the state tab and the search;
+the selection survives a reload; the fixed footer says "10 of 50 shown"
+whenever a filter hides rows, and the empty state names the filter.
+
+**The search suggests.** Typing shows matching folders under the field, each
+naming its root, as an ARIA combobox: focus stays in the field, nothing is
+chosen by typing, Down, Up, Enter and Escape as the reference pattern says.
+Choosing is exact. The search now matches the folder, not the root label.
+
+**The header stays.** New, the tabs, the chips and the search are reachable
+at any scroll position; scrolled, the root line goes and the title shrinks.
+
+**Logs at a URL.** `GET /logs/<name>` shows one project's tail in a tab of
+its own, bookmarkable, polled rather than streamed, refusing a name exactly
+as the API does. The drawer stays and gains "Open in a tab"; on a desktop it
+is wide enough for eighty columns.
+
+**Stop all.** One control in the footer, composed from the stop each row has:
+one confirmation, the stops requested one at a time, one wait reporting per
+row, the bulk kill inside the wait as the escalation and never before a
+graceful attempt. A standalone Kill all was decided against.
+
+**The footer says which build this is, since when, and as whom**, and links
+to the source. A row's memory figure says what bounds it: "1.4 GB of 4 GB",
+or "no limit", read from the process's cgroup ancestry.
+
+**A mark, a favicon, a home screen tile and glyphs.** The badge words carry a
+shape beside them, seven Tabler icons vendored under MIT; the application
+has a mark of its own, a favicon, a touch icon and a manifest, so a tab and
+a home screen tile are no longer nameless.
+
+### Fixed
+
+**The logs routes answered a bare 500 for a stopped name whose root had
+been unmounted**; they say `root_unavailable` now, as the listing does.
+
 ## 0.6.0 - 2026-09-11
 
 Phase 11: the interface in every state. Upgrading is safe with no action.
