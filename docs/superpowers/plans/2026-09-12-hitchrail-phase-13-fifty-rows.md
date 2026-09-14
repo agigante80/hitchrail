@@ -182,7 +182,7 @@ and no test had ever rendered it.
 
 ### Batch 5: the marks, tasks 77 and 78
 
-- [ ] **Task 77, #150.** Seven glyphs for the badge and the protected row,
+- [x] **Task 77, #150.** Seven glyphs for the badge and the protected row,
       from Tabler, vendored as one inline `<symbol>` sprite with the licence
       text and the version recorded in the file, `currentColor`, sized in
       `em`. `detached` and `stale` are the pair to get right, and the test is
@@ -190,7 +190,7 @@ and no test had ever rendered it.
       shapes. `tests/test_palette.py` keeps the contrast honest whatever the
       glyphs do.
 
-- [ ] **Task 78, #160.** The mark, direction 3: a row of short vertical marks
+- [x] **Task 78, #160.** The mark, direction 3: a row of short vertical marks
       on a baseline, one taller or filled. One path-based SVG on a 24 or 32
       unit grid, checked at 16px in both themes, then the favicon on both
       pages, the touch icon, a minimal manifest, `theme-color`, and the top of
