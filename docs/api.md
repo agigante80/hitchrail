@@ -75,6 +75,7 @@ See `CHANGELOG.md`.
 | `GET` | `/api/sessions/{name}/logs` | tail of the pane |
 | `GET` | `/api/sessions/{name}/url` | the session's link, once it has one |
 | `GET` | `/api/events` | SSE stream of state changes |
+| `GET` | `/logs/{name}` | a page showing one project's tail, bookmarkable; refuses a name exactly as `/api/sessions/{name}/logs` does |
 
 **Graceful stop and kill are separate routes, not one route with a flag.** A
 client that meant to be gentle is never one query parameter away from a kill.

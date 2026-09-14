@@ -119,6 +119,13 @@ def policy_for(path: str) -> str:
         return PAGE_CSP
     if path == "/grant":
         return GRANT_CSP
+    # #151. The logs page, one segment under /logs and exactly one: it runs
+    # its own script from the same origin under the same self-only policy as
+    # `/`. Deeper paths get the API policy, so nothing mounted under it later
+    # inherits a document policy by accident. This hands out no inline hash,
+    # which is the hazard the exact comparison above exists to contain.
+    if re.fullmatch(r"/logs/[^/]+", path):
+        return PAGE_CSP
     return API_CSP
 
 

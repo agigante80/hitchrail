@@ -1155,15 +1155,31 @@ class Engine:
                 )
         return expired
 
-    def logs(self, name: str, lines: int = 40) -> str:
-        """The tail of a pane."""
+    def locate(self, name: str) -> Session:
+        """The row a client may address by name, or the refusal the API gives.
+
+        One function for the two routes that take a name and read rather than
+        act (#151): the logs API and the logs page. A page that resolved a
+        name more loosely than the API route beside it is the asymmetry that
+        gets missed, so there is one ladder and both climb it. Addressable
+        rather than startable, because reading a pane must keep working for a
+        session whose folder is gone; and a name with nothing live behind it
+        is `UnknownProject` only when the root has never heard of it, which
+        keeps "stopped" and "unknown" the two answers they are (#47).
+        """
         # A real guard now. This read `self.get(name)` with a comment saying it
         # stopped an unknown project returning empty output; `get` cannot
         # raise, so it did nothing but spend two subprocess calls arriving
-        # there. Addressable rather than startable: reading a pane must keep
-        # working for a session whose folder is gone.
+        # there.
         self._require_addressable(name)
-        if self.get(name).state is State.STOPPED:
+        session = self.get(name)
+        if session.state is State.STOPPED:
+            self._reject_if_not_a_project(name)
+        return session
+
+    def logs(self, name: str, lines: int = 40) -> str:
+        """The tail of a pane."""
+        if self.locate(name).state is State.STOPPED:
             # Not `_require_live`: that also refuses the self project, and
             # reading the log of the session hosting Hitchrail is harmless and
             # occasionally the only way to see what it is doing.
@@ -1172,7 +1188,6 @@ class Engine:
             # different answers. Without it a name with nothing behind it
             # returns "", which a client cannot tell from a pane that has
             # printed nothing yet.
-            self._reject_if_not_a_project(name)
             raise NotRunning(name)
         try:
             return self.tmux.capture_pane(name, lines=lines)

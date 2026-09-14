@@ -1072,7 +1072,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # and are opposite in effect, so the next review needs the reason.
         # 1198 to 1224 for #243: the ceiling seam and its per pid cache, and
         # the comment carrying the measured cost that justifies the cache.
-        "engine.py": 1224,
+        # 1224 to 1239 for #151: `locate`, the one ladder the logs API and
+        # the logs page both climb, lifted out of `logs` with its reasons.
+        "engine.py": 1239,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -1227,7 +1229,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # in create_app and sent on the listing, with the sentence saying why
         # not a route, and the account fallback with the sentence saying why
         # not $USER. Both are seams, so the signature grew too.
-        "server.py": 669,
+        # 669 to 687 for #151: the logs page route, whose docstring says why
+        # a page route resolves a name through the API's own function. #205
+        # carries the split and the seam is unchanged: this is a handler.
+        "server.py": 687,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

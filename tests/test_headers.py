@@ -111,6 +111,18 @@ async def test_the_grant_page_refuses_to_be_framed(tmp_path: Path) -> None:
 # -- the policy is per route, and exactly per route --------------------------
 
 
+def test_the_logs_page_gets_the_page_policy_and_only_one_segment_deep() -> None:
+    """#151. A page under `/logs/<name>` runs the same script as `/` and gets
+    the same policy: self only, no inline. One path segment exactly, so
+    nothing mounted deeper inherits a document policy; the grant page's
+    inline hashes are the hazard a prefix would hand out, and this hands out
+    none of those."""
+    assert policy_for("/logs/main~vessel") == PAGE_CSP
+    assert policy_for("/logs/x/y") == API_CSP
+    assert policy_for("/logs/") == API_CSP
+    assert policy_for("/logs") == API_CSP
+
+
 def test_the_grant_policy_is_not_handed_to_a_neighbour() -> None:
     """Exact comparison, like `security.route_path`. A prefix test would give
     the grant page's inline hashes to anything mounted under it later."""

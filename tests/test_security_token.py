@@ -82,6 +82,25 @@ async def test_no_token_configured_means_no_token_demanded(tmp_path: Path) -> No
     assert (await call(app, headers=HOST)).status_code == 200
 
 
+# -- #151: the logs page is behind the token like `/` ----------------------
+
+
+@pytest.mark.integration
+async def test_the_logs_page_demands_the_token_like_the_index_does(tmp_path: Path) -> None:
+    """A page route with a name in its path is still a page: no token and a
+    wrong token get the same answer `/` gives, and nothing about the
+    project leaks in the refusal."""
+    app = Starlette(
+        routes=[Route("/logs/{name}", _ok, methods=["GET"])],
+        middleware=middleware_stack(make_config(tmp_path, host="0.0.0.0", token=TOKEN)),
+    )
+    for headers in (HOST, {**HOST, "authorization": "Bearer wrong"}):
+        response = await call(app, path="/logs/main~vessel", headers=headers)
+        assert response.status_code == 401, headers
+        assert response.json()["code"] == "unauthorized"
+        assert "vessel" not in response.text
+
+
 # -- the header carrier ----------------------------------------------------
 
 

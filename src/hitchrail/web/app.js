@@ -1529,6 +1529,18 @@ async function paneView(project) {
 async function openLogs(project) {
   const waiting = project.awaiting_trust || project.awaiting_input;
   const extra = await paneView(project);
+  // #151. The same tail in a tab of its own, bookmarkable and sized by the
+  // window. The drawer stays: reading forty lines without leaving the list
+  // is the common case, and this is for watching one project while acting
+  // on another. Same origin, so no rel is needed, and a real anchor for the
+  // reason the session link is one: it is what long press and open in new
+  // tab reach for.
+  const tab = document.createElement("a");
+  tab.className = "btn ghost";
+  tab.href = `/logs/${encodeURIComponent(project.name)}`;
+  tab.target = "_blank";
+  tab.textContent = "Open in a tab";
+  extra.append(tab);
   showDialog({
     title: project.name,
     body: waiting

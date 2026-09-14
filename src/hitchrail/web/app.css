@@ -560,3 +560,14 @@ dialog[data-dialog]::backdrop { background: rgba(46, 37, 28, 0.55); }
 .answer-key:active {
   background: var(--line);
 }
+
+/* -- #151: the logs page ------------------------------------------------
+   The same bar and the same pane, on a page of its own: the browser window
+   is the size, so the pane fills it and the 46vh cap of the drawer does not
+   apply. `[data-stale]` marks a pane whose last read failed, so a person
+   knows the text is from before the refusal above it. */
+.logs-main { padding: 12px 16px; }
+.logs-full { max-height: none; min-height: 60vh; margin: 0; }
+.logs-full[data-stale] { opacity: 0.6; }
+.logs-page .stream-note { display: none; }
+

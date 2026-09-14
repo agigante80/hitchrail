@@ -291,3 +291,113 @@ async def test_the_other_dialogs_keep_their_size_at_both_widths(
         await expect(page.locator("[data-dialog]")).to_contain_text("Stop ")
         assert await _dialog_width(page) <= cap + 1, viewport
         await page.locator("[data-dialog]").get_by_role("button", name="Cancel").click()
+
+
+# -- #151: the logs page --------------------------------------------------------
+
+
+async def test_the_drawer_opens_the_same_tail_in_a_tab(page: Page, server: Harness) -> None:
+    """#151. A URL is what a popup and a docked panel are approximations of:
+    a bookmark, a browser tab, and open-in-new-tab from the drawer, all from
+    one route. The drawer stays for the common case."""
+    server.seed(running=["vessel"])
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row).to_be_visible()
+    await row.get_by_role("button", name="Logs").click()
+    link = page.locator("[data-dialog]").get_by_role("link", name="Open in a tab")
+    await expect(link).to_have_attribute("href", f"/logs/{server.project('vessel')}")
+
+    async with page.context.expect_page() as opened:
+        await link.click()
+    tab = await opened.value
+    await expect(tab.locator("[data-pane]")).to_contain_text(
+        "hitchrail-shim: started", timeout=15_000
+    )
+    await expect(tab.locator("[data-title]")).to_have_text(server.project("vessel"))
+    await expect(page.locator("[data-dialog]")).to_be_visible()  # the drawer is still there
+
+
+async def test_two_tabs_refresh_independently(page: Page, server: Harness) -> None:
+    server.seed(running=["vessel", "koala"])
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(2)
+    one = await page.context.new_page()
+    two = await page.context.new_page()
+    await one.goto(f"{server.base}/logs/{server.project('vessel')}")
+    await two.goto(f"{server.base}/logs/{server.project('koala')}")
+    await expect(one.locator("[data-pane]")).to_contain_text(
+        "hitchrail-shim: started", timeout=15_000
+    )
+    await expect(two.locator("[data-pane]")).to_contain_text(
+        "hitchrail-shim: started", timeout=15_000
+    )
+    await expect(one.locator("[data-title]")).to_have_text(server.project("vessel"))
+    await expect(two.locator("[data-title]")).to_have_text(server.project("koala"))
+    # And the list in the first tab is still the list.
+    await expect(page.locator("[data-project]")).to_have_count(2)
+
+
+async def test_the_tab_says_so_when_the_session_ends_under_it(
+    page: Page, server: Harness
+) -> None:
+    """A stale tail shown as if live is the lie the drawer already refuses.
+    The session is killed; within a poll the tab says it is not running and
+    dims the text it still shows, rather than pretending nothing changed."""
+    server.seed(running=["vessel"])
+    await page.goto(f"{server.base}/logs/{server.project('vessel')}")
+    await expect(page.locator("[data-pane]")).to_contain_text(
+        "hitchrail-shim: started", timeout=15_000
+    )
+    server.kill("vessel")
+    await expect(page.locator("[data-note]")).to_contain_text("is not running", timeout=15_000)
+
+
+async def test_the_tab_reports_an_unreadable_pane_and_never_an_empty_one(
+    page: Page, server: Harness
+) -> None:
+    """The honest refusal rule: "cannot read" and "printed nothing" are
+    different answers, and the page must give the first when the pane cannot
+    be read. The harness cannot break tmux without breaking it for real, so
+    the API is intercepted with the 503 the server sends when it cannot."""
+    server.seed(running=["vessel"])
+    await page.goto(f"{server.base}/logs/{server.project('vessel')}")
+    pane = page.locator("[data-pane]")
+    await expect(pane).to_contain_text("hitchrail-shim: started", timeout=15_000)
+
+    await page.route(
+        "**/api/sessions/**/logs*",
+        lambda route: route.fulfill(
+            status=503,
+            content_type="application/json",
+            body='{"code": "machine_unreadable", "message": "tmux could not be read"}',
+        ),
+    )
+    await page.get_by_role("button", name="Refresh").click()
+    await expect(page.locator("[data-note]")).to_contain_text("Cannot read the pane")
+    await expect(pane).not_to_have_text("The pane has printed nothing yet.")
+    await expect(pane).to_have_attribute("data-stale", "")
+
+
+async def test_the_tab_sends_a_browser_whose_token_stopped_working_to_the_grant_flow(
+    page: Page, server: Harness
+) -> None:
+    """A token revoked while the tab is open: the next poll is refused, and
+    the page goes to the grant flow rather than sitting on a stale tail or
+    landing on a raw JSON 401. Served fresh, the page is behind the token
+    exactly as `/` is, which the token tier asserts."""
+    server.seed(running=["vessel"])
+    await page.goto(f"{server.base}/logs/{server.project('vessel')}")
+    await expect(page.locator("[data-pane]")).to_contain_text(
+        "hitchrail-shim: started", timeout=15_000
+    )
+    await page.route(
+        "**/api/sessions/**/logs*",
+        lambda route: route.fulfill(
+            status=401,
+            content_type="application/json",
+            body='{"code": "unauthorized", "message": "a valid token is required"}',
+        ),
+    )
+    await page.get_by_role("button", name="Refresh").click()
+    await page.wait_for_url("**/grant", timeout=15_000)

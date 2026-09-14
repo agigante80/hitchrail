@@ -1176,6 +1176,63 @@ async def test_an_unreadable_available_figure_still_refuses(
     assert response.json()["code"] == "machine_unreadable"
 
 
+# -- #151: the logs page, a project name in a PAGE route's path for the first
+# time. A page that resolves a name more loosely than the API route beside it
+# is the asymmetry that gets missed, so every refusal the API gives is asked
+# of the page, and the happy path is asked as well.
+
+
+async def test_the_logs_page_renders_for_a_project(client: httpx.AsyncClient) -> None:
+    response = await client.get(f"/logs/{proj('vessel')}", headers=HEADERS)
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "logs.js" in response.text
+
+
+async def test_the_logs_page_renders_for_a_stopped_project(client: httpx.AsyncClient) -> None:
+    """Stopped is a state the page reports, not a refusal: the tab says the
+    session is not running rather than pretending the project is unknown."""
+    response = await client.get(f"/logs/{proj('network')}", headers=HEADERS)
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        proj("nope"),
+        "..%2f..%2fetc",
+        f"{proj('vessel')}%0a",
+        "main~.hidden",
+        "main~a/b",
+        "vessel",  # no root label at all
+    ],
+    ids=["unknown", "traversal", "newline", "leading-dot", "separator", "unqualified"],
+)
+async def test_the_logs_page_refuses_exactly_as_the_api_does(
+    client: httpx.AsyncClient, name: str
+) -> None:
+    """The same `{code, message}` shape, the same 404, and no page: an empty
+    log page for a name that is not a project reads as "printed nothing".
+    Each name here is one the API's own tests refuse, asked of the page."""
+    page = await client.get(f"/logs/{name}", headers=HEADERS)
+    api = await client.get(f"/api/sessions/{name}/logs", headers=HEADERS)
+    assert page.status_code == api.status_code == 404, (page.status_code, api.status_code)
+    # The same code as the API, whichever it is: a name with a slash in it
+    # never reaches either route, since `{name}` is one path segment, and
+    # both answer the router's own 404. The agreement is the property.
+    assert page.json()["code"] == api.json()["code"]
+    assert page.json()["code"] in {"unknown_project", "not_found"}
+    assert "text/html" not in page.headers["content-type"]
+
+
+async def test_the_logs_page_does_not_choose_a_file_by_name(client: httpx.AsyncClient) -> None:
+    """The name is validated and the page is the same file for every name;
+    the name reaches the served bytes nowhere. Asserted on the body, which
+    must carry no project name, because the page reads it from its own URL."""
+    response = await client.get(f"/logs/{proj('vessel')}", headers=HEADERS)
+    assert proj("vessel") not in response.text
+
+
 async def test_the_page_route_exists_and_is_html(client: httpx.AsyncClient) -> None:
     """`/` used to be a routing 404 and is now the interface. Asserted so the
     envelope test above cannot quietly start covering a route that moved."""

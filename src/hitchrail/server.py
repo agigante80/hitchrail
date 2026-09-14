@@ -461,6 +461,23 @@ def create_app(
         # project treats a guard that cannot execute as worse than none.
         return JSONResponse({"name": name, "text": text})
 
+    async def logs_page(request: Request) -> Response:
+        """The logs page (#151). A project name in a PAGE route's path, and the
+        first one, so the name is resolved by `engine.locate`, the same
+        function the logs API climbs, and refused with the same envelope: a
+        page that validated less strictly than the sub-route it mirrors is
+        the asymmetry that gets missed. A stopped project renders, and the
+        page says so; an unknown one refuses rather than rendering an empty
+        tail that reads as "printed nothing"."""
+        name = request.path_params["name"]
+        try:
+            await in_thread(engine.locate, name)
+        except eng.UnknownProject as exc:
+            return _error(404, "unknown_project", str(exc))
+        except eng.MachineUnreadable as exc:
+            return _error(503, "machine_unreadable", str(exc))
+        return await pages.logs_page(request)
+
     async def session_url(request: Request) -> Response:
         """The link, paid for on demand.
 
@@ -654,6 +671,7 @@ def create_app(
             Route(sec.GRANT_API_PATH, grant, methods=["POST"]),
             Route(sec.GRANT_PAGE_PATH, pages.grant_page, methods=["GET"]),
             Route("/", pages.page, methods=["GET"]),
+            Route("/logs/{name}", logs_page, methods=["GET"]),
             *[Route(p, pages.asset_route(p), methods=["GET"]) for p in pages.ASSETS],
         ],
         # OUTSIDE the three access controls, so a refusal carries the

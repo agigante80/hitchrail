@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>hitchrail logs</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body class="logs-page">
+<!-- #151. One project's tail at a URL you can bookmark. The project is read
+     from this page's own address by logs.js and never written into this
+     file: the server serves the same bytes for every name, which is what
+     keeps pages.py reading only files it chose. Polled, not streamed: the
+     roadmap defers streaming, and a tail on demand plus a refresh is enough
+     until it demonstrably is not. -->
+<header class="bar">
+  <div class="bar-titles">
+    <h1 data-title>hitchrail</h1>
+    <p class="root" data-subtitle>logs</p>
+  </div>
+  <div class="bar-actions">
+    <button type="button" class="ghost" data-refresh>Refresh</button>
+  </div>
+</header>
+<p class="stream-note" role="status" data-note></p>
+<main class="logs-main">
+  <pre class="log-pane logs-full" data-pane></pre>
+</main>
+<script type="module" src="/logs.js"></script>
+</body>
+</html>
