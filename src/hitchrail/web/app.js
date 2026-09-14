@@ -888,11 +888,16 @@ function closeDialog(onlyIfFor) {
 
 /* `actions` are given SAFEST FIRST. The column layout means first is topmost
    and furthest from the thumb, which is the placement section 7 asks for. */
-function showDialog({ title, body, actions, extra, forProject }) {
+function showDialog({ title, body, actions, extra, forProject, wide = false }) {
   const dialog = $("[data-dialog]");
   if (!dialog) return;
   dialog.replaceChildren();
   delete dialog.dataset.refusal;
+  // #168. Only the pane view asks for room, and only the stylesheet's wide
+  // breakpoint grants it: the confirmation and the rest of the stop sequence
+  // share this element and keep the phone's column at every width.
+  if (wide) dialog.dataset.wide = "";
+  else delete dialog.dataset.wide;
   if (forProject === undefined) {
     delete dialog.dataset.for;
   } else {
@@ -1107,6 +1112,7 @@ async function showTimedOut(project) {
         "It was asked to exit and answered with a prompt, shown below. Reply "
         + "with a key here or at the pane; Hitchrail has stopped waiting.",
       extra,
+      wide: true,
       forProject: project.name,
       // Kill is still here, and still last. The person may well want it, and
       // the warning is the same one: the difference is that they now know what
@@ -1529,6 +1535,7 @@ async function openLogs(project) {
       ? "this session is waiting for an answer"
       : "last 40 lines of the pane",
     extra,
+    wide: true,
     actions: [["Close", "ghost", () => closeDialog()]],
   });
 }

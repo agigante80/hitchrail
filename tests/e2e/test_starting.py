@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from playwright.async_api import Page, expect
+from playwright.async_api import Page, ViewportSize, expect
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from support import DEFAULT_LABEL
@@ -221,3 +221,73 @@ async def test_the_sheet_does_not_reimplement_the_name_rule(
     await page.get_by_role("button", name="Create").click()
     # The message is the server's, not one the page invented.
     await expect(page.locator("[data-dialog]")).to_contain_text("space")
+
+
+# -- #168: the pane view, sized for where it is ------------------------------
+
+PHONE = ViewportSize(width=390, height=844)
+DESKTOP = ViewportSize(width=1280, height=800)
+
+
+async def _dialog_width(page: Page) -> float:
+    width = await page.locator("[data-dialog]").evaluate("d => d.getBoundingClientRect().width")
+    return float(width)
+
+
+async def test_the_pane_view_is_wider_on_a_desktop_and_fits_eighty_columns(
+    page: Page, server: Harness
+) -> None:
+    """#168. A 420px column of terminal output on a 1280px screen, with most
+    of the window empty, and a pane drawn for an 80 column terminal folded
+    into it. Sized in `ch` against the pane's own font, because the useful
+    width is a column count and not a pixel count."""
+    server.seed(running=["vessel"])
+    await page.set_viewport_size(DESKTOP)
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row).to_be_visible()
+    await row.get_by_role("button", name="Logs").click()
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog.locator("pre")).to_contain_text("hitchrail-shim: started")
+
+    assert await _dialog_width(page) > 560, "the pane view is still the phone's 420px column"
+    # Eighty columns on one line: the text occupies one line box, not two.
+    # Counted from the range's client rects, which is what a wrap produces
+    # more of; a height comparison would have to know the pane's padding.
+    line_boxes = await dialog.locator("pre").evaluate(
+        """(pre) => { pre.textContent = 'x'.repeat(80);
+                    const range = document.createRange();
+                    range.selectNodeContents(pre);
+                    return range.getClientRects().length; }"""
+    )
+    assert line_boxes == 1, f"an 80 column line took {line_boxes} line boxes on the desktop"
+
+
+async def test_the_pane_view_is_unchanged_on_a_phone(page: Page, server: Harness) -> None:
+    server.seed(running=["vessel"])
+    await page.set_viewport_size(PHONE)
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row).to_be_visible()
+    await row.get_by_role("button", name="Logs").click()
+    await expect(page.locator("[data-dialog] pre")).to_be_visible()
+    assert await _dialog_width(page) <= 390 * 0.92 + 1
+
+
+async def test_the_other_dialogs_keep_their_size_at_both_widths(
+    page: Page, server: Harness
+) -> None:
+    """The pane view and the stop confirmation are the same `<dialog>`, reused
+    because the stop sequence escalates within it. Widening has to be a
+    modifier the pane view sets, or the confirmation becomes a large empty
+    box; this is the measurement that stops the shared rule being edited."""
+    server.seed(running=["vessel"])
+    for viewport, cap in ((PHONE, 390 * 0.92), (DESKTOP, 420)):
+        await page.set_viewport_size(viewport)
+        await page.goto(server.base)
+        row = page.locator(f'[data-project="{server.project("vessel")}"]')
+        await expect(row).to_be_visible()
+        await row.get_by_role("button", name="Stop").click()
+        await expect(page.locator("[data-dialog]")).to_contain_text("Stop ")
+        assert await _dialog_width(page) <= cap + 1, viewport
+        await page.locator("[data-dialog]").get_by_role("button", name="Cancel").click()
