@@ -1300,8 +1300,24 @@ def test_the_mark_is_one_drawing_with_nothing_to_fetch() -> None:
     assert "<path" in svg
     # The namespace declaration is the one URL an SVG must carry.
     body = svg.replace('xmlns="http://www.w3.org/2000/svg"', "")
-    for forbidden in ("<image", "<text", "<filter", "href=", "url(", "http"):
+    # What a favicon renderer cannot draw, AND what a browser would execute
+    # (#253): navigated to directly, /icon.svg is a document in this origin,
+    # served without a token, and its own policy is the second control; the
+    # first is that nothing executable ever enters the file.
+    for forbidden in (
+        "<image",
+        "<text",
+        "<filter",
+        "href=",
+        "url(",
+        "http",
+        "<script",
+        "<foreignObject",
+        "<use",
+        "<a ",
+    ):
         assert forbidden not in body, forbidden
+    assert not re.search(r"\son\w+=", body), "an event handler attribute"
 
 
 async def test_the_page_route_exists_and_is_html(client: httpx.AsyncClient) -> None:
@@ -1386,7 +1402,7 @@ def _token_app(tmp_path: pathlib.Path) -> tuple[Engine, Config]:
 GRANT_HEADERS = {"host": "localhost", "origin": "http://localhost:8787"}
 
 
-async def test_every_route_but_the_two_grant_ones_needs_a_token(
+async def test_every_route_but_the_grant_ones_and_the_mark_needs_a_token(
     tmp_path: pathlib.Path,
 ) -> None:
     """Swept off the REAL route table, so a route added later is covered by
@@ -1409,6 +1425,29 @@ async def test_every_route_but_the_two_grant_ones_needs_a_token(
                 expected = 200 if path in UNAUTHENTICATED_ASSETS else 401
                 r = await c.request(method, path, headers={"host": "localhost"})
                 assert r.status_code == expected, f"{method} {path} -> {r.status_code}"
+                checked += 1
+    assert checked >= 10, f"only {checked} routes were swept"
+
+
+async def test_every_route_refuses_a_forged_host(tmp_path: pathlib.Path) -> None:
+    """#251. The token sweep above has a twin here, and did not: the host
+    allowlist is applied app wide, so the property held by construction, and
+    this is what notices a route mounted outside the stack. Every route in
+    the REAL table, the token-exempt grant routes and the mark included,
+    answers 400 host_rejected to a rebound name, before anything else runs."""
+    engine, config = _token_app(tmp_path)
+    app = create_app(engine=engine, config=config, bus=EventBus())
+    checked = 0
+    async with client_for(engine, config) as c:
+        for route in app.routes:
+            path = getattr(route, "path", "")
+            methods = getattr(route, "methods", set()) or {"GET"}
+            if "{" in path:
+                path = path.replace("{name}", "vessel")
+            for method in sorted(methods - {"HEAD", "OPTIONS"}):
+                r = await c.request(method, path, headers={"host": "evil.example"})
+                assert r.status_code == 400, f"{method} {path} -> {r.status_code}"
+                assert r.json()["code"] == "host_rejected", f"{method} {path}"
                 checked += 1
     assert checked >= 10, f"only {checked} routes were swept"
 

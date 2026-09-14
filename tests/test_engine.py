@@ -3441,3 +3441,19 @@ def test_the_ceiling_cache_survives_two_threads_pruning_at_once(root: Path) -> N
     for thread in threads:
         thread.join()
     assert failures == [], failures
+
+
+def test_no_engine_built_with_defaults_reads_the_real_cgroup_tree(root: Path) -> None:
+    """#250. The guard for the autouse stub in conftest: an engine built with
+    no `ceiling_fn`, the way twenty-odd tests build one, resolves its
+    default through the stub and never through the real reader. If the
+    fixture is removed or renamed, this reaches `/proc` and fails on the
+    call count."""
+    import conftest
+
+    engine = Engine(make_config(root))
+    before = len(conftest.STUB_CEILING_CALLS)
+    assert engine._ceiling_mb(4242) is None
+    assert conftest.STUB_CEILING_CALLS[before:] == [4242], (
+        "an engine built with defaults did not reach the stub, so it read the real tree"
+    )

@@ -566,15 +566,26 @@ def test_the_exemption_is_exactly_these_entries() -> None:
 
 @pytest.mark.integration
 async def test_an_unauthenticated_asset_is_only_ever_read(tmp_path: Path) -> None:
-    """GET and HEAD, nothing else: the exemption is for fetching a drawing,
-    and a POST to the icon's path is a request nothing should answer."""
+    """GET and HEAD, nothing else: the exemption is for fetching a drawing.
+
+    Both halves asserted (#253): HEAD admitted as well as GET, and every
+    other method refused, `OPTIONS` among them, because `method in
+    SAFE_METHODS` is the one refactor that would admit it and read as tidy.
+    The trailing slash is the case `redirect_slashes` makes interesting and
+    the one #78 had to argue for the grant page."""
     app = Starlette(
-        routes=[Route("/icon.svg", _ok, methods=["GET", "POST"])],
+        routes=[Route("/icon.svg", _ok, methods=["GET", "POST", "PUT", "DELETE", "PATCH"])],
         middleware=middleware_stack(make_config(tmp_path, host="0.0.0.0", token=TOKEN)),
     )
-    assert (await call(app, path="/icon.svg", headers=HOST)).status_code == 200
-    assert (await call(app, method="POST", path="/icon.svg", headers=HOST)).status_code == 401
-    assert (await call(app, path="/icon.svg/x", headers=HOST)).status_code == 401
+    for method in ("GET", "HEAD"):
+        assert (
+            await call(app, method=method, path="/icon.svg", headers=HOST)
+        ).status_code == 200
+    for method in ("POST", "PUT", "DELETE", "PATCH", "OPTIONS"):
+        r = await call(app, method=method, path="/icon.svg", headers=HOST)
+        assert r.status_code == 401, method
+    for path in ("/icon.svg/", "/icon.svg/x", "/ICON.SVG"):
+        assert (await call(app, path=path, headers=HOST)).status_code == 401, path
 
 
 @pytest.mark.integration

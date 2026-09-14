@@ -388,7 +388,7 @@ async def test_a_forged_host_is_rejected_on_the_logs_page(tmp_path: Path) -> Non
     page route is covered by construction, and this proves exactly that: the
     stack, mounted on a synthetic app with the same route shape, refuses a
     forged Host before the handler runs. It cannot see the REAL route table;
-    `test_live_socket.py` drives the real app for that."""
+    `test_every_route_refuses_a_forged_host` in `test_api.py` sweeps that."""
 
     async def ok(request: httpx.Request) -> JSONResponse:
         return JSONResponse({"ok": True})

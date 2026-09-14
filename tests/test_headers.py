@@ -162,6 +162,25 @@ def test_the_api_policy_allows_nothing() -> None:
     assert "'self'" not in API_CSP
 
 
+def test_the_grant_policy_is_bounded_like_the_other_two() -> None:
+    """#253. `PAGE_CSP` and `API_CSP` had a bound on their sources and the
+    grant policy, the page with the key field, had only "no unsafe-inline".
+    Parsed rather than matched as a string, so a directive reordered by a
+    later edit does not pass by accident: nothing from elsewhere, the
+    default at none, and the three fetching directives exactly self."""
+    directives = {
+        name: values.split()
+        for name, _, values in (
+            d.strip().partition(" ") for d in GRANT_CSP.split(";") if d.strip()
+        )
+    }
+    assert directives["default-src"] == ["'none'"]
+    assert "http" not in GRANT_CSP
+    for name in ("img-src", "manifest-src", "connect-src"):
+        assert directives[name] == ["'self'"], name
+    assert "'unsafe-inline'" not in GRANT_CSP and "'unsafe-eval'" not in GRANT_CSP
+
+
 def test_the_page_policy_is_self_only_and_names_no_third_party() -> None:
     """#76 is what makes this possible: the faces are served from here now, so
     the policy needs no fonts.googleapis.com and no 'unsafe-inline'."""

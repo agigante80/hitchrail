@@ -50,6 +50,33 @@ def no_real_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPa
     )
 
 
+@pytest.fixture(autouse=True)
+def no_real_cgroups(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The same rule for the memory ceiling reader (#250).
+
+    `Engine()` with no `ceiling_fn` binds `ram.memory_ceiling_mb`, which reads
+    `/proc/<pid>/cgroup` and walks `/sys/fs/cgroup`. Twenty-odd engines in
+    the hermetic tier are built that way, so every running-row test read the
+    host's cgroup tree for a fake pid; the read failed on every machine so
+    far, which is why nothing had differed yet, and a pid collision would
+    change an answer. Stubbed for every test, the e2e harness included: it
+    passes its own reader explicitly and is unaffected, and no tier has a
+    reason to read the real tree, since every pid any tier uses is fake.
+
+    `test_no_engine_built_with_defaults_reads_the_real_cgroup_tree` is the
+    guard: an engine built with no seam reaches this stub and nothing else.
+    """
+    monkeypatch.setattr("hitchrail.ram.memory_ceiling_mb", _stub_ceiling)
+
+
+def _stub_ceiling(pid: int, **kw: object) -> int | None:
+    STUB_CEILING_CALLS.append(pid)
+    return None
+
+
+STUB_CEILING_CALLS: list[int] = []
+
+
 #: Every variable `src/hitchrail/` reads from the environment. The autouse
 #: fixture below removes all of them, and
 #: `test_every_environment_variable_the_product_reads_is_scrubbed` fails if a
