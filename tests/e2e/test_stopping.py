@@ -1013,3 +1013,28 @@ async def test_a_hidden_bulk_wait_stops_polling_once_every_row_exited(
     before = listings["n"]
     await page.wait_for_timeout(2500)
     assert listings["n"] <= before + 1, "a hidden wait kept polling after every row exited"
+
+
+async def test_a_wait_that_is_over_is_superseded_by_the_next_stop_all(
+    page: Page, server: Harness
+) -> None:
+    """Round 1 review of Phase 13, batch 5. One bulk at a time reopened ANY
+    bulk that was not done, so a wait past its deadline with rows not
+    finished, hidden, came back on the next Stop all offering only Hide and
+    Kill: a person who had started more sessions since could not request a
+    stop for them without killing the old ones. A wait that is no longer
+    ticking is over, and the next Stop all starts fresh."""
+    server.seed_fifty(running=["p00", "p01"], ignores_graceful_stop=True)
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(50, timeout=15_000)
+    await page.evaluate("() => window.__hitchrail.setStopPatience(1500)")
+    await page.get_by_role("button", name="Stop all").click()
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop all", exact=True).click()
+    await expect(_bulk(page).locator("li").first).to_contain_text(
+        "not finished", timeout=15_000
+    )
+    await dialog.get_by_role("button", name="Hide, keep stopping").click()
+
+    await page.get_by_role("button", name="Stop all").click()
+    await expect(dialog).to_contain_text("Stop 2 sessions?")

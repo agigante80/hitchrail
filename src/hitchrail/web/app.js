@@ -1346,10 +1346,12 @@ function renderStopAll() {
 }
 
 function confirmStopAll() {
-  // #247. One bulk at a time. A wait that was hidden is still running, and
-  // Stop all again reopens it rather than starting a second request loop
-  // over a fresh object under the first loop's ticker.
-  if (bulk !== null && !bulk.done) {
+  // #247. One bulk at a time. A wait that was hidden and is still ticking
+  // is reopened rather than started again under its own ticker. A wait
+  // whose ticker has stopped is OVER, done or not: its rows were reported,
+  // and reopening it forever would leave a person who has started more
+  // sessions since with no way to stop them short of killing the old ones.
+  if (bulk !== null && !bulk.done && bulk.ticking) {
     showBulkWait();
     return;
   }

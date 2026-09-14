@@ -11,6 +11,7 @@ The browser actually honouring the policy is the e2e tier's job.
 
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -25,10 +26,13 @@ from hitchrail.config import Config
 from hitchrail.headers import (
     API_CSP,
     GRANT_CSP,
+    ICON_CSP,
     PAGE_CSP,
     SecurityHeadersMiddleware,
+    _hash_of,
     policy_for,
 )
+from hitchrail.pages import WEB
 from hitchrail.security import middleware_stack
 from support import make_config
 
@@ -109,6 +113,27 @@ async def test_the_grant_page_refuses_to_be_framed(tmp_path: Path) -> None:
 
 
 # -- the policy is per route, and exactly per route --------------------------
+
+
+def test_the_mark_is_served_with_a_policy_that_admits_its_own_style() -> None:
+    """Round 1 review of Phase 13, batch 5. `/icon.svg` carries a `<style>` for
+    its light and dark fills, and it was served under `API_CSP`, whose
+    `default-src 'none'` has no `style-src`. Firefox enforces an SVG response's
+    own CSP on its inline style even when the SVG is drawn as a favicon, so
+    the mark rendered solid black there and vanished on a dark tab strip;
+    Chromium ignores an image's own policy, which is why the browser tier
+    could not see it. The icon gets a policy of its own with the hash of its
+    style block, the way the grant page does, and nothing else opened."""
+    svg = WEB.joinpath("icon.svg").read_text()
+    (style,) = re.findall(r"<style>(.*?)</style>", svg, re.S)
+    policy = policy_for("/icon.svg")
+    assert policy == ICON_CSP
+    assert policy.startswith("default-src 'none'")
+    assert f"style-src {_hash_of(style)}" in policy
+    assert "'unsafe-inline'" not in policy and "script-src" not in policy
+    # The PNGs and the manifest have no style and get the API policy.
+    for path in ("/icon-180.png", "/icon-512.png", "/manifest.webmanifest"):
+        assert policy_for(path) == API_CSP, path
 
 
 def test_the_logs_page_gets_the_page_policy_and_only_one_segment_deep() -> None:
