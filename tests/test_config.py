@@ -1074,7 +1074,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # the comment carrying the measured cost that justifies the cache.
         # 1224 to 1239 for #151: `locate`, the one ladder the logs API and
         # the logs page both climb, lifted out of `logs` with its reasons.
-        "engine.py": 1239,
+        # 1239 to 1248 for round 1 of the Phase 13 review: the ceiling prune
+        # from a snapshot, with the race it replaces written where it was.
+        "engine.py": 1248,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon

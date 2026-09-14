@@ -211,9 +211,18 @@ class Engine:
         # Bounded: the table is a snapshot and pids come and go, so entries
         # older than the TTL are dropped here rather than kept for the life of
         # the process.
-        self._ceilings = {
-            p: v for p, v in self._ceilings.items() if now - v[0] < ram.CEILING_TTL_S
-        }
+        #
+        # **From a snapshot, with `pop`, and not by rebuilding the dict.** The
+        # listing runs on the request executor and the attention sweep on its
+        # own thread, and both arrive here. A comprehension iterating the live
+        # dict while the other thread inserted raised "dictionary changed size
+        # during iteration", reproduced under two threads in the suite: a 500
+        # on the route the page polls hardest. `list(items())` completes under
+        # the GIL and `pop` is atomic, so no lock is needed for a cache whose
+        # worst case is one extra read.
+        for p, v in list(self._ceilings.items()):
+            if now - v[0] >= ram.CEILING_TTL_S:
+                self._ceilings.pop(p, None)
         return ceiling
 
     def _derive(

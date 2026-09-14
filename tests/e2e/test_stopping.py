@@ -899,3 +899,52 @@ async def test_the_bulk_dialog_holds_fifty_rows_inside_the_viewport(
     kill = dialog.get_by_role("button", name="Do not wait, kill them all")
     kb = await kill.bounding_box()
     assert kb is not None and kb["y"] + kb["height"] <= 700, kb
+
+
+async def test_a_bulk_wait_whose_listings_failed_offers_no_kill_on_a_guess(
+    page: Page, server: Harness
+) -> None:
+    """Round 1 review of Phase 13: #81's rule, reintroduced by the bulk wait.
+    The single row wait tracks whether its LAST listing could be read and
+    shows "lost track" with no kill when it could not; the bulk wait
+    discarded that answer and said "have not finished" over listings that
+    had all failed, offering the kill on a guess."""
+    server.seed_fifty(running=["p00", "p01"], ignores_graceful_stop=True)
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(50, timeout=15_000)
+    await page.evaluate("() => window.__hitchrail.setStopPatience(2000)")
+    await page.get_by_role("button", name="Stop all").click()
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop all", exact=True).click()
+    await expect(_bulk(page).locator("li").nth(1)).to_contain_text("requested", timeout=15_000)
+    server.break_machine()
+    try:
+        await expect(dialog).to_contain_text("cannot read the machine", timeout=15_000)
+        assert "not finished" not in (await dialog.inner_text())
+        kill = dialog.get_by_role("button", name="Do not wait, kill them all")
+        assert await kill.count() == 0
+    finally:
+        server.heal_machine()
+
+
+async def test_a_bulk_wait_finishes_when_the_last_row_exits_after_the_deadline(
+    page: Page, server: Harness
+) -> None:
+    """Round 1 review of Phase 13. After the deadline the wait stopped
+    ticking, and rows that exited later flipped to "exited" on the stream
+    while the body kept saying "has not finished" and Close never came."""
+    server.seed_fifty(running=["p00"], ignores_graceful_stop=True)
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(50, timeout=15_000)
+    await page.evaluate("() => window.__hitchrail.setStopPatience(1500)")
+    await page.get_by_role("button", name="Stop all").click()
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop all", exact=True).click()
+    first = _bulk(page).locator("li").first
+    await expect(first).to_contain_text("not finished", timeout=15_000)
+
+    server.kill("p00")  # announced on the stream, as an exit at the pane would be
+    await expect(_bulk(page).locator("li").first).to_contain_text("exited", timeout=15_000)
+    await expect(dialog).to_contain_text("Done.")
+    await expect(dialog.get_by_role("button", name="Close")).to_be_visible()
+    assert "not finished" not in (await dialog.inner_text())

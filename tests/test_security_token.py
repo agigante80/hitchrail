@@ -88,8 +88,11 @@ async def test_no_token_configured_means_no_token_demanded(tmp_path: Path) -> No
 @pytest.mark.integration
 async def test_the_logs_page_demands_the_token_like_the_index_does(tmp_path: Path) -> None:
     """A page route with a name in its path is still a page: no token and a
-    wrong token get the same answer `/` gives, and nothing about the
-    project leaks in the refusal."""
+    wrong token get the same answer `/` gives, and nothing about the project
+    leaks in the refusal. On a synthetic app with the route's shape, so this
+    proves the stack's behaviour for that shape; that the REAL route is
+    behind the stack is `test_every_route_but_the_two_grant_ones_needs_a_token`
+    in `test_api.py`, which sweeps the real table."""
     app = Starlette(
         routes=[Route("/logs/{name}", _ok, methods=["GET"])],
         middleware=middleware_stack(make_config(tmp_path, host="0.0.0.0", token=TOKEN)),

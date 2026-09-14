@@ -385,8 +385,10 @@ def test_the_bound_address_is_always_reachable() -> None:
 @pytest.mark.integration
 async def test_a_forged_host_is_rejected_on_the_logs_page(tmp_path: Path) -> None:
     """#151. The allowlist is applied app wide rather than per route, so a new
-    page route is covered by construction. Asserted anyway: this is what
-    catches somebody later mounting it outside the stack."""
+    page route is covered by construction, and this proves exactly that: the
+    stack, mounted on a synthetic app with the same route shape, refuses a
+    forged Host before the handler runs. It cannot see the REAL route table;
+    `test_live_socket.py` drives the real app for that."""
 
     async def ok(request: httpx.Request) -> JSONResponse:
         return JSONResponse({"ok": True})

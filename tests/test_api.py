@@ -121,6 +121,9 @@ def make_engine(
         tmux=tmux,
         procs_fn=procs,
         meminfo_fn=lambda: mem,
+        # Never the real cgroup reader in this tier: the answer would depend
+        # on the machine, which Phase 10's rule 2 forbids.
+        ceiling_fn=lambda pid: None,
         clock=clock,
         sleep=clock.sleep,
     )

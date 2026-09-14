@@ -102,7 +102,12 @@ def engine_for(
     self_project: str | None = None,
     agent_config: Path | None = None,
     clock: FakeClock | None = None,
-    ceiling_fn: Callable[[int], int | None] | None = None,
+    # Hermetic by default (round 1 review of Phase 13): `None` here used to
+    # mean the real reader, so every running-row test read the host's
+    # `/proc/<pid>/cgroup` and its answer depended on the machine, the same
+    # leak the `sessions_dir` note below is about. A test that wants a
+    # ceiling passes one.
+    ceiling_fn: Callable[[int], int | None] = lambda pid: None,
 ) -> tuple[Engine, FakeTmux]:
     tmux = FakeTmux(sessions=sessions, foreign=foreign)
     # Pinned INSIDE the temporary root. Without it `Config` defaults to
@@ -3406,3 +3411,33 @@ def test_the_ceiling_is_read_once_per_pid_per_ttl(root: Path) -> None:
     clock.now += ram.CEILING_TTL_S + 1
     engine.get(proj("vessel"))
     assert len(calls) == 2, "a listing past the TTL kept a stale ceiling"
+
+
+def test_the_ceiling_cache_survives_two_threads_pruning_at_once(root: Path) -> None:
+    """Round 1 review of Phase 13. The listing runs on the request executor and
+    the attention sweep on its own, and both ask `_ceiling_mb`. The prune
+    rebuilt the dict by iterating it, so two threads expiring the same pids
+    could raise `dictionary changed size during iteration`, a 500 on the
+    route the page polls hardest. Driven hard: many pids, a TTL that has
+    always expired, two threads, and the exceptions collected rather than
+    hoped against."""
+    clock = FakeClock()
+    engine, _ = engine_for(root, clock=clock, ceiling_fn=lambda pid: 1)
+    clock.now = ram.CEILING_TTL_S * 1000  # far past every entry's expiry
+    failures: list[BaseException] = []
+
+    def hammer(offset: int) -> None:
+        try:
+            for i in range(8000):
+                engine._ceiling_mb(offset + (i % 3000))
+        except BaseException as exc:  # the point is to see it
+            failures.append(exc)
+
+    import threading
+
+    threads = [threading.Thread(target=hammer, args=(n,)) for n in (0, 1500)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert failures == [], failures

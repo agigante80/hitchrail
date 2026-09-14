@@ -1355,6 +1355,12 @@ async function beginStopAll(rows) {
     rows: rows.map((p) => ({ name: p.name, status: "queued", message: "" })),
     deadline: null,
     done: false,
+    // #81's rule, for the bulk case: whether the LAST listing could be read.
+    // A deadline reached on failed listings is "lost track", not "not
+    // finished", and offers no kill, because that would be proposing to end
+    // processes the page cannot currently see.
+    lastReadOk: true,
+    lost: false,
   };
   showBulkWait();
   for (const row of bulk.rows) {
@@ -1390,6 +1396,7 @@ function bulkStatus(row) {
   if (row.status !== "requested") return row.status;
   const current = state.projects.find((p) => p.name === row.name);
   if (current && current.state === "stopped") return "exited";
+  if (bulk.lost) return "unknown";
   if (bulk.deadline !== null && Date.now() >= bulk.deadline && !bulk.done) return "not finished";
   return "requested";
 }
@@ -1407,16 +1414,15 @@ function bulkInFlight() {
 async function awaitBulk() {
   const tick = async () => {
     if (bulk === null) return;
-    await refresh();
+    bulk.lastReadOk = (await refresh()).ok;
     renderBulk();
-    if (bulkInFlight().length === 0) {
-      bulk.done = true;
-      renderBulk();
-      return;
-    }
+    if (bulk.done) return;
     if (Date.now() >= bulk.deadline) {
       // Reports, and does not kill on its own: the engine refuses to
       // escalate by itself and the interface must not do it on its behalf.
+      // And if the last reading failed, it does not even report "not
+      // finished": the answer is that the page cannot tell.
+      if (!bulk.lastReadOk) bulk.lost = true;
       renderBulk();
       return;
     }
@@ -1459,6 +1465,12 @@ function showBulkWait() {
 function renderBulk() {
   const dialog = $("[data-dialog]");
   if (bulk === null || !dialog?.open || !("bulk" in dialog.dataset)) return;
+  // Done is decided HERE, on every render, and not only by the ticking wait:
+  // a row that exits after the deadline arrives on the stream, and the
+  // dialog that had stopped ticking must still finish.
+  if (!bulk.done && !bulk.lost && bulk.deadline !== null && bulkInFlight().length === 0) {
+    bulk.done = true;
+  }
   for (const row of bulk.rows) {
     const item = dialog.querySelector(`[data-bulk-rows] li[data-name="${CSS.escape(row.name)}"]`);
     if (!item) continue;
@@ -1471,6 +1483,25 @@ function renderBulk() {
   const unfinished = bulk.rows.filter((row) => bulkStatus(row) === "not finished").length;
   if (bulk.done) {
     if (body) body.textContent = "Done.";
+    const actions = dialog.querySelector(".dialog-actions");
+    if (actions && actions.children.length !== 1) {
+      const close = document.createElement("button");
+      close.type = "button";
+      close.className = "ghost";
+      close.textContent = "Close";
+      close.addEventListener("click", () => {
+        bulk = null;
+        closeDialog();
+      });
+      actions.replaceChildren(close);
+    }
+  } else if (bulk.lost) {
+    if (body) {
+      body.textContent =
+        "The stops were requested. This browser cannot read the machine, so "
+        + "it cannot say which sessions finished.";
+    }
+    // NO kill, for the reason `showLostTrack` gives.
     const actions = dialog.querySelector(".dialog-actions");
     if (actions && actions.children.length !== 1) {
       const close = document.createElement("button");
