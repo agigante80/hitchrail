@@ -166,7 +166,7 @@ and no test had ever rendered it.
 
 ### Batch 4: many rows at once, task 76
 
-- [ ] **Task 76, #240.** Stop all, composed from the stop each row has, no new
+- [x] **Task 76, #240.** Stop all, composed from the stop each row has, no new
       route. The set is every `running` row that is not protected; stale rows
       get Clear and are left out. One confirmation naming the count, DELETEs
       issued **in sequence**, never in parallel: `request_stop` captures the
