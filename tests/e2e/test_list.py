@@ -821,6 +821,12 @@ async def test_the_suggestion_list_follows_the_reference_keyboard_pattern(
     await box.press("Enter")
     await expect(box).to_have_attribute("aria-expanded", "false")
     await expect(page.locator("[data-project]")).to_have_count(1)
+    # #248. A choice is the end of the interaction: the next render, which
+    # any event or listing produces, must not reopen the popup with the one
+    # row that was just chosen. Forced here rather than waited for.
+    await page.evaluate("() => window.__hitchrail.render()")
+    await expect(box).to_have_attribute("aria-expanded", "false")
+    assert await page.get_by_role("listbox").is_hidden()
 
     await box.fill("ves")
     await expect(listbox).to_be_visible()
@@ -946,5 +952,11 @@ async def test_every_badge_carries_its_glyph_and_keeps_its_word(
         href = await use.get_attribute("href")
         assert href == f"#badge-{word}", (word, href)
         assert await badge.locator("svg").get_attribute("aria-hidden") == "true"
+        # #252. A drawn box, not only a reference: a sprite hidden in a way
+        # the engine refuses to draw from would pass every other line here.
+        box = await badge.locator("svg").bounding_box()
+        assert box is not None and box["width"] > 8 and box["height"] > 8, (word, box)
+        drawn = await badge.locator("svg").evaluate("s => s.getBBox && s.getBBox().width > 0")
+        assert drawn, f"the {word} glyph draws nothing"
         seen[word] = href or ""
     assert {"running", "stopped", "stale", "detached"} <= set(seen), seen

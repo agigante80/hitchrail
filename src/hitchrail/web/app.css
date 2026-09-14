@@ -384,10 +384,12 @@ main { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
    less motion. */
 .badge-glyph { width: 1.1em; height: 1.1em; flex-shrink: 0; fill: none; stroke: currentColor;
   stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-/* The sprite itself takes no room. Zero sized rather than `display: none`,
-   which some engines take as "draw nothing from here" for a `<use>`; and a
-   stylesheet rule rather than an inline style, which the page's CSP refuses
-   and the browser tier caught. */
+/* The sprite itself takes no room, and this rule is the ONE thing hiding it
+   (#252): zero sized rather than `display: none`, which some engines take
+   as "draw nothing from here" for a `<use>`, so the markup carries no
+   `hidden` attribute, which would have been exactly that; and a stylesheet
+   rule rather than an inline style, which the page's CSP refuses and the
+   browser tier caught. The glyph test asserts a drawn box. */
 [data-badge-sprite] { position: absolute; width: 0; height: 0; overflow: hidden; }
 @media (prefers-reduced-motion: no-preference) {
   .badge[data-badge="stopping"] .badge-glyph { animation: badge-spin 1.2s linear infinite; }

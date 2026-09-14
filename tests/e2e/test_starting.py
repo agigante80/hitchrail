@@ -401,3 +401,37 @@ async def test_the_tab_sends_a_browser_whose_token_stopped_working_to_the_grant_
     )
     await page.get_by_role("button", name="Refresh").click()
     await page.wait_for_url("**/grant", timeout=15_000)
+
+
+async def test_the_logs_page_opens_on_the_newest_lines_and_keeps_a_readers_place(
+    page: Page, server: Harness
+) -> None:
+    """#246. The page scrolls, not the pane, so the scroll-to-bottom line was a
+    no-op and a tab opened on the oldest of two hundred lines. Opened at the
+    bottom now; a refresh keeps a reader who scrolled up where they were, the
+    way a terminal does, and follows the tail only while they were at it."""
+    server.seed(running=["vessel"])
+    await page.goto(f"{server.base}/logs/{server.project('vessel')}")
+    pane = page.locator("[data-pane]")
+    await expect(pane).to_contain_text("hitchrail-shim: started", timeout=15_000)
+    # A render with more text than a screen holds, as two hundred lines is,
+    # through the page's own render step.
+    long = (
+        "() => window.__logs.paint("
+        "Array.from({length: 400}, (_, i) => 'line ' + i).join('\\n'))"
+    )
+    await page.evaluate(long)
+    at_bottom = (
+        "() => window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4"
+    )
+    assert await page.evaluate(at_bottom), "the page did not open on the newest lines"
+
+    # A reader who scrolled up is left where they are by the next render.
+    await page.evaluate("() => window.scrollTo(0, 200)")
+    await page.evaluate(long)
+    assert await page.evaluate("() => window.scrollY") == 200, "a refresh moved the reader"
+
+    # And one who scrolled back to the tail follows it again.
+    await page.evaluate("() => window.scrollTo(0, document.documentElement.scrollHeight)")
+    await page.evaluate(long.replace("400", "600"))
+    assert await page.evaluate(at_bottom), "the tail was not followed"

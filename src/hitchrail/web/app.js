@@ -215,6 +215,10 @@ const SUGGESTION_CAP = 8;
 let activeSuggestion = -1;
 
 function suggestions() {
+  // #248. A choice is the end of the interaction: the chosen row is the one
+  // match and it is on the list already, so the popup stays closed until
+  // the text is edited again, whatever renders in between.
+  if (state.chosen !== null) return [];
   return state.query.trim() ? visibleProjects().slice(0, SUGGESTION_CAP) : [];
 }
 
@@ -1416,7 +1420,11 @@ async function beginStopAll(rows) {
     }
     renderBulk();
   }
+  // The same two fields `killRemaining` resets, and for the same reason
+  // (#254): a ticker started by a kill during the request phase can give up
+  // before the last request returns, and a fresh wait must not start over.
   bulk.deadline = Date.now() + stopTimeoutMs();
+  bulk.over = false;
   await awaitBulk();
 }
 

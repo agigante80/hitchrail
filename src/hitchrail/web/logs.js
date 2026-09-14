@@ -80,9 +80,34 @@ async function refresh() {
   }
   note("");
   delete pane.dataset.stale;
-  pane.textContent = body.text || "The pane has printed nothing yet.";
-  pane.scrollTop = pane.scrollHeight;
+  paint(body.text || "The pane has printed nothing yet.");
 }
+
+/* #246. The PAGE scrolls, not the pane, so scrolling the pane was a no-op
+   and a tab opened on the oldest of two hundred lines. The first render
+   lands on the newest; later ones follow the tail only while the reader
+   was already at it, the way a terminal does, and leave a person who
+   scrolled up to read where they are. */
+let first = true;
+
+function atBottom() {
+  const root = document.documentElement;
+  return window.innerHeight + window.scrollY >= root.scrollHeight - 4;
+}
+
+/* Decided BEFORE the text changes: whether the reader was at the tail is a
+   fact about the page as it was, and the new text moves the bottom. */
+function paint(text) {
+  const following = first || atBottom();
+  $("[data-pane]").textContent = text;
+  if (following) window.scrollTo(0, document.documentElement.scrollHeight);
+  first = false;
+}
+
+/* The one test seam: the render step itself, so the tier can hand it more
+   text than a screen holds without a shim that prints that much, and the
+   test cannot drift from the path a real refresh takes. */
+window.__logs = { paint };
 
 function schedule() {
   if (timer !== null) clearInterval(timer);
