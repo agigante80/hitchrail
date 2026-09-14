@@ -240,6 +240,11 @@ def test_the_private_group_convention_is_read_from_the_passwd_database(
     # `usermod -aG alice bob`: private in name only, and the audit's case.
     monkeypatch.setattr(grp, "getgrgid", lambda gid: group("alice", ["bob"]))
     assert not settings._group_is_private(1000, 1000)
+    # The owner listed in their own group is still alone (review round 2).
+    monkeypatch.setattr(grp, "getgrgid", lambda gid: group("alice", ["alice"]))
+    assert settings._group_is_private(1000, 1000)
+    monkeypatch.setattr(grp, "getgrgid", lambda gid: group("alice", ["alice", "bob"]))
+    assert not settings._group_is_private(1000, 1000)
 
     def unknown(uid: int) -> pwd.struct_passwd:
         raise KeyError(uid)
@@ -289,6 +294,18 @@ def test_a_toggle_persists_first_and_only_then_applies(tmp_path: Path) -> None:
     assert _two_roots(tmp_path, state).active_roots() == ()
     prefs.set_roots_enabled({"work": True})
     assert settings.read_state(state).hidden == frozenset()
+    assert [r.label for r in prefs.active_roots()] == ["work"]
+
+
+def test_a_request_that_changes_nothing_writes_nothing(tmp_path: Path) -> None:
+    """`PATCH {}`, or a toggle to the state a root is already in, on a config
+    directory that cannot be written: no write, no 503, because there was
+    nothing to say (review round 2)."""
+    state = tmp_path / "blocked" / "state.toml"
+    (tmp_path / "blocked").write_text("a file where the directory should be")
+    prefs = _two_roots(tmp_path, state)
+    prefs.apply()
+    prefs.apply(roots={"work": True})
     assert [r.label for r in prefs.active_roots()] == ["work"]
 
 

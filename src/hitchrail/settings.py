@@ -113,15 +113,18 @@ def _group_is_private(gid: int, uid: int) -> bool:
     no other members. A file handed to a shared group, `users` or `staff`,
     fails the first two; a private group
     that `usermod -aG alice bob` has given a second member is private in name
-    only and fails the third (`gr_mem` lists exactly the supplementary
-    members, which is exactly the people who are not the owner).
+    only and fails the third (`gr_mem` lists the supplementary members, and
+    everybody there but the owner is somebody else).
     """
     try:
         owner = pwd.getpwuid(uid)
         group = grp.getgrgid(gid)
     except KeyError:
         return False
-    return owner.pw_gid == gid and group.gr_name == owner.pw_name and not group.gr_mem
+    # The owner listed in their own group (`alice:x:1000:alice`, which LDAP
+    # `memberUid` and `gpasswd -a alice alice` both produce) is still alone.
+    others = set(group.gr_mem) - {owner.pw_name}
+    return owner.pw_gid == gid and group.gr_name == owner.pw_name and not others
 
 
 def state_path_for(config_path: Path) -> Path:
@@ -379,7 +382,11 @@ class Preferences:
             state = replace(self._state, hidden=frozenset(hidden))
             if stop_timeout is not None:
                 state = replace(state, stop_timeout=stop_timeout)
-            self._persist(state)
+            # Nothing to say, nothing written: `PATCH {}` on a read only
+            # config directory answered 503 for a request that changed
+            # nothing (Phase 14 review, round 2).
+            if state != self._state:
+                self._persist(state)
 
     def _persist(self, state: State) -> None:
         if self._path is not None:
