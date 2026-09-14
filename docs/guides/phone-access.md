@@ -70,11 +70,14 @@ the exposure plainly before choosing it:
   not administer. On a cafe or hotel network it is everybody.
 - **The token is the only control.** There is no second factor and no source
   address restriction. Someone who obtains the token has a shell as you.
-- **It is HTTP.** The grant fragment stays in the browser and reaches no server
-  log, which is real and is not the whole story: the cookie it becomes crosses
-  your network in cleartext on every subsequent request. Anyone positioned to
-  read that traffic can replay it. Put a TLS terminating proxy in front of it
-  if that matters, and if you are doing that, route 1 is less work.
+- **It is HTTP, unless you give it a certificate.** The grant fragment stays
+  in the browser and reaches no server log, which is real and is not the
+  whole story: the cookie it becomes crosses your network in cleartext on
+  every subsequent request. Anyone positioned to read that traffic can replay
+  it. `--tls-cert` and `--tls-key` end that from the server itself, and the
+  section below says where a certificate for a private address comes from;
+  a TLS terminating proxy is the other way, and if you are installing one,
+  route 1 is less work.
 - **It is a decision with an expiry date you will not be told about.** This
   choice is correct while you are on a network you trust. Nothing warns you
   when the machine joins one you do not, and a laptop's whole job is joining
@@ -82,6 +85,49 @@ the exposure plainly before choosing it:
 
 That last point is why this is second rather than first. It is not less secure
 in the moment. It is a decision that silently stops being the one you made.
+
+### 2a. HTTPS on that address, without a second daemon
+
+uvicorn terminates TLS itself, so the two flags are the whole of the server
+side:
+
+```sh
+hitchrail --host 192.168.1.10 \
+  --tls-cert ~/.config/hitchrail/box.pem \
+  --tls-key  ~/.config/hitchrail/box-key.pem
+```
+
+Both or neither: one without the other refuses at startup naming the missing
+one, and a certificate that cannot be loaded refuses at startup too, before
+anything is bound, so the failure is never plain HTTP on the port you believed
+was TLS. With TLS on, the banner prints `https://` links, the cookie is
+`Secure`, and the origin check expects `https://192.168.1.10:8787`, all
+derived from the flags; `--allow-origin` stays for a proxy in front, whose
+scheme and port are its own.
+
+**Where the certificate comes from is the real work, and it is on the phone.**
+A public CA cannot issue for `192.168.1.10` or for a `.local` name, because
+there is no way to prove control of a private address to a public issuer. A
+bare self signed certificate produces a browser warning you would learn to
+click through, which trains exactly the wrong reflex on the one tool where a
+warning matters. The practical answer is a local certificate authority, and
+[mkcert](https://github.com/FiloSottile/mkcert) is the tool for it:
+
+```sh
+mkcert -install                       # a local CA, trusted on THIS machine
+mkcert -cert-file box.pem -key-file box-key.pem 192.168.1.10 box.lan
+```
+
+Then the CA has to be trusted on the phone as well, or the phone gets the
+warning the whole exercise exists to avoid: `mkcert -CAROOT` prints where
+`rootCA.pem` is, and that file goes onto the phone and into its trust store
+(Android: Settings, Security, Encryption and credentials, Install a
+certificate, CA certificate; iOS: open the file, install the profile, then
+enable it under Certificate Trust Settings). The CA's private key stays on the
+machine that made it, and anything that trusts the CA trusts every
+certificate it signs, which is why route 1 stays first: `tailscale serve`
+hands you a genuinely trusted certificate for the tailnet name with no CA to
+install anywhere.
 
 ## 3. Never the wildcard
 
@@ -114,6 +160,7 @@ difference.
 | It to keep working when the laptop moves | 1, overlay |
 | No inbound port open anywhere | 1, overlay |
 | Nothing installed, one trusted network, you accept the exposure above | 2, named address |
+| That, and the cookie encrypted, with a CA to install on the phone | 2a, a certificate |
 | To reach it from one interface | 2, name that interface |
 | To reach it from every interface | Nothing on this page. Reconsider. |
 

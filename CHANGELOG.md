@@ -52,6 +52,14 @@ narrows what the file allows. A hidden root's projects leave the listing,
 which now names them in `hidden_roots`; its sessions keep running and still
 answer by name.
 
+**HTTPS from the server itself.** `--tls-cert` and `--tls-key`, both or
+neither, refused at startup before the bind when one is missing or the pair
+cannot be loaded, so the failure is never plain HTTP on the port you believed
+was TLS. The origins the server derives, the banner's links and the cookie's
+`Secure` flag follow the scheme. `docs/guides/phone-access.md` route 2a says
+where a certificate for a private address comes from, and that the CA has to
+be trusted on the phone; Tailscale stays first.
+
 **A settings page.** The footer's "settings" link, and `GET /api/config`
 behind it: every value with where it came from, the token never. The stop
 wait can be set there, persists in `state.toml`, and the page's own wait now

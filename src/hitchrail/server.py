@@ -380,6 +380,8 @@ def create_app(
             "self_project": shown("self_project", config.self_project),
             "agent_binary": shown("agent_binary", config.agent_binary),
             "session_prefix": shown("session_prefix", config.session_prefix),
+            # The certificate's path, or none: what "is this HTTPS" needs.
+            "tls": shown("tls", _text(config.tls_cert)),
             "hard_floor_mb": shown("hard_floor_mb", config.hard_floor_mb),
             "soft_floor_mb": shown("soft_floor_mb", config.soft_floor_mb),
             "session_mb": shown("session_mb", config.session_mb),
@@ -389,10 +391,8 @@ def create_app(
             # The path that was READ, carried on Config, not derived back
             # from `state_path`: `--config /etc/hitchrail/prod.toml` showed
             # `/etc/hitchrail/config.toml`, a file never opened.
-            "config_file": shown(
-                "config", str(config.config_path) if config.config_path else None
-            ),
-            "state_file": {"value": str(config.state_path) if config.state_path else None},
+            "config_file": shown("config", _text(config.config_path)),
+            "state_file": {"value": _text(config.state_path)},
         }
 
     async def grant(request: Request) -> Response:
@@ -425,7 +425,7 @@ def create_app(
             # be.
             return _error(401, "unauthorized", "a valid token is required")
         response = JSONResponse({"ok": True})
-        sec.set_token_cookie(response, config.token)
+        sec.set_token_cookie(response, config.token, secure=config.tls)
         return response
 
     async def start(request: Request) -> Response:

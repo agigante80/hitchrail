@@ -123,6 +123,22 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     # in v1 deliberately: they are a safety net rather than a preference, and
     # an operator who wants a different one is usually asking for a machine
     # with more memory.
+    # #152. TLS from the server itself, so a LAN deployment needs no second
+    # daemon. Both or neither, refused in `Config` before the bind.
+    parser.add_argument(
+        "--tls-cert",
+        default=None,
+        type=Path,
+        metavar="FILE",
+        help="a PEM certificate; serve HTTPS with it. Needs --tls-key",
+    )
+    parser.add_argument(
+        "--tls-key",
+        default=None,
+        type=Path,
+        metavar="FILE",
+        help="the PEM private key for --tls-cert",
+    )
     parser.add_argument(
         "--session-prefix",
         # `None` rather than "hr-", so the file's value is used when the flag
@@ -248,6 +264,7 @@ def build_config(args: argparse.Namespace) -> Config:
         "agent_binary": source("agent_binary"),
         "session_prefix": source("session_prefix", file_settings.session_prefix is not None),
         "stop_timeout": source("stop_timeout"),
+        "tls": source("tls_cert"),
     }
     return Config(
         roots=roots,
@@ -255,6 +272,8 @@ def build_config(args: argparse.Namespace) -> Config:
         config_path=config_path,
         sources=sources,
         session_prefix=prefix,
+        tls_cert=args.tls_cert,
+        tls_key=args.tls_key,
         host=args.host,
         port=args.port,
         token=token,
@@ -310,7 +329,7 @@ def banner(config: Config) -> str:
     # costs nobody anything, which is the argument #21 settled the design on.
     fragment = "" if in_journal else f"#token={quote(config.token, safe='')}"
     lines += [
-        f"    http://{h}:{config.port}/grant{fragment}"
+        f"    {config.scheme}://{h}:{config.port}/grant{fragment}"
         for h in reachable
         if h not in {"::1", "[::1]"}
     ]
@@ -408,7 +427,17 @@ def preflight(
 
 
 def _serve(app: Starlette, config: Config) -> int:
-    uvicorn.run(app, host=config.host, port=config.port, log_level="info")
+    # The paths as strings, or None: uvicorn reads `ssl_certfile=None` as
+    # "no TLS", and `Config._check_tls` has already loaded the pair once, so
+    # a failure here would be the file changing between the two reads.
+    uvicorn.run(
+        app,
+        host=config.host,
+        port=config.port,
+        log_level="info",
+        ssl_certfile=None if config.tls_cert is None else str(config.tls_cert),
+        ssl_keyfile=None if config.tls_key is None else str(config.tls_key),
+    )
     return 0
 
 

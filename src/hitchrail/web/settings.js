@@ -176,6 +176,7 @@ const FACTS = [
   ["self_project", "Protected project"],
   ["agent_binary", "Agent"],
   ["session_prefix", "Session prefix"],
+  ["tls", "TLS certificate"],
   ["hard_floor_mb", "Hard memory floor, MB"],
   ["soft_floor_mb", "Soft memory floor, MB"],
   ["session_mb", "Per session estimate, MB"],

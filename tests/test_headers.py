@@ -271,6 +271,6 @@ def test_the_cookie_response_refuses_to_be_stored() -> None:
     from hitchrail.security import set_token_cookie
 
     response = JSONResponse({"ok": True})
-    set_token_cookie(response, TOKEN)
+    set_token_cookie(response, TOKEN, secure=False)
     assert response.headers["cache-control"] == "no-store"
     assert TOKEN in response.headers["set-cookie"]

@@ -130,7 +130,7 @@ before `Config` does.
 
 ### Batch 2: the scheme, task 82
 
-- [ ] **Task 82, #152.** `--tls-cert` and `--tls-key`, both or neither,
+- [x] **Task 82, #152.** `--tls-cert` and `--tls-key`, both or neither,
       refusing at startup before the bind, an unreadable or malformed
       certificate refused at startup rather than at the first request. **The
       part that is not the two flags:** derived origins become `https` when

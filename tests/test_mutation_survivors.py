@@ -587,7 +587,7 @@ def test_the_grant_cookie_carries_every_attribute_it_needs() -> None:
     from hitchrail.security import COOKIE_MAX_AGE, TOKEN_COOKIE, set_token_cookie
 
     response: JSONResponse = JSONResponse({})
-    set_token_cookie(response, "s3cret")
+    set_token_cookie(response, "s3cret", secure=False)
     header = dict(response.headers)["set-cookie"]
 
     assert f"{TOKEN_COOKIE}=s3cret" in header

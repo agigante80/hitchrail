@@ -8,6 +8,7 @@ and the derived allowlists; that one owns what a valid host or origin IS.
 from __future__ import annotations
 
 import contextlib
+import ssl
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -178,6 +179,14 @@ class Config:
     # page. Not validated, and not read by any control: a source tag decides
     # whether a request may write a value, never what the value is.
     sources: Mapping[str, str] = field(default_factory=dict)
+    # #152. Both or neither. The certificate is loaded at construction, so a
+    # file that cannot be read or does not parse refuses BEFORE the bind:
+    # the failure that must never happen is plain HTTP served on the port
+    # the operator believed was TLS, and that is what "refuse at startup"
+    # buys. Operator supplied filesystem paths, and nothing to do with
+    # `resolve_child`: they are outside every root on purpose.
+    tls_cert: Path | None = None
+    tls_key: Path | None = None
     tmux_socket: str | None = None
     self_project: str | None = None
     resolver: Resolver | None = None
@@ -213,6 +222,7 @@ class Config:
         self._check_extra_hosts()
         self._check_extra_origins()
         self._check_self_project()
+        self._check_tls()
 
         reach = remote_reach(self.host, self.extra_hosts, self.extra_origins)
         if reach and not self.token:
@@ -262,6 +272,43 @@ class Config:
                 "tmux reads '.' and ':' as window and pane separators, so a session "
                 "named with one can be created and then never addressed"
             )
+
+    @property
+    def tls(self) -> bool:
+        """Whether this server terminates TLS itself. The scheme of every
+        derived origin, every banner link and the cookie's `Secure` flag."""
+        return self.tls_cert is not None
+
+    @property
+    def scheme(self) -> str:
+        return "https" if self.tls else "http"
+
+    def _check_tls(self) -> None:
+        """One flag without the other is a configuration error, not half a
+        configuration; a certificate that cannot be loaded stops the start.
+
+        Loaded here, once, into a throwaway context: uvicorn would load it
+        again at bind time and exit 1 on failure, which the unit RETRIES,
+        and after the retries what is listening is nothing. Refusing here
+        is exit 2, which the unit leaves alone, with the file named.
+        """
+        if (self.tls_cert is None) != (self.tls_key is None):
+            missing = "--tls-key" if self.tls_key is None else "--tls-cert"
+            given = "--tls-cert" if self.tls_key is None else "--tls-key"
+            raise ConfigError(f"{given} needs {missing}: TLS takes both or neither")
+        if self.tls_cert is None or self.tls_key is None:
+            return
+        for flag, path in (("--tls-cert", self.tls_cert), ("--tls-key", self.tls_key)):
+            if not path.is_file():
+                raise ConfigError(f"{flag} {path}: not a readable file")
+        try:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(str(self.tls_cert), str(self.tls_key))
+        except (ssl.SSLError, OSError) as exc:
+            raise ConfigError(
+                f"--tls-cert {self.tls_cert} with --tls-key {self.tls_key} cannot be "
+                f"loaded, so nothing will be served on this port: {exc}"
+            ) from exc
 
     def _check_agent_binary(self) -> None:
         """A binary name beginning with '-' becomes a flag in an argv slot.
@@ -493,7 +540,7 @@ class Config:
     def _derive_allowed_origins(self) -> frozenset[str]:
         """Exactly the origins we can know, plus exactly the ones configured.
 
-        We know our own bind: scheme http, the hosts we answer to, our port.
+        We know our own bind: our scheme, the hosts we answer to, our port.
         That is derived.
 
         Everything else is configured, and that is the change. An earlier
@@ -510,7 +557,12 @@ class Config:
         """
         origins: set[str] = set()
         for host in self._allowed_hosts:
-            origins.update(origin_forms("http", host, self.port))
+            # `self.scheme`, not "http": with TLS on, a browser sends
+            # `https://host:port`, and deriving `http` here refused every
+            # mutating request with a 403 blaming the origin check. That is
+            # premortem 1 of the Phase 14 plan, and the hermetic test for it
+            # is parametrised over both schemes.
+            origins.update(origin_forms(self.scheme, host, self.port))
         for entry in self.extra_origins:
             parts = urlsplit(entry.strip().rstrip("/").lower())
             assert parts.hostname is not None  # validated in _check_extra_origins

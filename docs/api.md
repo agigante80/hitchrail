@@ -19,7 +19,9 @@ Two carriers for one token.
 The cookie exists because `EventSource` cannot set request headers, so a token
 living only in `Authorization` would authenticate every route except the live
 update stream, which is the one the interface depends on. `POST /api/grant`
-trades a token for the cookie.
+trades a token for the cookie: `HttpOnly`, `SameSite=Lax`, `Path=/`, and
+`Secure` exactly when the server terminates TLS itself (`--tls-cert`), never
+behind a proxy that does, where the server still speaks HTTP.
 
 **A token is demanded whenever anything outside the machine can reach the
 server**: a non loopback bind, or a non loopback name passed to `--allow-host`
@@ -32,7 +34,9 @@ an unauthenticated caller cannot enumerate the origin allowlist by watching a
 403 become a 401.
 
 The origin check applies to mutating requests only. `GET` is exempt, because
-`EventSource` cannot set headers.
+`EventSource` cannot set headers. The origins derived from the server's own
+bind carry its own scheme, `https` with `--tls-cert` and `http` without; an
+origin a proxy presents is `--allow-origin`, with the proxy's scheme and port.
 
 ## What `{name}` is
 
@@ -164,7 +168,8 @@ The effective configuration, for a person on a phone asking "what is this
 instance pointed at" without SSH. Every value is `{value, source}` where
 `source` is `flag`, `file`, `env` or `default`: `host`, `port`,
 `allow_hosts`, `allow_origins`, `self_project`, `agent_binary`,
-`session_prefix`, the three memory figures, `config_file` and `state_file`.
+`session_prefix`, `tls` (the certificate's path, or null), the three memory
+figures, `config_file` and `state_file`.
 `roots` is every configured root as `{label, path, enabled, editable,
 source}`, hidden ones included, with `hidden_roots` beside it; `stop_timeout`
 is `{value, source, editable}`, its source `state` when the interface set it.

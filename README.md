@@ -85,7 +85,10 @@ interface requires a token, and the server refuses to start without one. It
 validates the `Host` header on every request, because a localhost service
 without that check can be driven by any website you visit, through DNS
 rebinding. Over plain HTTP on a LAN the token crosses the network in cleartext;
-put a TLS terminating reverse proxy in front of it if that matters to you.
+`--tls-cert` and `--tls-key` serve HTTPS from the server itself, with the
+certificate for a private address coming from a local CA you also trust on
+the phone (`docs/guides/phone-access.md`, route 2a), or put a TLS terminating
+reverse proxy in front of it.
 
 Behind such a proxy, tell Hitchrail the origin the browser will actually send,
 because it cannot be derived: the scheme and the port are the proxy's, not
@@ -371,7 +374,8 @@ reach Hitchrail. Binding off loopback is one way to say so; passing
 because that is what you do to put Hitchrail behind a proxy such as
 `tailscale serve`. In both cases the server refuses to start without one. Everything after the `#` stays in the browser and
 reaches no server log. Over plain HTTP the cookie it becomes still crosses your
-network in clear, so put TLS in front of it if that matters to you.
+network in clear; `--tls-cert` and `--tls-key`, or TLS in front of it, end
+that.
 
 ### Every option
 
@@ -390,6 +394,7 @@ install it first.
 | `--allow-origin` | none | An exact origin a browser may claim, `scheme://host[:port]`. Repeatable. Needed behind a TLS terminating proxy, whose scheme and port cannot be derived from our own bind |
 | `--self-project` | none | A project that must never be stopped, named as `label~folder`. Point it at the folder Hitchrail itself runs from |
 | `--agent-binary` | `claude` | The agent executable to run. Must be on `PATH` or an absolute path |
+| `--tls-cert`, `--tls-key` | none | A PEM certificate and its key: serve HTTPS from the server itself. Both or neither, refused at startup before the bind when one is missing or the pair cannot be loaded. Derived origins, banner links and the cookie's `Secure` flag follow |
 | `--session-prefix` | `hr-` | What every tmux session this instance creates is named with, and the only sessions it will ever stop. Two instances on one tmux server need two prefixes: with one, each reads the other's agent in a same named folder as its own and can stop it. Also `session_prefix` in the config file |
 | `--stop-timeout` | `30` | Seconds to wait for a graceful stop before reporting that it timed out. It reports; it does not escalate |
 | `--version` | | Print the version and exit |

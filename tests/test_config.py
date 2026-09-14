@@ -1182,12 +1182,17 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 518 to 520 for #154 and #238: `state_path` and `sources`, each with
         # the sentence saying why it is not a control.
         # 523: `config_path`, the file that was read, for the settings page.
-        "config.py": 523,
+        # 523 to 575 for #152: the TLS pair, loaded once at construction so
+        # a certificate that cannot be read refuses BEFORE the bind, with
+        # the paragraph on why that is exit 2 and not uvicorn's retried 1.
+        "config.py": 575,
         # 460 for #123, #154 and #238: `--config`, `--session-prefix` and the
         # source tagging the settings page shows, which is one function
         # reading the flags back out of argv. Nothing here parses a value
         # twice; `settings.py` is where the file is read.
-        "cli.py": 461,
+        # 461 to 490 for #152: two flags, and the uvicorn call spelling the
+        # pair out as `None` rather than omitting it.
+        "cli.py": 490,
         # 409, nine lines over, down from 542. #115 deleted the `?token=`
         # carrier: 135 lines once the two blocks inside `TokenMiddleware`
         # that only served it are counted.
@@ -1216,7 +1221,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # beside them, which the set's own rule requires of every entry.
         # 418 to 436 for #160: the unauthenticated asset set and the argument
         # for it, which the rule beside the exemption requires of every entry.
-        "security.py": 436,
+        # 436 to 440 for #152: the cookie's `Secure` flag is `Config.tls`,
+        # and the paragraph on why not behind a proxy.
+        "security.py": 440,
         # rather than one. A refusal handler is the shape this file is made of.
         # 513 to 517 for #120. The listing payload reports every configured
         # root as a labelled list rather than one path string, and the comment
