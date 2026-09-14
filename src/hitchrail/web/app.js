@@ -854,7 +854,9 @@ function formatAgo(seconds) {
 export function render() {
   renderTabs();
   renderChips();
+  renderStopAll();
   renderList();
+  renderBulk();
   // A listing or an event arriving while somebody is typing: the popup is a
   // view of the same query and must not go on showing the old answer, or
   // stay closed because the first keystroke beat the first listing.
@@ -893,6 +895,7 @@ function showDialog({ title, body, actions, extra, forProject, wide = false }) {
   if (!dialog) return;
   dialog.replaceChildren();
   delete dialog.dataset.refusal;
+  delete dialog.dataset.bulk;
   // #168. Only the pane view asks for room, and only the stylesheet's wide
   // breakpoint grants it: the confirmation and the rest of the stop sequence
   // share this element and keep the phone's column at every width.
@@ -1306,6 +1309,207 @@ function showRefusal(result, project) {
     body: message,
     actions: [["Close", "ghost", () => closeDialog()]],
   });
+}
+
+/* -- #240: Stop all ----------------------------------------------------
+   The stop each row already has, issued for each row, and no new route: a
+   DELETE per row can refuse on its own terms, and those refusals are per row
+   facts the operator needs per row. Sequentially, never in parallel:
+   `request_stop` captures the pane between key groups on the executor that
+   serves the operator, and fifty captures at once is the load #180 moved the
+   sweep off the request path to avoid. The bulk kill lives inside this wait
+   as the escalation, second and styled danger, and reaches only the rows
+   still in flight: a row that exited or refused is not killed by it. A
+   standalone Kill all was decided against (#241, design section 7). */
+
+let bulk = null;
+
+function stoppableRows() {
+  // Stale rows get Clear, not Stop (#98), and are left out; the self project
+  // never enters the set.
+  return state.projects.filter((p) => isRunning(p) && !p.protected);
+}
+
+function renderStopAll() {
+  const button = $("[data-stop-all]");
+  if (button) button.hidden = stoppableRows().length === 0;
+}
+
+function confirmStopAll() {
+  const rows = stoppableRows();
+  if (rows.length === 0) return;
+  showDialog({
+    title: `Stop ${rows.length} sessions?`,
+    body:
+      "Each will be interrupted, then asked to exit, one at a time. "
+      + "Anything they are part way through may be lost.",
+    actions: [
+      ["Cancel", "ghost", () => closeDialog()],
+      ["Stop all", "", () => beginStopAll(rows)],
+    ],
+  });
+}
+
+async function beginStopAll(rows) {
+  bulk = {
+    rows: rows.map((p) => ({ name: p.name, status: "queued", message: "" })),
+    deadline: null,
+    done: false,
+  };
+  showBulkWait();
+  for (const row of bulk.rows) {
+    // Skipped if the escalation reached it first.
+    if (row.status !== "queued") continue;
+    row.status = "requesting";
+    renderBulk();
+    const result = await api(`/api/sessions/${encodeURIComponent(row.name)}`, {
+      method: "DELETE",
+    });
+    if (row.status !== "requesting") {
+      // Killed while the request was out. The kill's own outcome stands.
+    } else if (result.status === 0) {
+      // Never left. Reported as such, never as requested (#74's rule), and
+      // the sequence carries on: the next one may get through.
+      row.status = "not requested";
+      row.message = result.body.message;
+    } else if (!result.ok) {
+      row.status = "refused";
+      row.message = result.body.message;
+    } else {
+      row.status = "requested";
+    }
+    renderBulk();
+  }
+  bulk.deadline = Date.now() + stopTimeoutMs();
+  await awaitBulk();
+}
+
+/* What each row is now, from the listing and the request's own outcome. The
+   dialog never says "exited" from anything but the listing. */
+function bulkStatus(row) {
+  if (row.status !== "requested") return row.status;
+  const current = state.projects.find((p) => p.name === row.name);
+  if (current && current.state === "stopped") return "exited";
+  if (bulk.deadline !== null && Date.now() >= bulk.deadline && !bulk.done) return "not finished";
+  return "requested";
+}
+
+/* Every row that is not yet terminal: waiting to be asked, being asked,
+   asked, or out of time. "Do not wait" reaches all of them, because the stop
+   for the SET was confirmed and begun before the kill became reachable,
+   which is the affordance rule; a row that exited or refused is terminal and
+   is not touched. */
+function bulkInFlight() {
+  const live = ["queued", "requesting", "requested", "not finished"];
+  return bulk.rows.filter((row) => live.includes(bulkStatus(row)));
+}
+
+async function awaitBulk() {
+  const tick = async () => {
+    if (bulk === null) return;
+    await refresh();
+    renderBulk();
+    if (bulkInFlight().length === 0) {
+      bulk.done = true;
+      renderBulk();
+      return;
+    }
+    if (Date.now() >= bulk.deadline) {
+      // Reports, and does not kill on its own: the engine refuses to
+      // escalate by itself and the interface must not do it on its behalf.
+      renderBulk();
+      return;
+    }
+    window.setTimeout(tick, 700);
+  };
+  await tick();
+}
+
+function showBulkWait() {
+  const list = document.createElement("ul");
+  list.className = "bulk-rows";
+  list.dataset.bulkRows = "";
+  for (const row of bulk.rows) {
+    const item = document.createElement("li");
+    item.dataset.name = row.name;
+    const name = document.createElement("span");
+    name.dataset.bulkName = "";
+    name.textContent = row.name;
+    const status = document.createElement("span");
+    status.dataset.bulkStatus = "";
+    item.append(name, status);
+    list.append(item);
+  }
+  showDialog({
+    title: `Stopping ${bulk.rows.length} sessions`,
+    body: "Waiting for them to exit.",
+    extra: list,
+    actions: [
+      ["Hide, keep stopping", "ghost", () => closeDialog()],
+      ["Do not wait, kill them all", "danger", () => killRemaining()],
+    ],
+  });
+  $("[data-dialog]").dataset.bulk = "";
+  renderBulk();
+}
+
+/* Updated in place, never rebuilt: `showDialog` starts with `replaceChildren`,
+   and a wait that redraws its whole dialog on every listing takes focus from
+   under the thumb, which is #71's defect in a new place. */
+function renderBulk() {
+  const dialog = $("[data-dialog]");
+  if (bulk === null || !dialog?.open || !("bulk" in dialog.dataset)) return;
+  for (const row of bulk.rows) {
+    const item = dialog.querySelector(`[data-bulk-rows] li[data-name="${CSS.escape(row.name)}"]`);
+    if (!item) continue;
+    const status = bulkStatus(row);
+    item.dataset.status = status;
+    item.querySelector("[data-bulk-status]").textContent =
+      row.message ? `${status}: ${row.message}` : status;
+  }
+  const body = dialog.querySelector(".dialog-body");
+  const unfinished = bulk.rows.filter((row) => bulkStatus(row) === "not finished").length;
+  if (bulk.done) {
+    if (body) body.textContent = "Done.";
+    const actions = dialog.querySelector(".dialog-actions");
+    if (actions && actions.children.length !== 1) {
+      const close = document.createElement("button");
+      close.type = "button";
+      close.className = "ghost";
+      close.textContent = "Close";
+      close.addEventListener("click", () => {
+        bulk = null;
+        closeDialog();
+      });
+      actions.replaceChildren(close);
+    }
+  } else if (unfinished > 0 && body) {
+    // The risk before the kill is offered, as the single row timeout does.
+    body.textContent =
+      `${unfinished} ${unfinished === 1 ? "has" : "have"} not finished. Killing now ends `
+      + "them immediately, and anything not written to disk is lost.";
+  }
+}
+
+async function killRemaining() {
+  if (bulk === null) return;
+  // Only the rows still in flight, one at a time for the same reason the
+  // stops are.
+  for (const row of bulkInFlight()) {
+    const result = await api(`/api/sessions/${encodeURIComponent(row.name)}/kill`, {
+      method: "POST",
+    });
+    if (!result.ok) {
+      row.status = "refused";
+      row.message = result.body.message;
+    } else {
+      // A kill is a request too: the listing says whether it exited.
+      row.status = "requested";
+    }
+    renderBulk();
+  }
+  bulk.deadline = Date.now() + stopTimeoutMs();
+  await awaitBulk();
 }
 
 /* -- starting ----------------------------------------------------------
@@ -2023,6 +2227,7 @@ function boot() {
   trackKeyboardInset();
   $("[data-theme-toggle]")?.addEventListener("click", toggleTheme);
   $("[data-new]")?.addEventListener("click", () => showNewFolder());
+  $("[data-stop-all]")?.addEventListener("click", confirmStopAll);
   document.addEventListener("visibilitychange", onVisible);
   openStream();
   trackScroll();

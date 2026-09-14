@@ -53,6 +53,8 @@ DIALOGS: dict[str, str] = {
         "stopping. The list catches up on its own."
     ),
     "`Stop ${displayProject(project.name)}?`,": _MUST_ACT,
+    "`Stop ${rows.length} sessions?`,": _MUST_ACT,
+    "`Stopping ${bulk.rows.length} sessions`,": _MUST_ACT,
     "`Clear ${project.name}?`,": _MUST_ACT,
     "`Stopping ${project.name}`,": _MUST_ACT,
     "`Lost track of ${project.name}`,": (

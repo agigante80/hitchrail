@@ -427,6 +427,14 @@ main { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
 .mem-bar[data-pressure="hard"] { background: var(--danger); }
 .run-count { white-space: nowrap; font-weight: 600; }
 .shown { white-space: nowrap; }
+/* 44px to tap, the row's height on the page, by the same negative block
+   margin the source link uses; the pixels it reaches into hold nothing
+   interactive. Compact type, because it sits with the footer's figures. */
+.stop-all {
+  min-height: var(--touch); margin-block: -12px; padding: 0 10px;
+  font-size: 13px; white-space: nowrap;
+}
+.stop-all[hidden] { display: none; }
 .shown:empty { display: none; }
 
 .scrim { position: fixed; inset: 0; background: rgba(46, 37, 28, 0.55); }
@@ -570,4 +578,24 @@ dialog[data-dialog]::backdrop { background: rgba(46, 37, 28, 0.55); }
 .logs-full { max-height: none; min-height: 60vh; margin: 0; }
 .logs-full[data-stale] { opacity: 0.6; }
 .logs-page .stream-note { display: none; }
+
+/* -- #240: the bulk wait ------------------------------------------------
+   One line per row, scrolling inside the dialog so fifty of them leave the
+   actions on screen at a phone height. */
+.bulk-rows {
+  list-style: none; margin: 0 0 16px; padding: 0;
+  max-height: 40vh; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: var(--radius);
+}
+.bulk-rows li {
+  display: flex; justify-content: space-between; gap: 12px;
+  padding: 8px 12px; border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.bulk-rows li:last-child { border-bottom: 0; }
+.bulk-rows [data-bulk-name] { overflow-wrap: anywhere; }
+.bulk-rows [data-bulk-status] { color: var(--muted); white-space: nowrap; }
+.bulk-rows li[data-status="refused"] [data-bulk-status],
+.bulk-rows li[data-status="not requested"] [data-bulk-status],
+.bulk-rows li[data-status="not finished"] [data-bulk-status] { color: var(--danger-on-tint); }
 

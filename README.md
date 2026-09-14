@@ -72,7 +72,8 @@ none of it is a reason to run this on a network you do not trust.
 
 The browser interface is built. The list, search and filtering by state and
 by root, starting, the
-stop sequence with its escalation, the log tail, creating a folder, the memory
+stop sequence with its escalation, Stop all composed from it, the log tail on the
+page and at a URL of its own, creating a folder, the memory
 footer, live updates over SSE with reconnection, the token screen and the dark
 theme all work in a browser, and the end to end tier drives them. The warning
 above applies to all of it exactly as written.

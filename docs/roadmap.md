@@ -89,7 +89,8 @@ since when, as whom.
 
 Cut from a real five root install rather than from the design. None of it is a
 new power: the list is complete and correct, and what is missing is
-navigation and provenance.
+navigation, provenance, and one control composed from a power each row
+already has.
 
 Delivers: filtering by root, a header that survives scrolling, a footer that
 names the version and links to the source, the server's own start time and

@@ -74,6 +74,14 @@
   <div class="mem-figure" data-mem-label></div>
   <div class="mem-track"><div class="mem-bar" data-mem-bar></div></div>
   <div class="run-count" data-run-count></div>
+  <!-- #240. Beside the count it acts on, in the fixed footer, so it is
+       reachable at any scroll position by construction and adds no strip
+       to the top of the page: a third button in the bar wrapped at 390px
+       and grew the header by 37px, which is premortem 3 of Phase 13. Present
+       only while a row can be stopped. Composed from the stop each row
+       already has, so it is no new power; its kill lives inside its wait as
+       the escalation, per design section 7. -->
+  <button type="button" class="ghost stop-all" data-stop-all hidden>Stop all</button>
   <!-- #146. Empty unless a filter hides rows. The footer is fixed, so this
        is readable from anywhere in the list: an applied filter must stay
        visible after the strip that set it has scrolled away. -->
