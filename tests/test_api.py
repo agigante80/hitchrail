@@ -776,6 +776,22 @@ async def test_a_root_that_has_gone_away_is_503_not_an_empty_list(
     assert r.json()["code"] == "root_unavailable"
 
 
+@pytest.mark.parametrize("path", ["/api/sessions/{name}/logs", "/logs/{name}"])
+async def test_the_logs_routes_say_the_root_is_unavailable_rather_than_faulting(
+    config: Config, engine: Engine, path: str
+) -> None:
+    """#249. A stopped name's ladder ends in `_reject_if_not_a_project`, which
+    lists the root, which raises `RootUnavailable` when the root is gone.
+    Neither logs route had an arm for it, so both answered a bare 500 where
+    the listing says 503 root_unavailable. The docs test could not see it:
+    a 500 is not a code the server returns in that sense."""
+    shutil.rmtree(config.roots[0].path)
+    async with client_for(engine, config) as c:
+        r = await c.get(path.replace("{name}", proj("network")), headers=HEADERS)
+    assert r.status_code == 503, r.status_code
+    assert r.json()["code"] == "root_unavailable"
+
+
 async def test_starting_the_self_project_is_423_not_500(root: pathlib.Path) -> None:
     """The route where the protection matters most: it is the one that would
     put a SECOND agent in the folder Hitchrail is running in."""

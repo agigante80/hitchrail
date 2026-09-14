@@ -1236,7 +1236,8 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 669 to 687 for #151: the logs page route, whose docstring says why
         # a page route resolves a name through the API's own function. #205
         # carries the split and the seam is unchanged: this is a handler.
-        "server.py": 687,
+        # +7 for #249: the root_unavailable arm on both logs routes.
+        "server.py": 694,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

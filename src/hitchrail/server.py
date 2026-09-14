@@ -454,6 +454,11 @@ def create_app(
             return _error(409, "not_running", str(exc))
         except eng.MachineUnreadable as exc:
             return _error(503, "machine_unreadable", str(exc))
+        except discovery.RootUnavailable as exc:
+            # #249. A stopped name's ladder lists the root to tell "unknown"
+            # from "not running", and a root that has gone away raises here
+            # rather than in the listing. The same answer the listing gives.
+            return _error(503, "root_unavailable", str(exc))
         # No `Protected` arm, and that is not an oversight. `engine.logs`
         # deliberately does not refuse the self project: reading the log of the
         # session hosting Hitchrail is harmless and occasionally the only way
@@ -476,6 +481,8 @@ def create_app(
             return _error(404, "unknown_project", str(exc))
         except eng.MachineUnreadable as exc:
             return _error(503, "machine_unreadable", str(exc))
+        except discovery.RootUnavailable as exc:
+            return _error(503, "root_unavailable", str(exc))  # #249, as the API
         return await pages.logs_page(request)
 
     async def session_url(request: Request) -> Response:
