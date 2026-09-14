@@ -376,7 +376,23 @@ main { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
   font-size: 12px; font-weight: 700; text-transform: lowercase;
   padding: 3px 9px; border-radius: 999px;
   background: var(--surface-alt); color: var(--muted);
+  display: inline-flex; align-items: center; gap: 5px;
 }
+/* #150. Sized in em, never px, so a glyph scales with the text beside it;
+   `currentColor` so the palette's tokens carry the glyph with no second set.
+   Only `stopping` may move, and only for someone who has not asked for
+   less motion. */
+.badge-glyph { width: 1.1em; height: 1.1em; flex-shrink: 0; fill: none; stroke: currentColor;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+/* The sprite itself takes no room. Zero sized rather than `display: none`,
+   which some engines take as "draw nothing from here" for a `<use>`; and a
+   stylesheet rule rather than an inline style, which the page's CSP refuses
+   and the browser tier caught. */
+[data-badge-sprite] { position: absolute; width: 0; height: 0; overflow: hidden; }
+@media (prefers-reduced-motion: no-preference) {
+  .badge[data-badge="stopping"] .badge-glyph { animation: badge-spin 1.2s linear infinite; }
+}
+@keyframes badge-spin { to { transform: rotate(360deg); } }
 .badge[data-badge="running"] { background: var(--running); color: #FFFDFA; }
 .badge[data-badge="detached"] { background: var(--danger-tint); color: var(--danger-on-tint); }
 .badge[data-badge="stale"] { background: var(--warn-tint); color: var(--warn-on-tint); }

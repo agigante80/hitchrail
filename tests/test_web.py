@@ -218,3 +218,62 @@ def test_the_refusal_dialog_reaches_the_kill_route() -> None:
         "the dead end #169 exists to close"
     )
     assert '"danger"' in stop_unsafe, "the kill is no longer styled as destructive"
+
+
+# -- #150: the badge glyphs ----------------------------------------------------
+
+INDEX = APP_JS.parent / "index.html"
+
+
+def _badge_words() -> set[str]:
+    """Every word `badgeFor` can return, read from the function's own source:
+    the returned string literals, plus the four states it falls back to."""
+    source = APP_JS.read_text(encoding="utf-8")
+    start = source.index("function badgeFor(")
+    body = source[start : source.index("\n}\n", start)]
+    words = set(re.findall(r'return "([a-z]+)"', body))
+    assert "project.state" in body, "badgeFor no longer falls back to the state"
+    return words | {"running", "stopped", "stale", "detached"}
+
+
+def _sprite_symbols() -> set[str]:
+    html = INDEX.read_text(encoding="utf-8")
+    return set(re.findall(r'<symbol id="badge-([a-z]+)"', html))
+
+
+def test_every_badge_word_has_a_glyph_and_every_glyph_a_word() -> None:
+    """#150. Seven glyphs for the seven things the badge can say, no more: a
+    set that grows to fill a number is how an icon set stops meaning
+    anything, and a word with no glyph renders a broken `<use>`."""
+    words = _badge_words()
+    assert len(words) == 7, sorted(words)
+    assert _sprite_symbols() == words
+
+
+def test_the_sprite_names_its_source_licence_and_version() -> None:
+    """Vendored, not depended on, and MIT requires the notice be preserved.
+    The version is recorded so the next glyph comes from the same family at
+    the same stroke weight, which is what makes a small set look deliberate."""
+    html = INDEX.read_text(encoding="utf-8")
+    opened = html.index("data-badge-sprite")
+    # The notice is the comment immediately above the sprite, part of it in
+    # every sense but the markup's.
+    sprite = html[html.rindex("<!--", 0, opened) : html.index("</svg>", opened)]
+    assert "Tabler Icons" in sprite and "MIT" in sprite and "Paweł Kuna" in sprite
+    assert re.search(r"v3\.\d+\.\d+", sprite), "no version recorded"
+
+
+def test_detached_and_stale_are_different_shapes() -> None:
+    """The pair to get right: opposites the interface treats as opposites, and
+    confusing them is confusing "there is a live agent" with "there is not".
+    Pinned on the paths, since two symbols with the same drawing would pass
+    every other test here."""
+    html = INDEX.read_text(encoding="utf-8")
+
+    def paths(name: str) -> str:
+        start = html.index(f'<symbol id="badge-{name}"')
+        return html[start : html.index("</symbol>", start)]
+
+    assert paths("detached") != paths("stale")
+    for name in _badge_words():
+        assert "<path" in paths(name), f"{name} has no drawing"

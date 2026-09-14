@@ -921,3 +921,30 @@ async def test_a_short_list_leaves_no_gap_under_the_header(page: Page, server: H
     top_bottom = await top.evaluate("e => e.getBoundingClientRect().bottom")
     list_top = await page.locator("main").evaluate("e => e.getBoundingClientRect().top")
     assert abs(top_bottom - list_top) < 1, (top_bottom, list_top)
+
+
+# -- #150: shapes beside the words --------------------------------------------
+
+
+async def test_every_badge_carries_its_glyph_and_keeps_its_word(
+    page: Page, server: Harness
+) -> None:
+    """The badge is the one place a shape does something a word cannot: a list
+    of fifty is scanned, not read, and shape stops six states being told
+    apart by colour alone. The word stays beside it, and the glyph is
+    decorative to a screen reader, which still hears the word."""
+    server.seed(running=["vessel"], stopped=["koala"], stale=["ghost"], detached=["loose"])
+    await page.goto(server.base)
+    rows = page.locator("[data-project]")
+    await expect(rows).to_have_count(4, timeout=15_000)
+    seen: dict[str, str] = {}
+    for row in await rows.all():
+        badge = row.locator(".badge")
+        word = (await badge.get_attribute("data-badge")) or ""
+        await expect(badge).to_have_text(word)
+        use = badge.locator("svg use")
+        href = await use.get_attribute("href")
+        assert href == f"#badge-{word}", (word, href)
+        assert await badge.locator("svg").get_attribute("aria-hidden") == "true"
+        seen[word] = href or ""
+    assert {"running", "stopped", "stale", "detached"} <= set(seen), seen

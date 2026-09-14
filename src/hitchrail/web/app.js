@@ -530,8 +530,18 @@ function renderRow(project) {
 
   const badge = document.createElement("span");
   badge.className = "badge";
-  badge.dataset.badge = badgeFor(project);
-  badge.textContent = badgeFor(project);
+  const word = badgeFor(project);
+  badge.dataset.badge = word;
+  // #150. The glyph beside the word, never instead of it: decorative to a
+  // screen reader, which hears the word, and a shape a scanning eye picks
+  // out before it reads. One `<use>` into the inline sprite in index.html.
+  const glyph = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  glyph.setAttribute("aria-hidden", "true");
+  glyph.setAttribute("class", "badge-glyph");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", `#badge-${word}`);
+  glyph.append(use);
+  badge.append(glyph, word);
   head.append(badge);
 
   const actions = document.createElement("div");

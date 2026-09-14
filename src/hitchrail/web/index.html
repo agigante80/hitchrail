@@ -8,6 +8,44 @@
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
+<!-- #150. The badge glyphs: seven, for the seven things a badge can say, and
+     no more. A list of fifty is scanned rather than read, and a shape is
+     recognised peripherally where a word has to be read; it also stops the
+     states being told apart by colour alone. The word stays beside it.
+
+     Tabler Icons v3.46.0 (https://tabler.io/icons), outline set, vendored
+     as one inline sprite: no request, no icon font, no build. A SET has to
+     agree with itself on grid, stroke weight and optical alignment, which
+     is why these come from one library at one version and are never
+     generated; the application's own mark (#160) is the opposite call.
+     `detached` and `stale` are the pair to get right, opposites the
+     interface treats as opposites, and a test pins their drawings apart.
+
+     MIT License. Copyright (c) 2020-2026 Paweł Kuna. Permission is hereby
+     granted, free of charge, to any person obtaining a copy of this software
+     and associated documentation files (the "Software"), to deal in the
+     Software without restriction, including without limitation the rights
+     to use, copy, modify, merge, publish, distribute, sublicense, and/or
+     sell copies of the Software, and to permit persons to whom the Software
+     is furnished to do so, subject to the following conditions: The above
+     copyright notice and this permission notice shall be included in all
+     copies or substantial portions of the Software. THE SOFTWARE IS
+     PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+     INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+     FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+     AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+     DEALINGS IN THE SOFTWARE. -->
+<svg xmlns="http://www.w3.org/2000/svg" hidden aria-hidden="true" data-badge-sprite>
+  <symbol id="badge-running" viewBox="0 0 24 24"><path d="M7 4v16l13 -8l-13 -8"/></symbol>  <!-- player-play -->
+  <symbol id="badge-stopped" viewBox="0 0 24 24"><path d="M8.56 3.69a9 9 0 0 0 -2.92 1.95"/><path d="M3.69 8.56a9 9 0 0 0 -.69 3.44"/><path d="M3.69 15.44a9 9 0 0 0 1.95 2.92"/><path d="M8.56 20.31a9 9 0 0 0 3.44 .69"/><path d="M15.44 20.31a9 9 0 0 0 2.92 -1.95"/><path d="M20.31 15.44a9 9 0 0 0 .69 -3.44"/><path d="M20.31 8.56a9 9 0 0 0 -1.95 -2.92"/><path d="M15.44 3.69a9 9 0 0 0 -3.44 -.69"/></symbol>  <!-- circle-dashed -->
+  <symbol id="badge-detached" viewBox="0 0 24 24"><path d="M17 22v-2"/><path d="M9 15l6 -6"/><path d="M11 6l.463 -.536a5 5 0 0 1 7.071 7.072l-.534 .464"/><path d="M13 18l-.397 .534a5.068 5.068 0 0 1 -7.127 0a4.972 4.972 0 0 1 0 -7.071l.524 -.463"/><path d="M20 17h2"/><path d="M2 7h2"/><path d="M7 2v2"/></symbol>  <!-- unlink -->
+  <symbol id="badge-stale" viewBox="0 0 24 24"><path d="M5 11a7 7 0 0 1 14 0v7a1.78 1.78 0 0 1 -3.1 1.4a1.65 1.65 0 0 0 -2.6 0a1.65 1.65 0 0 1 -2.6 0a1.65 1.65 0 0 0 -2.6 0a1.78 1.78 0 0 1 -3.1 -1.4v-7"/><path d="M10 10l.01 0"/><path d="M14 10l.01 0"/><path d="M10 14a3.5 3.5 0 0 0 4 0"/></symbol>  <!-- ghost -->
+  <symbol id="badge-waiting" viewBox="0 0 24 24"><path d="M8 9h8"/><path d="M8 13h6"/><path d="M14 18h-1l-5 3v-3h-2a3 3 0 0 1 -3 -3v-8a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v4.5"/><path d="M19 22v.01"/><path d="M19 19a2.003 2.003 0 0 0 .914 -3.782a1.98 1.98 0 0 0 -2.414 .483"/></symbol>  <!-- message-question -->
+  <symbol id="badge-stopping" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9"/></symbol>  <!-- loader-2 -->
+  <symbol id="badge-controller" viewBox="0 0 24 24"><path d="M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3"/></symbol>  <!-- shield -->
+</svg>
 <!-- #149. Everything that acts on the whole list stays on screen: the bar
      with New and the theme toggle, the stream notice, the tabs, the root
      chips and the search. Sticky as one block, so a filter you cannot reach
