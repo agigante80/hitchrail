@@ -948,3 +948,57 @@ async def test_a_bulk_wait_finishes_when_the_last_row_exits_after_the_deadline(
     await expect(dialog).to_contain_text("Done.")
     await expect(dialog.get_by_role("button", name="Close")).to_be_visible()
     assert "not finished" not in (await dialog.inner_text())
+
+
+# -- #247: one bulk, one ticker ----------------------------------------------
+
+
+async def test_stop_all_while_a_wait_is_hidden_reopens_it_and_requests_nothing_twice(
+    page: Page, server: Harness
+) -> None:
+    """#247. Hide, keep stopping, then Stop all again ran a second request
+    loop over a fresh bulk while the first was still ticking. One bulk at a
+    time: the control reopens the wait that exists."""
+    server.seed_fifty(running=["p00", "p01"], ignores_graceful_stop=True)
+    deletes: list[str] = []
+
+    async def count(route: Route) -> None:
+        if route.request.method == "DELETE":
+            deletes.append(route.request.url)
+        await route.continue_()
+
+    await page.route(lambda url: "/api/sessions/" in url, count)
+    await _open_stop_all(page, server, expected=2)
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop all", exact=True).click()
+    await expect(_bulk(page).locator("li").nth(1)).to_contain_text("requested", timeout=15_000)
+    await dialog.get_by_role("button", name="Hide, keep stopping").click()
+    await expect(dialog).to_be_hidden()
+
+    await page.get_by_role("button", name="Stop all").click()
+    await expect(dialog).to_contain_text("Stopping 2 sessions")
+    await expect(_bulk(page).locator("li")).to_have_count(2)
+    await page.wait_for_timeout(1500)
+    assert len(deletes) == 2, f"a second Stop all re-requested the sessions: {deletes}"
+
+
+async def test_a_hidden_bulk_wait_stops_polling_once_every_row_exited(
+    page: Page, server: Harness
+) -> None:
+    server.seed_fifty(running=["p00", "p01"])
+    listings = {"n": 0}
+
+    async def watch(route: Route) -> None:
+        listings["n"] += 1
+        await route.continue_()
+
+    await page.route("**/api/projects", watch)
+    await _open_stop_all(page, server, expected=2)
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop all", exact=True).click()
+    await dialog.get_by_role("button", name="Hide, keep stopping").click()
+    server.wait_until_the_agents_are_gone()
+    await page.wait_for_timeout(1500)  # a tick or two, to let the wait notice
+    before = listings["n"]
+    await page.wait_for_timeout(2500)
+    assert listings["n"] <= before + 1, "a hidden wait kept polling after every row exited"

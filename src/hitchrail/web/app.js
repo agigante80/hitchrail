@@ -1336,6 +1336,13 @@ function renderStopAll() {
 }
 
 function confirmStopAll() {
+  // #247. One bulk at a time. A wait that was hidden is still running, and
+  // Stop all again reopens it rather than starting a second request loop
+  // over a fresh object under the first loop's ticker.
+  if (bulk !== null && !bulk.done) {
+    showBulkWait();
+    return;
+  }
   const rows = stoppableRows();
   if (rows.length === 0) return;
   showDialog({
@@ -1355,6 +1362,9 @@ async function beginStopAll(rows) {
     rows: rows.map((p) => ({ name: p.name, status: "queued", message: "" })),
     deadline: null,
     done: false,
+    // #247. The ticker belongs to this object: a tick that finds `bulk` is
+    // no longer the object it was started for returns without judging it.
+    id: Symbol("bulk"),
     // #81's rule, for the bulk case: whether the LAST listing could be read.
     // A deadline reached on failed listings is "lost track", not "not
     // finished", and offers no kill, because that would be proposing to end
@@ -1412,23 +1422,42 @@ function bulkInFlight() {
 }
 
 async function awaitBulk() {
+  const mine = bulk;
+  if (mine.ticking) return; // #247: one ticker per bulk, however many callers
+  mine.ticking = true;
   const tick = async () => {
-    if (bulk === null) return;
-    bulk.lastReadOk = (await refresh()).ok;
+    // Read once, and compared by identity after every await: Close nulls
+    // `bulk`, and a tick must never judge an object it was not started for.
+    if (bulk !== mine) return;
+    const ok = (await refresh()).ok;
+    if (bulk !== mine) return;
+    mine.lastReadOk = ok;
+    // A reading that succeeded ends "lost": the page can tell again.
+    if (ok) mine.lost = false;
+    settleBulk();
     renderBulk();
-    if (bulk.done) return;
-    if (Date.now() >= bulk.deadline) {
+    if (mine.done) return;
+    if (mine.deadline !== null && Date.now() >= mine.deadline) {
       // Reports, and does not kill on its own: the engine refuses to
       // escalate by itself and the interface must not do it on its behalf.
       // And if the last reading failed, it does not even report "not
       // finished": the answer is that the page cannot tell.
-      if (!bulk.lastReadOk) bulk.lost = true;
+      if (!ok) mine.lost = true;
       renderBulk();
+      mine.ticking = false;
       return;
     }
     window.setTimeout(tick, 700);
   };
   await tick();
+}
+
+/* Done is decided here, from the tick AND from every render, so a hidden
+   wait stops polling once every row exited and a row exiting after the
+   deadline still finishes the dialog. */
+function settleBulk() {
+  if (bulk === null || bulk.done || bulk.lost) return;
+  if (bulk.deadline !== null && bulkInFlight().length === 0) bulk.done = true;
 }
 
 function showBulkWait() {
@@ -1463,14 +1492,9 @@ function showBulkWait() {
    and a wait that redraws its whole dialog on every listing takes focus from
    under the thumb, which is #71's defect in a new place. */
 function renderBulk() {
+  settleBulk();
   const dialog = $("[data-dialog]");
   if (bulk === null || !dialog?.open || !("bulk" in dialog.dataset)) return;
-  // Done is decided HERE, on every render, and not only by the ticking wait:
-  // a row that exits after the deadline arrives on the stream, and the
-  // dialog that had stopped ticking must still finish.
-  if (!bulk.done && !bulk.lost && bulk.deadline !== null && bulkInFlight().length === 0) {
-    bulk.done = true;
-  }
   for (const row of bulk.rows) {
     const item = dialog.querySelector(`[data-bulk-rows] li[data-name="${CSS.escape(row.name)}"]`);
     if (!item) continue;
