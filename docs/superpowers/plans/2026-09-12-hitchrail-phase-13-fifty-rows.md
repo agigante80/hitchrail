@@ -147,14 +147,14 @@ and no test had ever rendered it.
 
 ### Batch 3: reading the pane, tasks 74 and 75
 
-- [ ] **Task 74, #168.** The pane view is wider and taller where there is
+- [x] **Task 74, #168.** The pane view is wider and taller where there is
       room. A modifier on the shared pane view's container, never on the
       shared dialog rule, sized in `ch` so eighty columns fit without wrapping
       at a desktop width. At the phone viewport nothing changes, and the stop
       confirmation is measured unchanged at both widths, which is the
       assertion that stops the shared rule being edited.
 
-- [ ] **Task 75, #151.** `GET /logs/{name}`, a page served from `web/` behind
+- [x] **Task 75, #151.** `GET /logs/{name}`, a page served from `web/` behind
       the same stack, polling the same `/api/sessions/{name}/logs` route the
       drawer uses. No stream. The pane view gains "Open in a tab" and the
       drawer stays. **A page route resolves a name exactly as strictly as the
