@@ -32,6 +32,43 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+Phase 14: the perimeter, chosen rather than assumed. Upgrading is safe with
+no action: every flag still works and still wins.
+
+### Added
+
+**A config file.** Roots can live in `~/.config/hitchrail/config.toml`, one
+`[[roots]]` table each with `label`, `path` and an optional `enabled`, read
+once at startup. Every refusal `--root` makes, the file makes identically,
+and a file that does not parse, or has an unknown key, or is writable by
+others, refuses to start naming the file and the line. `--config FILE` names
+a different file. The unit template's `ExecStart` no longer carries a root.
+
+**Hide a root.** `PATCH /api/config` toggles `enabled` on a root already in
+the file, and that is the only setting a request can change: no route accepts
+a path, and a test reads the real route table to keep it so. The choice is
+kept in Hitchrail's own `state.toml` beside the config file and only ever
+narrows what the file allows. A hidden root's projects leave the listing,
+which now names them in `hidden_roots`; its sessions keep running and still
+answer by name.
+
+**A settings page.** The footer's "settings" link, and `GET /api/config`
+behind it: every value with where it came from, the token never. The stop
+wait can be set there, persists in `state.toml`, and the page's own wait now
+follows the server's: `--stop-timeout 60` used to get a page that gave up at
+thirty seconds and said "it has not finished" while the server was still
+waiting. A wait given as a flag is pinned and shown as text.
+
+**Flags are exact.** `--stop 60` no longer stands in for `--stop-timeout 60`.
+argparse accepted any unambiguous abbreviation; the settings page needs to
+know which flags were given, and reads the names. Nothing documented ever
+abbreviated one.
+
+**`--session-prefix`, and `session_prefix` in the file.** The setting
+existed with its refusals and nothing reached it. Two instances on one tmux
+server need two prefixes: with one, each reads the other's agent in a same
+named folder as its own and can stop it, and now they cannot.
+
 ## 0.7.0 - 2026-09-14
 
 Phase 13: fifty rows on a phone. Upgrading is safe with no action. Four

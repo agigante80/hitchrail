@@ -353,6 +353,31 @@ different agent. Keeping it narrow serves both. Nothing outside this module may
 name a Claude Code behaviour, a Claude Code file, or a Claude Code key
 sequence.
 
+### 4.5 Two kinds of setting, decided by #154 and #238
+
+Configuration is read once at startup from the command line and from the
+operator's `~/.config/hitchrail/config.toml`, and it is of two kinds. The
+test for which is one question: **does changing this let a request do
+anything a request holding the token cannot already do?**
+
+Everything that fails the test is the perimeter, and no request may change
+it: the roots and their paths, the bind, the host and origin allowlists, the
+token, `agent_binary`, `session_prefix`, `self_project`, and the text typed
+on Stop when Phase 19 adds it. The settings page renders these as text with
+where each came from, never as a disabled input, so nothing suggests they
+can be changed from a phone. A route that added a root would turn a shell
+equivalent API into a shell equivalent API with no directory restriction, and
+each of the others is an input to a control or to what a spawned process is.
+
+What passes the test is policy about work the token already permits, and is
+editable: which configured roots the listing shows, and how long a graceful
+stop is waited for. The editable set is a literal in `server.py`, asserted
+member by member, so a key joins it on purpose. Those choices persist in
+Hitchrail's own `state.toml` beside the operator's file, which Hitchrail never
+writes, and they only narrow: a root the operator disabled cannot be enabled
+by a request, and a value given as a flag is pinned. No route accepts a path,
+and a test reads the real route table to keep it so.
+
 ## 5. Security
 
 The threat model is not incidental to this project. Hitchrail spawns

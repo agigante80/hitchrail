@@ -1076,7 +1076,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # the logs page both climb, lifted out of `logs` with its reasons.
         # 1239 to 1248 for round 1 of the Phase 13 review: the ceiling prune
         # from a snapshot, with the race it replaces written where it was.
-        "engine.py": 1248,
+        # 1248 to 1265 for #154 and #238: the preferences held on the engine,
+        # and the sentence saying why name resolution keeps every root.
+        "engine.py": 1265,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -1175,7 +1177,14 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # whole growth, comment included, and the comment is what stops it
         # drifting back: two literals of one variable name in two layers is how a
         # scrub stops scrubbing without anything going red.
-        "config.py": 507,
+        # 518 to 520 for #154 and #238: `state_path` and `sources`, each with
+        # the sentence saying why it is not a control.
+        "config.py": 520,
+        # 460 for #123, #154 and #238: `--config`, `--session-prefix` and the
+        # source tagging the settings page shows, which is one function
+        # reading the flags back out of argv. Nothing here parses a value
+        # twice; `settings.py` is where the file is read.
+        "cli.py": 460,
         # 409, nine lines over, down from 542. #115 deleted the `?token=`
         # carrier: 135 lines once the two blocks inside `TokenMiddleware`
         # that only served it are counted.
@@ -1237,7 +1246,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # a page route resolves a name through the API's own function. #205
         # carries the split and the seam is unchanged: this is a handler.
         # +7 for #249: the root_unavailable arm on both logs routes.
-        "server.py": 694,
+        # +137 for #154 and #238: the settings routes, the config view and
+        # the editable literal beside `MAX_BODY_BYTES`. #205 is still the
+        # split, and the settings routes are its first candidate.
+        "server.py": 831,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"
@@ -1369,7 +1381,7 @@ def test_every_environment_variable_the_product_reads_is_scrubbed() -> None:
     # The names as they appear in the source, which is how they are written in
     # `conftest.AMBIENT_ENV` too. A literal string here would pass while the
     # constant it duplicates drifted.
-    scrubbed = {"TOKEN_ENV", "JOURNAL_ENV"}
+    scrubbed = {"TOKEN_ENV", "JOURNAL_ENV", "CONFIG_HOME_ENV"}
     unscrubbed = {name: where for name, where in read.items() if name not in scrubbed}
     assert not unscrubbed, (
         f"environment variables read by the product and not scrubbed by "

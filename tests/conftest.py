@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 import subprocess
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 
@@ -16,6 +17,7 @@ from hitchrail.claude_ipc import launch_argv
 from hitchrail.cli import JOURNAL_ENV
 from hitchrail.config import TOKEN_ENV
 from hitchrail.procs import ProcTable, parse_ps
+from hitchrail.settings import CONFIG_HOME_ENV
 from hitchrail.tmux import Panes, Tmux
 
 # What the stubbed resolver answers with. `.invalid` is reserved by RFC 2606
@@ -84,7 +86,7 @@ STUB_CEILING_CALLS: list[int] = []
 #:
 #: Naming the CONSTANTS rather than the strings, so a rename moves both ends at
 #: once instead of leaving a scrub for a variable nothing reads any more.
-AMBIENT_ENV = (JOURNAL_ENV, TOKEN_ENV)
+AMBIENT_ENV = (JOURNAL_ENV, TOKEN_ENV, CONFIG_HOME_ENV)
 
 
 @pytest.fixture(autouse=True)
@@ -116,6 +118,17 @@ def no_ambient_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     for name in AMBIENT_ENV:
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def no_real_config_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#154. `settings.default_config_path()` reads `XDG_CONFIG_HOME` and falls
+    back to the home directory, so a test that builds a config without
+    `--config` would read the developer's real `~/.config/hitchrail/` and its
+    state file could hide a root from a test that never mentioned it. Every
+    test gets an empty config directory of its own; one that wants a file
+    writes it there or passes `--config`."""
+    monkeypatch.setenv(CONFIG_HOME_ENV, str(tmp_path / "xdg"))
 
 
 # -- Phase 4 fakes ---------------------------------------------------------

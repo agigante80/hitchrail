@@ -149,7 +149,7 @@ const state = {
   unsupportedTotal: 0,
   root: "",
   memory: { available_mb: null, total_mb: null },
-  server: { version: null, user: null, started_at: null },
+  server: { version: null, user: null, started_at: null, stop_timeout: null },
   tab: "all",
   query: "",
   // #146. Root labels to show; empty means all. A Set, never persisted as
@@ -157,6 +157,9 @@ const state = {
   // reload and is intersected with the roots actually present on every
   // listing, so a stale or forged value can only ever show MORE rows.
   rootFilter: new Set(),
+  // #154. Labels of configured roots absent from the listing today, so the
+  // empty state can say "hidden" rather than "no folder".
+  hiddenRoots: [],
   // #164. The identifier a suggestion chose, or null. Choosing is exact where
   // typing is a substring: picking `vessel` from the list must not also show
   // `vessel-social`, and the suggestion carried its root, so this is the
@@ -368,6 +371,12 @@ function emptyReason() {
   if (query) return `No folder${where} is called that.`;
   if (state.tab === "running") return `Nothing${where} is running.`;
   if (state.tab === "stopped") return `Nothing${where} is stopped.`;
+  // #154. Every root hidden is not "no folder": the honest empty state
+  // names the roots that are not being listed, and settings is where they
+  // come back.
+  if (state.projects.length === 0 && state.hiddenRoots.length > 0) {
+    return `Every root is hidden (${state.hiddenRoots.join(", ")}). Show one in settings.`;
+  }
   return `No folder${where}.`;
 }
 
@@ -1168,18 +1177,24 @@ async function killNow(project) {
   await refresh();
 }
 
-/* The server owns the real timeout and does not report it, so this is a
-   ceiling for the interface's own patience rather than a second copy of the
-   rule. Erring long is right: showing "no answer" while the engine is still
-   waiting would offer a kill the situation does not call for.
+/* The server owns the real timeout and reports it on the listing's `server`
+   object (#238), so the interface's patience is that number and never a
+   second copy of the rule: an operator who started with `--stop-timeout 60`
+   used to get a page that gave up at 30 and said "it has not finished"
+   while the server was still waiting. Erring long is right: showing "no
+   answer" while the engine is still waiting would offer a kill the
+   situation does not call for.
 
-   Overridable only so the browser tier can reach the timeout screen without
-   waiting thirty seconds per test. It is not read from the server, and a
-   client that shortened it would only make itself impatient. */
-let stopPatienceMs = 30_000;
+   The override exists only so the browser tier can reach the timeout screen
+   without waiting thirty seconds per test, and it wins over the server's
+   figure until the page is reloaded; a client that shortened it would only
+   make itself impatient. */
+let stopPatienceMs = null;
 
 function stopTimeoutMs() {
-  return stopPatienceMs;
+  if (stopPatienceMs !== null) return stopPatienceMs;
+  const seconds = state.server.stop_timeout;
+  return typeof seconds === "number" && seconds > 0 ? seconds * 1000 : 30_000;
 }
 
 export function setStopPatience(ms) {
@@ -2248,6 +2263,7 @@ async function refresh() {
   state.rootFilter = new Set(
     roots.length > 1 ? [...state.rootFilter, ...storedRoots()].filter((l) => present.has(l)) : [],
   );
+  state.hiddenRoots = result.body.hidden_roots ?? [];
   state.memory = result.body.memory;
   state.server = result.body.server ?? state.server;
   render();
@@ -2349,6 +2365,7 @@ window.__hitchrail = {
   state,
   api,
   setStopPatience,
+  stopTimeoutMs,
   setReopenPace,
   openStream,
   get stream() {

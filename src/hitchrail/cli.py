@@ -14,7 +14,7 @@ from urllib.parse import quote
 import uvicorn
 from starlette.applications import Starlette
 
-from hitchrail import __version__
+from hitchrail import __version__, settings
 from hitchrail.config import (
     TOKEN_ENV,
     Config,
@@ -50,6 +50,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="hitchrail",
         description="Start and stop headless Claude Code sessions across a folder of projects.",
+        # #238. `flags_given` reads the option strings back out of argv to
+        # say where a value came from, and an abbreviation argparse would
+        # accept (`--stop 60`) is a spelling that scan cannot see. Exact
+        # names only, which is what every document here uses anyway.
+        allow_abbrev=False,
     )
     # **`label=path`, repeatable, and there is no default.** #119 made a
     # project's identifier `<root-label>~<folder>`, so a root without a label
@@ -65,6 +70,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         type=_root_argument,
         metavar="LABEL=PATH",
         help="a labelled folder holding projects, as label=path; repeatable",
+    )
+    # #154. The file is the other door for roots. `--root` on the command
+    # line still wins, outright: a flag beside a file does not add to it.
+    parser.add_argument(
+        "--config",
+        default=None,
+        type=Path,
+        metavar="FILE",
+        help="the config file; default ~/.config/hitchrail/config.toml",
     )
     parser.add_argument("--host", default="127.0.0.1", help="address to bind")
     parser.add_argument("--port", default=8787, type=int)
@@ -110,13 +124,44 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     # an operator who wants a different one is usually asking for a machine
     # with more memory.
     parser.add_argument(
+        "--session-prefix",
+        # `None` rather than "hr-", so the file's value is used when the flag
+        # is absent and the flag still wins when it is given (#123).
+        default=None,
+        metavar="PREFIX",
+        help="what every tmux session this instance creates is named with, and the "
+        "only sessions it will ever stop; default hr-. Two instances sharing a tmux "
+        "server need two prefixes, or each can stop the other's agents",
+    )
+    parser.add_argument(
         "--stop-timeout",
         default=30,
         type=int,
         help="seconds to wait for a graceful stop before reporting it timed out",
     )
     parser.add_argument("--version", action="version", version=f"hitchrail {__version__}")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    args.given = flags_given(parser, argv)
+    return args
+
+
+def flags_given(parser: argparse.ArgumentParser, argv: list[str]) -> frozenset[str]:
+    """The destinations whose flag appears in argv, `--x v` and `--x=v` alike.
+
+    A value equal to the default is not the same as a default: `--stop-timeout
+    30` is the operator pinning it, and the settings page must say `flag` and
+    refuse to write over it. argparse does not record which is which, so this
+    reads the tokens. `--` ends the options, as it does for argparse.
+    """
+    names = {opt: action.dest for action in parser._actions for opt in action.option_strings}
+    given: set[str] = set()
+    for word in argv:
+        if word == "--":
+            break
+        dest = names.get(word.split("=", 1)[0])
+        if dest is not None:
+            given.add(dest)
+    return frozenset(given)
 
 
 # systemd sets this in a spawned service's environment when it has connected
@@ -169,8 +214,46 @@ def build_config(args: argparse.Namespace) -> Config:
         args.host, tuple(args.allow_hosts), tuple(args.allow_origins)
     ):
         token = secrets.token_urlsafe(24)
+    config_path = args.config or settings.default_config_path()
+    try:
+        file_settings = settings.read_config_file(config_path)
+    except settings.SettingsError as exc:
+        raise ConfigError(str(exc)) from exc
+    # The flags win outright (#154): a root the operator did not name on this
+    # command line appearing anyway is the surprise that matters on a tool
+    # that spawns agents.
+    roots = tuple(args.roots) if args.roots else file_settings.roots
+    # `is not None`, not truthiness: `--session-prefix ""` must reach the
+    # blank refusal in `Config` rather than fall through to the default.
+    prefix = args.session_prefix
+    if prefix is None:
+        prefix = file_settings.session_prefix
+    if prefix is None:
+        # The dataclass default stays the one place "hr-" is spelled.
+        prefix = Config.session_prefix
+    given: frozenset[str] = getattr(args, "given", frozenset())
+
+    def source(dest: str, from_file: bool = False) -> str:
+        return "flag" if dest in given else "file" if from_file else "default"
+
+    sources = {
+        "roots": source("roots", from_file=bool(file_settings.roots)),
+        "config": source("config"),
+        "host": source("host"),
+        "port": source("port"),
+        "token": "flag" if args.token else "env" if os.environ.get(TOKEN_ENV) else "generated",
+        "extra_hosts": source("allow_hosts"),
+        "extra_origins": source("allow_origins"),
+        "self_project": source("self_project"),
+        "agent_binary": source("agent_binary"),
+        "session_prefix": source("session_prefix", file_settings.session_prefix is not None),
+        "stop_timeout": source("stop_timeout"),
+    }
     return Config(
-        roots=tuple(args.roots),
+        roots=roots,
+        state_path=settings.state_path_for(config_path),
+        sources=sources,
+        session_prefix=prefix,
         host=args.host,
         port=args.port,
         token=token,

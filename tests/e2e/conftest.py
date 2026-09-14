@@ -380,6 +380,7 @@ class Harness:
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._meminfo = ""
+        self._ceiling_mb: int | None = None
         self.stopped_cleanly = True
         self.port = free_port()
         self.base = f"http://127.0.0.1:{self.port}"
@@ -449,8 +450,16 @@ class Harness:
         also_in: dict[str, list[str]] | None = None,
         stopped_in: dict[str, list[str]] | None = None,
         ceiling_mb: int | None = None,
+        state_path: Path | None = None,
+        pinned_stop_timeout: bool = False,
     ) -> None:
         """Set the world up BEFORE the page loads.
+
+        `state_path` is where the settings page's choices persist (#154,
+        #238); `None` keeps them in memory for the life of the server, which
+        is what every test that does not restart wants. `pinned_stop_timeout`
+        tags the wait as given on the command line, so the page shows it
+        pinned.
 
         `ceiling_mb` is what every session's cgroup ceiling reads as (#243).
         Injected, never read from this machine: the development box carries
@@ -566,6 +575,8 @@ class Harness:
             )
         )
 
+        sources = {"stop_timeout": "flag"} if pinned_stop_timeout else {}
+
         def build(protect: str | None) -> Config:
             if self.extra_roots:
                 return Config(
@@ -584,6 +595,8 @@ class Harness:
                     stop_timeout=stop_timeout,
                     token=token,
                     self_project=protect,
+                    state_path=state_path,
+                    sources=sources,
                 )
             return make_config(
                 self.root,
@@ -601,6 +614,8 @@ class Harness:
                 stop_timeout=stop_timeout,
                 token=token,
                 self_project=protect,
+                state_path=state_path,
+                sources=sources,
             )
 
         # Seeding runs through an engine with NO self_project and PLENTY of
@@ -712,13 +727,27 @@ class Harness:
             time.sleep(0.4)
 
         self._config = build(e2e_id(self_project) if self_project else None)
+        self._ceiling_mb = ceiling_mb
+        self.engine = self._build_engine()
+        self.start()
+
+    def _build_engine(self) -> Engine:
         # Read through the attribute rather than closed over, so `break_machine`
         # can make the reading unreadable mid test.
-        self.engine = Engine(
+        assert self._config is not None
+        return Engine(
             config=self._config,
             meminfo_fn=lambda: self._meminfo,
-            ceiling_fn=lambda pid: ceiling_mb,
+            ceiling_fn=lambda pid: self._ceiling_mb,
         )
+
+    def restart(self) -> None:
+        """The operator restarting Hitchrail (#238): a new engine over the
+        same configuration, which reads the state file again, on the same
+        port. The one thing a persistence claim can be proved against."""
+        self.stop_serving()
+        assert self.stopped_cleanly, "the old server did not stop, so a restart proves nothing"
+        self.engine = self._build_engine()
         self.start()
 
     # -- lifecycle ------------------------------------------------------
@@ -961,14 +990,29 @@ class Harness:
             # the loop under them logs "Task was destroyed but it is pending"
             # once per test, which is noise that trains people to ignore
             # asyncio errors in this suite.
-            pending = asyncio.all_tasks(self._loop)
-            for task in pending:
-                task.cancel()
-            if pending:
-                self._loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-            # The fixture is function scoped, so an unclosed loop leaks its
-            # epoll and self pipe descriptors once per browser test.
-            self._loop.close()
+            loop = self._loop
+
+            def settle() -> None:
+                pending = asyncio.all_tasks(loop)
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                # The fixture is function scoped, so an unclosed loop leaks
+                # its epoll and self pipe descriptors once per browser test.
+                loop.close()
+
+            # From the fixture's finalizer this thread runs no loop and the
+            # old one can be driven here. From `restart`, called inside an
+            # async test, this thread's loop is RUNNING and asyncio refuses
+            # to run a second one on it, so the old loop is settled from a
+            # thread of its own; it is stopped, so any thread may drive it.
+            if asyncio._get_running_loop() is None:
+                settle()
+            else:
+                worker = threading.Thread(target=settle)
+                worker.start()
+                worker.join(timeout=10)
             self._loop = None
 
     # -- asking the machine, not the page -------------------------------

@@ -53,6 +53,11 @@ class Root:
 
     label: str
     path: Path
+    # #154. Configured and shown, or configured and hidden today. A hidden
+    # root is still a root: its paths are still the perimeter, a session in it
+    # still derives and can still be addressed by name; it is absent from the
+    # listing and the sheet. Nothing about `enabled` changes what is reachable.
+    enabled: bool = True
 
 
 def parse_root_argument(raw: str) -> Root:

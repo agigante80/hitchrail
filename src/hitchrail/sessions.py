@@ -42,6 +42,40 @@ class Protected(EngineError):
     """
 
 
+class UnknownRoot(EngineError):
+    """No configured root carries that label (#154).
+
+    The toggle takes a label and nothing else, and a label is validated by
+    membership in the configured set: allowlist, not pattern. A path in its
+    place is an unknown label, and this is the whole of what it can do.
+    """
+
+
+class OperatorDisabled(EngineError):
+    """The operator's file disables this root, so a request cannot enable it
+    (#154). The state file only ever narrows the operator's set."""
+
+
+class OperatorPinned(EngineError):
+    """The operator set this on the command line, and a flag wins outright
+    over anything a request writes (#238). Refused rather than written to a
+    file the next restart would ignore."""
+
+
+class InvalidValue(EngineError):
+    """A settings value `Config` would refuse on the command line, in the
+    words it would use there (#238)."""
+
+
+class StateUnwritable(EngineError):
+    """The choice could not be persisted, so it was not made (#154).
+
+    Applying it in memory and reporting success would make a toggle that
+    silently reverts at the next restart, which is the drift a state file
+    exists to end. Nothing changed; the message says which file.
+    """
+
+
 class NotAsking(EngineError):
     """The screen is not showing a question, so no key was sent (#204).
 

@@ -142,7 +142,7 @@ def policy_for(path: str) -> str:
     Compared exactly, the way `security.route_path` is: a prefix test would
     hand the grant page's inline hashes to anything later mounted under it.
     """
-    if path == "/":
+    if path in {"/", "/settings"}:
         return PAGE_CSP
     if path == "/grant":
         return GRANT_CSP

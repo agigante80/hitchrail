@@ -136,6 +136,14 @@ def test_the_mark_is_served_with_a_policy_that_admits_its_own_style() -> None:
         assert policy_for(path) == API_CSP, path
 
 
+def test_the_settings_page_gets_the_page_policy_exactly() -> None:
+    """#238. Same script-from-self policy as `/`, by exact path: a prefix
+    match would hand a document policy to anything mounted under it."""
+    assert policy_for("/settings") == PAGE_CSP
+    assert policy_for("/settings/") == API_CSP
+    assert policy_for("/settings.js") == API_CSP
+
+
 def test_the_logs_page_gets_the_page_policy_and_only_one_segment_deep() -> None:
     """#151. A page under `/logs/<name>` runs the same script as `/` and gets
     the same policy: self only, no inline. One path segment exactly, so

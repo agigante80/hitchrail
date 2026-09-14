@@ -75,6 +75,8 @@ See `CHANGELOG.md`.
 | `GET` | `/api/sessions/{name}/logs` | tail of the pane |
 | `GET` | `/api/sessions/{name}/url` | the session's link, once it has one |
 | `GET` | `/api/events` | SSE stream of state changes |
+| `GET` | `/api/config` | the effective configuration, every value with its source, never the token |
+| `PATCH` | `/api/config` | hide or show a configured root, or set the stop wait; the two settings a request may change |
 | `GET` | `/logs/{name}` | a page showing one project's tail, bookmarkable; refuses a name exactly as `/api/sessions/{name}/logs` does |
 
 **Graceful stop and kill are separate routes, not one route with a flag.** A
@@ -93,11 +95,13 @@ in both directions by the suite:
 | `unsupported` | folders that cannot be projects, each with the rule it broke, capped |
 | `unsupported_total` | the true count behind that cap |
 | `memory` | the machine's `available_mb` and `total_mb`, null when unreadable |
-| `roots` | every configured root as `{label, path}`, one root still a list |
+| `roots` | every root the interface shows as `{label, path}`, one root still a list |
+| `hidden_roots` | the labels of configured roots absent from the listing today, disabled in the config file or hidden by a request; an empty page says "hidden" rather than "no projects" |
 | `server` | this server, as distinct from this machine |
 | `server.version` | the version the installed distribution carries, the string `hitchrail --version` prints; null from a bare checkout |
 | `server.user` | the account this server runs as, which is the account every session it starts runs as; the numeric uid when the account has no passwd entry |
 | `server.started_at` | when this process started, Unix seconds; format it in the viewer's timezone, never the server's |
+| `server.stop_timeout` | seconds the server waits for a graceful stop before reporting it timed out; the browser's own patience is this number, read here rather than assumed |
 
 ### The session payload
 
@@ -154,6 +158,53 @@ route, and `no_agent` (409) for both states that hold no agent to answer:
   Pure and Powerlevel10k, so a stale pane on a developer's machine looks exactly
   like a prompt awaiting an answer.
 
+### `GET /api/config`
+
+The effective configuration, for a person on a phone asking "what is this
+instance pointed at" without SSH. Every value is `{value, source}` where
+`source` is `flag`, `file`, `env` or `default`: `host`, `port`,
+`allow_hosts`, `allow_origins`, `self_project`, `agent_binary`,
+`session_prefix`, the three memory figures, `config_file` and `state_file`.
+`roots` is every configured root as `{label, path, enabled, editable,
+source}`, hidden ones included, with `hidden_roots` beside it; `stop_timeout`
+is `{value, source, editable}`, its source `state` when the interface set it.
+**`token` carries its source and never its value**, and `none` means the
+server runs without one, which only a loopback bind allows.
+
+### `PATCH /api/config`
+
+Body: `{"roots": {"work": {"enabled": false}}, "stop_timeout": 45}`, either
+half optional. One boolean per configured label, as many labels as the body
+names, and a whole number of seconds; the response is the same document
+`GET` returns, as it now stands.
+
+**No route accepts a path, and this is the route that would have.** Roots are
+read once at startup from `~/.config/hitchrail/config.toml` or `--root`, and
+the set of paths Hitchrail can reach is fixed by a person with filesystem
+access. This route chooses among them: `enabled` is the whole of what it
+edits, the label is validated by membership in the configured set, and
+`tests/test_settings_route.py` asserts both against the real route table.
+
+The choice persists in Hitchrail's own `state.toml` beside the config file,
+never in the operator's file, and it only ever narrows: a root the config file
+sets `enabled = false` on is `editable: false` here, and a request to enable
+it is `operator_disabled` (409). Every label in a body is checked before
+anything is written, so one unknown label (`unknown_root`, 404) changes
+nothing. Any key outside `roots.<label>.enabled` is `not_editable` (400), the
+same answer whether the key is a root's `path` or the server's `host`.
+
+Hiding a root removes its projects from the listing and stops nothing: a
+session in a hidden root still answers to its name on every session route,
+so an agent hidden by mistake can still be stopped.
+
+`stop_timeout` is the one policy value: a longer wait lets a request do
+nothing it could not already do. It passes the refusal `--stop-timeout`
+passes (`invalid_value`, 400), persists in `state.toml`, and is read by the
+engine and reported on the listing's `server` object from the next request.
+A `--stop-timeout` flag pins it: the value shows `source: "flag"`,
+`editable: false`, and a request to change it is `operator_pinned` (409)
+rather than a write the next restart would ignore.
+
 ## Session states
 
 Derived on demand, never stored.
@@ -206,6 +257,12 @@ than by position.
 | `origin_rejected` | 403 | a mutating request whose `Origin` is not allowed |
 | `not_found` | 404 | no such route |
 | `unknown_project` | 404 | no such folder under the root |
+| `unknown_root` | 404 | no configured root carries that label |
+| `not_editable` | 400 | the settings body names something a request may not change |
+| `operator_disabled` | 409 | the config file disables that root, and a request cannot undo it |
+| `operator_pinned` | 409 | that setting is given on the command line, and a request cannot override a flag |
+| `invalid_value` | 400 | a settings value the command line would refuse too, in the same words |
+| `state_unwritable` | 503 | the choice could not be written to `state.toml`, so it was not made |
 | `already_exists` | 409 | a folder of that name is already there |
 | `already_running` | 409 | that project already has a live session |
 | `locked` | 409 | a start is already in flight for that project |

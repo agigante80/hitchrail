@@ -37,7 +37,7 @@ import time
 from collections.abc import Callable
 from dataclasses import replace
 
-from hitchrail import attention, claude_ipc, derive, discovery, ram
+from hitchrail import attention, claude_ipc, derive, discovery, ram, settings
 from hitchrail.config import TOKEN_ENV, Config
 from hitchrail.derive import Machine
 from hitchrail.events import EventBus
@@ -46,6 +46,7 @@ from hitchrail.roots import RootError, split_identifier
 from hitchrail.sessions import (
     AlreadyRunning,
     EngineError,
+    InvalidValue,
     Locked,
     MachineUnreadable,
     MemoryNeedsAck,
@@ -53,12 +54,16 @@ from hitchrail.sessions import (
     NoAgent,
     NotAsking,
     NotRunning,
+    OperatorDisabled,
+    OperatorPinned,
     Protected,
     Session,
     StartFailed,
     State,
+    StateUnwritable,
     StopRefused,
     UnknownProject,
+    UnknownRoot,
 )
 from hitchrail.tmux import Tmux, TmuxUnavailable
 
@@ -183,6 +188,13 @@ class Engine:
         # is the whole reason the lock exists.
         self._starting: set[str] = set()
         self._starting_guard = threading.Lock()
+        # #154, #238. What the interface may change: which configured roots
+        # are hidden, and the stop wait. `config.roots` stays every configured
+        # root and is what anything that RESOLVES a name reads: a session in a
+        # hidden root is still a session, and refusing it by name would be a
+        # lie. `prefs.active_roots()` is what the listing shows, the sheet
+        # creates in and the sweep reads.
+        self.prefs = settings.Preferences(config)
         # Generous on purpose. Being too eager reports a working start as a
         # failure; being too patient is only a slow error message.
         self.start_grace = 8.0
@@ -290,7 +302,7 @@ class Engine:
         """
         machine = self._look()
         names = (
-            discovery.list_root_projects(self.config.roots)
+            discovery.list_root_projects(self.prefs.active_roots())
             if listing is None
             else list(listing.projects)
         )
@@ -963,7 +975,7 @@ class Engine:
             return []
         try:
             machine = self._look()
-            names = discovery.list_root_projects(self.config.roots)
+            names = discovery.list_root_projects(self.prefs.active_roots())
         except (MachineUnreadable, discovery.RootUnavailable):
             # We could not look. That is not evidence about anybody's screen,
             # so nothing is added and nothing already known is dropped.
@@ -1106,7 +1118,7 @@ class Engine:
             candidates = [
                 (name, began)
                 for name, began in self._stopping.items()
-                if now - began >= self.config.stop_timeout
+                if now - began >= self.prefs.stop_timeout()
             ]
             # No "is it still the same stop" check, deliberately. The
             # snapshot and the removal are inside ONE lock, so nothing can
@@ -1232,6 +1244,7 @@ __all__ = [
     "AlreadyRunning",
     "Engine",
     "EngineError",
+    "InvalidValue",
     "Locked",
     "MachineUnreadable",
     "MemoryNeedsAck",
@@ -1239,10 +1252,14 @@ __all__ = [
     "NoAgent",
     "NotAsking",
     "NotRunning",
+    "OperatorDisabled",
+    "OperatorPinned",
     "Protected",
     "Session",
     "StartFailed",
     "State",
+    "StateUnwritable",
     "StopRefused",
     "UnknownProject",
+    "UnknownRoot",
 ]

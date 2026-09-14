@@ -8,6 +8,7 @@ and the derived allowlists; that one owns what a valid host or origin IS.
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -162,6 +163,18 @@ class Config:
     # to be testable without the developer's own home directory deciding what
     # a row says.
     agent_config_path: Path = field(default_factory=lambda: Path.home() / ".claude.json")
+    # #154. Where the interface's one preference lives: which configured roots
+    # it has hidden. Hitchrail's own file, never the operator's, and `None`
+    # means the choice does not outlive the process, which is what a test and
+    # a bare `Engine(config)` want. `roots` is every configured root whatever
+    # this file says; the engine holds the narrowing, because a request can
+    # change it and a frozen Config cannot.
+    state_path: Path | None = None
+    # #238. Where each value came from, `flag`, `file`, `env` or `default`,
+    # by field name, filled by `cli.build_config` and shown on the settings
+    # page. Not validated, and not read by any control: a source tag decides
+    # whether a request may write a value, never what the value is.
+    sources: Mapping[str, str] = field(default_factory=dict)
     tmux_socket: str | None = None
     self_project: str | None = None
     resolver: Resolver | None = None

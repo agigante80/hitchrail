@@ -44,9 +44,24 @@ ROUTING_404_MESSAGE = str(HTTPException(status_code=404).detail)
 
 SWEEP_INTERVAL_S = 1.0
 
-# Two routes read a body: create takes {"name": <a project name>} and answer
-# takes {"key": <one of ANSWER_KEYS>}. A project name is capped at 64 characters
-# and a key is shorter still, so this is three orders of magnitude
+# #154, #238. WHAT A REQUEST MAY CHANGE, as a literal. `PATCH /api/config`
+# walks a body of `{"roots": {"<label>": {"enabled": bool}}, "stop_timeout":
+# int}` and refuses any key that is not named here, so the perimeter (a
+# root's path, the bind, the allowlists, the token, `agent_binary`,
+# `session_prefix`, `self_project`, and `stop_prompt` when #242 adds it)
+# cannot become editable by an edit elsewhere: adding a name to either set is
+# the only way, and `tests/test_settings_route.py` asserts both sets member by
+# member. The test for membership is #238's: does changing this let a request
+# do anything a request with the token cannot already do? A longer wait does
+# not; hiding a configured root does not. The label between the two levels is
+# validated by membership in the configured set, in the engine.
+EDITABLE_TOP_LEVEL = frozenset({"roots", "stop_timeout"})
+EDITABLE_ROOT_FIELDS = frozenset({"enabled"})
+
+# Three routes read a body: create takes {"name": <a project name>}, answer
+# takes {"key": <one of ANSWER_KEYS>} and the settings PATCH takes the shape
+# above, a boolean per configured label. A project name is capped at 64
+# characters and a key is shorter still, so this is three orders of magnitude
 # more than the contract needs.
 #
 # **413 is the one failure that is not the documented envelope**, and that is a
@@ -164,6 +179,13 @@ def create_app(
         "started_at": now(),
     }
 
+    def facts() -> dict[str, object]:
+        # `stop_timeout` rides here (#238) on #147's argument: the wait has
+        # to be right before the settings page has ever been opened, and
+        # this is the payload the page already fetches first. Read per
+        # request because the settings route can change it.
+        return {**server_facts, "stop_timeout": engine.prefs.stop_timeout()}
+
     async def list_projects(request: Request) -> Response:
         # ONE scan, one thread hop, one consistent answer.
         #
@@ -179,7 +201,7 @@ def create_app(
         # each with the rule it broke. Dropping them silently made a folder
         # called `my app` look like one Hitchrail could not see. See issue #7.
         def read() -> tuple[discovery.Listing, list[eng.Session], tuple[int, int | None]]:
-            listing = discovery.scan_roots(config.roots)
+            listing = discovery.scan_roots(engine.prefs.active_roots())
             return listing, engine.list(listing=listing), engine.machine_memory()
 
         try:
@@ -209,14 +231,19 @@ def create_app(
                 # proportion and the header names the folder, and neither is
                 # derivable from the rows. See #64.
                 "memory": {"available_mb": memory[0], "total_mb": memory[1]},
-                # Every configured root, labelled. One root is still a list,
-                # because #119 made the qualified form universal and a
-                # client that special cased "one root" would be wrong the
-                # day a second was added.
-                "roots": [{"label": r.label, "path": str(r.path)} for r in config.roots],
+                # Every root the interface shows, labelled. One root is still
+                # a list, because #119 made the qualified form universal and
+                # a client that special cased "one root" would be wrong the
+                # day a second was added. Hidden ones are named beside it so
+                # an empty page can say so (#154); the settings route is
+                # where they are listed in full.
+                "roots": [
+                    {"label": r.label, "path": str(r.path)} for r in engine.prefs.active_roots()
+                ],
+                "hidden_roots": list(engine.prefs.hidden_roots()),
                 # This server rather than this machine: what a person holding
                 # a phone needs before trusting the rest of the page (#147).
-                "server": server_facts,
+                "server": facts(),
             }
         )
 
@@ -229,7 +256,7 @@ def create_app(
             # here would put a traceback where a client expects a code.
             return _error(400, "invalid_name", "a JSON body with a 'name' is required")
         try:
-            await in_thread(discovery.create_in_root, config.roots, name)
+            await in_thread(discovery.create_in_root, engine.prefs.active_roots(), name)
         except discovery.AlreadyExists as exc:
             return _error(409, "already_exists", str(exc))
         except discovery.RootUnavailable as exc:
@@ -247,6 +274,113 @@ def create_app(
         # right because a refetch IS correct for a new project.
         events.publish(session.as_dict())
         return JSONResponse(session.as_dict(), status_code=201)
+
+    async def get_config(request: Request) -> Response:
+        """The effective configuration, every value with its source, and
+        never the token (#238). What a person on a phone needs to answer
+        "what is this instance pointed at" without SSH."""
+        return JSONResponse(_config_view())
+
+    async def patch_config(request: Request) -> Response:
+        """Change what the interface may change, and nothing else (#154, #238).
+
+        The ticket's argument in one line: a route that added a root would
+        turn a shell equivalent API into a shell equivalent API with no
+        directory restriction. So the body carries LABELS, checked by
+        membership in the configured set, and a boolean each, plus the one
+        policy value. There is no field a path could travel in, and
+        `EDITABLE_TOP_LEVEL` and `EDITABLE_ROOT_FIELDS` are the whole of what
+        is accepted.
+
+        PATCH rather than POST because it is a partial update to one
+        resource, the configuration, and the response is that resource as it
+        now stands. Every key is checked before anything is applied, so a
+        body with one bad key changes nothing.
+        """
+        try:
+            body = await request.json()
+        except ValueError:
+            return _error(400, "invalid_body", "a JSON object is required")
+        if not isinstance(body, dict):
+            return _error(400, "invalid_body", "a JSON object is required")
+        for key in body:
+            if key not in EDITABLE_TOP_LEVEL:
+                return _error(400, "not_editable", f"{key!r} is not editable")
+        roots = body.get("roots", {})
+        if not isinstance(roots, dict):
+            return _error(400, "invalid_body", "'roots' must be an object keyed by label")
+        changes: dict[str, bool] = {}
+        for label, fields in roots.items():
+            if not isinstance(fields, dict):
+                return _error(400, "invalid_body", f"roots[{label!r}] must be an object")
+            for key, value in fields.items():
+                field = f"roots[{label!r}].{key}"
+                if key not in EDITABLE_ROOT_FIELDS:
+                    return _error(400, "not_editable", f"{field} is not editable")
+                if not isinstance(value, bool):
+                    return _error(400, "invalid_body", f"{field} must be a boolean")
+                changes[label] = value
+        try:
+            if changes:
+                await in_thread(engine.prefs.set_roots_enabled, changes)
+            if "stop_timeout" in body:
+                await in_thread(engine.prefs.set_stop_timeout, body["stop_timeout"])
+        except eng.UnknownRoot as exc:
+            return _error(404, "unknown_root", str(exc))
+        except eng.OperatorDisabled as exc:
+            return _error(409, "operator_disabled", str(exc))
+        except eng.OperatorPinned as exc:
+            return _error(409, "operator_pinned", str(exc))
+        except eng.InvalidValue as exc:
+            return _error(400, "invalid_value", str(exc))
+        except eng.StateUnwritable as exc:
+            return _error(503, "state_unwritable", str(exc))
+        return JSONResponse(_config_view())
+
+    def _config_view() -> dict[str, object]:
+        """Read only values as `{value, source}`; the two a request may write
+        carry `editable` too. The token is its source alone."""
+        src = config.sources
+
+        def shown(name: str, value: object) -> dict[str, object]:
+            return {"value": value, "source": src.get(name, "default")}
+
+        prefs = engine.prefs
+        return {
+            "roots": [
+                {
+                    "label": v.label,
+                    "path": str(v.path),
+                    "enabled": v.enabled,
+                    "editable": v.editable,
+                    "source": src.get("roots", "default"),
+                }
+                for v in prefs.root_views()
+            ],
+            "hidden_roots": list(prefs.hidden_roots()),
+            "stop_timeout": {
+                "value": prefs.stop_timeout(),
+                "source": prefs.stop_timeout_source(),
+                "editable": prefs.stop_timeout_editable(),
+            },
+            "host": shown("host", config.host),
+            "port": shown("port", config.port),
+            "allow_hosts": shown("extra_hosts", list(config.extra_hosts)),
+            "allow_origins": shown("extra_origins", list(config.extra_origins)),
+            "self_project": shown("self_project", config.self_project),
+            "agent_binary": shown("agent_binary", config.agent_binary),
+            "session_prefix": shown("session_prefix", config.session_prefix),
+            "hard_floor_mb": shown("hard_floor_mb", config.hard_floor_mb),
+            "soft_floor_mb": shown("soft_floor_mb", config.soft_floor_mb),
+            "session_mb": shown("session_mb", config.session_mb),
+            # Never the value. Its source says whether a token exists at all
+            # ("none" on a loopback bind) and where it came from.
+            "token": {"source": src.get("token", "none") if config.token else "none"},
+            "config_file": shown("config", str(config.state_path.parent / "config.toml"))
+            if config.state_path
+            else shown("config", None),
+            "state_file": {"value": str(config.state_path) if config.state_path else None},
+        }
 
     async def grant(request: Request) -> Response:
         """Trade a token the page read from a fragment for the cookie.
@@ -667,6 +801,8 @@ def create_app(
         routes=[
             Route("/api/projects", list_projects, methods=["GET"]),
             Route("/api/projects", create_project, methods=["POST"]),
+            Route("/api/config", get_config, methods=["GET"]),
+            Route("/api/config", patch_config, methods=["PATCH"]),
             Route("/api/sessions/{name}", start, methods=["POST"]),
             Route("/api/sessions/{name}", stop, methods=["DELETE"]),
             # Its own route, deliberately. #52 and the design's section 6.
@@ -679,6 +815,7 @@ def create_app(
             Route(sec.GRANT_PAGE_PATH, pages.grant_page, methods=["GET"]),
             Route("/", pages.page, methods=["GET"]),
             Route("/logs/{name}", logs_page, methods=["GET"]),
+            Route("/settings", pages.settings_page, methods=["GET"]),
             *[Route(p, pages.asset_route(p), methods=["GET"]) for p in pages.ASSETS],
         ],
         # OUTSIDE the three access controls, so a refusal carries the

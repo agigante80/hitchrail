@@ -129,7 +129,10 @@ StartLimitBurst=12
 # `uv tool install hitchrail`, not `uvx`. uvx resolves and runs out of a cache
 # it is free to evict, so it is deliberately ephemeral and the path is not
 # stable. A unit needs an executable that is still there next month.
-ExecStart=%h/.local/bin/hitchrail --root main=%h/projects
+# No `--root` here: the roots live in ~/.config/hitchrail/config.toml, edited
+# on the machine, so adding a folder is never a unit edit. `--root LABEL=PATH`
+# still works and wins over the file, for a one off.
+ExecStart=%h/.local/bin/hitchrail
 
 # Mode 600, and this is not a style note. This file holds HITCHRAIL_TOKEN, and
 # anyone who can read it can run code on this machine as you. A token in a
@@ -153,7 +156,7 @@ Environment=PYTHONUNBUFFERED=1
 # (#195). Measured on a real boot: started at 17:23:06, refused at 17:23:06 with
 # "'claude' is not on PATH", exit 2, and correctly stayed stopped.
 #
-# `loginctl enable-linger`, which step 4 of the README's setup tells you to
+# `loginctl enable-linger`, which step 5 of the README's setup tells you to
 # run, starts the user manager AT BOOT, before any login. Its PATH then is systemd's
 # fallback, `/usr/local/bin:/usr/bin:/bin`, and the agent lives in
 # `~/.local/bin`, which is not in it.
