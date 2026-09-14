@@ -32,6 +32,8 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+## 0.7.0 - 2026-09-14
+
 Phase 13: fifty rows on a phone. Upgrading is safe with no action. Four
 files are now served without a token, the mark and its manifest; nothing
 else about the boundary moves, and the argument is in `security.py`.
