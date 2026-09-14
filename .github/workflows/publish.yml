@@ -68,6 +68,12 @@ jobs:
               "hitchrail/web/grant.html",
               "hitchrail/web/app.js",
               "hitchrail/web/app.css",
+              "hitchrail/web/logs.html",
+              "hitchrail/web/logs.js",
+              "hitchrail/web/icon.svg",
+              "hitchrail/web/icon-180.png",
+              "hitchrail/web/icon-512.png",
+              "hitchrail/web/manifest.webmanifest",
           ]
           missing = [n for n in needed if n not in names]
           fonts = [n for n in names if n.startswith("hitchrail/web/fonts/")]

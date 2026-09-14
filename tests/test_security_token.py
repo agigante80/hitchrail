@@ -25,6 +25,7 @@ from hitchrail.config import Config
 from hitchrail.security import (
     TOKEN_COOKIE,
     UNAUTHENTICATED,
+    UNAUTHENTICATED_ASSETS,
     middleware_stack,
     route_path,
     token_matches,
@@ -80,6 +81,28 @@ async def call(
 async def test_no_token_configured_means_no_token_demanded(tmp_path: Path) -> None:
     app = build(make_config(tmp_path))
     assert (await call(app, headers=HOST)).status_code == 200
+
+
+# -- #151: the logs page is behind the token like `/` ----------------------
+
+
+@pytest.mark.integration
+async def test_the_logs_page_demands_the_token_like_the_index_does(tmp_path: Path) -> None:
+    """A page route with a name in its path is still a page: no token and a
+    wrong token get the same answer `/` gives, and nothing about the project
+    leaks in the refusal. On a synthetic app with the route's shape, so this
+    proves the stack's behaviour for that shape; that the REAL route is
+    behind the stack is `test_every_route_but_the_two_grant_ones_needs_a_token`
+    in `test_api.py`, which sweeps the real table."""
+    app = Starlette(
+        routes=[Route("/logs/{name}", _ok, methods=["GET"])],
+        middleware=middleware_stack(make_config(tmp_path, host="0.0.0.0", token=TOKEN)),
+    )
+    for headers in (HOST, {**HOST, "authorization": "Bearer wrong"}):
+        response = await call(app, path="/logs/main~vessel", headers=headers)
+        assert response.status_code == 401, headers
+        assert response.json()["code"] == "unauthorized"
+        assert "vessel" not in response.text
 
 
 # -- the header carrier ----------------------------------------------------
@@ -532,6 +555,37 @@ def test_the_exemption_is_exactly_these_entries() -> None:
         )
         == UNAUTHENTICATED
     )
+    # #160. The mark and the manifest, the only assets a phone needs before
+    # it has a token: a drawing and a name, nothing from the machine. Named
+    # here for the same reason as the routes above.
+    assert (
+        frozenset({"/icon.svg", "/icon-180.png", "/icon-512.png", "/manifest.webmanifest"})
+        == UNAUTHENTICATED_ASSETS
+    )
+
+
+@pytest.mark.integration
+async def test_an_unauthenticated_asset_is_only_ever_read(tmp_path: Path) -> None:
+    """GET and HEAD, nothing else: the exemption is for fetching a drawing.
+
+    Both halves asserted (#253): HEAD admitted as well as GET, and every
+    other method refused, `OPTIONS` among them, because `method in
+    SAFE_METHODS` is the one refactor that would admit it and read as tidy.
+    The trailing slash is the case `redirect_slashes` makes interesting and
+    the one #78 had to argue for the grant page."""
+    app = Starlette(
+        routes=[Route("/icon.svg", _ok, methods=["GET", "POST", "PUT", "DELETE", "PATCH"])],
+        middleware=middleware_stack(make_config(tmp_path, host="0.0.0.0", token=TOKEN)),
+    )
+    for method in ("GET", "HEAD"):
+        assert (
+            await call(app, method=method, path="/icon.svg", headers=HOST)
+        ).status_code == 200
+    for method in ("POST", "PUT", "DELETE", "PATCH", "OPTIONS"):
+        r = await call(app, method=method, path="/icon.svg", headers=HOST)
+        assert r.status_code == 401, method
+    for path in ("/icon.svg/", "/icon.svg/x", "/ICON.SVG"):
+        assert (await call(app, path=path, headers=HOST)).status_code == 401, path
 
 
 @pytest.mark.integration

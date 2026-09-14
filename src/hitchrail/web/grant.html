@@ -6,6 +6,14 @@
 <meta name="color-scheme" content="light dark">
 <meta name="referrer" content="no-referrer">
 <title>hitchrail</title>
+<!-- #160. The four links below are the one exception to this page fetching
+     nothing: a tab and a tile must not be nameless, and these are served
+     without a token because they carry nothing from the machine. -->
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#F3ECE1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#362D24" media="(prefers-color-scheme: dark)">
 <!--
   SELF CONTAINED, on purpose. This is the only page served without a token, and
   every asset route stays behind one, so a linked stylesheet or an external

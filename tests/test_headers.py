@@ -11,6 +11,7 @@ The browser actually honouring the policy is the e2e tier's job.
 
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -25,10 +26,13 @@ from hitchrail.config import Config
 from hitchrail.headers import (
     API_CSP,
     GRANT_CSP,
+    ICON_CSP,
     PAGE_CSP,
     SecurityHeadersMiddleware,
+    _hash_of,
     policy_for,
 )
+from hitchrail.pages import WEB
 from hitchrail.security import middleware_stack
 from support import make_config
 
@@ -111,6 +115,39 @@ async def test_the_grant_page_refuses_to_be_framed(tmp_path: Path) -> None:
 # -- the policy is per route, and exactly per route --------------------------
 
 
+def test_the_mark_is_served_with_a_policy_that_admits_its_own_style() -> None:
+    """Round 1 review of Phase 13, batch 5. `/icon.svg` carries a `<style>` for
+    its light and dark fills, and it was served under `API_CSP`, whose
+    `default-src 'none'` has no `style-src`. Firefox enforces an SVG response's
+    own CSP on its inline style even when the SVG is drawn as a favicon, so
+    the mark rendered solid black there and vanished on a dark tab strip;
+    Chromium ignores an image's own policy, which is why the browser tier
+    could not see it. The icon gets a policy of its own with the hash of its
+    style block, the way the grant page does, and nothing else opened."""
+    svg = WEB.joinpath("icon.svg").read_text()
+    (style,) = re.findall(r"<style>(.*?)</style>", svg, re.S)
+    policy = policy_for("/icon.svg")
+    assert policy == ICON_CSP
+    assert policy.startswith("default-src 'none'")
+    assert f"style-src {_hash_of(style)}" in policy
+    assert "'unsafe-inline'" not in policy and "script-src" not in policy
+    # The PNGs and the manifest have no style and get the API policy.
+    for path in ("/icon-180.png", "/icon-512.png", "/manifest.webmanifest"):
+        assert policy_for(path) == API_CSP, path
+
+
+def test_the_logs_page_gets_the_page_policy_and_only_one_segment_deep() -> None:
+    """#151. A page under `/logs/<name>` runs the same script as `/` and gets
+    the same policy: self only, no inline. One path segment exactly, so
+    nothing mounted deeper inherits a document policy; the grant page's
+    inline hashes are the hazard a prefix would hand out, and this hands out
+    none of those."""
+    assert policy_for("/logs/main~vessel") == PAGE_CSP
+    assert policy_for("/logs/x/y") == API_CSP
+    assert policy_for("/logs/") == API_CSP
+    assert policy_for("/logs") == API_CSP
+
+
 def test_the_grant_policy_is_not_handed_to_a_neighbour() -> None:
     """Exact comparison, like `security.route_path`. A prefix test would give
     the grant page's inline hashes to anything mounted under it later."""
@@ -123,6 +160,25 @@ def test_the_api_policy_allows_nothing() -> None:
     """A JSON response is not a document and should pull nothing at all."""
     assert API_CSP.startswith("default-src 'none'")
     assert "'self'" not in API_CSP
+
+
+def test_the_grant_policy_is_bounded_like_the_other_two() -> None:
+    """#253. `PAGE_CSP` and `API_CSP` had a bound on their sources and the
+    grant policy, the page with the key field, had only "no unsafe-inline".
+    Parsed rather than matched as a string, so a directive reordered by a
+    later edit does not pass by accident: nothing from elsewhere, the
+    default at none, and the three fetching directives exactly self."""
+    directives = {
+        name: values.split()
+        for name, _, values in (
+            d.strip().partition(" ") for d in GRANT_CSP.split(";") if d.strip()
+        )
+    }
+    assert directives["default-src"] == ["'none'"]
+    assert "http" not in GRANT_CSP
+    for name in ("img-src", "manifest-src", "connect-src"):
+        assert directives[name] == ["'self'"], name
+    assert "'unsafe-inline'" not in GRANT_CSP and "'unsafe-eval'" not in GRANT_CSP
 
 
 def test_the_page_policy_is_self_only_and_names_no_third_party() -> None:

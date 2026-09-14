@@ -6,6 +6,11 @@ it is a sequence over time, not a status code.
 
 from __future__ import annotations
 
+import asyncio
+import itertools
+import re
+import time
+
 import pytest
 from playwright.async_api import Page, Route, expect
 
@@ -201,8 +206,18 @@ async def test_kill_appears_once_the_wait_is_under_way_and_stays(
     # two samples with a guess between them is the wrong shape: it can miss a
     # gap either side. This polls until the wait actually ends, which is the
     # timeout screen arriving, and fails on the first frame the control is gone.
+    #
+    # **A wait has three ends, and this watches until any of them.** "No
+    # answer from" is the ordinary one. "Lost track of" is #81's: a listing
+    # that could not be read at the deadline, which on a loaded machine is a
+    # tmux call timing out, and the control then goes deliberately, because
+    # offering a kill on a reading that failed is the thing #81 forbids. It
+    # failed here twice in full runs on a loaded box before that was written
+    # down. "is waiting for you" is #101's, unreachable for this shim, named
+    # for completeness.
+    ended = dialog.get_by_text(re.compile("No answer from|Lost track of|is waiting for you"))
     watched = 0
-    while not await dialog.get_by_text("No answer from").is_visible():
+    while not await ended.is_visible():
         assert await kill.is_visible(), (
             f"the kill control vanished {watched * 100}ms into the wait, so "
             f"somebody reaching for it finds it gone"
@@ -685,3 +700,354 @@ async def test_the_waiting_dialog_goes_when_the_agent_does(page: Page, server: H
     # page can act on without polling.
     server.kill("vessel")
     await expect(dialog).not_to_be_visible(timeout=15_000)
+
+
+# -- #240: Stop all, composed from the stop each row already has --------------
+
+
+def _bulk(page: Page):  # type: ignore[no-untyped-def]
+    return page.locator("[data-dialog] [data-bulk-rows]")
+
+
+async def _open_stop_all(page: Page, server: Harness, expected: int) -> None:
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(50, timeout=15_000)
+    await page.get_by_role("button", name="Stop all").click()
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text(f"Stop {expected} sessions?")
+
+
+async def test_stop_all_issues_the_stops_one_at_a_time_and_never_for_the_self_project(
+    page: Page, server: Harness
+) -> None:
+    """#240, and premortem 2 of the Phase 13 plan. `request_stop` captures the
+    pane between key groups on the executor that serves the operator, and
+    fifty captures at once is the load #180 moved the sweep off the request
+    path to avoid. So the DELETEs go out in sequence, asserted on their
+    ORDER AND NON-OVERLAP by holding each one for a moment and recording
+    when it began and ended, not on their count."""
+    server.seed_fifty(running=["p00", "p01", "p02", "p03"], self_project="p03")
+    intervals: list[tuple[str, float, float]] = []
+
+    async def hold(route: Route) -> None:
+        name = route.request.url.rsplit("/", 1)[-1]
+        started = time.monotonic()
+        await asyncio.sleep(0.25)
+        response = await route.fetch()
+        intervals.append((name, started, time.monotonic()))
+        await route.fulfill(response=response)
+
+    await page.route(lambda url: "/api/sessions/" in url, hold)
+    await _open_stop_all(page, server, expected=3)
+    dialog = page.locator("[data-dialog]")
+    assert server.project("p03") not in await dialog.inner_text(), "the self project was named"
+    await dialog.get_by_role("button", name="Stop all", exact=True).click()
+
+    rows = _bulk(page).locator("li")
+    await expect(rows).to_have_count(3)
+    for i in range(3):
+        await expect(rows.nth(i)).to_contain_text("exited", timeout=20_000)
+    assert len(intervals) == 3, intervals
+    names = [n for n, _, _ in intervals]
+    assert server.project("p03") not in names
+    for (_, _, end), (_, start, _) in itertools.pairwise(intervals):
+        assert end <= start, f"two stops were in flight at once: {intervals}"
+    await expect(dialog.get_by_role("button", name="Close")).to_be_visible()
+    assert server.is_running("p03"), "the self project was stopped"
+
+
+async def test_a_refusal_on_one_row_does_not_stop_the_others(
+    page: Page, server: Harness
+) -> None:
+    server.seed_fifty(running=["p00", "p01", "p02"])
+    refused = server.project("p01")
+
+    async def refuse_one(route: Route) -> None:
+        if route.request.url.endswith(refused) and route.request.method == "DELETE":
+            await route.fulfill(
+                status=409,
+                content_type="application/json",
+                body='{"code": "stop_unsafe", "message": "the input box is not clear"}',
+            )
+            return
+        await route.continue_()
+
+    await page.route(lambda url: "/api/sessions/" in url, refuse_one)
+    await _open_stop_all(page, server, expected=3)
+    await (
+        page.locator("[data-dialog]").get_by_role("button", name="Stop all", exact=True).click()
+    )
+    rows = _bulk(page).locator("li")
+    refused_row = rows.filter(has_text=refused)
+    await expect(refused_row).to_contain_text("refused")
+    await expect(refused_row).to_contain_text("the input box is not clear")
+    row = rows.filter(has_text=server.project("p00"))
+    await expect(row).to_contain_text("exited", timeout=20_000)
+    row = rows.filter(has_text=server.project("p02"))
+    await expect(row).to_contain_text("exited", timeout=20_000)
+
+
+async def test_the_bulk_kill_reaches_only_the_rows_still_in_flight(
+    page: Page, server: Harness
+) -> None:
+    """Escalation inside the wait, styled danger and second, never first. It
+    kills what is still in flight and only that: a row that refused is not
+    touched, and neither would one that had exited."""
+    server.seed_fifty(running=["p00", "p01", "p02"], ignores_graceful_stop=True)
+    refused = server.project("p01")
+    kills: list[str] = []
+
+    async def watch(route: Route) -> None:
+        url = route.request.url
+        if url.endswith(refused) and route.request.method == "DELETE":
+            await route.fulfill(
+                status=409,
+                content_type="application/json",
+                body='{"code": "stop_unsafe", "message": "not clear"}',
+            )
+            return
+        if url.endswith("/kill"):
+            kills.append(url.rsplit("/", 2)[-2])
+        await route.continue_()
+
+    await page.route(lambda url: "/api/sessions/" in url, watch)
+    await _open_stop_all(page, server, expected=3)
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop all", exact=True).click()
+    refused_row = _bulk(page).locator("li").filter(has_text=refused)
+    await expect(refused_row).to_contain_text("refused")
+
+    kill = dialog.get_by_role("button", name="Do not wait, kill them all")
+    await expect(kill).to_be_visible()
+    assert await kill.get_attribute("class") == "danger"
+    buttons = await dialog.locator(".dialog-actions button").all_inner_texts()
+    assert buttons[-1] == "Do not wait, kill them all", buttons
+    await kill.click()
+    rows = _bulk(page).locator("li")
+    row = rows.filter(has_text=server.project("p00"))
+    await expect(row).to_contain_text("exited", timeout=20_000)
+    row = rows.filter(has_text=server.project("p02"))
+    await expect(row).to_contain_text("exited", timeout=20_000)
+    assert sorted(kills) == sorted([server.project("p00"), server.project("p02")]), kills
+
+
+async def test_the_bulk_timeout_reports_per_row_and_kills_nothing(
+    page: Page, server: Harness
+) -> None:
+    server.seed_fifty(running=["p00", "p01"], ignores_graceful_stop=True)
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(50, timeout=15_000)
+    await page.evaluate("() => window.__hitchrail.setStopPatience(1500)")
+    await page.get_by_role("button", name="Stop all").click()
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop all", exact=True).click()
+    rows = _bulk(page).locator("li")
+    for i in range(2):
+        await expect(rows.nth(i)).to_contain_text("not finished", timeout=15_000)
+    kill = dialog.get_by_role("button", name="Do not wait, kill them all")
+    await expect(kill).to_be_visible()
+    assert server.is_running("p00") and server.is_running("p01"), "the timeout killed by itself"
+
+
+async def test_stop_all_is_absent_when_nothing_can_be_stopped(
+    page: Page, server: Harness
+) -> None:
+    server.seed(stopped=["vessel"], running=["koala"], self_project="koala")
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(2)
+    await expect(page.get_by_role("button", name="Stop all")).to_have_count(0)
+
+
+async def test_a_stop_that_never_left_is_reported_as_not_requested(
+    page: Page, server: Harness
+) -> None:
+    """#74's rule for the bulk case: a DELETE that fails to send is reported
+    as not requested, and the dialog never says exited from anything but the
+    listing."""
+    server.seed_fifty(running=["p00", "p01", "p02"])
+    dropped = server.project("p01")
+
+    async def drop_one(route: Route) -> None:
+        if route.request.url.endswith(dropped) and route.request.method == "DELETE":
+            await route.abort("failed")
+            return
+        await route.continue_()
+
+    await page.route(lambda url: "/api/sessions/" in url, drop_one)
+    await _open_stop_all(page, server, expected=3)
+    await (
+        page.locator("[data-dialog]").get_by_role("button", name="Stop all", exact=True).click()
+    )
+    rows = _bulk(page).locator("li")
+    await expect(rows.filter(has_text=dropped)).to_contain_text("not requested")
+    row = rows.filter(has_text=server.project("p02"))
+    await expect(row).to_contain_text("exited", timeout=20_000)
+    assert server.is_running("p01")
+
+
+async def test_the_bulk_dialog_holds_fifty_rows_inside_the_viewport(
+    page: Page, server: Harness
+) -> None:
+    """Fifty rows in the dialog at a phone width: the list scrolls inside it
+    and Kill stays on screen. Fifty running shims is the load rather than
+    the size, so the rows are added to the rendered list by hand."""
+    server.seed_fifty(running=["p00"])
+    await page.set_viewport_size({"width": 400, "height": 700})
+    await _open_stop_all(page, server, expected=1)
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop all", exact=True).click()
+    await expect(_bulk(page).locator("li")).to_have_count(1)
+    await _bulk(page).evaluate(
+        """(ul) => { for (let i = 0; i < 49; i++) {
+             const li = ul.firstElementChild.cloneNode(true);
+             li.querySelector('[data-bulk-name]').textContent = 'main~padding-' + i;
+             ul.append(li); } }"""
+    )
+    box = await dialog.bounding_box()
+    assert box is not None and box["y"] + box["height"] <= 700, box
+    scrolls = await _bulk(page).evaluate("ul => ul.scrollHeight > ul.clientHeight")
+    assert scrolls, "the fifty row list does not scroll inside the dialog"
+    kill = dialog.get_by_role("button", name="Do not wait, kill them all")
+    kb = await kill.bounding_box()
+    assert kb is not None and kb["y"] + kb["height"] <= 700, kb
+
+
+async def test_a_bulk_wait_whose_listings_failed_offers_no_kill_on_a_guess(
+    page: Page, server: Harness
+) -> None:
+    """Round 1 review of Phase 13: #81's rule, reintroduced by the bulk wait.
+    The single row wait tracks whether its LAST listing could be read and
+    shows "lost track" with no kill when it could not; the bulk wait
+    discarded that answer and said "have not finished" over listings that
+    had all failed, offering the kill on a guess."""
+    server.seed_fifty(running=["p00", "p01"], ignores_graceful_stop=True)
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(50, timeout=15_000)
+    await page.evaluate("() => window.__hitchrail.setStopPatience(2000)")
+    await page.get_by_role("button", name="Stop all").click()
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop all", exact=True).click()
+    await expect(_bulk(page).locator("li").nth(1)).to_contain_text("requested", timeout=15_000)
+    server.break_machine()
+    try:
+        await expect(dialog).to_contain_text("cannot read the machine", timeout=15_000)
+        assert "not finished" not in (await dialog.inner_text())
+        kill = dialog.get_by_role("button", name="Do not wait, kill them all")
+        assert await kill.count() == 0
+    finally:
+        server.heal_machine()
+
+
+async def test_a_bulk_wait_finishes_when_the_last_row_exits_after_the_deadline(
+    page: Page, server: Harness
+) -> None:
+    """Round 1 review of Phase 13. After the deadline the wait stopped
+    ticking, and rows that exited later flipped to "exited" on the stream
+    while the body kept saying "has not finished" and Close never came."""
+    server.seed_fifty(running=["p00"], ignores_graceful_stop=True)
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(50, timeout=15_000)
+    await page.evaluate("() => window.__hitchrail.setStopPatience(1500)")
+    await page.get_by_role("button", name="Stop all").click()
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop all", exact=True).click()
+    first = _bulk(page).locator("li").first
+    await expect(first).to_contain_text("not finished", timeout=15_000)
+
+    server.kill("p00")  # announced on the stream, as an exit at the pane would be
+    await expect(_bulk(page).locator("li").first).to_contain_text("exited", timeout=15_000)
+    await expect(dialog).to_contain_text("Done.")
+    await expect(dialog.get_by_role("button", name="Close")).to_be_visible()
+    assert "not finished" not in (await dialog.inner_text())
+
+
+# -- #247: one bulk, one ticker ----------------------------------------------
+
+
+async def test_stop_all_while_a_wait_is_hidden_reopens_it_and_requests_nothing_twice(
+    page: Page, server: Harness
+) -> None:
+    """#247. Hide, keep stopping, then Stop all again ran a second request
+    loop over a fresh bulk while the first was still ticking. One bulk at a
+    time: the control reopens the wait that exists.
+
+    Asked DURING the request phase as well as after it, holding each DELETE
+    for a moment so the phase is long enough to hide and tap inside: round 2
+    of the review found the guard keyed on a flag the ticker sets, which
+    starts only after the last request returns, so it fell through for the
+    whole phase it was written for."""
+    server.seed_fifty(running=["p00", "p01", "p02"], ignores_graceful_stop=True)
+    deletes: list[str] = []
+
+    async def hold(route: Route) -> None:
+        if route.request.method == "DELETE":
+            deletes.append(route.request.url)
+            await asyncio.sleep(1.0)
+        await route.continue_()
+
+    await page.route(lambda url: "/api/sessions/" in url, hold)
+    await _open_stop_all(page, server, expected=3)
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop all", exact=True).click()
+    await expect(_bulk(page).locator("li").first).to_contain_text("requesting")
+    # Inside the request phase: the first row is being asked, two are queued.
+    await dialog.get_by_role("button", name="Hide, keep stopping").click()
+    await expect(dialog).to_be_hidden()
+    await page.get_by_role("button", name="Stop all").click()
+    await expect(dialog).to_contain_text("Stopping 3 sessions")
+    assert "Stop 3 sessions?" not in (await dialog.inner_text())
+
+    # And after it, while the wait ticks.
+    await expect(_bulk(page).locator("li").nth(2)).to_contain_text("requested", timeout=15_000)
+    await dialog.get_by_role("button", name="Hide, keep stopping").click()
+    await page.get_by_role("button", name="Stop all").click()
+    await expect(dialog).to_contain_text("Stopping 3 sessions")
+    await page.wait_for_timeout(1500)
+    assert len(deletes) == 3, f"a second Stop all re-requested the sessions: {deletes}"
+
+
+async def test_a_hidden_bulk_wait_stops_polling_once_every_row_exited(
+    page: Page, server: Harness
+) -> None:
+    server.seed_fifty(running=["p00", "p01"])
+    listings = {"n": 0}
+
+    async def watch(route: Route) -> None:
+        listings["n"] += 1
+        await route.continue_()
+
+    await page.route("**/api/projects", watch)
+    await _open_stop_all(page, server, expected=2)
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop all", exact=True).click()
+    await dialog.get_by_role("button", name="Hide, keep stopping").click()
+    server.wait_until_the_agents_are_gone()
+    await page.wait_for_timeout(1500)  # a tick or two, to let the wait notice
+    before = listings["n"]
+    await page.wait_for_timeout(2500)
+    assert listings["n"] <= before + 1, "a hidden wait kept polling after every row exited"
+
+
+async def test_a_wait_that_is_over_is_superseded_by_the_next_stop_all(
+    page: Page, server: Harness
+) -> None:
+    """Round 1 review of Phase 13, batch 5. One bulk at a time reopened ANY
+    bulk that was not done, so a wait past its deadline with rows not
+    finished, hidden, came back on the next Stop all offering only Hide and
+    Kill: a person who had started more sessions since could not request a
+    stop for them without killing the old ones. A wait that is no longer
+    ticking is over, and the next Stop all starts fresh."""
+    server.seed_fifty(running=["p00", "p01"], ignores_graceful_stop=True)
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(50, timeout=15_000)
+    await page.evaluate("() => window.__hitchrail.setStopPatience(1500)")
+    await page.get_by_role("button", name="Stop all").click()
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop all", exact=True).click()
+    await expect(_bulk(page).locator("li").first).to_contain_text(
+        "not finished", timeout=15_000
+    )
+    await dialog.get_by_role("button", name="Hide, keep stopping").click()
+
+    await page.get_by_role("button", name="Stop all").click()
+    await expect(dialog).to_contain_text("Stop 2 sessions?")

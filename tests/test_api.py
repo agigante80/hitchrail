@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 import pathlib
 import re
 import shutil
@@ -14,6 +15,7 @@ import httpx
 import pytest
 from starlette.responses import Response
 
+import hitchrail
 from conftest import (
     CLEAR_INPUT_BOX,
     DIRTY_INPUT_BOX,
@@ -31,6 +33,7 @@ from hitchrail.config import Config
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
 from hitchrail.procs import ProcTable
+from hitchrail.security import UNAUTHENTICATED_ASSETS
 from hitchrail.server import create_app
 from hitchrail.tmux import Panes, TmuxUnavailable
 from support import DEFAULT_LABEL, make_config
@@ -119,6 +122,9 @@ def make_engine(
         tmux=tmux,
         procs_fn=procs,
         meminfo_fn=lambda: mem,
+        # Never the real cgroup reader in this tier: the answer would depend
+        # on the machine, which Phase 10's rule 2 forbids.
+        ceiling_fn=lambda pid: None,
         clock=clock,
         sleep=clock.sleep,
     )
@@ -185,6 +191,120 @@ async def test_projects_lists_every_folder_with_its_state(client: httpx.AsyncCli
 async def test_projects_reports_available_memory(client: httpx.AsyncClient) -> None:
     body = (await client.get("/api/projects", headers=HEADERS)).json()
     assert body["memory"]["available_mb"] == 24608
+
+
+async def test_projects_carries_the_version_this_server_runs(
+    client: httpx.AsyncClient,
+) -> None:
+    """#147. On the payload the page already fetches, never a route of its own:
+    a second round trip for a constant is a round trip on a phone. The same
+    string `hitchrail --version` prints, so "is the fix in the one I am
+    looking at" is answerable from the device least able to open a shell."""
+    body = (await client.get("/api/projects", headers=HEADERS)).json()
+    assert body["server"]["version"] == hitchrail.__version__
+
+
+async def test_a_bare_checkout_reports_no_version_rather_than_a_guess(
+    config: Config, engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A source checkout with no install has no distribution metadata. The
+    field is null and the page omits it; a wrong number is worse than none,
+    because the whole point is answering "which one is this"."""
+    monkeypatch.setattr(hitchrail, "installed_version", lambda: None)
+    async with client_for(engine, config) as c:
+        response = await c.get("/api/projects", headers=HEADERS)
+    assert response.status_code == 200
+    assert response.json()["server"]["version"] is None
+
+
+async def test_projects_says_since_when_and_as_whom(config: Config, engine: Engine) -> None:
+    """#148. A row's uptime is the AGENT's; the server's own is the number that
+    says whether the unit restarted at 04:00 and quietly invalidated the token
+    you are holding. And every session runs as the account that started
+    Hitchrail, with permissions skipped, so "as whom" is the difference
+    between an agent that can read your ~/.claude and one that cannot.
+
+    Read ONCE at startup and held: two listings taken apart in time report an
+    identical instant, which fails if the value is read per request.
+    """
+    ticks = iter([1_700_000_000.0, 1_700_000_500.0, 1_700_000_900.0])
+    app = create_app(
+        engine=engine,
+        config=config,
+        bus=EventBus(),
+        now=lambda: next(ticks),
+        user=lambda: "alien",
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://localhost"
+    ) as c:
+        first = (await c.get("/api/projects", headers=HEADERS)).json()["server"]
+        second = (await c.get("/api/projects", headers=HEADERS)).json()["server"]
+    assert first["user"] == "alien"
+    assert first["started_at"] == 1_700_000_000.0, "not the instant the app was built"
+    assert second["started_at"] == first["started_at"], "the start instant was re-read"
+
+
+async def test_a_uid_with_no_passwd_entry_renders_the_number(
+    config: Config, engine: Engine
+) -> None:
+    """The normal case in a container: `getpass.getuser` raises when the uid
+    has no entry. The number is the honest answer and the page never guesses
+    a name. `os.environ["USER"]` would be the wrong fallback: it is inherited,
+    so it lies under sudo, under a unit and under su."""
+
+    def no_entry() -> str:
+        raise KeyError("getpwuid(): uid not found")
+
+    app = create_app(engine=engine, config=config, bus=EventBus(), user=no_entry)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://localhost"
+    ) as c:
+        server = (await c.get("/api/projects", headers=HEADERS)).json()["server"]
+    assert server["user"] == str(os.getuid())
+
+
+def _session_fields_documented() -> set[str]:
+    text = pathlib.Path(__file__).parent.parent.joinpath("docs", "api.md").read_text()
+    start = text.index("### The session payload")
+    end = text.index("\n### ", start + 1)
+    return set(re.findall(r"^\| `([a-z_]+)` \|", text[start:end], re.M))
+
+
+async def test_the_api_doc_describes_the_session_payload_in_both_directions(
+    client: httpx.AsyncClient,
+) -> None:
+    """#243 added `ram_limit_mb` and found the session shape documented
+    nowhere. Held to `Session.as_dict` both ways, like the listing above."""
+    body = (await client.get("/api/projects", headers=HEADERS)).json()
+    served = set(body["projects"][0])
+    documented = _session_fields_documented()
+    assert documented, "no session payload table parsed out of docs/api.md"
+    assert served - documented == set(), f"undocumented: {sorted(served - documented)}"
+    assert documented - served == set(), f"not served: {sorted(documented - served)}"
+
+
+def _listing_fields_documented() -> set[str]:
+    """The `field` column of the listing payload table in docs/api.md."""
+    text = pathlib.Path(__file__).parent.parent.joinpath("docs", "api.md").read_text()
+    start = text.index("### The listing payload")
+    end = text.index("\n### ", start + 1)
+    return set(re.findall(r"^\| `([a-z_.]+)` \|", text[start:end], re.M))
+
+
+async def test_the_api_doc_describes_the_listing_payload_in_both_directions(
+    client: httpx.AsyncClient,
+) -> None:
+    """#147. Every top level field, and every field of the `server` object,
+    documented; nothing documented that the server does not send. The error
+    table has had this guard since #58, and the payload is what an integrator
+    reads second."""
+    body = (await client.get("/api/projects", headers=HEADERS)).json()
+    served = set(body) | {f"server.{k}" for k in body["server"]}
+    documented = _listing_fields_documented()
+    assert documented, "no listing payload table parsed out of docs/api.md"
+    assert served - documented == set(), f"undocumented: {sorted(served - documented)}"
+    assert documented - served == set(), f"not served: {sorted(documented - served)}"
 
 
 async def test_start_returns_the_new_session(config: Config) -> None:
@@ -656,6 +776,22 @@ async def test_a_root_that_has_gone_away_is_503_not_an_empty_list(
     assert r.json()["code"] == "root_unavailable"
 
 
+@pytest.mark.parametrize("path", ["/api/sessions/{name}/logs", "/logs/{name}"])
+async def test_the_logs_routes_say_the_root_is_unavailable_rather_than_faulting(
+    config: Config, engine: Engine, path: str
+) -> None:
+    """#249. A stopped name's ladder ends in `_reject_if_not_a_project`, which
+    lists the root, which raises `RootUnavailable` when the root is gone.
+    Neither logs route had an arm for it, so both answered a bare 500 where
+    the listing says 503 root_unavailable. The docs test could not see it:
+    a 500 is not a code the server returns in that sense."""
+    shutil.rmtree(config.roots[0].path)
+    async with client_for(engine, config) as c:
+        r = await c.get(path.replace("{name}", proj("network")), headers=HEADERS)
+    assert r.status_code == 503, r.status_code
+    assert r.json()["code"] == "root_unavailable"
+
+
 async def test_starting_the_self_project_is_423_not_500(root: pathlib.Path) -> None:
     """The route where the protection matters most: it is the one that would
     put a SECOND agent in the folder Hitchrail is running in."""
@@ -1060,6 +1196,146 @@ async def test_an_unreadable_available_figure_still_refuses(
     assert response.json()["code"] == "machine_unreadable"
 
 
+# -- #151: the logs page, a project name in a PAGE route's path for the first
+# time. A page that resolves a name more loosely than the API route beside it
+# is the asymmetry that gets missed, so every refusal the API gives is asked
+# of the page, and the happy path is asked as well.
+
+
+async def test_the_logs_page_renders_for_a_project(client: httpx.AsyncClient) -> None:
+    response = await client.get(f"/logs/{proj('vessel')}", headers=HEADERS)
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "logs.js" in response.text
+
+
+async def test_the_logs_page_renders_for_a_stopped_project(client: httpx.AsyncClient) -> None:
+    """Stopped is a state the page reports, not a refusal: the tab says the
+    session is not running rather than pretending the project is unknown."""
+    response = await client.get(f"/logs/{proj('network')}", headers=HEADERS)
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        proj("nope"),
+        "..%2f..%2fetc",
+        f"{proj('vessel')}%0a",
+        "main~.hidden",
+        "main~a/b",
+        "vessel",  # no root label at all
+    ],
+    ids=["unknown", "traversal", "newline", "leading-dot", "separator", "unqualified"],
+)
+async def test_the_logs_page_refuses_exactly_as_the_api_does(
+    client: httpx.AsyncClient, name: str
+) -> None:
+    """The same `{code, message}` shape, the same 404, and no page: an empty
+    log page for a name that is not a project reads as "printed nothing".
+    Each name here is one the API's own tests refuse, asked of the page."""
+    page = await client.get(f"/logs/{name}", headers=HEADERS)
+    api = await client.get(f"/api/sessions/{name}/logs", headers=HEADERS)
+    assert page.status_code == api.status_code == 404, (page.status_code, api.status_code)
+    # The same code as the API, whichever it is: a name with a slash in it
+    # never reaches either route, since `{name}` is one path segment, and
+    # both answer the router's own 404. The agreement is the property.
+    assert page.json()["code"] == api.json()["code"]
+    assert page.json()["code"] in {"unknown_project", "not_found"}
+    assert "text/html" not in page.headers["content-type"]
+
+
+async def test_the_logs_page_does_not_choose_a_file_by_name(client: httpx.AsyncClient) -> None:
+    """The name is validated and the page is the same file for every name;
+    the name reaches the served bytes nowhere. Asserted on the body, which
+    must carry no project name, because the page reads it from its own URL."""
+    response = await client.get(f"/logs/{proj('vessel')}", headers=HEADERS)
+    assert proj("vessel") not in response.text
+
+
+# -- #160: the mark, and the tile a phone makes of it -------------------------
+
+
+@pytest.mark.parametrize(
+    ("path", "content_type"),
+    [
+        ("/icon.svg", "image/svg+xml"),
+        ("/icon-180.png", "image/png"),
+        ("/icon-512.png", "image/png"),
+        ("/manifest.webmanifest", "application/manifest+json"),
+    ],
+)
+async def test_the_mark_and_the_manifest_are_served_without_a_token(
+    config: Config, engine: Engine, path: str, content_type: str
+) -> None:
+    """#160. The grant page is the first one a new phone ever loads and it must
+    not be nameless, and a touch icon cannot be a data URL. These four files
+    carry nothing from the machine: a drawing, and a manifest that names the
+    application. They are the ONLY assets served without a token, pinned in
+    `security.UNAUTHENTICATED_ASSETS` with the argument beside them."""
+    app = create_app(
+        engine=engine, config=make_config(config.roots[0].path, token="t0k"), bus=EventBus()
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://localhost"
+    ) as c:
+        response = await c.get(path, headers={"host": "localhost"})
+    assert response.status_code == 200, path
+    assert response.headers["content-type"].startswith(content_type)
+
+
+async def test_the_manifest_names_icons_that_exist(client: httpx.AsyncClient) -> None:
+    manifest = (await client.get("/manifest.webmanifest", headers=HEADERS)).json()
+    assert manifest["name"] == "hitchrail" and manifest["short_name"] == "hitchrail"
+    assert manifest["icons"], "no icons in the manifest"
+    for icon in manifest["icons"]:
+        served = await client.get(icon["src"], headers=HEADERS)
+        assert served.status_code == 200, icon
+        assert served.headers["content-type"].startswith(icon["type"]), icon
+
+
+@pytest.mark.parametrize("page_path", ["/", "/grant", "/logs/main~vessel"])
+async def test_every_document_page_carries_the_mark(
+    client: httpx.AsyncClient, page_path: str
+) -> None:
+    """A third page added later cannot ship nameless: every page the server
+    serves as a document links the icon, the touch icon, the manifest and a
+    theme colour."""
+    body = (await client.get(page_path, headers=HEADERS)).text
+    assert 'rel="icon" href="/icon.svg"' in body, page_path
+    assert 'rel="apple-touch-icon" href="/icon-180.png"' in body, page_path
+    assert 'rel="manifest" href="/manifest.webmanifest"' in body, page_path
+    assert 'name="theme-color"' in body, page_path
+
+
+def test_the_mark_is_one_drawing_with_nothing_to_fetch() -> None:
+    """Paths only: no raster, no font, no filter, no external reference. It has
+    to survive being scaled from 512 to 16 and being drawn by a favicon
+    renderer that does very little."""
+    svg = pages.WEB.joinpath("icon.svg").read_text()
+    assert "<path" in svg
+    # The namespace declaration is the one URL an SVG must carry.
+    body = svg.replace('xmlns="http://www.w3.org/2000/svg"', "")
+    # What a favicon renderer cannot draw, AND what a browser would execute
+    # (#253): navigated to directly, /icon.svg is a document in this origin,
+    # served without a token, and its own policy is the second control; the
+    # first is that nothing executable ever enters the file.
+    for forbidden in (
+        "<image",
+        "<text",
+        "<filter",
+        "href=",
+        "url(",
+        "http",
+        "<script",
+        "<foreignObject",
+        "<use",
+        "<a ",
+    ):
+        assert forbidden not in body, forbidden
+    assert not re.search(r"\son\w+=", body), "an event handler attribute"
+
+
 async def test_the_page_route_exists_and_is_html(client: httpx.AsyncClient) -> None:
     """`/` used to be a routing 404 and is now the interface. Asserted so the
     envelope test above cannot quietly start covering a route that moved."""
@@ -1142,7 +1418,7 @@ def _token_app(tmp_path: pathlib.Path) -> tuple[Engine, Config]:
 GRANT_HEADERS = {"host": "localhost", "origin": "http://localhost:8787"}
 
 
-async def test_every_route_but_the_two_grant_ones_needs_a_token(
+async def test_every_route_but_the_grant_ones_and_the_mark_needs_a_token(
     tmp_path: pathlib.Path,
 ) -> None:
     """Swept off the REAL route table, so a route added later is covered by
@@ -1159,8 +1435,35 @@ async def test_every_route_but_the_two_grant_ones_needs_a_token(
             for method in sorted(methods - {"HEAD", "OPTIONS"}):
                 if (method, path) in {("GET", "/grant"), ("POST", "/api/grant")}:
                     continue
+                # #160. The mark and the manifest are read without a token by
+                # design; the set is pinned in test_security_token.py, and the
+                # sweep asserts they are the ONLY assets so answered.
+                expected = 200 if path in UNAUTHENTICATED_ASSETS else 401
                 r = await c.request(method, path, headers={"host": "localhost"})
-                assert r.status_code == 401, f"{method} {path} -> {r.status_code}"
+                assert r.status_code == expected, f"{method} {path} -> {r.status_code}"
+                checked += 1
+    assert checked >= 10, f"only {checked} routes were swept"
+
+
+async def test_every_route_refuses_a_forged_host(tmp_path: pathlib.Path) -> None:
+    """#251. The token sweep above has a twin here, and did not: the host
+    allowlist is applied app wide, so the property held by construction, and
+    this is what notices a route mounted outside the stack. Every route in
+    the REAL table, the token-exempt grant routes and the mark included,
+    answers 400 host_rejected to a rebound name, before anything else runs."""
+    engine, config = _token_app(tmp_path)
+    app = create_app(engine=engine, config=config, bus=EventBus())
+    checked = 0
+    async with client_for(engine, config) as c:
+        for route in app.routes:
+            path = getattr(route, "path", "")
+            methods = getattr(route, "methods", set()) or {"GET"}
+            if "{" in path:
+                path = path.replace("{name}", "vessel")
+            for method in sorted(methods - {"HEAD", "OPTIONS"}):
+                r = await c.request(method, path, headers={"host": "evil.example"})
+                assert r.status_code == 400, f"{method} {path} -> {r.status_code}"
+                assert r.json()["code"] == "host_rejected", f"{method} {path}"
                 checked += 1
     assert checked >= 10, f"only {checked} routes were swept"
 
@@ -1436,11 +1739,22 @@ async def test_the_interface_asks_no_third_party_for_anything(
     Asserted against BOTH pages and as "no external origin at all" rather than
     "no Google": the next font, analytics snippet or icon set is the same
     defect, and naming one vendor tests the symptom.
+
+    **What LOADS, not what a person may tap.** A `<link href>` or any `src`
+    is fetched when the page opens; an `<a href>` fetches nothing until it is
+    tapped, and a tap is a decision. #147 put one anchor in the footer, to
+    the repository, and it is pinned here by value so a second one has to be
+    argued in this docstring rather than slipped in beside it. The session
+    links are built by `app.js` from what the agent published and never
+    appear in the served markup, which is why they are not in this set.
     """
     for path in ("/", "/grant"):
         body = (await client.get(path, headers=HEADERS)).text
-        external = re.findall(r"""(?:href|src)=["'](https?://[^"']+)""", body)
-        assert not external, f"{path} loads {external} from off this machine"
+        loaded = re.findall(r"""(?:<link[^>]+href|src)=["'](https?://[^"']+)""", body)
+        assert not loaded, f"{path} loads {loaded} from off this machine"
+        navigable = set(re.findall(r"""<a[^>]+href=["'](https?://[^"']+)""", body))
+        allowed = {"https://github.com/agigante80/hitchrail"} if path == "/" else set()
+        assert navigable == allowed, f"{path} links off this machine to {sorted(navigable)}"
 
 
 async def test_every_font_the_stylesheet_names_is_actually_served(

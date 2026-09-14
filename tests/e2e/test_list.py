@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import tempfile
@@ -147,9 +148,9 @@ async def test_search_filters_and_says_so_when_nothing_matches(
     # without failing anything the non-browser suite runs: a search term that
     # matches nothing is a passing unit test and an empty list here. Any rename
     # of the seeds above has to come back to this line.
-    await page.get_by_role("searchbox").fill("med")
+    await page.get_by_role("combobox", name="Search folders").fill("med")
     await expect(page.locator("[data-project]")).to_have_count(1)
-    await page.get_by_role("searchbox").fill("zzz")
+    await page.get_by_role("combobox", name="Search folders").fill("zzz")
     await expect(page.get_by_text("Nothing matches")).to_be_visible()
     await expect(page.get_by_text("No folder here is called that.")).to_be_visible()
 
@@ -252,14 +253,14 @@ async def test_an_empty_list_announces_itself_once(page: Page, server: Harness) 
     await expect(region).to_have_count(1)
     await expect(region).to_have_text("")
 
-    await page.get_by_role("searchbox").fill("nothing-matches-this")
+    await page.get_by_role("combobox", name="Search folders").fill("nothing-matches-this")
     await expect(region).to_have_text("No folders match.")
     # Not the words the visible empty state uses. Two nodes carrying the same
     # string would be read out twice, and would put the page's own search test
     # into a strict mode violation, since `.offscreen` clips rather than hides.
     await expect(page.get_by_text("Nothing matches")).to_be_visible()
 
-    await page.get_by_role("searchbox").fill("")
+    await page.get_by_role("combobox", name="Search folders").fill("")
     await expect(region).to_have_text("")
 
 
@@ -589,3 +590,373 @@ async def test_a_stuck_row_says_so_without_the_page_asking(
     # still `running`, because this is an overlay and not a fifth state.
     await expect(row.locator(".badge")).to_have_text("waiting")
     await expect(row).to_have_attribute("data-state", "running")
+
+
+# -- #90: the figure, and what bounds it -------------------------------------
+
+
+async def test_a_running_row_says_what_bounds_its_memory(page: Page, server: Harness) -> None:
+    """#90. "1.4 GB" beside nothing is a different sentence from "1.4 GB of
+    4 GB", and the reading is free where the setting is not ours."""
+    server.seed(running=["vessel"], ceiling_mb=4096)
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row.locator(".meta")).to_contain_text("of 4.0 GB")
+
+
+async def test_a_running_row_says_plainly_when_nothing_bounds_it(
+    page: Page, server: Harness
+) -> None:
+    """The other half, and the one that matters on the reporting machine:
+    "no limit" is a fact worth reading next to a figure, not an absence."""
+    server.seed(running=["vessel"], ceiling_mb=None)
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row.locator(".meta")).to_contain_text("no limit")
+    await expect(row.locator(".meta")).not_to_contain_text(" of ")
+
+
+# -- Phase 13: fifty rows ----------------------------------------------------
+
+
+async def test_fifty_rows_across_five_roots_all_render(page: Page, server: Harness) -> None:
+    """The fixture the phase's premortem asked for, proved before anything is
+    built on it: fifty folders, five roots, every one a row, at the phone
+    viewport, with two of them running."""
+    server.seed_fifty(running=["p00", "p01"])
+    await page.goto(server.base)
+    rows = page.locator("[data-project]")
+    await expect(rows).to_have_count(50, timeout=15_000)
+    await expect(page.locator("[data-run-count]")).to_have_text("2 running")
+    labels = {
+        (await row.get_attribute("data-project") or "").split("~")[0]
+        for row in await rows.all()
+    }
+    assert labels == set(Harness.FIFTY_LABELS), labels
+
+
+# -- #146: filtering by root -------------------------------------------------
+
+
+def _chip(page: Page, label: str):  # type: ignore[no-untyped-def]
+    return page.locator("[data-roots]").get_by_role("button", name=re.compile(rf"^{label}\b"))
+
+
+async def test_root_chips_or_together_and_and_with_the_state_tab(
+    page: Page, server: Harness
+) -> None:
+    """#146. Roots compose with OR among themselves and with AND against the
+    state tab and the search, the convention a person already expects and
+    the one that is classically got backwards."""
+    server.seed_fifty(running=["p00", "p01"])
+    await page.goto(server.base)
+    rows = page.locator("[data-project]")
+    await expect(rows).to_have_count(50, timeout=15_000)
+
+    await _chip(page, "bravo").click()
+    await expect(rows).to_have_count(10)
+    await _chip(page, "charlie").click()
+    await expect(rows).to_have_count(20)
+    for row in await rows.all():
+        label = (await row.get_attribute("data-project") or "").split("~")[0]
+        assert label in {"bravo", "charlie"}, label
+
+    # AND with the state tab: nothing in bravo or charlie is running.
+    await page.get_by_role("tab", name=re.compile("^Running")).click()
+    await expect(rows).to_have_count(0)
+    # And the machine's own count is untouched by the filter.
+    await expect(page.locator("[data-run-count]")).to_contain_text("2 running")
+
+
+async def test_every_chip_deselected_is_all_and_never_none(page: Page, server: Harness) -> None:
+    """Zero rows for a full machine is the failure worth a named test: a
+    filter silently hiding a running session is the dangerous direction."""
+    server.seed_fifty(running=["p00"])
+    await page.goto(server.base)
+    rows = page.locator("[data-project]")
+    await expect(rows).to_have_count(50, timeout=15_000)
+    await _chip(page, "delta").click()
+    await expect(rows).to_have_count(10)
+    await _chip(page, "delta").click()
+    await expect(rows).to_have_count(50)
+
+
+async def test_a_single_root_renders_no_chip_strip(page: Page, server: Harness) -> None:
+    """The same rule the row chip follows (#121): a single root deployment
+    does not pay for a feature it is not using. And a selection stored by a
+    previous multi root configuration must not filter the one root to
+    nothing."""
+    server.seed(stopped=["vessel", "koala"])
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(2)
+    await page.evaluate("() => localStorage.setItem('hitchrail.roots', '[\"bravo\"]')")
+    await page.reload()
+    await expect(page.locator("[data-project]")).to_have_count(2)
+    assert await page.locator("[data-roots]").is_hidden()
+
+
+async def test_the_selection_survives_a_reload_and_a_vanished_root_is_dropped(
+    page: Page, server: Harness
+) -> None:
+    """A filter that survives a reload is the difference between a filter and
+    a fidget. The restored value is untrusted browser input: intersected
+    with the roots actually present, and an unparseable value is no filter
+    rather than an exception."""
+    server.seed_fifty(running=["p00"])
+    await page.goto(server.base)
+    rows = page.locator("[data-project]")
+    await expect(rows).to_have_count(50, timeout=15_000)
+    await _chip(page, "echo").click()
+    await expect(rows).to_have_count(10)
+
+    await page.reload()
+    await expect(rows).to_have_count(10, timeout=15_000)
+    await expect(_chip(page, "echo")).to_have_attribute("aria-pressed", "true")
+
+    await page.evaluate("() => localStorage.setItem('hitchrail.roots', '[\"echo\", \"gone\"]')")
+    await page.reload()
+    await expect(rows).to_have_count(10, timeout=15_000)
+    assert await page.locator("[data-roots] button[aria-pressed='true']").count() == 1
+
+    await page.evaluate("() => localStorage.setItem('hitchrail.roots', '{not json')")
+    errors: list[str] = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    await page.reload()
+    await expect(rows).to_have_count(50, timeout=15_000)
+    assert errors == [], errors
+
+
+async def test_the_applied_filter_is_visible_from_the_bottom_of_the_list(
+    page: Page, server: Harness
+) -> None:
+    """Applied filters must remain readable from the list screen itself: on a
+    phone the strip that set them has scrolled away. The fixed footer says
+    how many of the machine's rows are shown, so a filtered list never reads
+    as the whole machine."""
+    server.seed_fifty(running=["p00"])
+    await page.goto(server.base)
+    rows = page.locator("[data-project]")
+    await expect(rows).to_have_count(50, timeout=15_000)
+    await expect(page.locator("[data-shown]")).to_have_text("")
+    await _chip(page, "bravo").click()
+    await page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+    await expect(page.locator("[data-shown]")).to_have_text("10 of 50 shown")
+    assert await page.locator("[data-shown]").is_visible()
+
+
+async def test_the_empty_state_says_which_filter_emptied_the_list(
+    page: Page, server: Harness
+) -> None:
+    server.seed_fifty(running=["p00"])
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(50, timeout=15_000)
+    await _chip(page, "bravo").click()
+    await page.get_by_role("tab", name=re.compile("^Running")).click()
+    empty = page.locator(".empty-body")
+    await expect(empty).to_contain_text("bravo")
+    await expect(empty).to_contain_text("running")
+
+
+# -- #164: the search suggests -----------------------------------------------
+
+
+async def test_typing_suggests_folders_and_a_tap_chooses_one(
+    page: Page, server: Harness
+) -> None:
+    """#164. On a phone keyboard the distinguishing part of a folder name is
+    the cost; a suggestion list under the field makes it one tap. Built from
+    the projects already in memory: no request produces a suggestion."""
+    server.seed_fifty(running=["p00"])
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(50, timeout=15_000)
+    requests: list[str] = []
+    page.on("request", lambda r: requests.append(r.url) if "/api/" in r.url else None)
+
+    box = page.get_by_role("combobox", name="Search folders")
+    await box.fill("p0")
+    listbox = page.get_by_role("listbox")
+    await expect(listbox).to_be_visible()
+    await expect(box).to_have_attribute("aria-expanded", "true")
+    options = listbox.get_by_role("option")
+    assert await options.count() > 0
+    # Each suggestion names its root, since there is more than one.
+    await expect(options.first).to_contain_text("main")
+
+    await options.first.click()
+    await expect(box).to_have_attribute("aria-expanded", "false")
+    # Choosing is exact: the one project the suggestion named, not every
+    # folder called p00 across the five roots and not p01 to p09 either.
+    await expect(page.locator("[data-project]")).to_have_count(1)
+    assert not [u for u in requests if "/api/projects" in u], "a suggestion cost a request"
+
+
+async def test_the_suggestion_list_follows_the_reference_keyboard_pattern(
+    page: Page, server: Harness
+) -> None:
+    """The ARIA editable combobox with list autocomplete: focus stays on the
+    input while `aria-activedescendant` moves attention, nothing is
+    auto-selected as you type, Down and Up move, Enter chooses, Escape closes
+    the popup and leaves the text, a second Escape clears the field."""
+    server.seed(stopped=["vessel", "vessel-social", "koala"])
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(3)
+    box = page.get_by_role("combobox", name="Search folders")
+    await box.fill("ves")
+    listbox = page.get_by_role("listbox")
+    await expect(listbox).to_be_visible()
+    # Typing selected nothing.
+    assert await box.get_attribute("aria-activedescendant") in (None, "")
+    await expect(page.locator("[data-project]")).to_have_count(2)
+
+    await box.press("ArrowDown")
+    active = await box.get_attribute("aria-activedescendant")
+    assert active, "Down did not move the active option"
+    focused = await page.evaluate("() => document.activeElement.getAttribute('role')")
+    assert focused == "combobox", "focus left the input"
+    await box.press("ArrowDown")
+    assert await box.get_attribute("aria-activedescendant") != active
+    await box.press("ArrowUp")
+    assert await box.get_attribute("aria-activedescendant") == active
+
+    await box.press("Enter")
+    await expect(box).to_have_attribute("aria-expanded", "false")
+    await expect(page.locator("[data-project]")).to_have_count(1)
+    # #248. A choice is the end of the interaction: the next render, which
+    # any event or listing produces, must not reopen the popup with the one
+    # row that was just chosen. Forced here rather than waited for.
+    await page.evaluate("() => window.__hitchrail.render()")
+    await expect(box).to_have_attribute("aria-expanded", "false")
+    assert await page.get_by_role("listbox").is_hidden()
+
+    await box.fill("ves")
+    await expect(listbox).to_be_visible()
+    await box.press("Escape")
+    await expect(box).to_have_attribute("aria-expanded", "false")
+    assert await box.input_value() == "ves"
+    await box.press("Escape")
+    assert await box.input_value() == ""
+    await expect(page.locator("[data-project]")).to_have_count(3)
+
+
+async def test_the_search_matches_the_folder_and_not_the_root_label(
+    page: Page, server: Harness
+) -> None:
+    """`includes` over the qualified string matched the `work` root for `work`
+    and a folder called `homework` in any root. Roots have chips now."""
+    server.seed_fifty(running=["p00"])
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(50, timeout=15_000)
+    await page.get_by_role("combobox", name="Search folders").fill("bravo")
+    await expect(page.locator("[data-project]")).to_have_count(0)
+    await expect(page.get_by_role("listbox")).to_be_hidden()
+
+
+# -- #149: the header stays ---------------------------------------------------
+
+# Measured on 2026-09-13 at 390x844 with five roots, before this change: the
+# bar 80px, the tabs 56, the chips 54, the search 68, 258 in all. Premortem 3
+# of the Phase 13 plan: every strip is individually right and together they
+# eat the screen, so the header may cost no more at rest than it did.
+TOP_AT_REST_BEFORE = 258
+
+
+async def _top_height(page: Page) -> float:
+    height = await page.locator("[data-top]").evaluate("e => e.getBoundingClientRect().height")
+    return float(height)
+
+
+async def test_new_and_the_filters_are_reachable_at_the_bottom_of_fifty_rows(
+    page: Page, server: Harness
+) -> None:
+    """#149. The header scrolled away with the list, so on a fifty row list
+    New and the filters were gone as soon as you started scrolling. The
+    controls that act on the whole list survive scrolling; the identity can
+    shrink."""
+    server.seed_fifty(running=["p00"])
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(50, timeout=15_000)
+    await page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+    await page.wait_for_timeout(200)
+
+    new = page.get_by_role("button", name="New")
+    box = await new.bounding_box()
+    assert box is not None and box["y"] >= 0 and box["y"] + box["height"] <= 844, box
+    for control in (
+        page.get_by_role("tab", name=re.compile("^Running")),
+        _chip(page, "bravo"),
+        page.get_by_role("combobox", name="Search folders"),
+    ):
+        b = await control.bounding_box()
+        assert b is not None and b["y"] >= 0 and b["y"] + b["height"] <= 844, b
+
+    await new.click()
+    await expect(page.get_by_label("Folder name")).to_be_visible()
+
+
+async def test_the_header_costs_no_more_at_rest_and_less_when_scrolled(
+    page: Page, server: Harness
+) -> None:
+    """Measured, not felt. At rest the top stack is no taller than it was
+    before it became sticky, and scrolled it is shorter: the root line goes
+    and the title shrinks, because identity can give way and controls
+    cannot."""
+    server.seed_fifty(running=["p00"])
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(50, timeout=15_000)
+    at_rest = await _top_height(page)
+    assert at_rest <= TOP_AT_REST_BEFORE, f"the header grew to {at_rest}px at rest"
+
+    await page.evaluate("() => window.scrollTo(0, 600)")
+    await page.wait_for_timeout(200)
+    scrolled = await _top_height(page)
+    assert scrolled < at_rest - 20, f"scrolled {scrolled}px is not under {at_rest}px by much"
+    assert await page.locator("[data-top]").evaluate("e => e.getBoundingClientRect().top") == 0
+
+    await page.evaluate("() => window.scrollTo(0, 0)")
+    await page.wait_for_timeout(200)
+    assert await _top_height(page) == at_rest, "the header did not come back at the top"
+
+
+async def test_a_short_list_leaves_no_gap_under_the_header(page: Page, server: Harness) -> None:
+    """With the list shorter than the viewport the sticky block must sit
+    exactly where the static one did: no gap and no double border."""
+    server.seed(stopped=["vessel"])
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(1)
+    top = page.locator("[data-top]")
+    top_bottom = await top.evaluate("e => e.getBoundingClientRect().bottom")
+    list_top = await page.locator("main").evaluate("e => e.getBoundingClientRect().top")
+    assert abs(top_bottom - list_top) < 1, (top_bottom, list_top)
+
+
+# -- #150: shapes beside the words --------------------------------------------
+
+
+async def test_every_badge_carries_its_glyph_and_keeps_its_word(
+    page: Page, server: Harness
+) -> None:
+    """The badge is the one place a shape does something a word cannot: a list
+    of fifty is scanned, not read, and shape stops six states being told
+    apart by colour alone. The word stays beside it, and the glyph is
+    decorative to a screen reader, which still hears the word."""
+    server.seed(running=["vessel"], stopped=["koala"], stale=["ghost"], detached=["loose"])
+    await page.goto(server.base)
+    rows = page.locator("[data-project]")
+    await expect(rows).to_have_count(4, timeout=15_000)
+    seen: dict[str, str] = {}
+    for row in await rows.all():
+        badge = row.locator(".badge")
+        word = (await badge.get_attribute("data-badge")) or ""
+        await expect(badge).to_have_text(word)
+        use = badge.locator("svg use")
+        href = await use.get_attribute("href")
+        assert href == f"#badge-{word}", (word, href)
+        assert await badge.locator("svg").get_attribute("aria-hidden") == "true"
+        # #252. A drawn box, not only a reference: a sprite hidden in a way
+        # the engine refuses to draw from would pass every other line here.
+        box = await badge.locator("svg").bounding_box()
+        assert box is not None and box["width"] > 8 and box["height"] > 8, (word, box)
+        drawn = await badge.locator("svg").evaluate("s => s.getBBox && s.getBBox().width > 0")
+        assert drawn, f"the {word} glyph draws nothing"
+        seen[word] = href or ""
+    assert {"running", "stopped", "stale", "detached"} <= set(seen), seen

@@ -11,7 +11,14 @@ from pathlib import Path
 
 import pytest
 
-from hitchrail.ram import Verdict, available_mb, guard, read_meminfo, total_mb
+from hitchrail.ram import (
+    Verdict,
+    available_mb,
+    guard,
+    memory_ceiling_mb,
+    read_meminfo,
+    total_mb,
+)
 
 # A real fragment, copied from this machine's /proc/meminfo, so the parser is
 # tested against the format it will actually meet rather than an idealised one.
@@ -209,3 +216,112 @@ def test_the_two_readers_share_one_parser() -> None:
         available_mb("MemAvailable: 100 MB\n")
     with pytest.raises(ValueError):
         total_mb("MemTotal: 100 MB\n")
+
+
+# -- #243: what bounds a session, read from its cgroup ancestry --------------
+
+# The shape captured on the development machine on 2026-09-12: cgroup v2, one
+# `0::` line, a tmux spawn scope five levels under the root, `memory.max`
+# reading `max` at every level and no file at the root at all. The fixture
+# below is built from that, never from a description of it.
+CGROUP_LINE = (
+    "0::/user.slice/user-1000.slice/user@1000.service/app.slice/"
+    "tmux-spawn-26b41d0e-4470-4829-af97-8bced67d713e.scope\n"
+)
+LEAF = "user.slice/user-1000.slice/user@1000.service/app.slice/tmux-spawn-26b41d0e.scope"
+
+
+def _tree(
+    tmp_path: Path, *, limits: dict[str, str], high: dict[str, str] | None = None
+) -> tuple[Path, Path]:
+    """A fake `/proc` and `/sys/fs/cgroup` for pid 4242, with `memory.max`
+    (and optionally `memory.high`) written at the named levels."""
+    proc = tmp_path / "proc"
+    (proc / "4242").mkdir(parents=True)
+    (proc / "4242" / "cgroup").write_text(
+        CGROUP_LINE.replace("26b41d0e-4470-4829-af97-8bced67d713e", "26b41d0e")
+    )
+    root = tmp_path / "cgroup"
+    (root / LEAF).mkdir(parents=True)
+    for rel, value in limits.items():
+        (root / rel / "memory.max").write_text(value + "\n")
+    for rel, value in (high or {}).items():
+        (root / rel / "memory.high").write_text(value + "\n")
+    return proc, root
+
+
+GIB = 1024**3
+
+
+def test_the_tightest_ceiling_along_the_ancestry_wins(tmp_path: Path) -> None:
+    """#172 measured that cgroups are inherited across fork, so a session's pid
+    can sit in the scope of the shell that started the tmux server. The leaf's
+    own `memory.max` is then `max` while a parent slice carries the limit that
+    actually bounds it, and a reader that reported the leaf would be wrong in
+    the direction of reassurance."""
+    proc, root = _tree(
+        tmp_path,
+        limits={
+            LEAF: "max",
+            "user.slice/user-1000.slice": str(4 * GIB),
+            "user.slice": str(8 * GIB),
+        },
+    )
+    assert memory_ceiling_mb(4242, proc=proc, cgroup_root=root) == 4096
+
+
+def test_two_finite_levels_give_the_smaller(tmp_path: Path) -> None:
+    proc, root = _tree(
+        tmp_path,
+        limits={LEAF: str(2 * GIB), "user.slice/user-1000.slice": str(4 * GIB)},
+    )
+    assert memory_ceiling_mb(4242, proc=proc, cgroup_root=root) == 2048
+
+
+def test_memory_high_counts_as_a_ceiling(tmp_path: Path) -> None:
+    """`MemoryHigh=` is what the reporting machine set, and it lands in
+    `memory.high`, not `memory.max`. It throttles rather than kills, and it is
+    still the number the process is held to; a reader of `max` alone would
+    have said "no limit" on the machine that motivated this."""
+    proc, root = _tree(
+        tmp_path,
+        limits={LEAF: "max"},
+        high={"user.slice/user-1000.slice/user@1000.service/app.slice": str(6 * GIB)},
+    )
+    assert memory_ceiling_mb(4242, proc=proc, cgroup_root=root) == 6144
+
+
+def test_max_at_every_level_is_no_ceiling(tmp_path: Path) -> None:
+    proc, root = _tree(tmp_path, limits={LEAF: "max", "user.slice": "max"})
+    assert memory_ceiling_mb(4242, proc=proc, cgroup_root=root) is None
+
+
+def test_an_unreadable_cgroup_is_no_ceiling_and_no_error(tmp_path: Path) -> None:
+    """Unknown is `None`, never a number and never an exception: this runs
+    per row on the listing route, and a pid that exited between the table
+    and this read is the ordinary case."""
+    proc = tmp_path / "proc"
+    proc.mkdir()
+    assert memory_ceiling_mb(4242, proc=proc, cgroup_root=tmp_path / "cgroup") is None
+
+
+def test_cgroup_v1_is_no_ceiling_rather_than_a_parse_of_the_wrong_file(tmp_path: Path) -> None:
+    """v1 lists one line per controller (`4:memory:/...`) and has no `0::`
+    unified line. The reader declines rather than reading a controller path it
+    does not understand."""
+    proc = tmp_path / "proc"
+    (proc / "4242").mkdir(parents=True)
+    (proc / "4242" / "cgroup").write_text("4:memory:/user.slice\n1:name=systemd:/user.slice\n")
+    root = tmp_path / "cgroup"
+    (root / "user.slice").mkdir(parents=True)
+    (root / "user.slice" / "memory.max").write_text(str(GIB) + "\n")
+    assert memory_ceiling_mb(4242, proc=proc, cgroup_root=root) is None
+
+
+def test_the_leaf_path_cannot_escape_the_cgroup_root(tmp_path: Path) -> None:
+    """The path comes from a file a process can influence in principle. A
+    `..` in it must not walk the reader above the root it was given."""
+    proc = tmp_path / "proc"
+    (proc / "4242").mkdir(parents=True)
+    (proc / "4242" / "cgroup").write_text("0::/../../etc\n")
+    assert memory_ceiling_mb(4242, proc=proc, cgroup_root=tmp_path / "cgroup") is None

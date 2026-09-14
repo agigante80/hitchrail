@@ -100,13 +100,40 @@ def _grant_csp() -> str:
     # Every header assertion still passed, because the header was exactly what
     # we said it would be. The browser tier is what found it, which is the
     # argument for that tier existing.
+    # #160. `img-src 'self'` and `manifest-src 'self'` for the mark and the
+    # manifest, the four files this page may fetch besides its one POST: they
+    # are served without a token and carry nothing from the machine, and a
+    # tab or a tile of the first page a phone loads must not be nameless.
+    # Everything else stays at 'none'.
     return (
         f"default-src 'none'; script-src {' '.join(scripts)}; "
-        f"style-src {' '.join(styles)}; connect-src 'self'; {_COMMON}"
+        f"style-src {' '.join(styles)}; connect-src 'self'; img-src 'self'; "
+        f"manifest-src 'self'; {_COMMON}"
     )
 
 
 GRANT_CSP = _grant_csp()
+
+
+def _icon_csp() -> str:
+    """The mark's own policy (#160, and round 1 of the Phase 13 review).
+
+    `/icon.svg` carries a `<style>` for its light and dark fills. Firefox
+    enforces an SVG response's own CSP header on that inline style even when
+    the SVG is drawn as a favicon, and under `API_CSP` there is no
+    `style-src`, so the mark rendered solid black there and vanished on a
+    dark tab strip. Chromium ignores an image's own policy, which is why the
+    browser tier never saw it. The hash of the one style block and nothing
+    else, the same shape as the grant page's policy.
+    """
+    svg = (WEB / "icon.svg").read_text()
+    styles = [_hash_of(b) for tag, b in _INLINE.findall(svg) if tag.lower() == "style"]
+    if len(styles) != 1:  # pragma: no cover - guarded by a test
+        raise RuntimeError("icon.svg must carry exactly one <style> block")
+    return f"default-src 'none'; style-src {styles[0]}; {_COMMON}"
+
+
+ICON_CSP = _icon_csp()
 
 
 def policy_for(path: str) -> str:
@@ -119,6 +146,15 @@ def policy_for(path: str) -> str:
         return PAGE_CSP
     if path == "/grant":
         return GRANT_CSP
+    if path == "/icon.svg":
+        return ICON_CSP
+    # #151. The logs page, one segment under /logs and exactly one: it runs
+    # its own script from the same origin under the same self-only policy as
+    # `/`. Deeper paths get the API policy, so nothing mounted under it later
+    # inherits a document policy by accident. This hands out no inline hash,
+    # which is the hazard the exact comparison above exists to contain.
+    if re.fullmatch(r"/logs/[^/]+", path):
+        return PAGE_CSP
     return API_CSP
 
 

@@ -211,11 +211,28 @@ button.ghost, .btn.ghost { background: transparent; color: var(--muted); }
 button[disabled] { color: var(--muted-3); cursor: not-allowed; }
 
 /* -- the bar ------------------------------------------------------------ */
+/* #149. The whole top stack is one sticky block on the ground colour, so the
+   list scrolls under it with nothing showing through the gaps between its
+   strips. The safe area inset is paid here, once, since the viewport is
+   `viewport-fit=cover`. */
+.top {
+  position: sticky; top: 0; z-index: 3;
+  background: var(--ground);
+  padding-top: env(safe-area-inset-top);
+}
 .bar {
   display: flex; align-items: center; justify-content: space-between;
   gap: var(--gap); padding: 14px 16px;
   background: var(--surface); border-bottom: 1px solid var(--line);
 }
+/* Scrolled: the identity shrinks and the controls keep their size. The root
+   line is the first thing to go, because it is the one part of the bar a
+   person does not act on, and the title drops a size. `app.js` sets the
+   attribute with hysteresis, so a collapse that shortens the page cannot
+   flip itself back. */
+:root[data-scrolled] .bar { padding: 6px 16px; }
+:root[data-scrolled] .bar h1 { font-size: 18px; }
+:root[data-scrolled] .root { display: none; }
 .bar h1 { font-size: 22px; font-weight: 700; }
 .root { margin: 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
 .bar-actions { display: flex; gap: 8px; flex-shrink: 0; }
@@ -278,7 +295,38 @@ button[disabled] { color: var(--muted-3); cursor: not-allowed; }
 }
 .tab-count { opacity: 0.75; margin-left: 6px; font-variant-numeric: tabular-nums; }
 
-.search { padding: 12px 16px; }
+/* #146. The root chips: the same pill as a tab, pressed rather than selected,
+   because several can be on at once. Scrolls sideways like the tabs do. */
+.chips { display: flex; gap: 8px; padding: 10px 16px 0; overflow-x: auto; }
+/* `display: flex` above outranks the user agent's `[hidden]`, so without this
+   a single root deployment would draw an empty strip with padding. */
+.chips[hidden] { display: none; }
+.chips button {
+  padding: 0 14px; border-radius: 999px; white-space: nowrap;
+  color: var(--muted); font-weight: 600;
+}
+.chips button[aria-pressed="true"] {
+  background: var(--ink); border-color: var(--ink); color: var(--surface);
+}
+
+.search { padding: 12px 16px; position: relative; }
+/* #164. The suggestions, under the field and over the list. Capped in
+   height so a phone keyboard leaves some of them on screen. */
+.suggestions {
+  position: absolute; left: 16px; right: 16px; z-index: 2;
+  margin: 4px 0 0; padding: 4px 0; list-style: none;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(46, 37, 28, 0.18);
+  max-height: 40vh; overflow-y: auto;
+}
+.suggestions[hidden] { display: none; }
+.suggestions li {
+  min-height: var(--touch); padding: 0 14px;
+  display: flex; align-items: center; gap: 10px;
+  cursor: pointer;
+}
+.suggestions li[aria-selected="true"] { background: var(--surface-alt); }
+.suggestions .row-root { margin-left: auto; }
 .search input {
   width: 100%; min-height: var(--touch); padding: 0 14px;
   border: 1px solid var(--line); border-radius: var(--radius);
@@ -328,7 +376,25 @@ main { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
   font-size: 12px; font-weight: 700; text-transform: lowercase;
   padding: 3px 9px; border-radius: 999px;
   background: var(--surface-alt); color: var(--muted);
+  display: inline-flex; align-items: center; gap: 5px;
 }
+/* #150. Sized in em, never px, so a glyph scales with the text beside it;
+   `currentColor` so the palette's tokens carry the glyph with no second set.
+   Only `stopping` may move, and only for someone who has not asked for
+   less motion. */
+.badge-glyph { width: 1.1em; height: 1.1em; flex-shrink: 0; fill: none; stroke: currentColor;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+/* The sprite itself takes no room, and this rule is the ONE thing hiding it
+   (#252): zero sized rather than `display: none`, which some engines take
+   as "draw nothing from here" for a `<use>`, so the markup carries no
+   `hidden` attribute, which would have been exactly that; and a stylesheet
+   rule rather than an inline style, which the page's CSP refuses and the
+   browser tier caught. The glyph test asserts a drawn box. */
+[data-badge-sprite] { position: absolute; width: 0; height: 0; overflow: hidden; }
+@media (prefers-reduced-motion: no-preference) {
+  .badge[data-badge="stopping"] .badge-glyph { animation: badge-spin 1.2s linear infinite; }
+}
+@keyframes badge-spin { to { transform: rotate(360deg); } }
 .badge[data-badge="running"] { background: var(--running); color: #FFFDFA; }
 .badge[data-badge="detached"] { background: var(--danger-tint); color: var(--danger-on-tint); }
 .badge[data-badge="stale"] { background: var(--warn-tint); color: var(--warn-on-tint); }
@@ -350,10 +416,27 @@ main { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
 /* -- footer ------------------------------------------------------------- */
 .footer {
   position: fixed; left: 0; right: 0; bottom: 0;
-  display: flex; align-items: center; gap: 12px;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
   background: var(--surface); border-top: 1px solid var(--line);
   font-size: 13px; color: var(--muted);
+}
+/* #147. A second row, full width, under the machine figures: the server's
+   own facts. `overflow-wrap: anywhere` so a long development version string
+   wraps inside the footer rather than pushing the page wider at 360px. */
+.about {
+  flex-basis: 100%; margin: 0;
+  font-size: 12px; color: var(--muted-2);
+  display: flex; gap: 8px; flex-wrap: wrap; overflow-wrap: anywhere;
+}
+/* 44px to tap, 17px on the page: section 7's minimum hit target, and the
+   footer is the surface with the least room to spend on it. The negative
+   block margin gives the tap box its height without giving the row any; the
+   pixels it reaches into above and below hold nothing interactive. */
+.about a {
+  color: var(--muted-2);
+  display: inline-flex; align-items: center;
+  min-height: var(--touch); margin-block: -13px;
 }
 .mem-figure { white-space: nowrap; }
 .mem-track { flex: 1; height: 8px; border-radius: 999px; background: var(--surface-alt); overflow: hidden; }
@@ -361,13 +444,23 @@ main { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
 .mem-bar[data-pressure="soft"] { background: var(--warn); }
 .mem-bar[data-pressure="hard"] { background: var(--danger); }
 .run-count { white-space: nowrap; font-weight: 600; }
+.shown { white-space: nowrap; }
+/* 44px to tap, the row's height on the page, by the same negative block
+   margin the source link uses; the pixels it reaches into hold nothing
+   interactive. Compact type, because it sits with the footer's figures. */
+.stop-all {
+  min-height: var(--touch); margin-block: -12px; padding: 0 10px;
+  font-size: 13px; white-space: nowrap;
+}
+.stop-all[hidden] { display: none; }
+.shown:empty { display: none; }
 
 .scrim { position: fixed; inset: 0; background: rgba(46, 37, 28, 0.55); }
 
 /* -- desktop is the same data at a wider viewport, not a second interface */
 @media (min-width: 900px) {
   main { max-width: 1100px; margin: 0 auto; }
-  .bar, .tabs, .search, .unsupported { max-width: 1100px; margin-inline: auto; }
+  .bar, .tabs, .chips, .search, .unsupported { max-width: 1100px; margin-inline: auto; }
   .row[data-state="running"], .row[data-state="detached"], .row[data-state="stale"] {
     flex-direction: row; align-items: center;
   }
@@ -439,6 +532,20 @@ dialog[data-dialog]::backdrop { background: rgba(46, 37, 28, 0.55); }
   max-height: 46vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;
   margin: 0 0 16px;
 }
+/* #168. Where there is room, the pane view takes it: the dialog fits its
+   content and the pane asks for eighty columns in ITS OWN `ch`, the pane's
+   monospace at 12px, which is what makes a line drawn for an 80 column
+   terminal land unwrapped. The modifier is set by the pane view alone; the
+   shared rule above is untouched, so the stop confirmation stays the
+   phone's column at every width. Under 900px nothing here applies. */
+@media (min-width: 900px) {
+  dialog[data-dialog][data-wide] { width: fit-content; max-width: 92vw; }
+  /* `box-sizing: border-box` is global, so the padding and the border are
+     added back or the content box comes out 22px short of eighty columns. */
+  dialog[data-dialog][data-wide] .log-pane {
+    min-width: calc(80ch + 20px + 2px); max-height: 70vh;
+  }
+}
 
 .sheet-field {
   width: 100%; min-height: var(--touch); padding: 0 12px; margin-top: 6px;
@@ -479,3 +586,34 @@ dialog[data-dialog]::backdrop { background: rgba(46, 37, 28, 0.55); }
 .answer-key:active {
   background: var(--line);
 }
+
+/* -- #151: the logs page ------------------------------------------------
+   The same bar and the same pane, on a page of its own: the browser window
+   is the size, so the pane fills it and the 46vh cap of the drawer does not
+   apply. `[data-stale]` marks a pane whose last read failed, so a person
+   knows the text is from before the refusal above it. */
+.logs-main { padding: 12px 16px; }
+.logs-full { max-height: none; min-height: 60vh; margin: 0; }
+.logs-full[data-stale] { opacity: 0.6; }
+.logs-page .stream-note { display: none; }
+
+/* -- #240: the bulk wait ------------------------------------------------
+   One line per row, scrolling inside the dialog so fifty of them leave the
+   actions on screen at a phone height. */
+.bulk-rows {
+  list-style: none; margin: 0 0 16px; padding: 0;
+  max-height: 40vh; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: var(--radius);
+}
+.bulk-rows li {
+  display: flex; justify-content: space-between; gap: 12px;
+  padding: 8px 12px; border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.bulk-rows li:last-child { border-bottom: 0; }
+.bulk-rows [data-bulk-name] { overflow-wrap: anywhere; }
+.bulk-rows [data-bulk-status] { color: var(--muted); white-space: nowrap; }
+.bulk-rows li[data-status="refused"] [data-bulk-status],
+.bulk-rows li[data-status="not requested"] [data-bulk-status],
+.bulk-rows li[data-status="not finished"] [data-bulk-status] { color: var(--danger-on-tint); }
+

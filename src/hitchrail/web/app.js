@@ -121,6 +121,18 @@ export function formatMb(mb) {
   return `${(mb / 1024).toFixed(1)} GB`;
 }
 
+/* #90. The figure and what bounds it, in one phrase: "1.4 GB of 4.0 GB" is
+   a different sentence from "1.4 GB", and "no limit" is a fact worth reading
+   beside a number rather than an absence. The ceiling is the tightest one
+   on the process's cgroup ancestry, read by the server; null means nothing
+   Hitchrail can see bounds it, which reads the same to the person holding
+   the phone whether the tree was unreadable or genuinely unlimited. */
+export function formatMemory(project) {
+  const used = formatMb(project.ram_mb);
+  const limit = project.ram_limit_mb;
+  return typeof limit === "number" ? `${used} of ${formatMb(limit)}` : `${used}, no limit`;
+}
+
 export function formatUptime(seconds) {
   if (!seconds || seconds < 60) return `${Math.max(0, Math.round(seconds || 0))}s`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
@@ -137,9 +149,39 @@ const state = {
   unsupportedTotal: 0,
   root: "",
   memory: { available_mb: null, total_mb: null },
+  server: { version: null, user: null, started_at: null },
   tab: "all",
   query: "",
+  // #146. Root labels to show; empty means all. A Set, never persisted as
+  // the source of truth: `localStorage` is a convenience that survives a
+  // reload and is intersected with the roots actually present on every
+  // listing, so a stale or forged value can only ever show MORE rows.
+  rootFilter: new Set(),
+  // #164. The identifier a suggestion chose, or null. Choosing is exact where
+  // typing is a substring: picking `vessel` from the list must not also show
+  // `vessel-social`, and the suggestion carried its root, so this is the
+  // whole identifier. Cleared the moment the text is edited again.
+  chosen: null,
 };
+
+const ROOTS_KEY = "hitchrail.roots";
+
+function storedRoots() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ROOTS_KEY) ?? "[]");
+    return Array.isArray(parsed) ? parsed.filter((v) => typeof v === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberRoots() {
+  try {
+    localStorage.setItem(ROOTS_KEY, JSON.stringify([...state.rootFilter]));
+  } catch {
+    /* a private window; the filter still applies for this page */
+  }
+}
 
 /* `Stopped` is NOT the stopped STATE. The canvas computes it as
    `all.length - runNames.length`, so a stale or detached row belongs there:
@@ -152,9 +194,181 @@ function visibleProjects() {
   return state.projects.filter((project) => {
     if (state.tab === "running" && !isRunning(project)) return false;
     if (state.tab === "stopped" && isRunning(project)) return false;
-    if (query && !project.name.toLowerCase().includes(query)) return false;
+    // #146. OR among roots, AND with the rest: an empty set is no filter.
+    if (state.rootFilter.size > 0 && !state.rootFilter.has(splitProject(project.name).label)) {
+      return false;
+    }
+    // #164. The FOLDER, not the qualified string: roots have chips, and a
+    // search over `root~folder` matched the `work` root by coincidence and a
+    // folder called `homework` in any root on purpose nobody had.
+    if (state.chosen !== null) return project.name === state.chosen;
+    if (query && !splitProject(project.name).folder.toLowerCase().includes(query)) return false;
     return true;
   });
+}
+
+/* -- #164: the search suggests ----------------------------------------
+   The suggestions are the rows the query would show, from `state.projects`
+   and nothing fetched: the filter and the popup are two views of one query,
+   so the list underneath is always right while the popup is open. */
+const SUGGESTION_CAP = 8;
+let activeSuggestion = -1;
+
+function suggestions() {
+  // #248. A choice is the end of the interaction: the chosen row is the one
+  // match and it is on the list already, so the popup stays closed until
+  // the text is edited again, whatever renders in between.
+  if (state.chosen !== null) return [];
+  return state.query.trim() ? visibleProjects().slice(0, SUGGESTION_CAP) : [];
+}
+
+function renderSuggestions() {
+  const box = $("[data-search]");
+  const list = $("[data-suggestions]");
+  if (!box || !list) return;
+  const items = suggestions();
+  if (items.length === 0 || document.activeElement !== box) {
+    closeSuggestions();
+    return;
+  }
+  if (activeSuggestion >= items.length) activeSuggestion = -1;
+  list.replaceChildren(
+    ...items.map((project, index) => {
+      const { label, folder } = splitProject(project.name);
+      const item = document.createElement("li");
+      item.id = `search-option-${index}`;
+      item.setAttribute("role", "option");
+      item.setAttribute("aria-selected", String(index === activeSuggestion));
+      item.textContent = folder;
+      if (severalRoots() && label) {
+        const where = document.createElement("span");
+        where.className = "row-root";
+        where.textContent = label;
+        item.append(where);
+      }
+      // `mousedown` rather than `click`: a click follows the input's blur, and
+      // the blur has closed the popup by then.
+      item.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        chooseSuggestion(project);
+      });
+      return item;
+    }),
+  );
+  list.hidden = false;
+  box.setAttribute("aria-expanded", "true");
+  const active = activeSuggestion >= 0 ? `search-option-${activeSuggestion}` : "";
+  if (active) box.setAttribute("aria-activedescendant", active);
+  else box.removeAttribute("aria-activedescendant");
+}
+
+function closeSuggestions() {
+  const box = $("[data-search]");
+  const list = $("[data-suggestions]");
+  if (list) {
+    list.hidden = true;
+    list.replaceChildren();
+  }
+  if (box) {
+    box.setAttribute("aria-expanded", "false");
+    box.removeAttribute("aria-activedescendant");
+  }
+  activeSuggestion = -1;
+}
+
+function chooseSuggestion(project) {
+  const box = $("[data-search]");
+  const { folder } = splitProject(project.name);
+  state.query = folder;
+  state.chosen = project.name;
+  if (box) box.value = folder;
+  closeSuggestions();
+  renderList();
+}
+
+/* The reference pattern's keys and nothing invented: Down and Up move the
+   active option, Enter chooses it, Escape closes the popup and leaves the
+   text, and a second Escape clears the field. Nothing is chosen by typing. */
+function onSearchKey(event) {
+  const items = suggestions();
+  const open = !$("[data-suggestions]")?.hidden;
+  if (event.key === "ArrowDown" && items.length) {
+    event.preventDefault();
+    activeSuggestion = (activeSuggestion + 1) % items.length;
+    renderSuggestions();
+  } else if (event.key === "ArrowUp" && items.length) {
+    event.preventDefault();
+    activeSuggestion = activeSuggestion <= 0 ? items.length - 1 : activeSuggestion - 1;
+    renderSuggestions();
+  } else if (event.key === "Enter" && open && activeSuggestion >= 0) {
+    event.preventDefault();
+    chooseSuggestion(items[activeSuggestion]);
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    if (open) {
+      closeSuggestions();
+    } else {
+      state.query = "";
+      state.chosen = null;
+      event.target.value = "";
+      renderList();
+    }
+  }
+}
+
+/* #146. One button per root, pressed or not, with how many rows it holds.
+   Nothing here is a server side parameter: it filters a list the client
+   already has in full, and the failure direction is showing MORE rows than
+   asked for, never fewer. Labels reach the DOM as text. */
+function renderChips() {
+  const strip = $("[data-roots]");
+  if (!strip) return;
+  const roots = state.roots ?? [];
+  if (roots.length <= 1) {
+    strip.hidden = true;
+    strip.replaceChildren();
+    return;
+  }
+  strip.hidden = false;
+  const counts = new Map();
+  for (const project of state.projects) {
+    const { label } = splitProject(project.name);
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  strip.replaceChildren(
+    ...roots.map((root) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.setAttribute("aria-pressed", String(state.rootFilter.has(root.label)));
+      button.dataset.root = root.label;
+      // A space before the count, so the accessible name is "bravo 10" and
+      // not "bravo10": read aloud, one is a root and a number and the other
+      // is a word nobody named anything.
+      button.append(`${root.label} `);
+      const count = document.createElement("span");
+      count.className = "tab-count";
+      count.textContent = String(counts.get(root.label) ?? 0);
+      button.append(count);
+      button.addEventListener("click", () => {
+        if (state.rootFilter.has(root.label)) state.rootFilter.delete(root.label);
+        else state.rootFilter.add(root.label);
+        rememberRoots();
+        render();
+      });
+      return button;
+    }),
+  );
+}
+
+/* Why the list is empty, in the filters' own words, so a person is not told
+   "nothing matches" by a filter they set and forgot. */
+function emptyReason() {
+  const where = state.rootFilter.size > 0 ? ` in ${[...state.rootFilter].join(", ")}` : " here";
+  const query = state.query.trim();
+  if (query) return `No folder${where} is called that.`;
+  if (state.tab === "running") return `Nothing${where} is running.`;
+  if (state.tab === "stopped") return `Nothing${where} is stopped.`;
+  return `No folder${where}.`;
 }
 
 function renderTabs() {
@@ -251,7 +465,7 @@ function metaFor(project) {
   // sitting there waiting for somebody.
   if (project.awaiting_input) return "waiting for an answer  ·  open the pane to answer";
   if (project.pid === null) return "";
-  return `${formatMb(project.ram_mb)}  ·  up ${formatUptime(project.uptime_s)}`;
+  return `${formatMemory(project)}  ·  up ${formatUptime(project.uptime_s)}`;
 }
 
 /* The states whose row is a column: a badge and up to three controls cannot
@@ -320,8 +534,18 @@ function renderRow(project) {
 
   const badge = document.createElement("span");
   badge.className = "badge";
-  badge.dataset.badge = badgeFor(project);
-  badge.textContent = badgeFor(project);
+  const word = badgeFor(project);
+  badge.dataset.badge = word;
+  // #150. The glyph beside the word, never instead of it: decorative to a
+  // screen reader, which hears the word, and a shape a scanning eye picks
+  // out before it reads. One `<use>` into the inline sprite in index.html.
+  const glyph = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  glyph.setAttribute("aria-hidden", "true");
+  glyph.setAttribute("class", "badge-glyph");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", `#badge-${word}`);
+  glyph.append(use);
+  badge.append(glyph, word);
   head.append(badge);
 
   const actions = document.createElement("div");
@@ -533,9 +757,19 @@ function renderList() {
   // same string put the page's own test into a strict mode violation, and
   // saying it twice is what a person navigating the page would then hear.
   announce(visible.length === 0 ? "No folders match." : "");
+  const shown = $("[data-shown]");
+  if (shown) {
+    shown.textContent =
+      visible.length === state.projects.length
+        ? ""
+        : `${visible.length} of ${state.projects.length} shown`;
+  }
   if (visible.length === 0) {
     const template = $("[data-empty-template]");
-    list.replaceChildren(template.content.cloneNode(true));
+    const empty = template.content.cloneNode(true);
+    const reason = empty.querySelector("[data-empty-reason]");
+    if (reason) reason.textContent = emptyReason();
+    list.replaceChildren(empty);
     return;
   }
   list.replaceChildren(...visible.map(renderRow));
@@ -589,11 +823,58 @@ function renderFooter() {
 
   const count = $("[data-run-count]");
   if (count) count.textContent = `${state.projects.filter(isRunning).length} running`;
+
+  // #147. Omitted, not guessed, when the server cannot say: a bare checkout
+  // has no distribution metadata, and a wrong number here defeats the one
+  // question the line exists to answer.
+  const version = $("[data-version]");
+  if (version) {
+    version.textContent = state.server.version === null ? "" : `hitchrail ${state.server.version}`;
+  }
+  // #148. Since when, as whom. Formatted HERE, in the viewer's own locale and
+  // timezone, and that is not a preference: the server's timezone is the
+  // machine's and the phone's is the person's, and a server rendered 15:45
+  // is wrong for anybody elsewhere in a way that looks right. Absolute with
+  // the relative beside it: relative alone cannot be compared against a
+  // journal entry, absolute alone makes a person do arithmetic on a phone.
+  const since = $("[data-since]");
+  if (since) since.textContent = describeStart(state.server);
+}
+
+function describeStart({ user, started_at: startedAt }) {
+  const parts = [];
+  if (typeof startedAt === "number") {
+    const started = new Date(startedAt * 1000);
+    const sameDay = started.toDateString() === new Date().toDateString();
+    const clock = sameDay
+      ? started.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : started.toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+    parts.push(`since ${clock} (${formatAgo(Date.now() / 1000 - startedAt)})`);
+  }
+  if (typeof user === "string" && user !== "") parts.push(`as ${user}`);
+  return parts.join("  \u00b7  ");
+}
+
+/* Coarse on purpose: the number answers "did this restart while I was not
+   looking", and minutes are the finest that question needs. */
+function formatAgo(seconds) {
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
 }
 
 export function render() {
   renderTabs();
+  renderChips();
+  renderStopAll();
   renderList();
+  renderBulk();
+  // A listing or an event arriving while somebody is typing: the popup is a
+  // view of the same query and must not go on showing the old answer, or
+  // stay closed because the first keystroke beat the first listing.
+  renderSuggestions();
   renderUnsupported();
   renderFooter();
 }
@@ -623,11 +904,17 @@ function closeDialog(onlyIfFor) {
 
 /* `actions` are given SAFEST FIRST. The column layout means first is topmost
    and furthest from the thumb, which is the placement section 7 asks for. */
-function showDialog({ title, body, actions, extra, forProject }) {
+function showDialog({ title, body, actions, extra, forProject, wide = false }) {
   const dialog = $("[data-dialog]");
   if (!dialog) return;
   dialog.replaceChildren();
   delete dialog.dataset.refusal;
+  delete dialog.dataset.bulk;
+  // #168. Only the pane view asks for room, and only the stylesheet's wide
+  // breakpoint grants it: the confirmation and the rest of the stop sequence
+  // share this element and keep the phone's column at every width.
+  if (wide) dialog.dataset.wide = "";
+  else delete dialog.dataset.wide;
   if (forProject === undefined) {
     delete dialog.dataset.for;
   } else {
@@ -842,6 +1129,7 @@ async function showTimedOut(project) {
         "It was asked to exit and answered with a prompt, shown below. Reply "
         + "with a key here or at the pane; Hitchrail has stopped waiting.",
       extra,
+      wide: true,
       forProject: project.name,
       // Kill is still here, and still last. The person may well want it, and
       // the warning is the same one: the difference is that they now know what
@@ -1037,6 +1325,280 @@ function showRefusal(result, project) {
   });
 }
 
+/* -- #240: Stop all ----------------------------------------------------
+   The stop each row already has, issued for each row, and no new route: a
+   DELETE per row can refuse on its own terms, and those refusals are per row
+   facts the operator needs per row. Sequentially, never in parallel:
+   `request_stop` captures the pane between key groups on the executor that
+   serves the operator, and fifty captures at once is the load #180 moved the
+   sweep off the request path to avoid. The bulk kill lives inside this wait
+   as the escalation, second and styled danger, and reaches only the rows
+   still in flight: a row that exited or refused is not killed by it. A
+   standalone Kill all was decided against (#241, design section 7). */
+
+let bulk = null;
+
+function stoppableRows() {
+  // Stale rows get Clear, not Stop (#98), and are left out; the self project
+  // never enters the set.
+  return state.projects.filter((p) => isRunning(p) && !p.protected);
+}
+
+function renderStopAll() {
+  const button = $("[data-stop-all]");
+  if (button) button.hidden = stoppableRows().length === 0;
+}
+
+function confirmStopAll() {
+  // #247. One bulk at a time. A wait that was hidden and is still ticking
+  // is reopened rather than started again under its own ticker. A wait
+  // whose ticker has stopped is OVER, done or not: its rows were reported,
+  // and reopening it forever would leave a person who has started more
+  // sessions since with no way to stop them short of killing the old ones.
+  //
+  // "Over" is a flag the ticker flips where it gives up at the deadline,
+  // and nothing else: it is false while the stops are being requested and
+  // while they are awaited, which is what makes this guard hold during the
+  // request phase too. Round 2 of the review found `ticking` used here,
+  // which is unset until the ticker starts, after the LAST request returns,
+  // so the guard fell through for the whole phase it was written for.
+  if (bulk !== null && !bulk.done && !bulk.over) {
+    showBulkWait();
+    return;
+  }
+  const rows = stoppableRows();
+  if (rows.length === 0) return;
+  showDialog({
+    title: `Stop ${rows.length} sessions?`,
+    body:
+      "Each will be interrupted, then asked to exit, one at a time. "
+      + "Anything they are part way through may be lost.",
+    actions: [
+      ["Cancel", "ghost", () => closeDialog()],
+      ["Stop all", "", () => beginStopAll(rows)],
+    ],
+  });
+}
+
+async function beginStopAll(rows) {
+  bulk = {
+    rows: rows.map((p) => ({ name: p.name, status: "queued", message: "" })),
+    deadline: null,
+    done: false,
+    // #247. The ticker belongs to this object: a tick that finds `bulk` is
+    // no longer the object it was started for returns without judging it.
+    id: Symbol("bulk"),
+    // #81's rule, for the bulk case: whether the LAST listing could be read.
+    // A deadline reached on failed listings is "lost track", not "not
+    // finished", and offers no kill, because that would be proposing to end
+    // processes the page cannot currently see.
+    lastReadOk: true,
+    lost: false,
+    over: false,
+  };
+  showBulkWait();
+  for (const row of bulk.rows) {
+    // Skipped if the escalation reached it first.
+    if (row.status !== "queued") continue;
+    row.status = "requesting";
+    renderBulk();
+    const result = await api(`/api/sessions/${encodeURIComponent(row.name)}`, {
+      method: "DELETE",
+    });
+    if (row.status !== "requesting") {
+      // Killed while the request was out. The kill's own outcome stands.
+    } else if (result.status === 0) {
+      // Never left. Reported as such, never as requested (#74's rule), and
+      // the sequence carries on: the next one may get through.
+      row.status = "not requested";
+      row.message = result.body.message;
+    } else if (!result.ok) {
+      row.status = "refused";
+      row.message = result.body.message;
+    } else {
+      row.status = "requested";
+    }
+    renderBulk();
+  }
+  // The same two fields `killRemaining` resets, and for the same reason
+  // (#254): a ticker started by a kill during the request phase can give up
+  // before the last request returns, and a fresh wait must not start over.
+  bulk.deadline = Date.now() + stopTimeoutMs();
+  bulk.over = false;
+  await awaitBulk();
+}
+
+/* What each row is now, from the listing and the request's own outcome. The
+   dialog never says "exited" from anything but the listing. */
+function bulkStatus(row) {
+  if (row.status !== "requested") return row.status;
+  const current = state.projects.find((p) => p.name === row.name);
+  if (current && current.state === "stopped") return "exited";
+  if (bulk.lost) return "unknown";
+  // "Not finished" is the ticker's verdict at the deadline, never the clock's
+  // on some other render: the words and the flag flip together.
+  if (bulk.over) return "not finished";
+  return "requested";
+}
+
+/* Every row that is not yet terminal: waiting to be asked, being asked,
+   asked, or out of time. "Do not wait" reaches all of them, because the stop
+   for the SET was confirmed and begun before the kill became reachable,
+   which is the affordance rule; a row that exited or refused is terminal and
+   is not touched. */
+function bulkInFlight() {
+  const live = ["queued", "requesting", "requested", "not finished"];
+  return bulk.rows.filter((row) => live.includes(bulkStatus(row)));
+}
+
+async function awaitBulk() {
+  const mine = bulk;
+  if (mine.ticking) return; // #247: one ticker per bulk, however many callers
+  mine.ticking = true;
+  const tick = async () => {
+    // Read once, and compared by identity after every await: Close nulls
+    // `bulk`, and a tick must never judge an object it was not started for.
+    if (bulk !== mine) return;
+    const ok = (await refresh()).ok;
+    if (bulk !== mine) return;
+    mine.lastReadOk = ok;
+    // A reading that succeeded ends "lost": the page can tell again.
+    if (ok) mine.lost = false;
+    settleBulk();
+    renderBulk();
+    if (mine.done) return;
+    if (mine.deadline !== null && Date.now() >= mine.deadline) {
+      // Reports, and does not kill on its own: the engine refuses to
+      // escalate by itself and the interface must not do it on its behalf.
+      // And if the last reading failed, it does not even report "not
+      // finished": the answer is that the page cannot tell.
+      if (!ok) mine.lost = true;
+      mine.over = true;
+      mine.ticking = false;
+      renderBulk();
+      return;
+    }
+    window.setTimeout(tick, 700);
+  };
+  await tick();
+}
+
+/* Done is decided here, from the tick AND from every render, so a hidden
+   wait stops polling once every row exited and a row exiting after the
+   deadline still finishes the dialog. */
+function settleBulk() {
+  if (bulk === null || bulk.done || bulk.lost) return;
+  if (bulk.deadline !== null && bulkInFlight().length === 0) bulk.done = true;
+}
+
+function showBulkWait() {
+  const list = document.createElement("ul");
+  list.className = "bulk-rows";
+  list.dataset.bulkRows = "";
+  for (const row of bulk.rows) {
+    const item = document.createElement("li");
+    item.dataset.name = row.name;
+    const name = document.createElement("span");
+    name.dataset.bulkName = "";
+    name.textContent = row.name;
+    const status = document.createElement("span");
+    status.dataset.bulkStatus = "";
+    item.append(name, status);
+    list.append(item);
+  }
+  showDialog({
+    title: `Stopping ${bulk.rows.length} sessions`,
+    body: "Waiting for them to exit.",
+    extra: list,
+    actions: [
+      ["Hide, keep stopping", "ghost", () => closeDialog()],
+      ["Do not wait, kill them all", "danger", () => killRemaining()],
+    ],
+  });
+  $("[data-dialog]").dataset.bulk = "";
+  renderBulk();
+}
+
+/* Updated in place, never rebuilt: `showDialog` starts with `replaceChildren`,
+   and a wait that redraws its whole dialog on every listing takes focus from
+   under the thumb, which is #71's defect in a new place. */
+function renderBulk() {
+  settleBulk();
+  const dialog = $("[data-dialog]");
+  if (bulk === null || !dialog?.open || !("bulk" in dialog.dataset)) return;
+  for (const row of bulk.rows) {
+    const item = dialog.querySelector(`[data-bulk-rows] li[data-name="${CSS.escape(row.name)}"]`);
+    if (!item) continue;
+    const status = bulkStatus(row);
+    item.dataset.status = status;
+    item.querySelector("[data-bulk-status]").textContent =
+      row.message ? `${status}: ${row.message}` : status;
+  }
+  const body = dialog.querySelector(".dialog-body");
+  const unfinished = bulk.rows.filter((row) => bulkStatus(row) === "not finished").length;
+  if (bulk.done) {
+    if (body) body.textContent = "Done.";
+    const actions = dialog.querySelector(".dialog-actions");
+    if (actions && actions.children.length !== 1) {
+      const close = document.createElement("button");
+      close.type = "button";
+      close.className = "ghost";
+      close.textContent = "Close";
+      close.addEventListener("click", () => {
+        bulk = null;
+        closeDialog();
+      });
+      actions.replaceChildren(close);
+    }
+  } else if (bulk.lost) {
+    if (body) {
+      body.textContent =
+        "The stops were requested. This browser cannot read the machine, so "
+        + "it cannot say which sessions finished.";
+    }
+    // NO kill, for the reason `showLostTrack` gives.
+    const actions = dialog.querySelector(".dialog-actions");
+    if (actions && actions.children.length !== 1) {
+      const close = document.createElement("button");
+      close.type = "button";
+      close.className = "ghost";
+      close.textContent = "Close";
+      close.addEventListener("click", () => {
+        bulk = null;
+        closeDialog();
+      });
+      actions.replaceChildren(close);
+    }
+  } else if (unfinished > 0 && body) {
+    // The risk before the kill is offered, as the single row timeout does.
+    body.textContent =
+      `${unfinished} ${unfinished === 1 ? "has" : "have"} not finished. Killing now ends `
+      + "them immediately, and anything not written to disk is lost.";
+  }
+}
+
+async function killRemaining() {
+  if (bulk === null) return;
+  // Only the rows still in flight, one at a time for the same reason the
+  // stops are.
+  for (const row of bulkInFlight()) {
+    const result = await api(`/api/sessions/${encodeURIComponent(row.name)}/kill`, {
+      method: "POST",
+    });
+    if (!result.ok) {
+      row.status = "refused";
+      row.message = result.body.message;
+    } else {
+      // A kill is a request too: the listing says whether it exited.
+      row.status = "requested";
+    }
+    renderBulk();
+  }
+  bulk.deadline = Date.now() + stopTimeoutMs();
+  bulk.over = false;
+  await awaitBulk();
+}
+
 /* -- starting ----------------------------------------------------------
    The two memory refusals are DIFFERENT SCREENS, not one with a variable.
    The soft one asks and can be overridden; the hard one refuses and offers a
@@ -1114,7 +1676,7 @@ function showHardMemory(project, body) {
     body:
       `Only ${formatMb(body.available_mb)} free. Hitchrail will not start a `
       + "session into that."
-      + (largest ? ` The largest is ${largest.name}, ${formatMb(largest.ram_mb)}.` : ""),
+      + (largest ? ` The largest is ${largest.name}, ${formatMemory(largest)}.` : ""),
     actions,
   });
 }
@@ -1258,12 +1820,25 @@ async function paneView(project) {
 async function openLogs(project) {
   const waiting = project.awaiting_trust || project.awaiting_input;
   const extra = await paneView(project);
+  // #151. The same tail in a tab of its own, bookmarkable and sized by the
+  // window. The drawer stays: reading forty lines without leaving the list
+  // is the common case, and this is for watching one project while acting
+  // on another. Same origin, so no rel is needed, and a real anchor for the
+  // reason the session link is one: it is what long press and open in new
+  // tab reach for.
+  const tab = document.createElement("a");
+  tab.className = "btn ghost";
+  tab.href = `/logs/${encodeURIComponent(project.name)}`;
+  tab.target = "_blank";
+  tab.textContent = "Open in a tab";
+  extra.append(tab);
   showDialog({
     title: project.name,
     body: waiting
       ? "this session is waiting for an answer"
       : "last 40 lines of the pane",
     extra,
+    wide: true,
     actions: [["Close", "ghost", () => closeDialog()]],
   });
 }
@@ -1665,9 +2240,39 @@ async function refresh() {
   state.unsupportedTotal = result.body.unsupported_total;
   state.roots = roots;
   state.root = roots.length === 1 ? roots[0].path : "";
+  // #146. The remembered selection, intersected with what is actually here:
+  // a root removed from the command line drops out of the filter, and one
+  // root means no filter at all, so a selection stored by an earlier multi
+  // root configuration cannot filter the one root to nothing.
+  const present = new Set(roots.map((r) => r.label));
+  state.rootFilter = new Set(
+    roots.length > 1 ? [...state.rootFilter, ...storedRoots()].filter((l) => present.has(l)) : [],
+  );
   state.memory = result.body.memory;
+  state.server = result.body.server ?? state.server;
   render();
   return result;
+}
+
+/* #149. Collapse the header once the list has scrolled under it, and bring
+   it back at the top. With hysteresis: collapsing takes ~30px out of the
+   page, and on a page barely taller than the viewport that alone can move
+   `scrollY` back under a single threshold and flip the header forever. So
+   the collapse waits for 48px and the return waits for under 16px, and a
+   page that cannot scroll that far never collapses at all. */
+function trackScroll() {
+  const root = document.documentElement;
+  const update = () => {
+    const scrolled = "scrolled" in root.dataset;
+    const y = window.scrollY;
+    if (!scrolled && y > 48 && root.scrollHeight - window.innerHeight > 96) {
+      root.dataset.scrolled = "";
+    } else if (scrolled && y < 16) {
+      delete root.dataset.scrolled;
+    }
+  };
+  window.addEventListener("scroll", update, { passive: true });
+  update();
 }
 
 /* Report how much of the viewport an on screen keyboard is covering (#103).
@@ -1709,12 +2314,21 @@ function boot() {
   trackKeyboardInset();
   $("[data-theme-toggle]")?.addEventListener("click", toggleTheme);
   $("[data-new]")?.addEventListener("click", () => showNewFolder());
+  $("[data-stop-all]")?.addEventListener("click", confirmStopAll);
   document.addEventListener("visibilitychange", onVisible);
   openStream();
-  $("[data-search]")?.addEventListener("input", (event) => {
+  trackScroll();
+  const search = $("[data-search]");
+  search?.addEventListener("input", (event) => {
     state.query = event.target.value;
+    state.chosen = null;
+    activeSuggestion = -1;
     renderList();
+    renderSuggestions();
   });
+  search?.addEventListener("keydown", onSearchKey);
+  search?.addEventListener("focus", renderSuggestions);
+  search?.addEventListener("blur", closeSuggestions);
   refresh();
 }
 

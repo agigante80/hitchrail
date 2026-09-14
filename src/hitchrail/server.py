@@ -10,8 +10,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import functools
+import getpass
 import json
 import logging
+import os
+import time
 from collections.abc import AsyncIterator, Callable
 from typing import TypeVar
 
@@ -23,6 +26,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+import hitchrail
 from hitchrail import discovery, pages
 from hitchrail import engine as eng
 from hitchrail import security as sec
@@ -116,8 +120,19 @@ async def _routing_error(request: Request, exc: Exception) -> Response:
     )
 
 
-def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
+def create_app(
+    engine: eng.Engine,
+    config: Config,
+    bus: EventBus,
+    *,
+    now: Callable[[], float] = time.time,
+    user: Callable[[], str] = getpass.getuser,
+) -> Starlette:
     """The bus is REQUIRED, and the caller owns it.
+
+    `now` and `user` are the two seams #148 added, wall clock and account,
+    read once below. Wall clock rather than the engine's monotonic one,
+    because the value is shown to a person beside a journal timestamp.
 
     An earlier draft took it optionally and reconciled it against `engine.bus`.
     There is no such attribute: `Engine` has a private `_bus` and
@@ -128,6 +143,26 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
     """
     engine.attach_bus(bus)
     events = bus
+    # #147. Per server constants, read ONCE here and sent on the listing the
+    # page already fetches, never on a route of their own: a second round trip
+    # for a string is a round trip on a phone. `None` for the version is a
+    # bare checkout, and the page omits it rather than rendering a guess.
+    #
+    # #148. Since when, as whom. Both are constant for the life of the
+    # process, so a per request syscall for either is the shape this codebase
+    # already refuses for the pane map. `getpass.getuser` consults passwd,
+    # where `$USER` is inherited and lies under sudo, a unit and su; it raises
+    # for a uid with no entry, the ordinary case in a container, and the
+    # number is then the honest answer. Never a guessed name.
+    try:
+        account: str = user()
+    except (KeyError, OSError, ImportError):
+        account = str(os.getuid())
+    server_facts = {
+        "version": hitchrail.installed_version(),
+        "user": account,
+        "started_at": now(),
+    }
 
     async def list_projects(request: Request) -> Response:
         # ONE scan, one thread hop, one consistent answer.
@@ -179,6 +214,9 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
                 # client that special cased "one root" would be wrong the
                 # day a second was added.
                 "roots": [{"label": r.label, "path": str(r.path)} for r in config.roots],
+                # This server rather than this machine: what a person holding
+                # a phone needs before trusting the rest of the page (#147).
+                "server": server_facts,
             }
         )
 
@@ -416,12 +454,36 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
             return _error(409, "not_running", str(exc))
         except eng.MachineUnreadable as exc:
             return _error(503, "machine_unreadable", str(exc))
+        except discovery.RootUnavailable as exc:
+            # #249. A stopped name's ladder lists the root to tell "unknown"
+            # from "not running", and a root that has gone away raises here
+            # rather than in the listing. The same answer the listing gives.
+            return _error(503, "root_unavailable", str(exc))
         # No `Protected` arm, and that is not an oversight. `engine.logs`
         # deliberately does not refuse the self project: reading the log of the
         # session hosting Hitchrail is harmless and occasionally the only way
         # to see what it is doing. An arm here could never fire, and this
         # project treats a guard that cannot execute as worse than none.
         return JSONResponse({"name": name, "text": text})
+
+    async def logs_page(request: Request) -> Response:
+        """The logs page (#151). A project name in a PAGE route's path, and the
+        first one, so the name is resolved by `engine.locate`, the same
+        function the logs API climbs, and refused with the same envelope: a
+        page that validated less strictly than the sub-route it mirrors is
+        the asymmetry that gets missed. A stopped project renders, and the
+        page says so; an unknown one refuses rather than rendering an empty
+        tail that reads as "printed nothing"."""
+        name = request.path_params["name"]
+        try:
+            await in_thread(engine.locate, name)
+        except eng.UnknownProject as exc:
+            return _error(404, "unknown_project", str(exc))
+        except eng.MachineUnreadable as exc:
+            return _error(503, "machine_unreadable", str(exc))
+        except discovery.RootUnavailable as exc:
+            return _error(503, "root_unavailable", str(exc))  # #249, as the API
+        return await pages.logs_page(request)
 
     async def session_url(request: Request) -> Response:
         """The link, paid for on demand.
@@ -616,6 +678,7 @@ def create_app(engine: eng.Engine, config: Config, bus: EventBus) -> Starlette:
             Route(sec.GRANT_API_PATH, grant, methods=["POST"]),
             Route(sec.GRANT_PAGE_PATH, pages.grant_page, methods=["GET"]),
             Route("/", pages.page, methods=["GET"]),
+            Route("/logs/{name}", logs_page, methods=["GET"]),
             *[Route(p, pages.asset_route(p), methods=["GET"]) for p in pages.ASSETS],
         ],
         # OUTSIDE the three access controls, so a refusal carries the

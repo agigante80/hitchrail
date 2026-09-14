@@ -27,7 +27,7 @@ from conftest import (
     procs_from,
     ps_row,
 )
-from hitchrail import attention, derive, discovery
+from hitchrail import attention, derive, discovery, ram
 from hitchrail.claude_ipc import GRACEFUL_STOP_KEYS, launch_argv
 from hitchrail.config import TOKEN_ENV
 from hitchrail.engine import (
@@ -102,6 +102,12 @@ def engine_for(
     self_project: str | None = None,
     agent_config: Path | None = None,
     clock: FakeClock | None = None,
+    # Hermetic by default (round 1 review of Phase 13): `None` here used to
+    # mean the real reader, so every running-row test read the host's
+    # `/proc/<pid>/cgroup` and its answer depended on the machine, the same
+    # leak the `sessions_dir` note below is about. A test that wants a
+    # ceiling passes one.
+    ceiling_fn: Callable[[int], int | None] = lambda pid: None,
 ) -> tuple[Engine, FakeTmux]:
     tmux = FakeTmux(sessions=sessions, foreign=foreign)
     # Pinned INSIDE the temporary root. Without it `Config` defaults to
@@ -131,6 +137,7 @@ def engine_for(
             tmux=tmux,
             procs_fn=procs_fn or procs_from(table),
             meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
+            ceiling_fn=ceiling_fn,
             clock=clock,
             sleep=clock.sleep,
         )
@@ -140,6 +147,7 @@ def engine_for(
             tmux=tmux,
             procs_fn=procs_fn or procs_from(table),
             meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
+            ceiling_fn=ceiling_fn,
         )
     )
     return engine, tmux
@@ -3345,4 +3353,107 @@ def test_a_discarded_sweep_ages_nothing(root: Path) -> None:
         "a sweep that discarded its evidence still aged a claim it declined to "
         "renew, so the next scan has to rediscover it instead of renewing it. "
         "See #182."
+    )
+
+
+# -- #243: the ceiling beside a row's figure ---------------------------------
+
+
+def test_a_running_row_carries_what_bounds_it(root: Path) -> None:
+    """Through the injected reader, never the real cgroup tree: the hermetic
+    tier reads nothing under /sys. The reader is asked with the agent's pid
+    and the answer rides on the row."""
+    asked: list[int] = []
+
+    def ceiling(pid: int) -> int | None:
+        asked.append(pid)
+        return 4096
+
+    engine, _ = engine_for(
+        root,
+        sessions={proj("vessel"): PANE},
+        table=running_table(etime_s=60),
+        ceiling_fn=ceiling,
+    )
+    row = engine.get(proj("vessel"))
+    assert row.ram_limit_mb == 4096
+    assert asked == [row.pid]
+
+
+def test_a_stopped_row_has_no_pid_to_bound(root: Path) -> None:
+    engine, _ = engine_for(root, ceiling_fn=lambda pid: 4096)
+    assert engine.get(proj("vessel")).ram_limit_mb is None
+
+
+def test_the_ceiling_is_read_once_per_pid_per_ttl(root: Path) -> None:
+    """The reader is ten sysfs reads, measured at 665 microseconds, and the
+    listing route asks once per running row on every poll. Two listings
+    inside the TTL read once; one past it reads again, so a limit changed on
+    the machine shows up, bounded by the same window the attention overlay
+    accepts."""
+    clock = FakeClock()
+    calls: list[int] = []
+
+    def ceiling(pid: int) -> int | None:
+        calls.append(pid)
+        return 2048
+
+    engine, _ = engine_for(
+        root,
+        sessions={proj("vessel"): PANE},
+        table=running_table(etime_s=60),
+        clock=clock,
+        ceiling_fn=ceiling,
+    )
+    engine.get(proj("vessel"))
+    engine.get(proj("vessel"))
+    assert len(calls) == 1, "a second listing inside the TTL read the tree again"
+    clock.now += ram.CEILING_TTL_S + 1
+    engine.get(proj("vessel"))
+    assert len(calls) == 2, "a listing past the TTL kept a stale ceiling"
+
+
+def test_the_ceiling_cache_survives_two_threads_pruning_at_once(root: Path) -> None:
+    """Round 1 review of Phase 13. The listing runs on the request executor and
+    the attention sweep on its own, and both ask `_ceiling_mb`. The prune
+    rebuilt the dict by iterating it, so two threads expiring the same pids
+    could raise `dictionary changed size during iteration`, a 500 on the
+    route the page polls hardest. Driven hard: many pids, a TTL that has
+    always expired, two threads, and the exceptions collected rather than
+    hoped against."""
+    clock = FakeClock()
+    engine, _ = engine_for(root, clock=clock, ceiling_fn=lambda pid: 1)
+    clock.now = ram.CEILING_TTL_S * 1000  # far past every entry's expiry
+    failures: list[BaseException] = []
+
+    def hammer(offset: int) -> None:
+        try:
+            for i in range(8000):
+                engine._ceiling_mb(offset + (i % 3000))
+        except BaseException as exc:  # the point is to see it
+            failures.append(exc)
+
+    import threading
+
+    threads = [threading.Thread(target=hammer, args=(n,)) for n in (0, 1500)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert failures == [], failures
+
+
+def test_no_engine_built_with_defaults_reads_the_real_cgroup_tree(root: Path) -> None:
+    """#250. The guard for the autouse stub in conftest: an engine built with
+    no `ceiling_fn`, the way twenty-odd tests build one, resolves its
+    default through the stub and never through the real reader. If the
+    fixture is removed or renamed, this reaches `/proc` and fails on the
+    call count."""
+    import conftest
+
+    engine = Engine(make_config(root))
+    before = len(conftest.STUB_CEILING_CALLS)
+    assert engine._ceiling_mb(4242) is None
+    assert conftest.STUB_CEILING_CALLS[before:] == [4242], (
+        "an engine built with defaults did not reach the stub, so it read the real tree"
     )

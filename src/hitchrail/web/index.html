@@ -6,8 +6,61 @@
 <meta name="color-scheme" content="light dark">
 <title>hitchrail</title>
 <link rel="stylesheet" href="/app.css">
+<!-- #160. The mark, the tile a phone makes of it, and the manifest that
+     names the tile. No service worker, deliberately: offline, this page
+     would show a list that is not true, and the whole product is a page
+     that says what is true about a machine right now. -->
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#F3ECE1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#362D24" media="(prefers-color-scheme: dark)">
 </head>
 <body>
+<!-- #150. The badge glyphs: seven, for the seven things a badge can say, and
+     no more. A list of fifty is scanned rather than read, and a shape is
+     recognised peripherally where a word has to be read; it also stops the
+     states being told apart by colour alone. The word stays beside it.
+
+     Tabler Icons v3.46.0 (https://tabler.io/icons), outline set, vendored
+     as one inline sprite: no request, no icon font, no build. A SET has to
+     agree with itself on grid, stroke weight and optical alignment, which
+     is why these come from one library at one version and are never
+     generated; the application's own mark (#160) is the opposite call.
+     `detached` and `stale` are the pair to get right, opposites the
+     interface treats as opposites, and a test pins their drawings apart.
+
+     MIT License. Copyright (c) 2020-2026 Paweł Kuna. Permission is hereby
+     granted, free of charge, to any person obtaining a copy of this software
+     and associated documentation files (the "Software"), to deal in the
+     Software without restriction, including without limitation the rights
+     to use, copy, modify, merge, publish, distribute, sublicense, and/or
+     sell copies of the Software, and to permit persons to whom the Software
+     is furnished to do so, subject to the following conditions: The above
+     copyright notice and this permission notice shall be included in all
+     copies or substantial portions of the Software. THE SOFTWARE IS
+     PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+     INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+     FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+     AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+     DEALINGS IN THE SOFTWARE. -->
+<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" data-badge-sprite>
+  <symbol id="badge-running" viewBox="0 0 24 24"><path d="M7 4v16l13 -8l-13 -8"/></symbol>  <!-- player-play -->
+  <symbol id="badge-stopped" viewBox="0 0 24 24"><path d="M8.56 3.69a9 9 0 0 0 -2.92 1.95"/><path d="M3.69 8.56a9 9 0 0 0 -.69 3.44"/><path d="M3.69 15.44a9 9 0 0 0 1.95 2.92"/><path d="M8.56 20.31a9 9 0 0 0 3.44 .69"/><path d="M15.44 20.31a9 9 0 0 0 2.92 -1.95"/><path d="M20.31 15.44a9 9 0 0 0 .69 -3.44"/><path d="M20.31 8.56a9 9 0 0 0 -1.95 -2.92"/><path d="M15.44 3.69a9 9 0 0 0 -3.44 -.69"/></symbol>  <!-- circle-dashed -->
+  <symbol id="badge-detached" viewBox="0 0 24 24"><path d="M17 22v-2"/><path d="M9 15l6 -6"/><path d="M11 6l.463 -.536a5 5 0 0 1 7.071 7.072l-.534 .464"/><path d="M13 18l-.397 .534a5.068 5.068 0 0 1 -7.127 0a4.972 4.972 0 0 1 0 -7.071l.524 -.463"/><path d="M20 17h2"/><path d="M2 7h2"/><path d="M7 2v2"/></symbol>  <!-- unlink -->
+  <symbol id="badge-stale" viewBox="0 0 24 24"><path d="M5 11a7 7 0 0 1 14 0v7a1.78 1.78 0 0 1 -3.1 1.4a1.65 1.65 0 0 0 -2.6 0a1.65 1.65 0 0 1 -2.6 0a1.65 1.65 0 0 0 -2.6 0a1.78 1.78 0 0 1 -3.1 -1.4v-7"/><path d="M10 10l.01 0"/><path d="M14 10l.01 0"/><path d="M10 14a3.5 3.5 0 0 0 4 0"/></symbol>  <!-- ghost -->
+  <symbol id="badge-waiting" viewBox="0 0 24 24"><path d="M8 9h8"/><path d="M8 13h6"/><path d="M14 18h-1l-5 3v-3h-2a3 3 0 0 1 -3 -3v-8a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v4.5"/><path d="M19 22v.01"/><path d="M19 19a2.003 2.003 0 0 0 .914 -3.782a1.98 1.98 0 0 0 -2.414 .483"/></symbol>  <!-- message-question -->
+  <symbol id="badge-stopping" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9"/></symbol>  <!-- loader-2 -->
+  <symbol id="badge-controller" viewBox="0 0 24 24"><path d="M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3"/></symbol>  <!-- shield -->
+</svg>
+<!-- #149. Everything that acts on the whole list stays on screen: the bar
+     with New and the theme toggle, the stream notice, the tabs, the root
+     chips and the search. Sticky as one block, so a filter you cannot reach
+     is not a filter you stop using. On scroll the identity gives way, the
+     root line and the title's size, and the controls do not. -->
+<div class="top" data-top>
 <header class="bar">
   <div class="bar-titles">
     <h1>hitchrail</h1>
@@ -22,9 +75,25 @@
 <p class="stream-note" role="status" data-stream-note></p>
 
 <nav class="tabs" role="tablist" aria-label="Filter projects" data-tabs></nav>
+<!-- #146. Roots, as chips: multi select, OR among themselves, AND with the
+     tab and the search. Present only with more than one root, the same rule
+     the row's root chip follows. A group of toggle buttons rather than more
+     tabs, because a segmented control is single select and expects three
+     options, and roots are a set the operator chose. -->
+<div class="chips" role="group" aria-label="Filter by root" data-roots hidden></div>
 
+<!-- #164. An editable combobox with list autocomplete, the WAI-ARIA pattern
+     by that name: the input keeps focus, `aria-activedescendant` moves the
+     screen reader's attention through the listbox, nothing is chosen until
+     Enter or a tap. Hand built rather than a `<datalist>`, because a
+     suggestion has to say which root it is in and a datalist cannot. -->
 <div class="search">
-  <input type="search" role="searchbox" placeholder="Search folders" aria-label="Search folders" data-search>
+  <input type="search" role="combobox" placeholder="Search folders" aria-label="Search folders"
+         aria-autocomplete="list" aria-controls="search-options" aria-expanded="false"
+         autocomplete="off" data-search>
+  <ul id="search-options" class="suggestions" role="listbox" aria-label="Matching folders"
+      data-suggestions hidden></ul>
+</div>
 </div>
 
 <!-- No `aria-live` on the list. It was announced on every render, which used
@@ -40,7 +109,7 @@
 
 <template data-empty-template>
   <p class="empty-title">Nothing matches</p>
-  <p class="empty-body">No folder here is called that.</p>
+  <p class="empty-body" data-empty-reason>No folder here is called that.</p>
 </template>
 
 <section class="unsupported" data-unsupported hidden>
@@ -52,6 +121,27 @@
   <div class="mem-figure" data-mem-label></div>
   <div class="mem-track"><div class="mem-bar" data-mem-bar></div></div>
   <div class="run-count" data-run-count></div>
+  <!-- #240. Beside the count it acts on, in the fixed footer, so it is
+       reachable at any scroll position by construction and adds no strip
+       to the top of the page: a third button in the bar wrapped at 390px
+       and grew the header by 37px, which is premortem 3 of Phase 13. Present
+       only while a row can be stopped. Composed from the stop each row
+       already has, so it is no new power; its kill lives inside its wait as
+       the escalation, per design section 7. -->
+  <button type="button" class="ghost stop-all" data-stop-all hidden>Stop all</button>
+  <!-- #146. Empty unless a filter hides rows. The footer is fixed, so this
+       is readable from anywhere in the list: an applied filter must stay
+       visible after the strip that set it has scrolled away. -->
+  <div class="shown" data-shown></div>
+  <!-- #147. This server, not this machine: the one line that answers "which
+       build is this" from the phone. The repository link is the only outbound
+       link on the page besides the session links, and it is a real anchor for
+       the same reason those are. -->
+  <p class="about" data-about>
+    <span data-version></span>
+    <a href="https://github.com/agigante80/hitchrail" target="_blank" rel="noopener noreferrer">source</a>
+    <span data-since></span>
+  </p>
 </footer>
 
 <div class="scrim" data-scrim hidden></div>

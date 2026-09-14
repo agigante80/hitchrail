@@ -380,3 +380,23 @@ def test_a_declared_host_is_kept_without_resolving_it() -> None:
 def test_the_bound_address_is_always_reachable() -> None:
     """Nothing else in the list is guaranteed, and this one is by definition."""
     assert reachable_hosts("192.0.2.7", ("192.0.2.7", "localhost"), ()) == ["192.0.2.7"]
+
+
+@pytest.mark.integration
+async def test_a_forged_host_is_rejected_on_the_logs_page(tmp_path: Path) -> None:
+    """#151. The allowlist is applied app wide rather than per route, so a new
+    page route is covered by construction, and this proves exactly that: the
+    stack, mounted on a synthetic app with the same route shape, refuses a
+    forged Host before the handler runs. It cannot see the REAL route table;
+    `test_every_route_refuses_a_forged_host` in `test_api.py` sweeps that."""
+
+    async def ok(request: httpx.Request) -> JSONResponse:
+        return JSONResponse({"ok": True})
+
+    app = Starlette(
+        routes=[Route("/logs/{name}", ok, methods=["GET"])],
+        middleware=middleware_stack(make_config(tmp_path)),
+    )
+    response = await call(app, path="/logs/main~vessel", headers={"host": "evil.example"})
+    assert response.status_code == 400
+    assert response.json()["code"] == "host_rejected"

@@ -73,6 +73,19 @@ UNAUTHENTICATED: frozenset[tuple[str, str, str]] = frozenset(
         ("http", "POST", GRANT_API_PATH),
     }
 )
+
+# #160. The mark, the touch icon and the manifest: the only assets served
+# without a token. The grant page is the first page a new phone ever loads
+# and it must not be a nameless tab or a nameless tile, and a touch icon
+# cannot be a data URL. These are fixed files carrying nothing from the
+# machine, a drawing and a name, so the argument #21 made for the grant page
+# holds for them: nothing here names a project, a root or a figure. Read
+# only: the middleware admits GET and HEAD to these paths and nothing else,
+# and the set is pinned by a test like the one above. A stylesheet or a
+# script must NOT join it; the grant page inlines its own for that reason.
+UNAUTHENTICATED_ASSETS: frozenset[str] = frozenset(
+    {"/icon.svg", "/icon-180.png", "/icon-512.png", "/manifest.webmanifest"}
+)
 # Thirty days. Long enough that a phone is not re-granted every session, short
 # enough that a device left behind stops working eventually.
 COOKIE_MAX_AGE = 60 * 60 * 24 * 30
@@ -353,7 +366,12 @@ class TokenMiddleware:
         # Sub path mounting is not a documented deployment and this does not
         # make it one; what it stops is a guard and a router disagreeing about
         # which route a request is for, which is a bug whatever the deployment.
-        if (scope["type"], scope.get("method", ""), route_path(scope)) in UNAUTHENTICATED:
+        method = scope.get("method", "")
+        path = route_path(scope)
+        is_read = scope["type"] == "http" and method in ("GET", "HEAD")
+        if (scope["type"], method, path) in UNAUTHENTICATED or (
+            is_read and path in UNAUTHENTICATED_ASSETS
+        ):
             await self.app(scope, receive, send)
             return
 

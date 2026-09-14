@@ -78,7 +78,13 @@ tickets stay, because each is the reason one badge lies; a third goes to its
 own phase or to Backlog.
 
 ## Phase: Phase 13: Fifty rows on a phone
-state: planned
+state: done
+plan: docs/superpowers/plans/2026-09-12-hitchrail-phase-13-fifty-rows.md
+
+**Done, 2026-09-14.** Every task landed, reviewed in two bounded loops
+whose eleven findings were fixed as ordinary work before the close; the
+plan records the loops and where each stopped. The browser tier runs on a
+fifty row fixture now, which is the premortem's first rule made permanent.
 
 The interface stays usable when there are fifty projects across five roots,
 and says what it knows about each. Phase 11 is about states saying something
@@ -88,7 +94,8 @@ since when, as whom.
 
 Cut from a real five root install rather than from the design. None of it is a
 new power: the list is complete and correct, and what is missing is
-navigation and provenance.
+navigation, provenance, and one control composed from a power each row
+already has.
 
 Delivers: filtering by root, a header that survives scrolling, a footer that
 names the version and links to the source, the server's own start time and
@@ -100,13 +107,16 @@ Done when a fifty row list can be narrowed to one root in one tap, the primary
 action is reachable at any scroll position, and the page answers "which build
 is this and who is it running as" without an SSH session.
 
-Two decisions are already taken and the tickets argue them. The badge glyphs
-are a SET, vendored from a library and never generated, because a set has to
-agree with itself on grid and stroke and that agreement is what generation
-gets wrong; the application's own mark is one drawing that agrees with
-nothing, so it is drawn. And framing the vendor's session view under our
-header is measurably impossible: it refuses framing twice, by header and by
-CSP, so what remains of that idea is the header question underneath it.
+Decisions already taken, argued on the tickets and in the plan. The badge
+glyphs are a SET, vendored from a library and never generated, because a set
+has to agree with itself on grid and stroke and that agreement is what
+generation gets wrong; the application's own mark is one drawing that agrees
+with nothing, so it is drawn, and its direction was chosen on 2026-09-12.
+Framing the vendor's session view under our header is measurably impossible:
+it refuses framing twice, by header and by CSP, so what remains of that idea
+is the header question underneath it. And a standalone Kill all is not built:
+design section 7's rule holds for the list as for the row, and the bulk kill
+lives inside Stop all's wait as its escalation.
 
 ## Phase: Phase 14: The perimeter, chosen rather than assumed
 state: planned

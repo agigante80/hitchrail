@@ -405,6 +405,29 @@ class Harness:
         self._agent.write_text(body)
         self._agent.chmod(0o755)
 
+    # Phase 13's premortem 1: nothing was ever tested with fifty rows. Every
+    # seed before this one made three to five folders, and the phase has
+    # fifty in its title. Five roots, ten folders each, named so that a root
+    # label and a folder name never share letters by accident: the chips
+    # filter on labels and the search on folders, and a fixture where "work"
+    # matched a folder called "workbench" would pass a filter that was wrong.
+    FIFTY_LABELS = (DEFAULT_LABEL, "bravo", "charlie", "delta", "echo")
+
+    def seed_fifty(self, running: list[str] | None = None, **kw: object) -> None:
+        """Fifty folders across five roots, a few of them running, the rest
+        stopped. `running` names folders in the DEFAULT root; the other four
+        roots hold stopped folders only, because a shim per running row is
+        a real process and fifty of them is the load, not the size, and the
+        size is what this fixture is for."""
+        names = [f"p{i:02d}" for i in range(10)]
+        running = running or []
+        self.seed(
+            running=running,
+            stopped=[n for n in names if n not in running],
+            stopped_in=dict.fromkeys(self.FIFTY_LABELS[1:], names),
+            **kw,  # type: ignore[arg-type]
+        )
+
     def seed(
         self,
         running: list[str] | None = None,
@@ -424,15 +447,27 @@ class Harness:
         agent_shows_a_modal: bool = False,
         token: str | None = None,
         also_in: dict[str, list[str]] | None = None,
+        stopped_in: dict[str, list[str]] | None = None,
+        ceiling_mb: int | None = None,
     ) -> None:
         """Set the world up BEFORE the page loads.
+
+        `ceiling_mb` is what every session's cgroup ceiling reads as (#243).
+        Injected, never read from this machine: the development box carries
+        an 8 GiB `memory.high` on the tmux scope and CI carries none, and a
+        tier whose rows said different things on each would be the machine
+        dependence rule 2 of Phase 10 forbids. `None` is "no limit".
 
         `also_in` maps a root LABEL to the projects running in it, and it is
         what the two root tests use. The folders are created under a sibling
         directory named for the label, so the roots are genuinely disjoint and
         the overlap refusal is not what is under test.
         """
-        for label, names in (also_in or {}).items():
+        # `stopped_in` is `also_in` without the start: the root is registered
+        # and the folders exist, and no shim runs in them. The fifty row
+        # fixture needs forty such folders, and forty shims would be the load
+        # rather than the size.
+        for label, names in {**(stopped_in or {}), **(also_in or {})}.items():
             extra = self.root.parent / f"root-{label}"
             extra.mkdir(exist_ok=True)
             self.extra_roots[label] = extra
@@ -679,7 +714,11 @@ class Harness:
         self._config = build(e2e_id(self_project) if self_project else None)
         # Read through the attribute rather than closed over, so `break_machine`
         # can make the reading unreadable mid test.
-        self.engine = Engine(config=self._config, meminfo_fn=lambda: self._meminfo)
+        self.engine = Engine(
+            config=self._config,
+            meminfo_fn=lambda: self._meminfo,
+            ceiling_fn=lambda pid: ceiling_mb,
+        )
         self.start()
 
     # -- lifecycle ------------------------------------------------------

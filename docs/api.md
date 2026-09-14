@@ -75,11 +75,49 @@ See `CHANGELOG.md`.
 | `GET` | `/api/sessions/{name}/logs` | tail of the pane |
 | `GET` | `/api/sessions/{name}/url` | the session's link, once it has one |
 | `GET` | `/api/events` | SSE stream of state changes |
+| `GET` | `/logs/{name}` | a page showing one project's tail, bookmarkable; refuses a name exactly as `/api/sessions/{name}/logs` does |
 
 **Graceful stop and kill are separate routes, not one route with a flag.** A
 client that meant to be gentle is never one query parameter away from a kill.
 The graceful call returns as soon as the request is sent and reports progress
 over the event stream like every other state change.
+
+### The listing payload
+
+`GET /api/projects` answers one object. The fields, checked against the server
+in both directions by the suite:
+
+| Field | What it holds |
+|---|---|
+| `projects` | every project under every root, each in the shape the event stream sends |
+| `unsupported` | folders that cannot be projects, each with the rule it broke, capped |
+| `unsupported_total` | the true count behind that cap |
+| `memory` | the machine's `available_mb` and `total_mb`, null when unreadable |
+| `roots` | every configured root as `{label, path}`, one root still a list |
+| `server` | this server, as distinct from this machine |
+| `server.version` | the version the installed distribution carries, the string `hitchrail --version` prints; null from a bare checkout |
+| `server.user` | the account this server runs as, which is the account every session it starts runs as; the numeric uid when the account has no passwd entry |
+| `server.started_at` | when this process started, Unix seconds; format it in the viewer's timezone, never the server's |
+
+### The session payload
+
+One project, as `projects` lists it, as `POST` and `DELETE` on
+`/api/sessions/{name}` return it, and as the event stream sends it:
+
+| Field | What it holds |
+|---|---|
+| `name` | the qualified identifier, `<root-label>~<folder>` |
+| `state` | one of the four states below |
+| `pid` | the agent's process id, null when there is none |
+| `ram_mb` | resident memory of the agent and its descendants |
+| `ram_limit_mb` | the tightest `memory.max` or `memory.high` on the agent's cgroup ancestry; null when nothing bounds it that Hitchrail can see, which includes an unreadable tree and cgroup v1 |
+| `uptime_s` | how long the agent has run |
+| `url` | the session link once the agent has published one, else null |
+| `stopping` | a graceful stop is in flight |
+| `protected` | the self project; refuses every mutating route |
+| `awaiting_trust` | the agent is sitting on its trust prompt |
+| `awaiting_input` | the agent is sitting on a question only a person can answer |
+| `foreign_session` | the tmux session another tool runs the agent under, when one is visible; null otherwise |
 
 ### `POST /api/sessions/{name}/answer`
 

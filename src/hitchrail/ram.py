@@ -124,3 +124,86 @@ def guard(available: int, need_mb: int, hard_mb: int, soft_mb: int) -> Verdict:
     if remaining < soft_mb:
         return Verdict.SOFT
     return Verdict.OK
+
+
+# -- #243: what bounds one process ------------------------------------------
+
+PROC_PATH = Path("/proc")
+CGROUP_ROOT = Path("/sys/fs/cgroup")
+_BYTES_PER_MB = 1024 * 1024
+# How long the engine may reuse one ceiling reading for a pid. See the cost
+# paragraph on `memory_ceiling_mb`.
+CEILING_TTL_S = 30.0
+
+
+def memory_ceiling_mb(
+    pid: int, *, proc: Path = PROC_PATH, cgroup_root: Path = CGROUP_ROOT
+) -> int | None:
+    """The tightest memory ceiling on a process, or `None` when nothing bounds
+    it that this can see.
+
+    Read from the process's cgroup and every ancestor up to the root: the
+    smallest finite `memory.max` or `memory.high` on the way. **The ancestry
+    and not the leaf**, because #172 measured that cgroups are inherited
+    across fork, so a session's pid can sit in the scope of the shell that
+    started the tmux server, with `max` on its own line and the real limit on
+    a slice above it. A reader of the leaf would be wrong in the direction of
+    reassurance. `memory.high` counts: it throttles rather than kills, it is
+    what `MemoryHigh=` sets, and it is what the machine that reported #90 had
+    set; a reader of `max` alone would have said "no limit" there.
+
+    Unknown is `None` and never a number: no `0::` line (cgroup v1, or a pid
+    that exited between the table and this read), a path that leaves the
+    root, an unreadable file. Every case above is ordinary.
+
+    **Cost, measured rather than guessed, on the development machine with a
+    five level ancestry: 665 microseconds per call**, ten sysfs reads. Fifty
+    running rows would add 35 ms to every listing, which is the class of per
+    row cost the design refuses on the route the page polls hardest, so the
+    engine caches the answer per pid for `CEILING_TTL_S` rather than calling
+    this per listing. A limit changed with `systemctl set-property` shows up
+    within that window, and a pid reused inside it is a different process
+    whose ceiling is read afresh on the next expiry, which is the same bound
+    the attention overlay accepts for the same reason. The first measurement
+    on this machine also found an 8 GiB `memory.high` that a walk of
+    `memory.max` alone had reported as no limit.
+
+    Linux and cgroup v2 only, which is the position the module already takes
+    for `/proc/meminfo`; the unified `0::` line is the v2 signature.
+    """
+    try:
+        lines = (proc / str(pid) / "cgroup").read_text().splitlines()
+    except OSError:
+        return None
+    unified = next((line[3:] for line in lines if line.startswith("0::")), None)
+    if unified is None:
+        return None
+    leaf = (cgroup_root / unified.lstrip("/")).resolve()
+    root = cgroup_root.resolve()
+    if leaf != root and root not in leaf.parents:
+        return None
+    ceiling: int | None = None
+    node = leaf
+    while node != root:
+        for name in ("memory.max", "memory.high"):
+            value = _limit_bytes(node / name)
+            if value is not None and (ceiling is None or value < ceiling):
+                ceiling = value
+        node = node.parent
+    return None if ceiling is None else ceiling // _BYTES_PER_MB
+
+
+def _limit_bytes(path: Path) -> int | None:
+    """`max` is no limit; anything else is bytes. A missing or unreadable file
+    is treated as no limit at that level, which is what the kernel means when
+    it does not expose one."""
+    try:
+        text = path.read_text().strip()
+    except OSError:
+        return None
+    if text == "max":
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None

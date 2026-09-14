@@ -14,6 +14,8 @@ the other one's agent. That is the failure being ruled out, and it was silent.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from playwright.async_api import Page, expect
 
@@ -120,8 +122,10 @@ async def test_a_search_spans_the_roots_and_says_where_each_hit_is(
 ) -> None:
     """#122's scope: one query, both roots, and each result distinguishable.
 
-    The query runs against the identifier, so `vessel` matches in both roots
-    and a root label is itself a way to narrow to one of them.
+    The query runs against the FOLDER since #164, so `vessel` matches in both
+    roots and a root label typed into the search matches nothing: narrowing
+    to one root is the chips' job (#146), and a search that matched labels by
+    coincidence also matched a folder called `homework` for `work`.
     """
     server.seed(running=["vessel"], also_in=TWO_ROOTS)
     await page.goto(server.base)
@@ -135,9 +139,13 @@ async def test_a_search_spans_the_roots_and_says_where_each_hit_is(
     await expect(personal).to_be_visible()
     await expect(personal.locator(".row-root")).to_have_text("personal")
 
-    # A label narrows to one root, which falls out of matching the identifier
-    # rather than being a feature anybody had to add.
+    # A label is not a folder: the search does not match it, and the chip is
+    # what narrows to one root.
     await page.locator("[data-search]").fill("personal")
+    await expect(page.locator("[data-project]")).to_have_count(0)
+    await page.locator("[data-search]").fill("vessel")
+    chips = page.locator("[data-roots]")
+    await chips.get_by_role("button", name=re.compile("^personal")).click()
     await expect(personal).to_be_visible()
     await expect(work).to_be_hidden()
 
@@ -159,7 +167,7 @@ async def test_the_new_folder_sheet_says_which_root_and_lets_you_change_it(
     ).to_have_attribute("data-state", "running", timeout=15_000)
 
     await page.get_by_role("button", name="New").click()
-    picker = page.get_by_label("Root")
+    picker = page.locator("[data-dialog]").get_by_label("Root", exact=True)
     await expect(picker).to_be_visible()
 
     await picker.select_option("personal")
@@ -180,4 +188,5 @@ async def test_one_root_gets_no_root_control_at_all(page: Page, server: Harness)
     await page.goto(server.base)
     await page.get_by_role("button", name="New").click()
     await expect(page.get_by_label("Folder name")).to_be_visible()
-    await expect(page.get_by_label("Root")).to_have_count(0)
+    sheet = page.locator("[data-dialog]")
+    await expect(sheet.get_by_label("Root", exact=True)).to_have_count(0)

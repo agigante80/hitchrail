@@ -29,6 +29,14 @@ WOFF2 = "font/woff2"
 ASSETS = {
     "/app.css": ("app.css", "text/css; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/logs.js": ("logs.js", "text/javascript; charset=utf-8"),
+    # #160. The mark, the tile a phone makes of it, and the manifest that
+    # names the tile. Served without a token, the only assets that are: see
+    # `security.UNAUTHENTICATED_ASSETS` for the argument.
+    "/icon.svg": ("icon.svg", "image/svg+xml"),
+    "/icon-180.png": ("icon-180.png", "image/png"),
+    "/icon-512.png": ("icon-512.png", "image/png"),
+    "/manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json"),
     # Self hosted, not fetched from Google (#76). Six faces, and only six: the
     # ones the stylesheet can actually reach. See `app.css` for why the display
     # face needs 500 rather than 400, which is not obvious.
@@ -81,6 +89,19 @@ async def grant_page(request: Request) -> Response:
     project's name is absent from its body.
     """
     return FileResponse(WEB / "grant.html", media_type=HTML, headers=_REVALIDATE)
+
+
+async def logs_page(request: Request) -> Response:
+    """The logs page (#151): the same file for every project.
+
+    The name in the URL chooses NOTHING here. `server.py` has already asked
+    the engine whether the name is one a client may address, through the
+    same function the logs API uses, and refused with the API's own envelope
+    if not; what arrives here is a fixed file that reads its project from its
+    own URL in the browser. That is what keeps this module's rule true: it
+    reads files it chose, never files a request chose.
+    """
+    return FileResponse(WEB / "logs.html", media_type=HTML, headers=_REVALIDATE)
 
 
 def asset_route(path: str) -> Callable[[Request], Awaitable[Response]]:

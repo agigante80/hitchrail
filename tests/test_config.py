@@ -1070,7 +1070,13 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # comment says which side of the renewal it is on and why the other
         # side was round 1 of #182's regression: the two look alike in a diff
         # and are opposite in effect, so the next review needs the reason.
-        "engine.py": 1198,
+        # 1198 to 1224 for #243: the ceiling seam and its per pid cache, and
+        # the comment carrying the measured cost that justifies the cache.
+        # 1224 to 1239 for #151: `locate`, the one ladder the logs API and
+        # the logs page both climb, lifted out of `logs` with its reasons.
+        # 1239 to 1248 for round 1 of the Phase 13 review: the ceiling prune
+        # from a snapshot, with the race it replaces written where it was.
+        "engine.py": 1248,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -1196,7 +1202,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         "discovery.py": 440,
         # 409 to 418 for #78: two entries in the exemption and the argument
         # beside them, which the set's own rule requires of every entry.
-        "security.py": 418,
+        # 418 to 436 for #160: the unauthenticated asset set and the argument
+        # for it, which the rule beside the exemption requires of every entry.
+        "security.py": 436,
         # rather than one. A refusal handler is the shape this file is made of.
         # 513 to 517 for #120. The listing payload reports every configured
         # root as a labelled list rather than one path string, and the comment
@@ -1221,7 +1229,15 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # stops the scan. It cancels the AWAIT; `in_thread` is run_in_executor
         # and a thread cannot be cancelled, so the worker runs to the call
         # timeout and the process waits for it at executor shutdown. Measured.
-        "server.py": 631,
+        # 631 to 669 for #147 and #148: the per server constants, read once
+        # in create_app and sent on the listing, with the sentence saying why
+        # not a route, and the account fallback with the sentence saying why
+        # not $USER. Both are seams, so the signature grew too.
+        # 669 to 687 for #151: the logs page route, whose docstring says why
+        # a page route resolves a name through the API's own function. #205
+        # carries the split and the seam is unchanged: this is a handler.
+        # +7 for #249: the root_unavailable arm on both logs routes.
+        "server.py": 694,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

@@ -111,6 +111,7 @@ class Engine:
         tmux: Tmux | None = None,
         procs_fn: Callable[[], ProcTable] | None = None,
         meminfo_fn: Callable[[], str] | None = None,
+        ceiling_fn: Callable[[int], int | None] | None = None,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
         bus: EventBus | None = None,
@@ -126,6 +127,13 @@ class Engine:
         )
         self._procs_fn = procs_fn or snapshot
         self._meminfo_fn = meminfo_fn or ram.read_meminfo
+        # #243. Cached per pid for `ram.CEILING_TTL_S`, because the reader is
+        # ten sysfs reads and the listing route asks once per running row on
+        # every poll; the cost paragraph on `memory_ceiling_mb` has the
+        # numbers. Keyed by pid only: a pid reused inside the window is read
+        # afresh on the next expiry, the bound the attention overlay accepts.
+        self._ceiling_fn = ceiling_fn or ram.memory_ceiling_mb
+        self._ceilings: dict[int, tuple[float, int | None]] = {}
         self._clock = clock
         self._sleep = sleep
         self._bus: EventBus | None = bus
@@ -188,7 +196,34 @@ class Engine:
     # -- reading -------------------------------------------------------
 
     def _look(self) -> Machine:
-        return derive.look(self._procs_fn, self.tmux, self.config.agent_config_path)
+        return derive.look(
+            self._procs_fn, self.tmux, self.config.agent_config_path, self._ceiling_mb
+        )
+
+    def _ceiling_mb(self, pid: int) -> int | None:
+        """`ram.memory_ceiling_mb`, remembered per pid for the TTL."""
+        now = self._clock()
+        cached = self._ceilings.get(pid)
+        if cached is not None and now - cached[0] < ram.CEILING_TTL_S:
+            return cached[1]
+        ceiling = self._ceiling_fn(pid)
+        self._ceilings[pid] = (now, ceiling)
+        # Bounded: the table is a snapshot and pids come and go, so entries
+        # older than the TTL are dropped here rather than kept for the life of
+        # the process.
+        #
+        # **From a snapshot, with `pop`, and not by rebuilding the dict.** The
+        # listing runs on the request executor and the attention sweep on its
+        # own thread, and both arrive here. A comprehension iterating the live
+        # dict while the other thread inserted raised "dictionary changed size
+        # during iteration", reproduced under two threads in the suite: a 500
+        # on the route the page polls hardest. `list(items())` completes under
+        # the GIL and `pop` is atomic, so no lock is needed for a cache whose
+        # worst case is one extra read.
+        for p, v in list(self._ceilings.items()):
+            if now - v[0] >= ram.CEILING_TTL_S:
+                self._ceilings.pop(p, None)
+        return ceiling
 
     def _derive(
         self, name: str, machine: Machine, needs_a_person: frozenset[str] | None = None
@@ -1129,15 +1164,31 @@ class Engine:
                 )
         return expired
 
-    def logs(self, name: str, lines: int = 40) -> str:
-        """The tail of a pane."""
+    def locate(self, name: str) -> Session:
+        """The row a client may address by name, or the refusal the API gives.
+
+        One function for the two routes that take a name and read rather than
+        act (#151): the logs API and the logs page. A page that resolved a
+        name more loosely than the API route beside it is the asymmetry that
+        gets missed, so there is one ladder and both climb it. Addressable
+        rather than startable, because reading a pane must keep working for a
+        session whose folder is gone; and a name with nothing live behind it
+        is `UnknownProject` only when the root has never heard of it, which
+        keeps "stopped" and "unknown" the two answers they are (#47).
+        """
         # A real guard now. This read `self.get(name)` with a comment saying it
         # stopped an unknown project returning empty output; `get` cannot
         # raise, so it did nothing but spend two subprocess calls arriving
-        # there. Addressable rather than startable: reading a pane must keep
-        # working for a session whose folder is gone.
+        # there.
         self._require_addressable(name)
-        if self.get(name).state is State.STOPPED:
+        session = self.get(name)
+        if session.state is State.STOPPED:
+            self._reject_if_not_a_project(name)
+        return session
+
+    def logs(self, name: str, lines: int = 40) -> str:
+        """The tail of a pane."""
+        if self.locate(name).state is State.STOPPED:
             # Not `_require_live`: that also refuses the self project, and
             # reading the log of the session hosting Hitchrail is harmless and
             # occasionally the only way to see what it is doing.
@@ -1146,7 +1197,6 @@ class Engine:
             # different answers. Without it a name with nothing behind it
             # returns "", which a client cannot tell from a pane that has
             # printed nothing yet.
-            self._reject_if_not_a_project(name)
             raise NotRunning(name)
         try:
             return self.tmux.capture_pane(name, lines=lines)
