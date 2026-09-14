@@ -1351,7 +1351,14 @@ function confirmStopAll() {
   // whose ticker has stopped is OVER, done or not: its rows were reported,
   // and reopening it forever would leave a person who has started more
   // sessions since with no way to stop them short of killing the old ones.
-  if (bulk !== null && !bulk.done && bulk.ticking) {
+  //
+  // "Over" is a flag the ticker flips where it gives up at the deadline,
+  // and nothing else: it is false while the stops are being requested and
+  // while they are awaited, which is what makes this guard hold during the
+  // request phase too. Round 2 of the review found `ticking` used here,
+  // which is unset until the ticker starts, after the LAST request returns,
+  // so the guard fell through for the whole phase it was written for.
+  if (bulk !== null && !bulk.done && !bulk.over) {
     showBulkWait();
     return;
   }
@@ -1383,6 +1390,7 @@ async function beginStopAll(rows) {
     // processes the page cannot currently see.
     lastReadOk: true,
     lost: false,
+    over: false,
   };
   showBulkWait();
   for (const row of bulk.rows) {
@@ -1419,7 +1427,9 @@ function bulkStatus(row) {
   const current = state.projects.find((p) => p.name === row.name);
   if (current && current.state === "stopped") return "exited";
   if (bulk.lost) return "unknown";
-  if (bulk.deadline !== null && Date.now() >= bulk.deadline && !bulk.done) return "not finished";
+  // "Not finished" is the ticker's verdict at the deadline, never the clock's
+  // on some other render: the words and the flag flip together.
+  if (bulk.over) return "not finished";
   return "requested";
 }
 
@@ -1455,8 +1465,9 @@ async function awaitBulk() {
       // And if the last reading failed, it does not even report "not
       // finished": the answer is that the page cannot tell.
       if (!ok) mine.lost = true;
-      renderBulk();
+      mine.over = true;
       mine.ticking = false;
+      renderBulk();
       return;
     }
     window.setTimeout(tick, 700);
@@ -1576,6 +1587,7 @@ async function killRemaining() {
     renderBulk();
   }
   bulk.deadline = Date.now() + stopTimeoutMs();
+  bulk.over = false;
   await awaitBulk();
 }
 
