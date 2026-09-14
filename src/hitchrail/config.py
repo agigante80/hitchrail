@@ -170,6 +170,9 @@ class Config:
     # this file says; the engine holds the narrowing, because a request can
     # change it and a frozen Config cannot.
     state_path: Path | None = None
+    # The config file that was read, or none, shown on the settings page. A
+    # record, not an input: nothing reads the file through it.
+    config_path: Path | None = None
     # #238. Where each value came from, `flag`, `file`, `env` or `default`,
     # by field name, filled by `cli.build_config` and shown on the settings
     # page. Not validated, and not read by any control: a source tag decides

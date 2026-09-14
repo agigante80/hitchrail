@@ -428,6 +428,20 @@ class Engine:
         """
         if name not in discovery.list_root_projects(self.config.roots):
             raise UnknownProject(name)
+        # `enabled = false` in the operator's file narrows what can be
+        # STARTED, not only what is listed: the security audit of #154 read
+        # the README's `confidential` example the way an operator would, as
+        # "no agent runs there", and this is what makes that reading true.
+        # A root the INTERFACE hid is not refused here: hiding is a listing
+        # preference and the logs page can still start a row it shows.
+        # Everything that resolves a name for stop, kill and logs stays on
+        # `config.roots`, so an agent already in a disabled root can be ended.
+        label, _ = split_identifier(name)
+        if any(r.label == label and not r.enabled for r in self.config.roots):
+            raise OperatorDisabled(
+                f"root {label!r} is disabled in the operator's config file, so "
+                f"nothing is started in it"
+            )
         try:
             return str(discovery.resolve_identifier(self.config.roots, name))
         except (

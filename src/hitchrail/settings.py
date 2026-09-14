@@ -62,6 +62,46 @@ def default_config_path() -> Path:
     return Path(base) / "hitchrail" / "config.toml"
 
 
+def _read_private(path: Path) -> str:
+    """The file's bytes, once its mode and owner say nobody else could have
+    written them.
+
+    The file decides where an agent may run. One anybody on the machine can
+    edit is a root anybody on the machine can add, so it is refused the way
+    ssh's `StrictModes` refuses a permissive private key, and for the same
+    reason: writable by others, writable by a group that is not the owner's
+    own, or owned by somebody who is not the user running this (root
+    excepted, who can edit anything regardless). The security audit of the
+    first version found the owner unchecked: a colleague's 644 file passed.
+
+    One descriptor for the check and the read, so the mode and the bytes come
+    from the same inode rather than a file swapped in between a `stat` and a
+    `read_text`.
+    """
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        info = os.fstat(fd)
+        mode = stat.S_IMODE(info.st_mode)
+        if info.st_uid not in (os.geteuid(), 0):
+            raise SettingsError(
+                f"{path}: is owned by uid {info.st_uid}, not by the user running "
+                f"hitchrail; whoever owns it chooses where an agent may run"
+            )
+        if mode & stat.S_IWOTH or (
+            mode & stat.S_IWGRP and not _group_is_private(info.st_gid, info.st_uid)
+        ):
+            raise SettingsError(
+                f"{path}: is writable by group or others (mode {mode:04o}); anybody who "
+                f"can edit it chooses where an agent may run. chmod 644 it."
+            )
+        chunks = []
+        while chunk := os.read(fd, 65536):
+            chunks.append(chunk)
+    finally:
+        os.close(fd)
+    return b"".join(chunks).decode()
+
+
 def _group_is_private(gid: int, uid: int) -> bool:
     """Whether a group-writable file is still the owner's alone.
 
@@ -69,15 +109,19 @@ def _group_is_private(gid: int, uid: int) -> bool:
     and a umask of 002, so every file such a user saves is group-writable and
     refusing it would refuse the default editor on the default distribution.
     The convention that makes that umask safe is the one checked: the file's
-    group is the owner's primary group and carries the owner's own name. A
-    file handed to a shared group, `users` or `staff`, fails both halves.
+    group is the owner's primary group, carries the owner's own name, and has
+    no other members. A file handed to a shared group, `users` or `staff`,
+    fails the first two; a private group
+    that `usermod -aG alice bob` has given a second member is private in name
+    only and fails the third (`gr_mem` lists exactly the supplementary
+    members, which is exactly the people who are not the owner).
     """
     try:
         owner = pwd.getpwuid(uid)
         group = grp.getgrgid(gid)
     except KeyError:
         return False
-    return owner.pw_gid == gid and group.gr_name == owner.pw_name
+    return owner.pw_gid == gid and group.gr_name == owner.pw_name and not group.gr_mem
 
 
 def state_path_for(config_path: Path) -> Path:
@@ -110,24 +154,14 @@ def read_config_file(path: Path) -> FileSettings:
     """
     if not path.is_file():
         return FileSettings(roots=())
-    # The file decides where an agent may run. One anybody on the machine can
-    # edit is a root anybody on the machine can add, so it is refused the way
-    # ssh refuses a permissive private key, and for the same reason.
-    info = path.stat()
-    mode = stat.S_IMODE(info.st_mode)
-    if mode & stat.S_IWOTH or (
-        mode & stat.S_IWGRP and not _group_is_private(info.st_gid, info.st_uid)
-    ):
-        raise SettingsError(
-            f"{path}: is writable by group or others (mode {mode:04o}); anybody who "
-            f"can edit it chooses where an agent may run. chmod 644 it."
-        )
     try:
-        data = tomllib.loads(path.read_text())
-    except tomllib.TOMLDecodeError as exc:
-        raise SettingsError(f"{path}: {exc}") from exc
+        text = _read_private(path)
     except OSError as exc:
         raise SettingsError(f"{path}: cannot be read: {exc}") from exc
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise SettingsError(f"{path}: {exc}") from exc
 
     unknown = set(data) - _TOP_KEYS
     if unknown:
@@ -299,40 +333,53 @@ class Preferences:
         return "state" if self._state.stop_timeout is not None else "default"
 
     def set_roots_enabled(self, changes: Mapping[str, bool]) -> None:
-        """Every label checked before anything is written, so a request that
-        names one unknown label changes nothing at all."""
+        self.apply(roots=changes)
+
+    def set_stop_timeout(self, seconds: object) -> None:
+        self.apply(stop_timeout=seconds)
+
+    def apply(self, roots: Mapping[str, bool] = {}, stop_timeout: object = None) -> None:
+        """One request, one write. EVERYTHING is checked before anything is
+        persisted, so a body that names one unknown label, or a valid toggle
+        beside a timeout of zero, changes nothing at all: round 1 of the
+        Phase 14 review found the halves applied in sequence, with the
+        first written before the second was refused.
+
+        The timeout passes the refusal it would pass on the command line, by
+        building the `Config` it would have built: one validator (premortem
+        2), and `InvalidValue` carries its words.
+        """
         configured = {r.label: r for r in self._roots}
-        for label in changes:
+        for label in roots:
             if label not in configured:
                 raise UnknownRoot(f"no configured root is labelled {label!r}")
-        for label, on in changes.items():
+        for label, on in roots.items():
             if on and not configured[label].enabled:
                 raise OperatorDisabled(
                     f"root {label!r} is disabled in the operator's config file, "
                     f"which a request cannot undo"
                 )
+        if stop_timeout is not None:
+            if isinstance(stop_timeout, bool) or not isinstance(stop_timeout, int):
+                raise InvalidValue(
+                    f"stop_timeout must be a whole number of seconds: {stop_timeout!r}"
+                )
+            if not self.stop_timeout_editable():
+                raise OperatorPinned(
+                    "stop_timeout is set on the command line, which a request cannot override"
+                )
+            try:
+                replace(self._config, stop_timeout=stop_timeout)
+            except ValueError as exc:
+                raise InvalidValue(str(exc)) from exc
         with self._guard:
             hidden = set(self._state.hidden)
-            for label, on in changes.items():
+            for label, on in roots.items():
                 (hidden.discard if on else hidden.add)(label)
-            self._persist(replace(self._state, hidden=frozenset(hidden)))
-
-    def set_stop_timeout(self, seconds: object) -> None:
-        """The value passes the refusal it would pass on the command line, by
-        building the `Config` it would have built: one validator (premortem
-        2), and `InvalidValue` carries its words."""
-        if isinstance(seconds, bool) or not isinstance(seconds, int):
-            raise InvalidValue(f"stop_timeout must be a whole number of seconds: {seconds!r}")
-        if not self.stop_timeout_editable():
-            raise OperatorPinned(
-                "stop_timeout is set on the command line, which a request cannot override"
-            )
-        try:
-            replace(self._config, stop_timeout=seconds)
-        except ValueError as exc:
-            raise InvalidValue(str(exc)) from exc
-        with self._guard:
-            self._persist(replace(self._state, stop_timeout=seconds))
+            state = replace(self._state, hidden=frozenset(hidden))
+            if stop_timeout is not None:
+                state = replace(state, stop_timeout=stop_timeout)
+            self._persist(state)
 
     def _persist(self, state: State) -> None:
         if self._path is not None:

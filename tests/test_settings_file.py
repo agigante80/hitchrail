@@ -8,6 +8,7 @@ validator that drifts, and the parity tests here are its rule.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -199,6 +200,20 @@ def test_group_writable_is_refused_unless_the_group_is_the_owners_own(
         build_config(parse_args(["--config", str(path)]))
 
 
+def test_a_file_owned_by_somebody_else_is_refused_whatever_its_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The security audit of the first version: a colleague's 644 file
+    passed, because only the mode was read. The owner is compared with the
+    running user, root excepted. Simulated by moving the running user, since
+    a test cannot chown to somebody else."""
+    (tmp_path / "work").mkdir()
+    path = _write(tmp_path, ROOTS_TOML.format(label="work", path=tmp_path / "work"))
+    monkeypatch.setattr(os, "geteuid", lambda: os.getuid() + 12345)
+    with pytest.raises(ConfigError, match=r"is owned by uid \d+, not by the user running"):
+        build_config(parse_args(["--config", str(path)]))
+
+
 def test_the_private_group_convention_is_read_from_the_passwd_database(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -212,8 +227,8 @@ def test_the_private_group_convention_is_read_from_the_passwd_database(
     def user(name: str, gid: int) -> pwd.struct_passwd:
         return pwd.struct_passwd((name, "x", 1000, gid, "", "/home/x", "/bin/sh"))
 
-    def group(name: str) -> grp.struct_group:
-        return grp.struct_group((name, "x", 0, []))
+    def group(name: str, members: list[str] | None = None) -> grp.struct_group:
+        return grp.struct_group((name, "x", 0, members or []))
 
     monkeypatch.setattr(pwd, "getpwuid", lambda uid: user("alice", 1000))
     monkeypatch.setattr(grp, "getgrgid", lambda gid: group("alice"))
@@ -222,6 +237,9 @@ def test_the_private_group_convention_is_read_from_the_passwd_database(
     assert not settings._group_is_private(1000, 1000)
     monkeypatch.setattr(grp, "getgrgid", lambda gid: group("alice"))
     assert not settings._group_is_private(1001, 1000)
+    # `usermod -aG alice bob`: private in name only, and the audit's case.
+    monkeypatch.setattr(grp, "getgrgid", lambda gid: group("alice", ["bob"]))
+    assert not settings._group_is_private(1000, 1000)
 
     def unknown(uid: int) -> pwd.struct_passwd:
         raise KeyError(uid)
@@ -331,7 +349,7 @@ def test_an_unreadable_state_file_disables_nothing(tmp_path: Path) -> None:
 # -- #238: the stop timeout, a policy the interface may set -----------------
 
 
-@pytest.mark.parametrize("bad", ["60", 60.5, True, 0, -5, None, [60]])
+@pytest.mark.parametrize("bad", ["60", 60.5, True, 0, -5, [60]])
 def test_a_stop_timeout_that_is_not_a_positive_whole_number_is_refused(
     tmp_path: Path, bad: object
 ) -> None:

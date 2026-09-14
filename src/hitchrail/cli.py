@@ -252,6 +252,7 @@ def build_config(args: argparse.Namespace) -> Config:
     return Config(
         roots=roots,
         state_path=settings.state_path_for(config_path),
+        config_path=config_path,
         sources=sources,
         session_prefix=prefix,
         host=args.host,

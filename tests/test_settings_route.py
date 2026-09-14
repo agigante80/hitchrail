@@ -141,6 +141,43 @@ async def test_the_choice_persists_to_the_state_file_and_a_new_process_reads_it(
     assert [x.label for x in fresh.prefs.active_roots()] == ["work"]
 
 
+VAULT_PS = """\
+ 700     1   4096   600 tmux new-session -d -s hr-vault~secret
+ 701   700 512000   600 claude --dangerously-skip-permissions --remote-control vault~secret
+"""
+
+
+async def test_nothing_starts_in_an_operator_disabled_root_and_what_runs_there_can_stop(
+    config: Config,
+) -> None:
+    """The security audit's reading of the README's `confidential` example:
+    `enabled = false` means no agent runs there, not only that the row is
+    off the list. Start is refused before anything is spawned; stop still
+    resolves the name, because an agent already there must be endable."""
+    tmux = FakeTmux(sessions={"vault~secret": 700})
+    engine = make_engine(config, tmux, procs_from(VAULT_PS), PLENTY)
+    app = create_app(engine=engine, config=config, bus=EventBus())
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://localhost"
+    ) as c:
+        # A folder with nothing running: refused, and nothing was started.
+        (config.roots[2].path / "ledger").mkdir()
+        r = await c.post("/api/sessions/vault~ledger", headers=HEADERS)
+        assert r.status_code == 409, r.text
+        assert r.json()["code"] == "operator_disabled"
+        assert tmux.started == []
+        # The one already running: stoppable by name.
+        r = await c.delete("/api/sessions/vault~secret", headers=HEADERS)
+        assert r.status_code == 202, r.text
+        # A root the INTERFACE hid is not refused: hiding is a preference.
+        r = await c.patch(
+            "/api/config", json={"roots": {"home": {"enabled": False}}}, headers=HEADERS
+        )
+        assert r.status_code == 200
+        r = await c.post("/api/sessions/home~attic", headers=HEADERS)
+        assert r.status_code != 409 or r.json()["code"] != "operator_disabled", r.text
+
+
 async def test_creating_a_project_in_a_hidden_root_is_refused(
     client: httpx.AsyncClient, config: Config
 ) -> None:
@@ -221,6 +258,7 @@ async def test_a_request_cannot_enable_what_the_operator_disabled(
         ({"stop_timeout": "45"}, "invalid_value", "whole number"),
         ({"stop_timeout": 0}, "invalid_value", "positive"),
         ({"stop_timeout": True}, "invalid_value", "whole number"),
+        ({"stop_timeout": None}, "invalid_value", "whole number"),
         # Malformed shapes, all 400 and none of them a state change.
         ({"roots": {"work": {"enabled": "false"}}}, "invalid_body", "boolean"),
         ({"roots": {"work": {"enabled": 0}}}, "invalid_body", "boolean"),
@@ -320,6 +358,54 @@ async def test_a_stop_timeout_change_reaches_the_listing_and_persists(
     assert "stop_timeout = 45" in config.state_path.read_text()
     fresh = make_engine(config, tmux, procs_from(RUNNING_PS), PLENTY)
     assert fresh.prefs.stop_timeout() == 45
+
+
+async def test_a_valid_toggle_beside_a_refused_timeout_writes_nothing(
+    client: httpx.AsyncClient, config: Config
+) -> None:
+    """Round 1 of the Phase 14 review: the halves were applied in sequence,
+    so this body hid `work` and wrote it to disk before `stop_timeout: 0`
+    was refused. One request is one write, or none."""
+    r = await client.patch(
+        "/api/config",
+        json={"roots": {"work": {"enabled": False}}, "stop_timeout": 0},
+        headers=HEADERS,
+    )
+    assert r.status_code == 400
+    assert r.json()["code"] == "invalid_value"
+    assert config.state_path is not None
+    assert not config.state_path.exists()
+    body = await _listing(client)
+    assert [x["label"] for x in body["roots"]] == ["work", "home"]
+    # And the other way round: a bad label beside a good timeout.
+    r = await client.patch(
+        "/api/config",
+        json={"roots": {"nope": {"enabled": False}}, "stop_timeout": 45},
+        headers=HEADERS,
+    )
+    assert r.status_code == 404
+    assert not config.state_path.exists()
+    assert (await _listing(client))["server"]["stop_timeout"] == 30.0
+
+
+async def test_the_config_file_shown_is_the_one_that_was_read(tmp_path: pathlib.Path) -> None:
+    """`--config /etc/hitchrail/prod.toml` used to show `config.toml` beside
+    the state file, a path never opened (Phase 14 review, round 1)."""
+    from hitchrail.cli import build_config, parse_args
+
+    (tmp_path / "work").mkdir()
+    custom = tmp_path / "prod.toml"
+    custom.write_text(f'[[roots]]\nlabel = "work"\npath = "{tmp_path / "work"}"\n')
+    custom.chmod(0o644)
+    cfg = build_config(parse_args(["--config", str(custom)]))
+    engine = make_engine(cfg, FakeTmux(), procs_from(""), PLENTY)
+    app = create_app(engine=engine, config=cfg, bus=EventBus())
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://localhost"
+    ) as c:
+        body = (await c.get("/api/config", headers=HEADERS)).json()
+    assert body["config_file"] == {"value": str(custom), "source": "flag"}
+    assert body["state_file"] == {"value": str(tmp_path / "state.toml")}
 
 
 async def test_a_body_that_is_not_json_is_invalid_body(client: httpx.AsyncClient) -> None:

@@ -98,7 +98,7 @@ second validator: premortem 2 below is the failure this batch is most likely
 to have, and the rule is that the file feeds `Config` and nothing validates
 before `Config` does.
 
-- [ ] **Task 79, #154.** Roots from the config file, `--root` still winning
+- [x] **Task 79, #154.** Roots from the config file, `--root` still winning
       with no deprecation. Every refusal that applies to `--root` applies
       identically to the file, because both build the same `Root` objects and
       `Config` refuses them the same way: nested roots, a path that is not a
@@ -110,14 +110,14 @@ before `Config` does.
       asserts no route accepts a path**, read from the real route table and
       the request bodies the routes parse, so the next route cannot.
 
-- [ ] **Task 80, #123.** `--session-prefix`, and `session_prefix` in the
+- [x] **Task 80, #123.** `--session-prefix`, and `session_prefix` in the
       config file, two lines each once task 79 exists. The refusals
       `_check_session_prefix` already makes become reachable from the command
       line and are tested there. Two instances with different prefixes cannot
       see or kill each other's work, proved in the live tmux tier with two
       prefixes on one private socket.
 
-- [ ] **Task 81, #238.** The settings page. `GET /api/config` returns the
+- [x] **Task 81, #238.** The settings page. `GET /api/config` returns the
       effective configuration with the token omitted and every value tagged
       with its source (flag, file, default); `PATCH /api/config` accepts the
       editable subset only, a literal asserted member by member, refusing any

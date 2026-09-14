@@ -16,6 +16,7 @@ import logging
 import os
 import time
 from collections.abc import AsyncIterator, Callable
+from pathlib import Path
 from typing import TypeVar
 
 from sse_starlette.sse import EventSourceResponse
@@ -320,11 +321,17 @@ def create_app(
                 if not isinstance(value, bool):
                     return _error(400, "invalid_body", f"{field} must be a boolean")
                 changes[label] = value
+        if "stop_timeout" in body and body["stop_timeout"] is None:
+            # `None` is "not in this request" one layer down, so a JSON null
+            # is refused here rather than read as no change and answered 200.
+            return _error(
+                400, "invalid_value", "stop_timeout must be a whole number of seconds"
+            )
         try:
-            if changes:
-                await in_thread(engine.prefs.set_roots_enabled, changes)
-            if "stop_timeout" in body:
-                await in_thread(engine.prefs.set_stop_timeout, body["stop_timeout"])
+            # Both halves in ONE call, checked together before either is
+            # written: applied in sequence, a refused timeout left the roots
+            # half already on disk (Phase 14 review, round 1).
+            await in_thread(engine.prefs.apply, changes, body.get("stop_timeout"))
         except eng.UnknownRoot as exc:
             return _error(404, "unknown_root", str(exc))
         except eng.OperatorDisabled as exc:
@@ -336,6 +343,9 @@ def create_app(
         except eng.StateUnwritable as exc:
             return _error(503, "state_unwritable", str(exc))
         return JSONResponse(_config_view())
+
+    def _text(path: Path | None) -> str | None:
+        return None if path is None else str(path)
 
     def _config_view() -> dict[str, object]:
         """Read only values as `{value, source}`; the two a request may write
@@ -376,9 +386,12 @@ def create_app(
             # Never the value. Its source says whether a token exists at all
             # ("none" on a loopback bind) and where it came from.
             "token": {"source": src.get("token", "none") if config.token else "none"},
-            "config_file": shown("config", str(config.state_path.parent / "config.toml"))
-            if config.state_path
-            else shown("config", None),
+            # The path that was READ, carried on Config, not derived back
+            # from `state_path`: `--config /etc/hitchrail/prod.toml` showed
+            # `/etc/hitchrail/config.toml`, a file never opened.
+            "config_file": shown(
+                "config", str(config.config_path) if config.config_path else None
+            ),
             "state_file": {"value": str(config.state_path) if config.state_path else None},
         }
 
@@ -444,6 +457,8 @@ def create_app(
             )
         except eng.StartFailed as exc:
             return _error(502, "start_died", str(exc), output=exc.output)
+        except eng.OperatorDisabled as exc:
+            return _error(409, "operator_disabled", str(exc))
         except eng.Protected as exc:
             # `start` raises this and an earlier draft did not catch it, so the
             # one route where the protection matters most, the one that would

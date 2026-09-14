@@ -1078,7 +1078,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # from a snapshot, with the race it replaces written where it was.
         # 1248 to 1265 for #154 and #238: the preferences held on the engine,
         # and the sentence saying why name resolution keeps every root.
-        "engine.py": 1265,
+        # 1279 after the security audit of #154: an operator disabled root
+        # refuses Start, with the sentence on why hiding does not.
+        "engine.py": 1279,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -1179,12 +1181,13 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # scrub stops scrubbing without anything going red.
         # 518 to 520 for #154 and #238: `state_path` and `sources`, each with
         # the sentence saying why it is not a control.
-        "config.py": 520,
+        # 523: `config_path`, the file that was read, for the settings page.
+        "config.py": 523,
         # 460 for #123, #154 and #238: `--config`, `--session-prefix` and the
         # source tagging the settings page shows, which is one function
         # reading the flags back out of argv. Nothing here parses a value
         # twice; `settings.py` is where the file is read.
-        "cli.py": 460,
+        "cli.py": 461,
         # 409, nine lines over, down from 542. #115 deleted the `?token=`
         # carrier: 135 lines once the two blocks inside `TokenMiddleware`
         # that only served it are counted.
@@ -1249,7 +1252,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # +137 for #154 and #238: the settings routes, the config view and
         # the editable literal beside `MAX_BODY_BYTES`. #205 is still the
         # split, and the settings routes are its first candidate.
-        "server.py": 831,
+        # 844 after round 1 of the Phase 14 review: the null refusal and the
+        # one call that applies both halves of a settings body together.
+        "server.py": 846,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

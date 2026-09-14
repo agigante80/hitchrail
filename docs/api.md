@@ -195,7 +195,10 @@ same answer whether the key is a root's `path` or the server's `host`.
 
 Hiding a root removes its projects from the listing and stops nothing: a
 session in a hidden root still answers to its name on every session route,
-so an agent hidden by mistake can still be stopped.
+so an agent hidden by mistake can still be stopped. `enabled = false` in the
+config file is stronger than hiding: `POST /api/sessions/{name}` in such a
+root is `operator_disabled` (409) and spawns nothing, while stop, kill and
+logs still resolve the name, so an agent already there can be ended.
 
 `stop_timeout` is the one policy value: a longer wait lets a request do
 nothing it could not already do. It passes the refusal `--stop-timeout`
@@ -259,7 +262,7 @@ than by position.
 | `unknown_project` | 404 | no such folder under the root |
 | `unknown_root` | 404 | no configured root carries that label |
 | `not_editable` | 400 | the settings body names something a request may not change |
-| `operator_disabled` | 409 | the config file disables that root, and a request cannot undo it |
+| `operator_disabled` | 409 | the config file disables that root: a request cannot enable it, and nothing is started in it |
 | `operator_pinned` | 409 | that setting is given on the command line, and a request cannot override a flag |
 | `invalid_value` | 400 | a settings value the command line would refuse too, in the same words |
 | `state_unwritable` | 503 | the choice could not be written to `state.toml`, so it was not made |

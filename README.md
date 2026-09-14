@@ -278,9 +278,11 @@ root becomes a row. The label becomes part of the project's name, so
 row, and stopping one leaves the other alone. The label is required even with a
 single root: if one root were unlabelled, adding a second later would rename
 everything you had saved a link to. A root inside another root is refused at
-startup, naming both. `enabled = false` keeps a root configured and out of
-the listing; the interface can hide and show any root in the file, and that
-choice is kept in `state.toml` beside it. Nothing the interface does can add
+startup, naming both. `enabled = false` keeps a root configured, out of the
+listing, and closed to Start: nothing is spawned there until you change the
+file, though an agent already running there can still be stopped. Hiding
+from the interface is weaker: it only leaves the list, and that choice is
+kept in `state.toml` beside the file. Nothing the interface does can add
 a folder: the file is read once at startup, edited on the machine, and never
 written by Hitchrail. `--root LABEL=PATH` on the command line still works and
 wins outright over the file.
