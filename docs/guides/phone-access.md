@@ -169,6 +169,26 @@ difference.
 | To reach it from one interface | 2, name that interface |
 | To reach it from every interface | Nothing on this page. Reconsider. |
 
+## Enrolling a device
+
+Getting a new phone in means moving the token onto it, once. The link the
+banner prints carries it in the fragment, `/grant#token=...`, and a saved link
+works for as long as the token does. The other door is the form at `/grant`,
+which takes the token typed or pasted, and that is the one a password manager
+fills: **put the token in your password manager as the password for the
+address Hitchrail serves on**, and enrolling the next device is opening
+`/grant` and letting the manager fill the field. The credential is never
+retyped, never in a message, and lives where your other credentials live.
+
+That is the whole of it, and it was a decision (#171). A QR code printed by
+the server would cost a fourth runtime dependency or a hand rolled encoder
+for a once per device event; a short pairing code would be the first
+endpoint here that genuinely needs rate limiting, because a short code is
+guessable by construction; and a QR drawn inside the authenticated page would
+hand the raw token to script, which the `HttpOnly` cookie exists to prevent.
+The paragraph above costs nothing and addresses a moment that is rare,
+recoverable and already survivable.
+
 ## Running it unattended
 
 `packaging/hitchrail.service` is a systemd user unit template. It is a template

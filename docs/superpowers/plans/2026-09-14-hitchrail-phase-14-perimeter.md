@@ -160,7 +160,7 @@ before `Config` does.
       expected value is a line the operator fills in; unset means the check
       is off and the header says so.
 
-- [ ] **Task 85, #171.** The paragraph in `docs/guides/phone-access.md`: put
+- [x] **Task 85, #171.** The paragraph in `docs/guides/phone-access.md`: put
       the token in a password manager and it fills the existing form. Closes
       as documentation, with the declined options and their costs left on the
       ticket for the next time it is asked.
