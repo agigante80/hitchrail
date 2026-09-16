@@ -507,6 +507,9 @@ def create_app(
             return _error(409, "stop_unsafe", str(exc))
         except eng.MachineUnreadable as exc:
             return _error(503, "machine_unreadable", str(exc))
+        except discovery.RootUnavailable as exc:
+            # #263. The stopped name's ladder lists the root, as on logs.
+            return _error(503, "root_unavailable", str(exc))
         return JSONResponse(session.as_dict(), status_code=202)
 
     async def answer(request: Request) -> Response:
@@ -587,6 +590,8 @@ def create_app(
             return _error(409, "no_agent", str(exc))
         except eng.MachineUnreadable as exc:
             return _error(503, "machine_unreadable", str(exc))
+        except discovery.RootUnavailable as exc:
+            return _error(503, "root_unavailable", str(exc))  # #263, as on logs
         return JSONResponse(session.as_dict(), status_code=200)
 
     async def signal_detached(request: Request) -> Response:
@@ -625,6 +630,8 @@ def create_app(
             return _error(501, "pidfd_unavailable", str(exc))
         except eng.MachineUnreadable as exc:
             return _error(503, "machine_unreadable", str(exc))
+        except discovery.RootUnavailable as exc:
+            return _error(503, "root_unavailable", str(exc))  # #263, as on logs
         return JSONResponse(session.as_dict(), status_code=202)
 
     async def logs(request: Request) -> Response:

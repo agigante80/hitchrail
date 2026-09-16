@@ -32,6 +32,28 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+Phase 20: the perimeter, hardened. Upgrading is safe with no action unless
+one of two refusals now names your configuration: a `--stop-timeout` above
+3600 seconds, or `--tls-cert` beside a plain `http://` `--allow-origin` off
+loopback, which never worked (the `Secure` cookie was never sent back on that
+origin) and now says so at startup.
+
+### Fixed
+
+**Three session routes answered a bare 500 when a root was unmounted.**
+Stop, kill and the signal route on a stopped name now answer 503
+`root_unavailable` in the envelope, as the listing and logs did.
+
+**The signal route could reach past this instance's root.** Two instances as
+the same user, both labelled `main`, with different folders: one could end
+the other's agent for a folder it did not have, because the pid route checked
+the label and not the listing. It checks the listing first now; the tmux
+routes are unchanged and keep a renamed folder's session reachable.
+
+**The stop wait has a ceiling, 3600 seconds**, on the flag and the settings
+page alike. Above about 24 days a browser's timer fires at once, so the page
+said "it has not finished" while the server waited forever.
+
 ## 0.8.0 - 2026-09-16
 
 Phase 14: the perimeter, chosen rather than assumed. Upgrading is safe with

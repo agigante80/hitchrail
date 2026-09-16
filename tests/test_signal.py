@@ -281,6 +281,40 @@ def test_an_unknown_root_label_is_refused_before_any_pid_is_looked_up(root: Path
     assert [k for k, _ in fake.events if k in ("open", "send", "owner")] == []
 
 
+def test_a_folder_the_root_has_never_heard_of_is_refused_before_any_pid_is_looked_up(
+    root: Path,
+) -> None:
+    """#264. Two instances as the same user, both labelled `main` as the
+    README suggests, different roots: B's agent carries `main~ledger` in its
+    argv and this instance has no `ledger`. The label check passes; the
+    listing is what says this is not our project, and it is asked before
+    the derive so the pid is never even read."""
+    fake = FakePidfd()
+    theirs = ps_row(ORPHAN, 1, project=proj("ledger"))
+    engine = _engine(root, Watched(fake, theirs), fake)
+    with pytest.raises(UnknownProject):
+        engine.signal_detached(proj("ledger"))
+    assert [k for k, _ in fake.events if k in ("open", "send", "owner")] == []
+
+
+def test_a_detached_agent_in_a_renamed_folder_is_refused_here_and_reachable_by_tmux(
+    root: Path,
+) -> None:
+    """Premortem 2 of the Phase 20 plan: the listing check must not make a
+    live session unreachable. A folder renamed under a running agent keeps
+    its tmux session, and stop and kill reach it by the prefix (#42); only
+    the pid route, which has no prefix, refuses the name the root no longer
+    lists, and its refusal names the listing."""
+    fake = FakePidfd()
+    (root / "vessel").rename(root / "vessel-renamed")
+    running = ps_row(500, 1, args="tmux") + ps_row(501, 500, project=proj("vessel"))
+    engine = _engine(root, Watched(fake, running), fake, sessions={proj("vessel"): 500})
+    assert engine.get(proj("vessel")).state is State.RUNNING
+    with pytest.raises(UnknownProject):
+        engine.signal_detached(proj("vessel"))
+    engine.kill(proj("vessel"))
+
+
 # -- round 1 of the review, pinned -----------------------------------------
 
 

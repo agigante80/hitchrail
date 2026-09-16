@@ -157,8 +157,9 @@ function renderStop(config) {
 async function saveStop() {
   const input = $("[data-stop-timeout]");
   const seconds = Number(input.value);
-  if (!Number.isInteger(seconds) || seconds < 1) {
-    note("Not changed. The wait is a whole number of seconds, at least 1.");
+  const ceiling = Number(input.max);
+  if (!Number.isInteger(seconds) || seconds < 1 || seconds > ceiling) {
+    note(`Not changed. The wait is a whole number of seconds, 1 to ${ceiling}.`);
     return;
   }
   const config = await call("PATCH", { stop_timeout: seconds });

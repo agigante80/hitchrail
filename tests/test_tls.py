@@ -134,19 +134,35 @@ def test_derived_origins_carry_the_servers_own_scheme(
     assert other not in config.allowed_origins
 
 
-def test_an_allow_origin_keeps_its_own_scheme_whatever_ours_is(
+def test_a_proxy_origin_keeps_its_own_scheme_and_a_plain_http_one_is_refused(
     tmp_path: pathlib.Path, certificate: tuple[pathlib.Path, pathlib.Path]
 ) -> None:
-    """A proxy in front of a TLS server is still configured, not derived."""
+    """A proxy in front of a TLS server is still configured, not derived, and
+    it speaks https to the browser. A plain `http://` origin off loopback
+    beside our own TLS cannot work (#268): the cookie is `Secure` and never
+    comes back on it, so the deployment is refused at startup rather than
+    accepted and silently broken after the grant. This test enshrined the
+    admitting behaviour until the review of Phase 14 found what it admitted."""
     cert, key = certificate
     config = Config(
         roots=_roots(tmp_path),
         token="t",
         tls_cert=cert,
         tls_key=key,
-        extra_origins=("http://box.lan:8080",),
+        extra_origins=("https://box.lan:8443", "http://localhost:3000"),
     )
-    assert "http://box.lan:8080" in config.allowed_origins
+    assert "https://box.lan:8443" in config.allowed_origins
+    with pytest.raises(ConfigError, match=r"plain http and --tls-cert is set"):
+        Config(
+            roots=_roots(tmp_path),
+            token="t",
+            tls_cert=cert,
+            tls_key=key,
+            extra_origins=("http://box.lan:8080",),
+        )
+    # Without TLS the same origin is ordinary.
+    plain = Config(roots=_roots(tmp_path), token="t", extra_origins=("http://box.lan:8080",))
+    assert "http://box.lan:8080" in plain.allowed_origins
 
 
 def _mutating_app(config: Config) -> Starlette:

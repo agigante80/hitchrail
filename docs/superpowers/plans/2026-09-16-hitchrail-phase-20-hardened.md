@@ -59,27 +59,27 @@ here is one the rules load for.
 
 Independent, small, and each is a scenario that was executed against the code.
 
-- [ ] **Task 87, #263.** `RootUnavailable` on stop, kill and signal answers
+- [x] **Task 87, #263.** `RootUnavailable` on stop, kill and signal answers
       503 `root_unavailable` in the envelope, as `logs` does since #249. One
       integration test per route with an unreadable root and a stopped name.
 
-- [ ] **Task 88, #265.** A ceiling on `stop_timeout` in `Config._check_numbers`,
+- [x] **Task 88, #265.** A ceiling on `stop_timeout` in `Config._check_numbers`,
       3600 seconds, so the flag and the PATCH refuse from the one validator;
       the page's number field carries the same `max`. `--stop-timeout 100000`
       refuses naming the ceiling; the PATCH is `invalid_value` with the state
       file unchanged.
 
-- [ ] **Task 89, #268.** `--tls-cert` with a non loopback `http://` extra
+- [x] **Task 89, #268.** `--tls-cert` with a non loopback `http://` extra
       origin refuses at startup naming the origin and the scheme. The test
       that enshrined the admitting behaviour asserts the refusal; an `https://`
       proxy origin with TLS on still starts.
 
-- [ ] **Task 90, #264.** `signal_detached` calls `_reject_if_not_a_project`
+- [x] **Task 90, #264.** `signal_detached` calls `_reject_if_not_a_project`
       unconditionally before the derive, so a detached process whose argv
       names a folder not under this instance's root is 404 with nothing
       opened, and the label check's comment says what it closes.
 
-- [ ] **Task 91, #266.** The no-path guard: no converter in any template, every
+- [x] **Task 91, #266.** The no-path guard: no converter in any template, every
       `Assign` whose value is `await request.json()` walked, `query_params`
       by subscript matched. Each bypass proved by applying it to a scratch copy
       of `server.py` and showing the guard fails, in the test's own docstring.

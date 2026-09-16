@@ -53,6 +53,13 @@ __all__ = [
 ]
 
 
+# #265. The ceiling on `stop_timeout`, one hour, in the one validator so the
+# flag and the settings route refuse alike. The settings page's field carries
+# the same number as its `max`, and `tests/test_settings_route.py` asserts
+# the two agree.
+MAX_STOP_TIMEOUT_S = 3600
+
+
 class ConfigError(ValueError):
     """The configuration is not one Hitchrail is willing to run with."""
 
@@ -316,6 +323,24 @@ class Config:
                 f"--tls-cert {self.tls_cert} with --tls-key {self.tls_key} cannot be "
                 f"loaded, so nothing will be served on this port: {exc}"
             ) from exc
+        # #268. A plain `http://` origin off loopback beside our own TLS is a
+        # deployment that cannot work: the cookie is `Secure` and is never
+        # sent back on that origin, so the grant succeeds and every request
+        # after it is refused. A proxy in front of an HTTPS backend speaks
+        # https to the browser; the loopback exception is a developer's own
+        # tools on the same machine.
+        for entry in self.extra_origins:
+            parts = urlsplit(entry.strip().rstrip("/").lower())
+            if (
+                parts.scheme == "http"
+                and parts.hostname
+                and not is_loopback_host(parts.hostname)
+            ):
+                raise ConfigError(
+                    f"--allow-origin {entry!r} is plain http and --tls-cert is set: the "
+                    f"session cookie is Secure with TLS on and would never be sent back "
+                    f"on that origin. Give the origin as https, or drop --tls-cert"
+                )
 
     def _check_gateway_mac(self) -> None:
         """Six octets in any of the usual spellings, stored in one."""
@@ -345,6 +370,14 @@ class Config:
             raise ConfigError(f"port out of range: {self.port}")
         if self.stop_timeout <= 0:
             raise ConfigError(f"stop timeout must be positive: {self.stop_timeout}")
+        if self.stop_timeout > MAX_STOP_TIMEOUT_S:
+            # #265. Above 2^31-1 ms a browser's `setTimeout` fires at once, so
+            # the page reported a timeout while the engine waited forever;
+            # and a wait past an hour is not a wait anybody is watching.
+            raise ConfigError(
+                f"stop timeout must be at most {MAX_STOP_TIMEOUT_S} seconds: "
+                f"{self.stop_timeout}"
+            )
         for name in ("hard_floor_mb", "soft_floor_mb", "session_mb"):
             value = getattr(self, name)
             if value < 0:

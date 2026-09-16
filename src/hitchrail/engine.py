@@ -933,20 +933,20 @@ class Engine:
         and never what happens first.
         """
         self._require_addressable(name)
-        # The LABEL too, here and not in `_require_addressable`: an
-        # identifier under a label no root carries would still derive, and a
-        # second instance's agent with that identifier in its argv would
-        # match, a pid looked up for a project that cannot exist here. The
-        # tmux routes are prefix scoped and keep #42's reachability instead.
-        label, _ = split_identifier(name)
-        if not any(r.label == label for r in self.config.roots):
+        # The LISTING, here and not in `_require_addressable`, and before the
+        # derive rather than only on the way to a refusal (#264). The pid
+        # route matches an agent by argv, and argv is what a second instance
+        # as the same user writes too: with both labelled `main`, A's
+        # `main~foo` would match B's agent for a folder A does not have. The
+        # label alone closed only a label no root carries. The tmux routes are
+        # prefix scoped and keep #42's reachability instead; nothing a tmux
+        # session could reach is lost by refusing a folder the root has never
+        # heard of on the one route that reaches past tmux.
+        if name not in discovery.list_root_projects(self.config.roots):
             raise UnknownProject(name)
         session = self.get(name)
         if session.protected:
             raise Protected(name)
-        if session.state is State.STOPPED:
-            # Unknown and stopped are two answers, as on stop and kill.
-            self._reject_if_not_a_project(name)
         if session.state is not State.DETACHED or session.pid is None:
             raise NotDetached(
                 f"{name} is {session.state.value}, and this route is for an agent "

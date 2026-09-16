@@ -406,6 +406,16 @@ def test_a_prefix_that_would_make_the_kill_guard_vacuous_is_refused(
         Config(roots=_r(tmp_path), session_prefix=prefix)
 
 
+def test_a_stop_timeout_past_the_ceiling_is_refused_and_the_ceiling_is_named(
+    tmp_path: Path,
+) -> None:
+    """#265. Above 2^31-1 ms a browser's `setTimeout` fires at once, so the
+    page said "it has not finished" while the engine waited forever."""
+    with pytest.raises(ConfigError, match="at most 3600 seconds"):
+        Config(roots=_r(tmp_path), stop_timeout=3601)
+    assert Config(roots=_r(tmp_path), stop_timeout=3600).stop_timeout == 3600
+
+
 @pytest.mark.parametrize("binary", ["", "  ", "-rf", "--dangerously-skip-permissions"])
 def test_a_flag_shaped_agent_binary_is_refused(tmp_path: Path, binary: str) -> None:
     # argv[0] starting with a hyphen is read as an option by whatever parses it,
@@ -1194,7 +1204,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # a certificate that cannot be read refuses BEFORE the bind, with
         # the paragraph on why that is exit 2 and not uvicorn's retried 1.
         # 575 to 594 for #207: the expected gateway MAC, normalised once.
-        "config.py": 594,
+        # 608 for #265: the ceiling, and the sentence on why a browser fires
+        # a timeout above 2^31-1 ms at once.
+        # And to 627 for #268: TLS on beside a plain http origin refuses.
+        "config.py": 627,
         # 460 for #123, #154 and #238: `--config`, `--session-prefix` and the
         # source tagging the settings page shows, which is one function
         # reading the flags back out of argv. Nothing here parses a value
@@ -1278,7 +1291,8 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 844 after round 1 of the Phase 14 review: the null refusal and the
         # one call that applies both halves of a settings body together.
         # +40 for #107: two routes and every refusal's code.
-        "server.py": 887,
+        # 894 for #263: the root_unavailable arm on three more routes.
+        "server.py": 894,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

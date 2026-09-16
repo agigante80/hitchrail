@@ -794,6 +794,28 @@ async def test_the_logs_routes_say_the_root_is_unavailable_rather_than_faulting(
     assert r.json()["code"] == "root_unavailable"
 
 
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("DELETE", "/api/sessions/{name}"),
+        ("POST", "/api/sessions/{name}/kill"),
+        ("POST", "/api/sessions/{name}/signal"),
+        ("POST", "/api/sessions/{name}/signal/force"),
+    ],
+)
+async def test_the_session_routes_say_the_root_is_unavailable_rather_than_faulting(
+    config: Config, engine: Engine, method: str, path: str
+) -> None:
+    """#263, the same gap as #249 on the three routes it did not reach. A
+    stopped name's ladder lists the root to tell unknown from not running,
+    the root is gone, and the answer was a bare 500."""
+    shutil.rmtree(config.roots[0].path)
+    async with client_for(engine, config) as c:
+        r = await c.request(method, path.replace("{name}", proj("network")), headers=HEADERS)
+    assert r.status_code == 503, r.text
+    assert r.json()["code"] == "root_unavailable"
+
+
 async def test_starting_the_self_project_is_423_not_500(root: pathlib.Path) -> None:
     """The route where the protection matters most: it is the one that would
     put a SECOND agent in the folder Hitchrail is running in."""

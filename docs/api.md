@@ -181,11 +181,13 @@ the call is a different process the handle does not refer to (`not_ours`);
 one that exited is `gone`; nothing is ever signalled by `os.kill`, and a
 machine that cannot open a pidfd is told so (`pidfd_unavailable`, 501).
 
-Refused before any handle is opened: the self project (`self_protected`), a
-pid in the process tree this server runs in (also `self_protected`), a row
-that is not detached (`not_detached`), a row a visible tmux session owns
-(`owned_elsewhere`, with the session in a `session` field: attach there), and
-another user's process (`not_ours`).
+Refused before any handle is opened: a folder the root does not list
+(`unknown_project`, checked before anything is derived, because the argv
+this route matches on is what a second instance as the same user writes too),
+the self project (`self_protected`), a pid in the process tree this server
+runs in (also `self_protected`), a row that is not detached (`not_detached`),
+a row a visible tmux session owns (`owned_elsewhere`, with the session in a
+`session` field: attach there), and another user's process (`not_ours`).
 
 ### `GET /api/config`
 
@@ -232,8 +234,9 @@ logs still resolve the name, so an agent already there can be ended.
 
 `stop_timeout` is the one policy value: a longer wait lets a request do
 nothing it could not already do. It passes the refusal `--stop-timeout`
-passes (`invalid_value`, 400), persists in `state.toml`, and is read by the
-engine and reported on the listing's `server` object from the next request.
+passes (`invalid_value`, 400: a whole number of seconds, 1 to 3600), persists
+in `state.toml`, and is read by the engine and reported on the listing's
+`server` object from the next request.
 A `--stop-timeout` flag pins it: the value shows `source: "flag"`,
 `editable: false`, and a request to change it is `operator_pinned` (409)
 rather than a write the next restart would ignore.

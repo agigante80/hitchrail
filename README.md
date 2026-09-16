@@ -409,7 +409,7 @@ install it first.
 | `--tls-cert`, `--tls-key` | none | A PEM certificate and its key: serve HTTPS from the server itself. Both or neither, refused at startup before the bind when one is missing or the pair cannot be loaded. Derived origins, banner links and the cookie's `Secure` flag follow |
 | `--expect-gateway-mac` | none | Refuse to start unless the default gateway has this MAC address, read from `/proc/net/route` and `/proc/net/arp`. A guard against a laptop serving on a network it joined by accident; a MAC is spoofable, so not against an attacker on the LAN. Checked once at start. A mismatch is exit 2, which the unit keeps stopped; "cannot tell" (no route yet, no ARP entry, a pinned entry) is exit 3, which it retries |
 | `--session-prefix` | `hr-` | What every tmux session this instance creates is named with, and the only sessions it will ever stop. Two instances on one tmux server need two prefixes: with one, each reads the other's agent in a same named folder as its own and can stop it. Also `session_prefix` in the config file |
-| `--stop-timeout` | `30` | Seconds to wait for a graceful stop before reporting that it timed out. It reports; it does not escalate |
+| `--stop-timeout` | `30` | Seconds to wait for a graceful stop before reporting that it timed out, at most 3600. It reports; it does not escalate |
 | `--version` | | Print the version and exit |
 | `-h`, `--help` | | Print the options and exit |
 
