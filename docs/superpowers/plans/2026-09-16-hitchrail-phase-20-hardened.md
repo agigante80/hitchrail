@@ -172,16 +172,16 @@ phase's objective admits.
 
 ## Done looks like
 
-- [ ] Every task above is ticked, or is marked MOVED OUT with the issue that
+- [x] Every task above is ticked, or is marked MOVED OUT with the issue that
       carries it.
-- [ ] Every ticket in the milestone on 2026-09-16 is closed, done or declined
+- [x] Every ticket in the milestone on 2026-09-16 is closed, done or declined
       with the reason on the ticket, or moved out with the issue that carries
       it named in the task above, and #269's decision is written into
       `security.py` whichever way it went.
-- [ ] `docs/api.md` documents every code this phase added or changed, held to
+- [x] `docs/api.md` documents every code this phase added or changed, held to
       the server both ways.
-- [ ] `Config(...)` opens no file, asserted.
-- [ ] The roadmap's Phase 20 block says `state: done`, the milestone is closed,
+- [x] `Config(...)` opens no file, asserted.
+- [x] The roadmap's Phase 20 block says `state: done`, the milestone is closed,
       `scripts/check-phases.sh` is clean, and this plan has no unticked box
       without a marker.
 

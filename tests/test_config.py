@@ -1226,7 +1226,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 674 for #269: `cookie_is_secure`, the rule the operator decided
         # (our own TLS, or a proxy deployment whose every non loopback origin
         # is https) with the two failures it sits between written down.
-        "config.py": 674,
+        # 686 after round 1 of that batch's review: the bind is the third
+        # thing the rule asks about, and the paragraph says why the origins
+        # alone were not enough.
+        "config.py": 686,
         # 460 for #123, #154 and #238: `--config`, `--session-prefix` and the
         # source tagging the settings page shows, which is one function
         # reading the flags back out of argv. Nothing here parses a value

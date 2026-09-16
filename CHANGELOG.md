@@ -32,15 +32,23 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+## 0.9.0 - 2026-09-17
+
 Phase 20: the perimeter, hardened. Upgrading is safe with no action unless
-one of four refusals now names your configuration: a `--stop-timeout` above
+one of five refusals now names your configuration: a `--stop-timeout` above
 3600 seconds; `--tls-cert` beside a plain `http://` `--allow-origin` off
 loopback, which never worked (the `Secure` cookie was never sent back on that
 origin) and now says so at startup; a config file whose DIRECTORY others can
-write to, refused like the file itself; or an `--expect-gateway-mac` that is
+write to, refused like the file itself; an `--expect-gateway-mac` that is
 not one of the four spellings of a MAC (`aa:bb:cc:dd:ee:ff`,
 `aa-bb-cc-dd-ee-ff`, `aabb.ccdd.eeff`, `aabbccddeeff`), which the check used
-to accept with stray characters around it.
+to accept with stray characters around it; or a `--tls-key` with a
+passphrase, which used to reach a prompt no unit can answer.
+
+Still not protected, and stated so it is read rather than discovered:
+Hitchrail does not sandbox the sessions it starts, and over plain HTTP on a
+LAN the token crosses the network in cleartext, which `--tls-cert` or a TLS
+terminating proxy ends.
 
 ### Fixed
 
@@ -111,12 +119,14 @@ the same name is offered End before Kill, as any row is.
 
 **The session cookie is `Secure` behind a TLS terminating proxy.** It was
 `Secure` only when Hitchrail itself held the certificate, so in the proxy
-deployment (`--allow-origin https://box.lan`, no `--tls-cert`) the browser
-also offered the cookie to `http://box.lan`, on any port, because cookies
-are not port scoped. It is `Secure` now when every non loopback allowed
-origin is https, which is exactly that deployment and costs nothing there.
-A plain HTTP deployment is unchanged: the flag stays off, because a browser
-would never send the cookie back. Loopback origins count for neither.
+deployment (bound to loopback, `--allow-origin https://box.lan`, no
+`--tls-cert`) the browser also offered the cookie to `http://box.lan`, on
+any port, because cookies are not port scoped. It is `Secure` now when the
+bind is loopback and every non loopback allowed origin is https, which is
+exactly that deployment and costs nothing there. Everything else is
+unchanged, including a proxy origin beside a LAN bind: something can still
+reach that server in the clear, and a `Secure` cookie on a browser doing so
+is never sent back. Loopback origins count for neither.
 
 **The config file's remaining refusals are in words.** A label holding
 `=` refuses as a label rather than parsing as a different one; a NUL escape

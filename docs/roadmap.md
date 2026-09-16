@@ -161,8 +161,25 @@ holding a token can get in without a saved link, and adding a folder does not
 mean editing a systemd unit.
 
 ## Phase: Phase 20: The perimeter, hardened
-state: open
+state: done
 plan: docs/superpowers/plans/2026-09-16-hitchrail-phase-20-hardened.md
+
+**Done, 2026-09-17, shipped as 0.9.0.** Every ticket closed: fifteen built
+and one declined in writing (the ARP cache's STALE window, which needs
+netlink and does not answer the question this guard is for). Four batches,
+each through the bounded review loop with the security lens, and the loops
+found two things worth naming. The pane map's record terminator rested on a
+premise about tmux that release 3.7a had already falsified, which is the
+"verify, do not recall" rule catching a verification that had gone stale
+rather than one that was never done. And #189's first shape named Hitchrail's
+own tmux server as somebody else's and withheld End from the process End
+exists for, found because the live tier runs from inside a tmux.
+
+Re-shaped rather than extended in one place: #237, the mutation sweep over
+five modules, went back to Backlog. It is not a perimeter ticket, it is a
+hundred and thirty nine survivors to read, and this plan's own rule about
+absorbing work is what sent it out. Two findings that add rather than sharpen
+were split out to Backlog as #279 and #280.
 
 The second pass over what Phase 14 built, taken while the reasoning is
 fresh. Every ticket here is a finding from the review of that phase's own

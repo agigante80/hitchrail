@@ -313,51 +313,76 @@ async def test_the_cookie_is_secure_exactly_when_we_terminate_tls(
 
 @pytest.mark.integration
 @pytest.mark.parametrize(
-    ("origins", "secure"),
+    ("host", "origins", "secure"),
     [
-        (("https://box.lan",), True),
-        (("https://box.lan", "http://localhost:3000"), True),
-        (("https://box.lan", "http://other.lan"), False),
-        (("http://box.lan",), False),
-        ((), False),
+        ("127.0.0.1", ("https://box.lan",), True),
+        ("127.0.0.1", ("https://box.lan", "http://localhost:3000"), True),
+        ("127.0.0.1", ("https://box.lan", "http://other.lan"), False),
+        ("127.0.0.1", ("http://box.lan",), False),
+        ("127.0.0.1", (), False),
+        ("0.0.0.0", ("https://box.lan",), False),
     ],
-    ids=["proxy", "proxy-and-a-local-dev-server", "one-plain-origin", "plain-lan", "none"],
+    ids=[
+        "proxy",
+        "proxy-and-a-local-dev-server",
+        "one-plain-origin",
+        "plain-lan",
+        "none",
+        "proxy-origin-but-we-are-reachable-in-the-clear",
+    ],
 )
 async def test_the_cookie_is_secure_behind_a_proxy_whose_origins_are_all_https(
-    tmp_path: pathlib.Path, origins: tuple[str, ...], secure: bool
+    tmp_path: pathlib.Path, host: str, origins: tuple[str, ...], secure: bool
 ) -> None:
     """#269, decided by the operator on 2026-09-16: `Secure` when we
-    terminate TLS, or when every non loopback origin configured is https.
+    terminate TLS, or when a LOOPBACK bind's every non loopback origin is
+    https.
 
     No `--tls-cert` in any of these: the server speaks HTTP and something in
-    front of it may speak HTTPS. With every configured origin https, the
-    browser reached the proxy over TLS and the flag costs nothing; without
-    it the cookie is offered to `http://box.lan` on any port, because
-    cookies are not port scoped. One plain origin turns it off, because that
-    origin is a browser that would never send the cookie back. A loopback
-    origin is ignored: `http://localhost` is a secure context in Chrome and
-    Firefox, and a developer's own dev server must not disarm the flag for
-    everybody else.
+    front of it may speak HTTPS. With every configured origin https and
+    nothing off the machine able to connect, the browser reached the proxy
+    over TLS and the flag costs nothing; without the flag the cookie is
+    offered to `http://box.lan` on any port, because cookies are not port
+    scoped. One plain origin turns it off, because that origin is a browser
+    that would never send the cookie back. A loopback origin is ignored:
+    `http://localhost` is a secure context in Chrome and Firefox, and a
+    developer's own dev server must not disarm the flag for everybody else.
+
+    The last case is the round 1 review's finding, and it is the one a
+    parametrisation over origins alone could not see. Bound to `0.0.0.0`
+    with a proxy origin configured, `_derive_allowed_origins` still emits
+    `http://box.lan:8787` for every allowed host, so a phone that opens the
+    LAN address directly gets a 200 and a cookie its browser throws away,
+    then 401s forever with a correct token. The bind says what a browser
+    can do; the origins only say what the operator meant.
     """
     (tmp_path / "root").mkdir(exist_ok=True)
     config = make_config(
         tmp_path / "root",
-        host="0.0.0.0",
+        host=host,
         token="s3cret",
+        extra_hosts=("box.lan",),
         extra_origins=origins,
         sessions_dir=tmp_path / ".s",
         agent_config_path=NO_AGENT_CONFIG,
     )
     assert config.tls is False, "this rule is about the deployment where we do NOT"
+    if host == "0.0.0.0":
+        assert "http://box.lan:8787" in config.allowed_origins, (
+            "the premise of the last case: a plain http origin off loopback is "
+            "derived from our own bind and a browser can use it"
+        )
     engine = make_engine(config, FakeTmux(), procs_from(""), PLENTY)
     app = create_app(engine=engine, config=config, bus=EventBus())
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://localhost"
+        transport=httpx.ASGITransport(app=app), base_url="http://box.lan"
     ) as c:
         r = await c.post(
             "/api/grant",
             json={"token": "s3cret"},
-            headers={"host": "localhost", "origin": "http://localhost:8787"},
+            headers={"host": "box.lan", "origin": f"http://box.lan:{config.port}"}
+            if host == "0.0.0.0"
+            else {"host": "localhost", "origin": "http://localhost:8787"},
         )
     assert r.status_code == 200
     header = r.headers["set-cookie"].lower()

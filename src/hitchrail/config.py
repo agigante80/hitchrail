@@ -315,18 +315,28 @@ class Config:
 
         `tls` alone was the rule, and behind a TLS terminating proxy that is
         too narrow: the operator gives `--allow-origin https://box.lan` and
-        binds plain HTTP on loopback or the LAN, so the cookie went out
-        without `Secure` and the browser then offered it to
-        `http://box.lan` on ANY port, since cookies are not port scoped.
+        binds plain HTTP on loopback, so the cookie went out without
+        `Secure` and the browser then offered it to `http://box.lan` on ANY
+        port, since cookies are not port scoped.
 
-        The rule is: our own TLS, or every non loopback origin the operator
-        configured is https. That second half is exactly the proxy
-        deployment, where nothing is lost by the flag because no http origin
-        is allowed to reach us anyway. It stays FALSE for a plain HTTP LAN
-        deployment, which is the failure the old rule was avoiding: a
-        `Secure` cookie there is never sent back and the tool silently stops
-        working, and `--allow-origin http://box.lan` is how that deployment
-        is spelled.
+        The rule is: our own TLS, or a LOOPBACK bind whose every non
+        loopback origin is https. Both halves of that second clause are
+        load bearing, and the bind is the one the first version left out
+        (round 1 review of this phase's batch 4). The origins say what the
+        operator meant; the bind says what a browser can actually do. With
+        `--host 0.0.0.0`, `_derive_allowed_origins` emits
+        `http://box.lan:8787` for every allowed host, because our own scheme
+        is http, so a phone that opens the LAN address directly is a request
+        we accept, answer 200 to, and hand a cookie the browser throws away:
+        every request after it is a 401 and the grant page loops forever
+        with a correct token. Bound to loopback that path does not exist,
+        because nothing off the machine can connect at all, and the only way
+        in is the proxy the origins name.
+
+        It stays FALSE for a plain HTTP LAN deployment, which is the failure
+        the original rule was avoiding: a `Secure` cookie there is never
+        sent back and the tool silently stops working, and
+        `--allow-origin http://box.lan` is how that deployment is spelled.
 
         Loopback origins are ignored for the test. `http://localhost` is a
         secure context in Chrome and Firefox, which send a `Secure` cookie
@@ -337,6 +347,8 @@ class Config:
         """
         if self.tls:
             return True
+        if not is_loopback_host(self.host):
+            return False
         proxied = [parts for entry in self.extra_origins if (parts := _origin_parts(entry))]
         return bool(proxied) and all(scheme == "https" for scheme, _ in proxied)
 
