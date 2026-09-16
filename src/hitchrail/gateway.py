@@ -15,11 +15,20 @@ catches is the laptop taken to a cafe, the hotel wifi, the home router
 replaced: the ordinary ways a trusted network silently stops being the one
 the decision was made on.
 
-**"Cannot tell" refuses.** No default route, no ARP entry for the gateway,
-an unreadable table: each stays stopped rather than starting on a guess,
-because a start that guesses is the direction the unit already refuses. The
-cost is a boot on a machine whose network is merely unusual, and the
-operator chose that cost by setting the flag.
+**"Cannot tell" refuses, and is retried.** No default route, no ARP entry
+for the gateway, an unreadable table, a pinned entry: each serves nothing
+rather than starting on a guess, because a start that guesses is the
+direction the unit already refuses. It is exit 3, the status the unit
+retries within its budget, because "no default route" is what a boot looks
+like before the DHCP lease lands; a MISMATCH is exit 2 and stays stopped
+until a person looks. The cost is a boot on a machine whose network is
+merely unusual, and the operator chose that cost by setting the flag.
+
+**Checked once, at start.** The unit runs the check before it binds and
+never again: a laptop that sleeps at home with the unit running and wakes
+at a cafe is not noticed until the next start. A periodic re-check is a
+design change for its own ticket, and every document that offers the flag
+says this.
 
 Read from `/proc`, not from `ip`: two files, no subprocess, no dependency on
 iproute2 being on a PATH the unit controls. The ARP table can be empty for
@@ -84,13 +93,40 @@ def default_gateway(route_text: str) -> str | None:
     return None
 
 
+# `/proc/net/arp` flags: ATF_COM (0x2) is a completed entry, ATF_PERM (0x4)
+# one somebody pinned with `ip neigh ... nud permanent`.
+_ATF_PERM = 0x4
+
+
+class PinnedEntry(RuntimeError):
+    """The gateway's ARP entry is permanent: the operator's assertion about
+    the network, not the network's answer."""
+
+
 def mac_for(ip: str, arp_text: str) -> str | None:
     """The hardware address `/proc/net/arp` holds for an IP, or None when the
     entry is absent or incomplete (all zeros, which the kernel writes while a
-    resolution is pending or failed)."""
+    resolution is pending or failed).
+
+    A PERMANENT entry raises rather than answers (security audit of #207).
+    The audience that sets this flag is the audience that pins the gateway
+    against ARP spoofing, and a pinned entry survives carrier down and up on
+    the same device: at a cafe whose router is also 192.168.1.1, the file
+    would report the home MAC and the guard would pass on the operator's
+    own assertion. "Cannot tell" is the honest answer there.
+    """
     for line in arp_text.splitlines()[1:]:
         fields = line.split()
         if len(fields) >= 4 and fields[0] == ip:
+            try:
+                if int(fields[2], 16) & _ATF_PERM:
+                    raise PinnedEntry(
+                        f"the ARP entry for the gateway {ip} is permanent (pinned by "
+                        f"hand), so it says what the operator asserted rather than "
+                        f"what the network answered"
+                    )
+            except ValueError:
+                pass
             mac = normalise_mac(fields[3])
             return None if mac in (None, "00:00:00:00:00:00") else mac
     return None
@@ -129,6 +165,8 @@ def gateway_mac(
             return mac_for(ip, arp.read_text())
         except OSError as exc:
             raise GatewayUnknown(f"{arp} cannot be read: {exc}") from exc
+        except PinnedEntry as exc:
+            raise GatewayUnknown(str(exc)) from exc
 
     mac = read_arp()
     if mac is not None:

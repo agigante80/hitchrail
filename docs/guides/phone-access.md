@@ -87,6 +87,11 @@ the exposure plainly before choosing it:
   unit stays stopped until you look (`ip neigh show default` or the router's
   label gives you the address). It catches the cafe, the hotel and the
   replaced router, and not an attacker on the LAN, who can present any MAC.
+  Checked once, when the unit starts: a machine that joins another network
+  while it is running is not noticed until the next start. `ip route show
+  default` names the gateway's address, and `ip neigh show` the MAC beside
+  it; the password manager entry for `/grant` is keyed by origin, so a new
+  scheme or port means a new entry there too.
 
 That last point is why this is second rather than first. It is not less secure
 in the moment. It is a decision that silently stops being the one you made.

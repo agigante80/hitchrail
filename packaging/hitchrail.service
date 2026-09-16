@@ -29,11 +29,15 @@
 # notices the wrong network** (#207). A unit binding an address on a removable
 # adapter serves on whatever network later hands the machine that address,
 # and nothing else here would tell you. With the flag, a start whose default
-# gateway is not the one named, or whose gateway cannot be identified at all,
-# refuses with exit 2, and `RestartPreventExitStatus=2` below keeps it
-# stopped until you look. A MAC is spoofable by anyone already on the LAN,
-# so this guards against carrying the machine somewhere by accident and not
-# against an attacker who chose to be there. Unset, the check is off:
+# gateway is not the one named refuses with exit 2, and
+# `RestartPreventExitStatus=2` below keeps it stopped until you look; a
+# start where the gateway cannot be identified yet (no route before the DHCP
+# lease lands, no ARP entry) is exit 3, which the budget above retries, so a
+# slow boot on the RIGHT network is not a dead unit. Checked once, at start:
+# a network the machine joins while running is noticed at the next start. A
+# MAC is spoofable by anyone already on the LAN, so this guards against
+# carrying the machine somewhere by accident and not against an attacker
+# who chose to be there. Unset, the check is off:
 #
 #   ExecStart=%h/.local/bin/hitchrail --host 192.168.1.10 \
 #       --expect-gateway-mac aa:bb:cc:dd:ee:ff

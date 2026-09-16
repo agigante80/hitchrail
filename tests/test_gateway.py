@@ -2,8 +2,9 @@
 `/proc`, and the preflight that refuses a start on another network.
 
 Every table here is a string a test wrote and the nudge is a recorder, so
-nothing reads this machine's routes or puts a packet on its network, which
-is what `conftest.no_real_network` would refuse anyway.
+nothing reads this machine's routes or puts a packet on its network;
+`conftest.no_real_gateway` makes the real reader and the real nudge fail
+loudly for every test, this file included.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import pytest
 
 from conftest import FakeClock
 from hitchrail import gateway
-from hitchrail.cli import build_config, main, parse_args, preflight
+from hitchrail.cli import build_config, gateway_verdict, main, parse_args
 from hitchrail.config import Config, ConfigError
 from support import make_config
 
@@ -41,6 +42,28 @@ def test_the_default_gateway_is_read_in_host_byte_order() -> None:
     assert gateway.default_gateway(ROUTE) == "192.168.33.1"
     assert gateway.default_gateway(ROUTE.splitlines()[0] + "\n") is None
     assert gateway.default_gateway("") is None
+
+
+def test_a_pinned_arp_entry_is_cannot_tell(tmp_path: Path) -> None:
+    """`ip neigh ... nud permanent` survives a change of network on the same
+    device, so at a cafe whose router shares the home address the file
+    would report the home MAC. The operator's assertion is not the
+    network's answer."""
+    pinned = ARP.replace("0x2         A4:2B", "0x6         A4:2B")
+    with pytest.raises(gateway.PinnedEntry, match="permanent"):
+        gateway.mac_for("192.168.33.1", pinned)
+    route, arp = _tables(tmp_path, arp=pinned)
+    with pytest.raises(gateway.GatewayUnknown, match="pinned by hand"):
+        gateway.gateway_mac(route, arp, nudge=lambda ip: None)
+
+
+def test_the_real_reader_is_stubbed_for_every_test() -> None:
+    """The guard's guard: an engine or a verdict built with no seam reaches
+    the stub in `conftest.no_real_gateway` and nothing else."""
+    with pytest.raises(AssertionError, match="real gateway reader"):
+        gateway.gateway_mac()
+    with pytest.raises(AssertionError, match="datagram"):
+        gateway._nudge("192.0.2.1")
 
 
 def test_the_arp_table_yields_the_mac_and_treats_all_zeros_as_absent() -> None:
@@ -158,72 +181,75 @@ def _guarded(tmp_path: Path) -> Config:
 
 
 def test_the_expected_network_starts_unchanged(tmp_path: Path) -> None:
-    problems = preflight(
-        _guarded(tmp_path),
-        which=lambda _n: "/usr/bin/x",
-        meminfo=tmp_path,
-        gateway_mac=lambda: GATEWAY,
-    )
-    assert problems == []
+    assert gateway_verdict(_guarded(tmp_path), gateway_mac=lambda: GATEWAY) is None
 
 
-def test_a_different_network_is_refused_naming_both_addresses(tmp_path: Path) -> None:
-    problems = preflight(
-        _guarded(tmp_path),
-        which=lambda _n: "/usr/bin/x",
-        meminfo=tmp_path,
-        gateway_mac=lambda: "de:ad:be:ef:00:01",
-    )
-    assert len(problems) == 1
-    assert "de:ad:be:ef:00:01" in problems[0]
-    assert GATEWAY in problems[0]
-    assert "different network" in problems[0]
+def test_a_different_network_is_exit_2_naming_both_addresses(tmp_path: Path) -> None:
+    """Exit 2 is the deliberate stop `RestartPreventExitStatus=2` keeps
+    stopped: the machine is on the wrong network, and only a person can say
+    otherwise."""
+    verdict = gateway_verdict(_guarded(tmp_path), gateway_mac=lambda: "de:ad:be:ef:00:01")
+    assert verdict is not None
+    code, message = verdict
+    assert code == 2
+    assert "de:ad:be:ef:00:01" in message
+    assert GATEWAY in message
+    assert "different network" in message
 
 
-def test_cannot_tell_refuses_and_says_so(tmp_path: Path) -> None:
-    """The decided direction: a start that guesses is the one the unit
-    already refuses, so an unidentifiable network stays stopped."""
+def test_cannot_tell_refuses_with_the_retried_exit_code(tmp_path: Path) -> None:
+    """The decided direction, sharpened by review: an unidentifiable network
+    serves nothing, and it is exit 3 rather than 2 because "no default route
+    yet" is what a boot looks like before the lease lands. The unit retries
+    3 within its budget; 2 it never retries, and a service dead on the
+    right network was the failure the retry budget exists to prevent."""
 
     def unknown() -> str:
         raise gateway.GatewayUnknown("this machine has no IPv4 default route")
 
-    problems = preflight(
-        _guarded(tmp_path), which=lambda _n: "/usr/bin/x", meminfo=tmp_path, gateway_mac=unknown
-    )
-    assert len(problems) == 1
-    assert "cannot be identified" in problems[0]
-    assert "no IPv4 default route" in problems[0]
-    assert "Refusing rather than guessing" in problems[0]
+    verdict = gateway_verdict(_guarded(tmp_path), gateway_mac=unknown)
+    assert verdict is not None
+    code, message = verdict
+    assert code == 3
+    assert "cannot be identified" in message
+    assert "no IPv4 default route" in message
+    assert "Refusing rather than guessing" in message
 
 
 def test_without_the_flag_the_network_is_never_read(tmp_path: Path) -> None:
     def explode() -> str:
         raise AssertionError("the gateway was read with the check off")
 
-    assert (
-        preflight(
-            make_config(tmp_path),
-            which=lambda _n: "/usr/bin/x",
-            meminfo=tmp_path,
-            gateway_mac=explode,
-        )
-        == []
-    )
+    assert gateway_verdict(make_config(tmp_path), gateway_mac=explode) is None
 
 
-def test_a_mismatch_is_exit_2_from_the_command_line(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize(
+    ("found", "code"),
+    [("de:ad:be:ef:00:01", 2), (None, 3)],
+    ids=["mismatch", "cannot-tell"],
+)
+def test_the_verdict_is_the_exit_code_from_the_command_line(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    found: str | None,
+    code: int,
 ) -> None:
-    """Exit 2 is the deliberate stop `RestartPreventExitStatus=2` keeps
-    stopped, which is the whole mechanism: the unit is dead until a person
-    acts, and the retry budget is not doing double duty."""
+    """Exit 2 is the stop the unit never restarts, exit 3 the one it retries,
+    which is the whole mechanism: a wrong network is dead until a person
+    acts, and a network not yet up is tried again."""
     (tmp_path / "root").mkdir()
     monkeypatch.setattr("shutil.which", lambda _n: "/usr/bin/x")
-    monkeypatch.setattr(gateway, "gateway_mac", lambda: "de:ad:be:ef:00:01")
+
+    def read() -> str:
+        if found is None:
+            raise gateway.GatewayUnknown("this machine has no IPv4 default route")
+        return found
+
+    monkeypatch.setattr(gateway, "gateway_mac", read)
     argv = ["--root", f"main={tmp_path / 'root'}", "--expect-gateway-mac", GATEWAY]
-    assert main(argv) == 2
+    assert main(argv) == code
     err = capsys.readouterr().err
-    # The FAKE's address, so this cannot pass by reading the real machine's
+    # The FAKE's words, so this cannot pass by reading the real machine's
     # tables and happening not to match, which the first version did.
-    assert "de:ad:be:ef:00:01" in err
-    assert "different network" in err
+    assert ("de:ad:be:ef:00:01" in err) if found else ("no IPv4 default route" in err)

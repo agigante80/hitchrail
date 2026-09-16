@@ -382,7 +382,6 @@ def preflight(
     config: Config,
     which: Callable[[str], str | None] | None = None,
     meminfo: Path = MEMINFO,
-    gateway_mac: Callable[[], str] | None = None,
 ) -> list[str]:
     """What is missing, in the operator's words. Empty means good to go.
 
@@ -435,32 +434,43 @@ def preflight(
             "rather than run without the check that stops it filling the "
             "machine with agents"
         )
-    if config.expect_gateway_mac is not None:
-        # #207. Exit 2 either way, mismatch or "cannot tell", which
-        # `RestartPreventExitStatus=2` keeps stopped until a person looks:
-        # a guard against joining the wrong network by accident, and the
-        # module says why an attacker on the LAN is not what it is for.
-        # Resolved per call for the reason `look` is above: a default bound
-        # at definition time is what a test's monkeypatch cannot reach, and
-        # the first version of this test read the real machine's tables and
-        # passed because the developer's gateway happened not to match.
-        read = gateway_mac if gateway_mac is not None else gateway.gateway_mac
-        try:
-            found = read()
-        except gateway.GatewayUnknown as exc:
-            problems.append(
-                f"--expect-gateway-mac is set and the network cannot be identified: {exc}. "
-                "Refusing rather than guessing which network this is"
-            )
-        else:
-            if found != config.expect_gateway_mac:
-                problems.append(
-                    f"the default gateway is {found}, not the expected "
-                    f"{config.expect_gateway_mac}: this machine is on a different network "
-                    "from the one --expect-gateway-mac names, so nothing is served. If "
-                    "the network is right and the gateway changed, update the flag"
-                )
     return problems
+
+
+EXIT_REFUSED = 2
+EXIT_TRANSIENT = 3
+
+
+def gateway_verdict(
+    config: Config, gateway_mac: Callable[[], str] | None = None
+) -> tuple[int, str] | None:
+    """`None` to start; else the exit code and the sentence for the journal.
+
+    Resolved per call, for the reason `preflight`'s `look` gives: a default
+    bound at definition time is what a test's monkeypatch cannot reach, and
+    the first version of the exit 2 test read this machine's real tables and
+    passed because the developer's gateway happened not to match.
+    """
+    if config.expect_gateway_mac is None:
+        return None
+    read = gateway_mac if gateway_mac is not None else gateway.gateway_mac
+    try:
+        found = read()
+    except gateway.GatewayUnknown as exc:
+        return (
+            EXIT_TRANSIENT,
+            f"--expect-gateway-mac is set and the network cannot be identified yet: {exc}. "
+            "Refusing rather than guessing which network this is; the unit retries",
+        )
+    if found != config.expect_gateway_mac:
+        return (
+            EXIT_REFUSED,
+            f"the default gateway is {found}, not the expected "
+            f"{config.expect_gateway_mac}: this machine is on a different network "
+            "from the one --expect-gateway-mac names, so nothing is served. If "
+            "the network is right and the gateway changed, update the flag",
+        )
+    return None
 
 
 def _serve(app: Starlette, config: Config) -> int:
@@ -498,6 +508,20 @@ def main(argv: list[str] | None = None) -> int:
         for problem in problems:
             print(f"  - {problem}", file=sys.stderr)
         return 2
+    # #207. After the preflight, before the bind, and with two exit codes
+    # because the unit reads them differently. A MISMATCH is exit 2, the
+    # deliberate stop `RestartPreventExitStatus=2` keeps stopped until a
+    # person looks: this machine is on the wrong network. "Cannot tell", no
+    # default route yet or no ARP entry, is exit 3, the transient the unit
+    # retries within its budget: a boot where the DHCP lease lands after
+    # the first start is the measured case, and refusing it forever would
+    # leave the service dead on the right network (Phase 14 review, round
+    # 1). Both serve nothing: "cannot tell" is still a refusal, retried.
+    verdict = gateway_verdict(config)
+    if verdict is not None:
+        code, message = verdict
+        print(f"hitchrail: cannot start. {message}", file=sys.stderr)
+        return code
 
     text = banner(config)
     if text:
