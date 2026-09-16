@@ -629,3 +629,106 @@ def test_the_state_file_is_written_two_levels_deep(tmp_path: Path) -> None:
     state = tmp_path / "a" / "b" / "state.toml"
     settings.write_state(state, settings.State(hidden=frozenset({"work"})), configured={"work"})
     assert settings.read_state(state).hidden == {"work"}
+
+
+# -- #270: the file's remaining refusals, in words ----------------------------
+
+
+def test_a_label_holding_an_equals_sign_is_refused_as_a_label(tmp_path: Path) -> None:
+    """The flag splits on the first `=`, so `a=b` composed into `a=b=/x` used
+    to parse as label `a` at `<cwd>/b=/x`, and the allowlist that refuses
+    `=` never saw it. Asked first now; one validator, still."""
+    (tmp_path / "work").mkdir()
+    path = _write(tmp_path, ROOTS_TOML.format(label="a=b", path=tmp_path / "work"))
+    with pytest.raises(ConfigError, match=r"roots entry 1: root label 'a=b' is not usable"):
+        build_config(parse_args(["--config", str(path)]))
+
+
+def test_a_nul_in_a_path_refuses_with_exit_2_rather_than_a_traceback(tmp_path: Path) -> None:
+    """argv cannot carry a NUL; a TOML escape can, and `resolve` raised a
+    bare `ValueError` through `build_config`."""
+    path = _write(tmp_path, '[[roots]]\nlabel = "work"\npath = "/tmp/a\\u0000b"\n')
+    with pytest.raises(ConfigError, match=r"root 'work' has an unusable path"):
+        build_config(parse_args(["--config", str(path)]))
+    assert main(["--config", str(path)]) == 2
+
+
+def test_a_file_that_is_not_utf8_is_refused_naming_the_file(tmp_path: Path) -> None:
+    """`UnicodeDecodeError` is a `ValueError`, which neither the `OSError`
+    nor the `TOMLDecodeError` arm caught."""
+    path = tmp_path / "config.toml"
+    path.write_bytes(b'[[roots]]\nlabel = "w\xff"\npath = "/x"\n')
+    path.chmod(0o644)
+    with pytest.raises(ConfigError, match=r"config\.toml: is not UTF-8"):
+        build_config(parse_args(["--config", str(path)]))
+    assert main(["--config", str(path)]) == 2
+
+
+def test_a_directory_others_can_write_is_refused_naming_the_directory(tmp_path: Path) -> None:
+    """A writable parent lets others `mv` a fresh 644 file over a private
+    one, so the file's own mode proved nothing; ssh's `StrictModes` refuses
+    the parent for the same reason."""
+    (tmp_path / "work").mkdir()
+    shared = tmp_path / "etc"
+    shared.mkdir()
+    path = shared / "config.toml"
+    path.write_text(ROOTS_TOML.format(label="work", path=tmp_path / "work"))
+    path.chmod(0o644)
+    shared.chmod(0o777)
+    try:
+        with pytest.raises(
+            ConfigError, match=r"etc: is writable by group or others \(mode 0777\)"
+        ):
+            build_config(parse_args(["--config", str(path)]))
+    finally:
+        shared.chmod(0o755)
+    assert [r.label for r in build_config(parse_args(["--config", str(path)])).roots] == [
+        "work"
+    ]
+
+
+def test_the_directory_is_checked_before_the_file_is_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The order is the point: a file in a shared directory is not read at
+    all, not read and then refused."""
+    (tmp_path / "work").mkdir()
+    shared = tmp_path / "etc"
+    shared.mkdir()
+    path = _write(shared, ROOTS_TOML.format(label="work", path=tmp_path / "work"))
+    shared.chmod(0o777)
+    opened: list[str] = []
+    real_open = os.open
+
+    def recording_open(name: object, *args: object, **kwargs: object) -> int:
+        opened.append(str(name))
+        return real_open(name, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(os, "open", recording_open)
+    try:
+        with pytest.raises(ConfigError, match="writable by group or others"):
+            build_config(parse_args(["--config", str(path)]))
+    finally:
+        shared.chmod(0o755)
+    assert str(path) not in opened
+
+
+def test_a_symlink_left_at_the_state_files_tmp_name_is_not_written_through(
+    tmp_path: Path,
+) -> None:
+    """With a writable state directory, `state.tmp -> ~/.ssh/authorized_keys`
+    was truncated and written through on the next toggle. The write goes
+    through a fresh `O_EXCL` name now, which cannot follow anything, and the
+    rename replaces the name rather than the target."""
+    victim = tmp_path / "authorized_keys"
+    victim.write_text("ssh-ed25519 AAAA somebody\n")
+    state = tmp_path / "state.toml"
+    (tmp_path / "state.tmp").symlink_to(victim)
+    settings.write_state(state, settings.State(hidden=frozenset({"work"})), configured={"work"})
+    assert victim.read_text() == "ssh-ed25519 AAAA somebody\n"
+    assert settings.read_state(state).hidden == frozenset({"work"})
+    assert (tmp_path / "state.tmp").is_symlink(), "the leftover was touched"
+    assert sorted(p.name for p in tmp_path.iterdir() if p.name.startswith("state.")) == [
+        "state.tmp",
+        "state.toml",
+    ], "a temporary name was left behind"

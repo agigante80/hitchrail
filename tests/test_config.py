@@ -1270,7 +1270,13 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # #154, #238: the operator's file and Hitchrail's state file, one
         # module because the split between them IS the security argument in
         # its docstring; over by the ceiling's four lines (#265).
-        "settings.py": 404,
+        # 448 for #270: the directory checked by the file's rule, the
+        # decode refusal in words, the label asked of the allowlist before
+        # it is composed into `label=path`, and the state file written
+        # through a fresh `O_EXCL` name. Every line is a refusal or its
+        # reason, and the seam that would split this module is the one its
+        # docstring says must not be split.
+        "settings.py": 448,
         # rather than one. A refusal handler is the shape this file is made of.
         # 513 to 517 for #120. The listing payload reports every configured
         # root as a labelled list rather than one path string, and the comment

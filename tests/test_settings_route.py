@@ -14,6 +14,7 @@ import ast
 import pathlib
 import re
 from collections.abc import AsyncIterator, Sequence
+from dataclasses import replace
 from typing import Any
 
 import httpx
@@ -297,9 +298,25 @@ async def test_get_config_shows_every_value_with_its_source_and_never_the_token(
     ]
     assert body["hidden_roots"] == ["vault"]
     assert body["state_file"] == {"value": str(config.state_path)}
+    # The network guard, unset here: null with its source (#260 item 6, which
+    # found the field on the page and in nobody's test).
+    assert body["expect_gateway_mac"] == {"value": None, "source": "default"}
     # Everything a flag can set is on the page, by the name the flag uses.
     for name in ("port", "allow_hosts", "allow_origins", "self_project", "agent_binary"):
         assert set(body[name]) == {"value", "source"}, name
+
+
+async def test_the_expected_gateway_is_shown_normalised(
+    tmp_path: pathlib.Path, config: Config, engine: Engine
+) -> None:
+    """The value as `Config` keeps it, lower case with colons, whatever
+    spelling the flag was given, so the page and the refusal agree."""
+    guarded = replace(config, expect_gateway_mac="A4-2B-B0-11-22-33")
+    app = create_app(engine=engine, config=guarded, bus=EventBus())
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as c:
+        r = await c.get("/api/config", headers=HEADERS)
+    assert r.json()["expect_gateway_mac"]["value"] == "a4:2b:b0:11:22:33"
 
 
 async def test_the_sources_the_cli_computes_reach_the_page(tmp_path: pathlib.Path) -> None:

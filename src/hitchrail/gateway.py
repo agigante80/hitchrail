@@ -35,6 +35,17 @@ iproute2 being on a PATH the unit controls. The ARP table can be empty for
 the gateway at boot, before anything has spoken to it, so one UDP datagram
 to the discard port is sent to make the kernel resolve it. That is the one
 packet this module puts on the wire; a test injects the sender.
+
+**The ARP table is a cache, and `/proc/net/arp` does not say how old an
+entry is** (#260). It prints a STALE neighbour and a REACHABLE one
+identically, `0x2` and the address, so behind a switch whose link never
+drops, a router replaced and the unit restarted inside the kernel's relearn
+window (a few tens of seconds by default) reads the old router's MAC and
+passes. Reading the neighbour state needs netlink (`RTM_GETNEIGH`, some
+forty lines of stdlib `AF_NETLINK`), which is a design choice this module
+declines: the window is narrow, the case is a router swapped without a link
+flap, and the guard is documented as one against carrying the machine
+somewhere by accident, which a swapped router is not.
 """
 
 from __future__ import annotations
@@ -65,29 +76,57 @@ class GatewayPinned(GatewayUnknown):
     on a retry; the unit stays stopped until they look."""
 
 
+# The spellings a MAC is written in: colons, hyphens, Cisco's dotted quads,
+# and the bare twelve digits. Nothing else (#260): the first version stripped
+# every non hex character before counting, so `zz:a4:2b:b0:11:22:33` and
+# `a4:2b:b0:11:22:33 router` passed a check whose refusal said "six pairs of
+# hex digits". A check should match its own message.
+_MAC_SPELLINGS = re.compile(
+    r"\A(?:"
+    r"(?:[0-9a-f]{2}:){5}[0-9a-f]{2}"
+    r"|(?:[0-9a-f]{2}-){5}[0-9a-f]{2}"
+    r"|[0-9a-f]{4}\.[0-9a-f]{4}\.[0-9a-f]{4}"
+    r"|[0-9a-f]{12}"
+    r")\Z",
+    re.IGNORECASE,
+)
+
+
 def normalise_mac(raw: str) -> str | None:
-    """`AA-BB-CC-DD-EE-FF`, `aa:bb:cc:dd:ee:ff` and `aabb.ccdd.eeff` are one
-    address. Lower case with colons, or None for anything that is not six
-    octets."""
-    digits = re.sub(r"[^0-9a-fA-F]", "", raw)
-    if len(digits) != 12:
+    """`AA-BB-CC-DD-EE-FF`, `aa:bb:cc:dd:ee:ff`, `aabb.ccdd.eeff` and
+    `aabbccddeeff` are one address. Lower case with colons, or None for
+    anything that is not one of those four spellings of six octets."""
+    if not _MAC_SPELLINGS.match(raw):
         return None
+    digits = re.sub(r"[^0-9a-fA-F]", "", raw)
     return ":".join(digits[i : i + 2] for i in range(0, 12, 2)).lower()
 
 
-def default_gateway(route_text: str) -> str | None:
-    """The IPv4 default gateway from `/proc/net/route`, dotted, or None.
+def default_gateway(route_text: str) -> tuple[str, str] | None:
+    """The IPv4 default gateway from `/proc/net/route`, as `(interface,
+    dotted address)`, or None.
 
     The kernel writes each address as eight hex digits in HOST byte order,
     which on every machine this runs on is little endian: `0121A8C0` is
     192.168.33.1. The default route is the line whose destination is all
     zeros and whose flags carry RTF_GATEWAY (0x2).
+
+    The FIRST such line is the preferred default. The file is the main
+    table's trie, and within one prefix the kernel keeps aliases in metric
+    ascending order (`fib_find_alias` in `net/ipv4/fib_trie.c` inserts a
+    new route before the first whose priority is not below its own), so two
+    defaults, wifi at 600 and ethernet at 100, list ethernet first.
+
+    The interface rides along (#260): the ARP table is matched by address
+    AND device, because two interfaces on one prefix (ethernet and wifi on
+    the same LAN) hold two entries for one gateway address, and by address
+    alone the answer was whichever the file listed first.
     """
     for line in route_text.splitlines()[1:]:
         fields = line.split()
         if len(fields) < 4:
             continue
-        _, destination, gateway, flags = fields[:4]
+        iface, destination, gateway, flags = fields[:4]
         try:
             if destination != "00000000" or not int(flags, 16) & 0x2:
                 continue
@@ -95,7 +134,7 @@ def default_gateway(route_text: str) -> str | None:
         except ValueError:
             continue
         if len(octets) == 4:
-            return ".".join(str(b) for b in octets)
+            return iface, ".".join(str(b) for b in octets)
     return None
 
 
@@ -109,10 +148,11 @@ class PinnedEntry(RuntimeError):
     the network, not the network's answer."""
 
 
-def mac_for(ip: str, arp_text: str) -> str | None:
-    """The hardware address `/proc/net/arp` holds for an IP, or None when the
-    entry is absent or incomplete (all zeros, which the kernel writes while a
-    resolution is pending or failed).
+def mac_for(ip: str, arp_text: str, iface: str | None = None) -> str | None:
+    """The hardware address `/proc/net/arp` holds for an IP on an interface,
+    or None when the entry is absent or incomplete (all zeros, which the
+    kernel writes while a resolution is pending or failed). With `iface`
+    None any device's entry answers, which only a test wants.
 
     A PERMANENT entry raises rather than answers (security audit of #207).
     The audience that sets this flag is the audience that pins the gateway
@@ -123,7 +163,7 @@ def mac_for(ip: str, arp_text: str) -> str | None:
     """
     for line in arp_text.splitlines()[1:]:
         fields = line.split()
-        if len(fields) >= 4 and fields[0] == ip:
+        if len(fields) >= 6 and fields[0] == ip and iface in (None, fields[5]):
             try:
                 if int(fields[2], 16) & _ATF_PERM:
                     raise PinnedEntry(
@@ -136,6 +176,15 @@ def mac_for(ip: str, arp_text: str) -> str | None:
             mac = normalise_mac(fields[3])
             return None if mac in (None, "00:00:00:00:00:00") else mac
     return None
+
+
+def _read_table(path: Path) -> str:
+    """Bytes, decoded with replacement (#260). An interface name is any
+    bytes but `/` and whitespace, so `read_text` could raise `ValueError`
+    on one that is not UTF-8, and a traceback out of a preflight is not a
+    refusal. Both tables go through the same decoding, so a replaced byte in
+    a name still matches itself across the two files."""
+    return path.read_bytes().decode("utf-8", "replace")
 
 
 def _nudge(ip: str) -> None:
@@ -163,16 +212,17 @@ def gateway_mac(
     """
     send = nudge if nudge is not None else _nudge
     try:
-        route_text = route.read_text()
+        route_text = _read_table(route)
     except OSError as exc:
         raise GatewayUnknown(f"{route} cannot be read: {exc}") from exc
-    ip = default_gateway(route_text)
-    if ip is None:
+    found = default_gateway(route_text)
+    if found is None:
         raise GatewayUnknown("this machine has no IPv4 default route")
+    iface, ip = found
 
     def read_arp() -> str | None:
         try:
-            return mac_for(ip, arp.read_text())
+            return mac_for(ip, _read_table(arp), iface)
         except OSError as exc:
             raise GatewayUnknown(f"{arp} cannot be read: {exc}") from exc
         except PinnedEntry as exc:
@@ -195,7 +245,7 @@ def gateway_mac(
             return mac
         if clock() >= deadline:
             raise GatewayUnknown(
-                f"the default gateway {ip} has no entry in the ARP table, so this "
-                f"network cannot be identified"
+                f"the default gateway {ip} has no entry in the ARP table for "
+                f"{iface}, so this network cannot be identified"
             )
         sleep(_POLL_S)

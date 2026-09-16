@@ -18,13 +18,15 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
-from hitchrail.claude_ipc import URL_BASE, _valid_bridge_id
-from hitchrail.config import ConfigError
+from hitchrail.claude_ipc import URL_BASE, _valid_bridge_id, launch_argv
+from hitchrail.config import Config, ConfigError
 from hitchrail.hostnames import is_valid_host, normalise_host, normalise_origin
 from hitchrail.procs import ProcTable, parse_ps
+from hitchrail.roots import Root, qualify
 from hitchrail.security import parse_host
 from hitchrail.tmuxnames import sanitize, unsanitize
 from support import make_config
@@ -85,6 +87,45 @@ def test_sanitize_is_injective(batch: list[str]) -> None:
     """
     unique = set(batch)
     assert len({sanitize(n) for n in unique}) == len(unique)
+
+
+# Identifiers as both parsers admit them: a spaceless label, `~`, and a
+# folder that may hold single interior spaces (#173). Drawn from an alphabet
+# dense in the characters `ps` cannot tell apart.
+_labels = st.from_regex(r"\A[a-c0-1][a-c0-1._-]{0,3}\Z")
+_folders = st.from_regex(r"\A[a-c0-1](?: ?[a-c0-1._-]){0,4}\Z")
+identifiers = st.builds(qualify, _labels, _folders)
+
+
+@given(batch=st.lists(identifiers, min_size=2, max_size=8, unique=True))
+@example(batch=["x~y", "a x~y"])
+@example(batch=["main~my app", "main~my"])
+def test_no_identifiers_argv_is_a_suffix_of_anothers(batch: list[str]) -> None:
+    """#271. `ps` joins argv with spaces, and `derive.find_detached` matches
+    an agent by the space joined suffix of its argv. So for two distinct
+    valid identifiers, neither's spawned command line may end with the
+    other's suffix, or one project's agent derives as the other's. The
+    proof rests on labels being spaceless (`roots.parse_root_argument`),
+    which is why the strategy admits a space only in the folder, and the
+    second example is the case that would fail if a label could hold one.
+    """
+    lines = {name: " ".join(launch_argv("agent", name)) for name in batch}
+    suffixes = {name: " ".join(launch_argv("agent", name)[1:]) for name in batch}
+    for a in batch:
+        for b in batch:
+            if a != b:
+                assert not lines[a].endswith(suffixes[b]), (a, b)
+
+
+def test_a_root_built_in_code_with_a_bad_label_is_refused_by_config() -> None:
+    """#271. Both parsers refuse `my lab`; a `Root` constructed directly
+    bypassed both, and its sessions then classified as foreign."""
+    with pytest.raises(
+        ConfigError, match=r"root label 'my lab' is not usable: contains a space"
+    ):
+        Config(roots=(Root(label="my lab", path=_SHARED_ROOT),))
+    with pytest.raises(ConfigError, match=r"root label 'a=b' is not usable"):
+        Config(roots=(Root(label="a=b", path=_SHARED_ROOT),))
 
 
 @given(name=st.text(alphabet="abc.:-~e ", min_size=0, max_size=8))

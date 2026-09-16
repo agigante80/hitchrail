@@ -83,14 +83,15 @@ the exposure plainly before choosing it:
   when the machine joins one you do not, and a laptop's whole job is joining
   other networks. `--expect-gateway-mac` is the one thing that will: it names
   the default gateway of the network you meant, and a start anywhere else,
-  or anywhere the gateway cannot be identified, refuses with exit 2 and the
-  unit stays stopped until you look (`ip neigh show default` or the router's
-  label gives you the address). It catches the cafe, the hotel and the
-  replaced router, and not an attacker on the LAN, who can present any MAC.
-  Checked once, when the unit starts: a machine that joins another network
-  while it is running is not noticed until the next start. `ip route show
-  default` names the gateway's address, and `ip neigh show` the MAC beside
-  it.
+  or anywhere the gateway cannot be identified, refuses and the unit stays
+  stopped until you look. It catches the cafe, the hotel and the replaced
+  router, and not an attacker on the LAN, who can present any MAC. Checked
+  once, when the unit starts: a machine that joins another network while
+  it is running is not noticed until the next start. To read the address
+  to expect: `ip route show default` names the gateway, and
+  `ip neigh show $(ip route show default | awk '{print $3}')` prints its
+  line, with the MAC after `lladdr`; the router's own label carries the
+  same address.
 
 That last point is why this is second rather than first. It is not less secure
 in the moment. It is a decision that silently stops being the one you made.

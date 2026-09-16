@@ -203,8 +203,9 @@ The effective configuration, for a person on a phone asking "what is this
 instance pointed at" without SSH. Every value is `{value, source}` where
 `source` is `flag`, `file`, `env` or `default`: `host`, `port`,
 `allow_hosts`, `allow_origins`, `self_project`, `agent_binary`,
-`session_prefix`, `tls` (the certificate's path, or null), the three memory
-figures, `config_file` and `state_file`.
+`session_prefix`, `tls` (the certificate's path, or null),
+`expect_gateway_mac` (the flag's value, normalised, or null), the three
+memory figures, `config_file` and `state_file`.
 `roots` is every configured root as `{label, path, enabled, editable,
 source}`, hidden ones included, with `hidden_roots` beside it; `stop_timeout`
 is `{value, source, editable}`, its source `state` when the interface set it.

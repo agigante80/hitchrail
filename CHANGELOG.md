@@ -33,10 +33,14 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 ## Unreleased
 
 Phase 20: the perimeter, hardened. Upgrading is safe with no action unless
-one of two refusals now names your configuration: a `--stop-timeout` above
-3600 seconds, or `--tls-cert` beside a plain `http://` `--allow-origin` off
+one of four refusals now names your configuration: a `--stop-timeout` above
+3600 seconds; `--tls-cert` beside a plain `http://` `--allow-origin` off
 loopback, which never worked (the `Secure` cookie was never sent back on that
-origin) and now says so at startup.
+origin) and now says so at startup; a config file whose DIRECTORY others can
+write to, refused like the file itself; or an `--expect-gateway-mac` that is
+not one of the four spellings of a MAC (`aa:bb:cc:dd:ee:ff`,
+`aa-bb-cc-dd-ee-ff`, `aabb.ccdd.eeff`, `aabbccddeeff`), which the check used
+to accept with stray characters around it.
 
 ### Fixed
 
@@ -76,6 +80,21 @@ of "no session Hitchrail can address"; the signal route refuses it as
 `owned_elsewhere` with the pid in a `server_pid` field, and the listing
 carries it as `foreign_server_pid`. An agent that outlived its pane under
 Hitchrail's own server is still detached and can still be ended.
+
+**The config file's remaining refusals are in words.** A label holding
+`=` refuses as a label rather than parsing as a different one; a NUL escape
+in a path and a file that is not UTF-8 refuse with exit 2 naming the file
+rather than a traceback; a config directory writable by others refuses
+naming the directory, since a private file in a shared directory is private
+until the next rename; and the state file is written through a fresh
+temporary name, so a symlink left at `state.tmp` in a writable state
+directory is no longer written through.
+
+**The network guard reads the gateway's entry on the route's interface.**
+With ethernet and wifi on one LAN the ARP table holds two entries for the
+gateway address, and the guard compared whichever the table listed first.
+It matches the interface the default route names now, and a table holding
+an interface name that is not UTF-8 is read rather than a traceback.
 
 **A foreign session name holding a newline could put somebody else's pane
 into your listing.** tmux 3.1 and earlier store a newline in a session name
