@@ -119,8 +119,14 @@ design section 7's rule holds for the list as for the row, and the bulk kill
 lives inside Stop all's wait as its escalation.
 
 ## Phase: Phase 14: The perimeter, chosen rather than assumed
-state: open
+state: done
 plan: docs/superpowers/plans/2026-09-14-hitchrail-phase-14-perimeter.md
+
+**Done, 2026-09-16, shipped as 0.8.0.** Every task landed. Each of the four
+batches went through the bounded review loop with the security lens; every
+loop stopped by its own rule and none on the trip wire, and every finding
+below high or medium became a ticket rather than a fix. Those tickets are the
+whole of the next phase, which is why it sits directly after this one.
 
 The operator chooses how this is reached and how it is proved, instead of
 being handed one answer. Every ticket here touches a security control, so each
@@ -152,6 +158,40 @@ edits on the machine and a UI can only toggle what is already in it.
 Done when a LAN deployment can be HTTPS without a second daemon, a person
 holding a token can get in without a saved link, and adding a folder does not
 mean editing a systemd unit.
+
+## Phase: Phase 20: The perimeter, hardened
+state: planned
+
+The second pass over what Phase 14 built, taken while the reasoning is
+fresh. Every ticket here is a finding from the review of that phase's own
+commits, code and security lenses, filed instead of fixed because the loop
+is bounded: a reviewer asked to find problems will find them, eventually in
+the fixes, so the loop stops and the remainder becomes work that is planned
+rather than work that happens to a fix commit.
+
+Ahead of Phase 15 on the second ordering rule, risk, and on the third, cost of
+delay. Risk: these are soft spots in the surfaces 0.8.0 shipped, a config
+file that draws the root boundary, a route that signals a pid, a guard that
+reads the network, and Phase 16 adds more perimeter on top of them. Cost of
+delay: the reviewers' scenarios are on the tickets now, verified against the
+code as it was; every week they age toward the state #153 reached, a ticket
+that asked for what had already shipped.
+
+Two shapes of ticket, and the priority says which. The P2s are things an
+operator can meet: a stop wait the page reports wrongly, a route that answers
+a 500 where the envelope was promised, a TLS deployment that is accepted and
+then silently fails, a settings write that re-reads the private key and lies
+about it, a guard the phase's out of scope rests on that a plausible edit
+walks around, and a pid route that checks the label and not the listing. The
+P3s are defence in depth on the same files, and one of them is a decision
+rather than work, carried as `needs-human`.
+
+Delivers: the perimeter Phase 14 drew, with its own review's findings closed
+or declined in writing.
+
+Done when every ticket the Phase 14 review filed is closed or declined with
+its reason on the ticket, and no refusal on those surfaces can be reached
+that is not in words.
 
 ## Phase: Phase 15: The package as strangers meet it
 state: planned
