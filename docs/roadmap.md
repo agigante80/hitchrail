@@ -29,10 +29,11 @@ every unfinished ticket somewhere explicit.
 
 Phases appear in the order they are meant to run. Three rules decide that
 order: dependency first, then risk where dependency allows a choice, then cost
-of delay, which has been invoked once, when Phase 12 jumped ahead of 9, 10 and
+of delay, which has been invoked twice: when Phase 12 jumped ahead of 9, 10 and
 11 because the wire format it changed was free to break that week and more
-expensive every week after. The next candidate for jumping the queue is argued
-against that one.
+expensive every week after, and when Phase 19 moved ahead of 16, 17 and 18 on
+2026-09-16 because every stop until then loses the wrap up. The next candidate
+for jumping the queue is argued against those two.
 
 **Phases 1 to 10 and 12 closed before this format was adopted on 2026-09-11
 and are not written into it.** Rewriting finished work to look planned in a
@@ -212,6 +213,49 @@ Done when the PyPI page and the README agree, the licence is one clickable
 statement rather than four scattered ones, and a stranger's bug report can be
 answered from the journal.
 
+## Phase: Phase 19: Stop means wrap up
+state: planned
+
+A session stopped from a phone leaves the same record as one closed by hand.
+Cut out of Phase 11 on 2026-09-11.
+
+Stop today types `C-u`, `Escape`, `/exit`, `Enter` and nothing else: the agent
+is interrupted mid task and asked to exit, and whatever it knew about the work
+in flight leaves with it. The operator's stated model of Stop is "run the
+closing skill, summarise everything, then close the session", and the code did
+none of that. Decided over the concern that a typed instruction on the
+operator's behalf is impersonation: what keeps it relay is that the prompt is
+authored on the machine only, sent only on a tapped Stop, and sent with
+`send-keys -l`.
+
+A phase rather than a ticket for the reason Phase 16 is one: what it changes,
+not how big it is. It changes design section 4.3, the stop sequence, and it
+carries an open sub decision, the order in which the interrupt and the prompt
+are sent, that is the operator's to make.
+
+Moved ahead of 16, 17 and 18 on 2026-09-16, on the third ordering rule, cost
+of delay, invoked for the second time. Every stop tapped from a phone today
+loses the wrap up the operator's own model of Stop says should happen, and
+nothing in 16, 17 or 18 depends on it or is made cheaper by waiting. It sits
+after Phase 15 rather than before it because #167's logging is what makes
+the new stop sequence diagnosable when it is first watched on a real
+session: "was the prompt sent, and did the pane go idle" has to have an
+answer in the journal before the sequence is trusted.
+
+Delivers: a configured prompt sent before the exit sequence, the closing skill
+by default, with a per session wait for the pane to show an idle input box
+under a ceiling; and an opt in, off by default, that lets a stop ending on a
+prompt end the session anyway because the operator said so ahead of time.
+
+Done when a session stopped from the interface has run the closing skill
+before it exits, a stop that ends on a prompt still does nothing on its own
+unless the operator opted in before tapping, and `stop_prompt` cannot be set
+through any HTTP route.
+
+The deferral under "Deliberately later" still binds, and this phase is written
+against it rather than around it: the prompt is configuration on the machine,
+never text from the page, and the page's only verb is still Stop.
+
 ## Phase: Phase 16: What survives a reboot
 state: planned
 
@@ -303,40 +347,6 @@ file changes. `engine.py` is the other, and most of its length is comments
 recording footguns that cost real debugging to find. A split that moves lines
 without moving responsibility is refused; length is the trigger for looking,
 never the reason for cutting.
-
-## Phase: Phase 19: Stop means wrap up
-state: planned
-
-A session stopped from a phone leaves the same record as one closed by hand.
-Cut out of Phase 11 on 2026-09-11.
-
-Stop today types `C-u`, `Escape`, `/exit`, `Enter` and nothing else: the agent
-is interrupted mid task and asked to exit, and whatever it knew about the work
-in flight leaves with it. The operator's stated model of Stop is "run the
-closing skill, summarise everything, then close the session", and the code did
-none of that. Decided over the concern that a typed instruction on the
-operator's behalf is impersonation: what keeps it relay is that the prompt is
-authored on the machine only, sent only on a tapped Stop, and sent with
-`send-keys -l`.
-
-A phase rather than a ticket for the reason Phase 16 is one: what it changes,
-not how big it is. It changes design section 4.3, the stop sequence, and it
-carries an open sub decision, the order in which the interrupt and the prompt
-are sent, that is the operator's to make.
-
-Delivers: a configured prompt sent before the exit sequence, the closing skill
-by default, with a per session wait for the pane to show an idle input box
-under a ceiling; and an opt in, off by default, that lets a stop ending on a
-prompt end the session anyway because the operator said so ahead of time.
-
-Done when a session stopped from the interface has run the closing skill
-before it exits, a stop that ends on a prompt still does nothing on its own
-unless the operator opted in before tapping, and `stop_prompt` cannot be set
-through any HTTP route.
-
-The deferral under "Deliberately later" still binds, and this phase is written
-against it rather than around it: the prompt is configuration on the machine,
-never text from the page, and the page's only verb is still Stop.
 
 ## Phase: Backlog
 state: backlog
