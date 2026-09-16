@@ -426,7 +426,7 @@ def create_app(
             # be.
             return _error(401, "unauthorized", "a valid token is required")
         response = JSONResponse({"ok": True})
-        sec.set_token_cookie(response, config.token, secure=config.tls)
+        sec.set_token_cookie(response, config.token, secure=config.cookie_is_secure)
         return response
 
     async def start(request: Request) -> Response:

@@ -402,9 +402,18 @@ def set_token_cookie(response: Response, token: str, *, secure: bool) -> None:
     `POST /api/grant` in `server.py` sets it, and the query grant used to until
     #115. A cookie that differed between callers would be a security control
     with two definitions, which is why this stayed one function even now that
-    the second carrier is gone. `secure` is `Config.tls` and nothing else, for
-    the reason in `TokenMiddleware`'s docstring: over plain HTTP on a LAN a
-    `Secure` cookie is never sent back, and the tool silently stops working.
+    the second carrier is gone.
+
+    `secure` is `Config.cookie_is_secure`, which is our own TLS OR a
+    deployment where every non loopback origin the operator configured is
+    https (#269, decided by the operator on 2026-09-16). It used to be
+    `Config.tls` alone, and behind a TLS terminating proxy that left the
+    cookie without `Secure`, so the browser also offered it to
+    `http://box.lan` on any port: cookies are not port scoped. It is still
+    false for a plain HTTP LAN deployment, for the reason in
+    `TokenMiddleware`'s docstring: a `Secure` cookie there is never sent
+    back and the tool silently stops working.
+
     Keyword only, so a caller cannot pass it by accident in the token's place.
     """
     response.set_cookie(

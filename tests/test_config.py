@@ -1219,7 +1219,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 608 for #265: the ceiling, and the sentence on why a browser fires
         # a timeout above 2^31-1 ms at once.
         # And to 627 for #268: TLS on beside a plain http origin refuses.
-        "config.py": 630,
+        # 674 for #269: `cookie_is_secure`, the rule the operator decided
+        # (our own TLS, or a proxy deployment whose every non loopback origin
+        # is https) with the two failures it sits between written down.
+        "config.py": 674,
         # 460 for #123, #154 and #238: `--config`, `--session-prefix` and the
         # source tagging the settings page shows, which is one function
         # reading the flags back out of argv. Nothing here parses a value
@@ -1266,7 +1269,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # for it, which the rule beside the exemption requires of every entry.
         # 436 to 440 for #152: the cookie's `Secure` flag is `Config.tls`,
         # and the paragraph on why not behind a proxy.
-        "security.py": 440,
+        # 449 for #269: the cookie's rule and the two deployments it sits
+        # between, written where the cookie is set rather than in a ticket.
+        "security.py": 449,
         # #154, #238: the operator's file and Hitchrail's state file, one
         # module because the split between them IS the security argument in
         # its docstring; over by the ceiling's four lines (#265).

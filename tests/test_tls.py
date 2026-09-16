@@ -273,6 +273,59 @@ async def test_the_cookie_is_secure_exactly_when_we_terminate_tls(
     assert ("secure" in header.split("; ")) is tls, header
 
 
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("origins", "secure"),
+    [
+        (("https://box.lan",), True),
+        (("https://box.lan", "http://localhost:3000"), True),
+        (("https://box.lan", "http://other.lan"), False),
+        (("http://box.lan",), False),
+        ((), False),
+    ],
+    ids=["proxy", "proxy-and-a-local-dev-server", "one-plain-origin", "plain-lan", "none"],
+)
+async def test_the_cookie_is_secure_behind_a_proxy_whose_origins_are_all_https(
+    tmp_path: pathlib.Path, origins: tuple[str, ...], secure: bool
+) -> None:
+    """#269, decided by the operator on 2026-09-16: `Secure` when we
+    terminate TLS, or when every non loopback origin configured is https.
+
+    No `--tls-cert` in any of these: the server speaks HTTP and something in
+    front of it may speak HTTPS. With every configured origin https, the
+    browser reached the proxy over TLS and the flag costs nothing; without
+    it the cookie is offered to `http://box.lan` on any port, because
+    cookies are not port scoped. One plain origin turns it off, because that
+    origin is a browser that would never send the cookie back. A loopback
+    origin is ignored: `http://localhost` is a secure context in Chrome and
+    Firefox, and a developer's own dev server must not disarm the flag for
+    everybody else.
+    """
+    (tmp_path / "root").mkdir(exist_ok=True)
+    config = make_config(
+        tmp_path / "root",
+        host="0.0.0.0",
+        token="s3cret",
+        extra_origins=origins,
+        sessions_dir=tmp_path / ".s",
+        agent_config_path=NO_AGENT_CONFIG,
+    )
+    assert config.tls is False, "this rule is about the deployment where we do NOT"
+    engine = make_engine(config, FakeTmux(), procs_from(""), PLENTY)
+    app = create_app(engine=engine, config=config, bus=EventBus())
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://localhost"
+    ) as c:
+        r = await c.post(
+            "/api/grant",
+            json={"token": "s3cret"},
+            headers={"host": "localhost", "origin": "http://localhost:8787"},
+        )
+    assert r.status_code == 200
+    header = r.headers["set-cookie"].lower()
+    assert ("secure" in header.split("; ")) is secure, header
+
+
 def test_the_banner_prints_links_in_the_servers_scheme(
     tmp_path: pathlib.Path, certificate: tuple[pathlib.Path, pathlib.Path]
 ) -> None:

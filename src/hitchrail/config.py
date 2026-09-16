@@ -112,6 +112,19 @@ def remote_reach(
     return None
 
 
+def _origin_parts(entry: str) -> tuple[str, str] | None:
+    """An allowed origin as `(scheme, host)`, or None when it is loopback or
+    unparseable. One reader for both, so the cookie rule and the TLS refusal
+    agree about what counts as somebody else's browser (#269)."""
+    try:
+        parts = urlsplit(entry.strip().rstrip("/").lower())
+    except ValueError:
+        return None
+    if not parts.hostname or is_loopback_host(parts.hostname):
+        return None
+    return parts.scheme, parts.hostname
+
+
 # The one setting that may arrive in the environment, and the only one that
 # ever will. Every other option stays a flag: this is not the start of an
 # environment based configuration layer.
@@ -295,6 +308,37 @@ class Config:
     @property
     def scheme(self) -> str:
         return "https" if self.tls else "http"
+
+    @property
+    def cookie_is_secure(self) -> bool:
+        """Whether the token cookie carries `Secure` (#269).
+
+        `tls` alone was the rule, and behind a TLS terminating proxy that is
+        too narrow: the operator gives `--allow-origin https://box.lan` and
+        binds plain HTTP on loopback or the LAN, so the cookie went out
+        without `Secure` and the browser then offered it to
+        `http://box.lan` on ANY port, since cookies are not port scoped.
+
+        The rule is: our own TLS, or every non loopback origin the operator
+        configured is https. That second half is exactly the proxy
+        deployment, where nothing is lost by the flag because no http origin
+        is allowed to reach us anyway. It stays FALSE for a plain HTTP LAN
+        deployment, which is the failure the old rule was avoiding: a
+        `Secure` cookie there is never sent back and the tool silently stops
+        working, and `--allow-origin http://box.lan` is how that deployment
+        is spelled.
+
+        Loopback origins are ignored for the test. `http://localhost` is a
+        secure context in Chrome and Firefox, which send a `Secure` cookie
+        on it, and a developer's own `http://127.0.0.1` beside a proxy
+        origin must not turn the flag off for everybody else. Safari does
+        not, which is why a loopback-only deployment (no proxy origin at
+        all) still gets `False` from the first half of the rule.
+        """
+        if self.tls:
+            return True
+        proxied = [parts for entry in self.extra_origins if (parts := _origin_parts(entry))]
+        return bool(proxied) and all(scheme == "https" for scheme, _ in proxied)
 
     def _check_tls(self) -> None:
         """One flag without the other is a configuration error, not half a

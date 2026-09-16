@@ -156,10 +156,11 @@ phase's objective admits.
       through the repaint, and the empty state stops naming roots it cannot
       show.
 
-- [ ] **Task 102, #269.** MOVED OUT of this batch's ordering only: it is a
-      decision for the operator, not work, and the phase cannot close until
-      it is taken. Whichever way it goes, the rule and its reason go into
-      `security.set_token_cookie` and `docs/api.md`.
+- [x] **Task 102, #269.** Decided by the operator on 2026-09-16: `Secure`
+      when we terminate TLS, or when every non loopback `--allow-origin` is
+      https. `Config.cookie_is_secure` carries the rule, its reason and the
+      two failures it sits between; the cookie test is parametrised over
+      five deployments.
 
 - [ ] **Task 103, #237.** MOVED OUT to Backlog, issue #237. It is the mutation
       sweep over the five modules Phase 10 did not reach, about 139 survivors

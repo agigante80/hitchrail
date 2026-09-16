@@ -81,6 +81,15 @@ of "no session Hitchrail can address"; the signal route refuses it as
 carries it as `foreign_server_pid`. An agent that outlived its pane under
 Hitchrail's own server is still detached and can still be ended.
 
+**The session cookie is `Secure` behind a TLS terminating proxy.** It was
+`Secure` only when Hitchrail itself held the certificate, so in the proxy
+deployment (`--allow-origin https://box.lan`, no `--tls-cert`) the browser
+also offered the cookie to `http://box.lan`, on any port, because cookies
+are not port scoped. It is `Secure` now when every non loopback allowed
+origin is https, which is exactly that deployment and costs nothing there.
+A plain HTTP deployment is unchanged: the flag stays off, because a browser
+would never send the cookie back. Loopback origins count for neither.
+
 **The config file's remaining refusals are in words.** A label holding
 `=` refuses as a label rather than parsing as a different one; a NUL escape
 in a path and a file that is not UTF-8 refuse with exit 2 naming the file
