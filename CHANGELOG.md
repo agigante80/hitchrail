@@ -32,8 +32,18 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+## 0.8.0 - 2026-09-16
+
 Phase 14: the perimeter, chosen rather than assumed. Upgrading is safe with
-no action: every flag still works and still wins.
+no action: every flag still works and still wins. Two things worth knowing
+before you do: `--stop 60` no longer stands in for `--stop-timeout 60`
+(flags are exact now), and a config file writable by others, or owned by
+somebody else, refuses to start.
+
+Still not protected, and stated so it is read rather than discovered:
+Hitchrail does not sandbox the sessions it starts, and over plain HTTP on a
+LAN the token crosses the network in cleartext, which `--tls-cert` now ends
+from the server itself.
 
 ### Added
 
