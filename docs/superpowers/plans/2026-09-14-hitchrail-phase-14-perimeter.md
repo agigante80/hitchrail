@@ -184,17 +184,17 @@ before `Config` does.
 
 ## Done looks like
 
-- [ ] Every task above is ticked, or is marked MOVED OUT with the issue that
+- [x] Every task above is ticked, or is marked MOVED OUT with the issue that
       carries it.
-- [ ] The premortem's four rules each have the assertion named below, in the
+- [x] The premortem's four rules each have the assertion named below, in the
       suite, and two of them run on a live socket or a real process.
-- [ ] `docs/api.md` documents every route, field and code this phase added,
+- [x] `docs/api.md` documents every route, field and code this phase added,
       held to the server both ways.
-- [ ] `README.md` and `docs/guides/phone-access.md` state the limitations as
+- [x] `README.md` and `docs/guides/phone-access.md` state the limitations as
       they are after this phase: HTTPS from the server itself as route 2, the
       config file as where roots live, the signal route as what a detached
       row can do.
-- [ ] Design section 5.2b no longer says pid signalling does not exist and
+- [x] Design section 5.2b no longer says pid signalling does not exist and
       states what constrains it; section 5's control count and the two
       documents that count it agree (#174 is Phase 17 and must not be made
       worse here).
