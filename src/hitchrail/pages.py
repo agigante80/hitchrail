@@ -1,4 +1,4 @@
-"""Serving the two HTML pages and the two assets.
+"""Serving the HTML pages and the assets.
 
 Lifted out of `server.py` when the grant page took that file past the size
 guideline. It is a real seam and not a line count: reading a file off disk and
@@ -30,6 +30,7 @@ ASSETS = {
     "/app.css": ("app.css", "text/css; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/logs.js": ("logs.js", "text/javascript; charset=utf-8"),
+    "/settings.js": ("settings.js", "text/javascript; charset=utf-8"),
     # #160. The mark, the tile a phone makes of it, and the manifest that
     # names the tile. Served without a token, the only assets that are: see
     # `security.UNAUTHENTICATED_ASSETS` for the argument.
@@ -102,6 +103,12 @@ async def logs_page(request: Request) -> Response:
     reads files it chose, never files a request chose.
     """
     return FileResponse(WEB / "logs.html", media_type=HTML, headers=_REVALIDATE)
+
+
+async def settings_page(request: Request) -> Response:
+    """The settings page (#238), behind the token like `/`. It fetches
+    `/api/config` itself; nothing about the machine is in this file."""
+    return FileResponse(WEB / "settings.html", media_type=HTML, headers=_REVALIDATE)
 
 
 def asset_route(path: str) -> Callable[[Request], Awaitable[Response]]:

@@ -114,7 +114,12 @@ src/hitchrail/
   roots.py         what a root IS, and what a qualified project identifier
                    IS: `<root-label>~<folder>`, injective by allowlist
   config.py        the dataclass, its refusals, and the derived allowlists
+  settings.py      the operator's config file, read once and never written,
+                   and Hitchrail's state file beside it, which can only hide
   discovery.py     root scanning, folder creation, path safety
+  gateway.py       which network this is, by the default gateway's MAC: the
+                   unit's guard against serving where it was carried by
+                   accident, and not against an attacker
   tmuxnames.py     what a valid tmux name IS, and what a tmux invocation
                    looks like: pure strings, no server
   tmux.py          the tmux adapter and its footguns

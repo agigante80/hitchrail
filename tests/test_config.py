@@ -1076,7 +1076,17 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # the logs page both climb, lifted out of `logs` with its reasons.
         # 1239 to 1248 for round 1 of the Phase 13 review: the ceiling prune
         # from a snapshot, with the race it replaces written where it was.
-        "engine.py": 1248,
+        # 1248 to 1265 for #154 and #238: the preferences held on the engine,
+        # and the sentence saying why name resolution keeps every root.
+        # 1279 after the security audit of #154: an operator disabled root
+        # refuses Start, with the sentence on why hiding does not.
+        # 1279 to 1420 for #107: `signal_detached`, the one destructive
+        # path scoped by a check, with the order that makes the check sound
+        # written where it is enforced. Phase 18 carries the split.
+        # And to 1441 after round 1 of its review: the label check moved here
+        # from `_require_addressable`, and two guards that read the table
+        # refuse when it could not be read.
+        "engine.py": 1443,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -1150,7 +1160,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 543 to 553 for #175: the empty-name guard and the note saying it
         # defends a format change rather than a defect, measured against tmux
         # 3.4, so nobody goes looking for a bug that is not there.
-        "tmux.py": 553,
+        # 553 to 556 for #173: the pane map asks `could_be_ours` rather than
+        # "has a space", and the comment says why the question changed.
+        "tmux.py": 556,
         # 413, and thirteen lines over the guideline is not a second job. #18
         # already took the host vocabulary out of this file, and what is left
         # is one dataclass and its startup refusals, which is one thing. The
@@ -1175,7 +1187,28 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # whole growth, comment included, and the comment is what stops it
         # drifting back: two literals of one variable name in two layers is how a
         # scrub stops scrubbing without anything going red.
-        "config.py": 507,
+        # 518 to 520 for #154 and #238: `state_path` and `sources`, each with
+        # the sentence saying why it is not a control.
+        # 523: `config_path`, the file that was read, for the settings page.
+        # 523 to 575 for #152: the TLS pair, loaded once at construction so
+        # a certificate that cannot be read refuses BEFORE the bind, with
+        # the paragraph on why that is exit 2 and not uvicorn's retried 1.
+        # 575 to 594 for #207: the expected gateway MAC, normalised once.
+        "config.py": 594,
+        # 460 for #123, #154 and #238: `--config`, `--session-prefix` and the
+        # source tagging the settings page shows, which is one function
+        # reading the flags back out of argv. Nothing here parses a value
+        # twice; `settings.py` is where the file is read.
+        # 461 to 490 for #152: two flags, and the uvicorn call spelling the
+        # pair out as `None` rather than omitting it.
+        # 490 to 527 for #207: the flag and the preflight arm that refuses
+        # the wrong network, with the sentence on why the seam is resolved
+        # per call. The reading itself is `gateway.py`.
+        # 551 after the Phase 14 batch 3 review: the gateway verdict is its
+        # own function with two exit codes, mismatch and not yet.
+        # 556 after 8601915: the pinned entry's own exit code, and the words
+        # for it. Bumped a commit late, which #261 notes.
+        "cli.py": 556,
         # 409, nine lines over, down from 542. #115 deleted the `?token=`
         # carrier: 135 lines once the two blocks inside `TokenMiddleware`
         # that only served it are counted.
@@ -1204,7 +1237,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # beside them, which the set's own rule requires of every entry.
         # 418 to 436 for #160: the unauthenticated asset set and the argument
         # for it, which the rule beside the exemption requires of every entry.
-        "security.py": 436,
+        # 436 to 440 for #152: the cookie's `Secure` flag is `Config.tls`,
+        # and the paragraph on why not behind a proxy.
+        "security.py": 440,
         # rather than one. A refusal handler is the shape this file is made of.
         # 513 to 517 for #120. The listing payload reports every configured
         # root as a labelled list rather than one path string, and the comment
@@ -1237,7 +1272,13 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # a page route resolves a name through the API's own function. #205
         # carries the split and the seam is unchanged: this is a handler.
         # +7 for #249: the root_unavailable arm on both logs routes.
-        "server.py": 694,
+        # +137 for #154 and #238: the settings routes, the config view and
+        # the editable literal beside `MAX_BODY_BYTES`. #205 is still the
+        # split, and the settings routes are its first candidate.
+        # 844 after round 1 of the Phase 14 review: the null refusal and the
+        # one call that applies both halves of a settings body together.
+        # +40 for #107: two routes and every refusal's code.
+        "server.py": 887,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"
@@ -1369,7 +1410,7 @@ def test_every_environment_variable_the_product_reads_is_scrubbed() -> None:
     # The names as they appear in the source, which is how they are written in
     # `conftest.AMBIENT_ENV` too. A literal string here would pass while the
     # constant it duplicates drifted.
-    scrubbed = {"TOKEN_ENV", "JOURNAL_ENV"}
+    scrubbed = {"TOKEN_ENV", "JOURNAL_ENV", "CONFIG_HOME_ENV"}
     unscrubbed = {name: where for name, where in read.items() if name not in scrubbed}
     assert not unscrubbed, (
         f"environment variables read by the product and not scrubbed by "

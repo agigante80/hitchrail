@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import socket
+import ssl
 import threading
 import time
 from collections.abc import Iterator
@@ -372,3 +373,81 @@ def test_a_query_token_now_reaches_the_access_log_and_that_is_correct(tmp_path: 
         "the query string is passed through untouched; if this fails somebody "
         "has restored the scrub, which #115 removed with the carrier it served"
     )
+
+
+# -- #152: TLS from the server itself, on a real socket ----------------------
+
+
+def test_a_grant_and_a_start_go_through_our_own_tls(tmp_path: Path) -> None:
+    """Premortem 1 of the Phase 14 plan, which only a socket can see.
+
+    The hermetic tier proves the derivation says `https`; it cannot prove a
+    browser's request over HTTPS is accepted, because an ASGITransport
+    carries whatever scheme the test writes. Here uvicorn terminates TLS
+    with a certificate minted for this test, `httpx` verifies it, the grant
+    sets a `Secure` cookie, and a START goes through with that cookie and
+    the `https` origin: the request the origin check refused when the
+    derivation said `http`.
+    """
+    from conftest import FakeTmux, ScriptedProcs
+    from support import make_certificate
+    from test_api import NO_AGENT_CONFIG, PLENTY, STARTED_PS, make_engine
+
+    cert, key = make_certificate(tmp_path)
+    (tmp_path / "root" / "network").mkdir(parents=True)
+    port = free_port()
+    config = make_config(
+        tmp_path / "root",
+        host="127.0.0.1",
+        port=port,
+        token=TOKEN,
+        tls_cert=cert,
+        tls_key=key,
+        sessions_dir=tmp_path / ".s",
+        agent_config_path=NO_AGENT_CONFIG,
+    )
+    engine = make_engine(config, FakeTmux(), ScriptedProcs("", STARTED_PS), PLENTY)
+    app = create_app(engine=engine, config=config, bus=EventBus())
+    server = uvicorn.Server(
+        uvicorn.Config(
+            app,
+            host="127.0.0.1",
+            port=port,
+            log_level="warning",
+            ssl_certfile=str(cert),
+            ssl_keyfile=str(key),
+        )
+    )
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    try:
+        deadline = time.monotonic() + 10
+        while not server.started and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert server.started, "uvicorn did not start with the certificate"
+        base = f"https://127.0.0.1:{port}"
+        origin = {"Host": "127.0.0.1", "Origin": base}
+        trust = ssl.create_default_context(cafile=str(cert))
+        with httpx.Client(verify=trust, timeout=TIMEOUT) as client:
+            # Plain HTTP on the TLS port is not served: the failure that must
+            # never happen is HTTP on the port the operator believed was TLS.
+            with pytest.raises(httpx.HTTPError):
+                httpx.get(f"http://127.0.0.1:{port}/api/projects", timeout=TIMEOUT)
+            granted = client.post(f"{base}/api/grant", json={"token": TOKEN}, headers=origin)
+            assert granted.status_code == 200, granted.text
+            assert "secure" in granted.headers["set-cookie"].lower().split("; ")
+            assert TOKEN_COOKIE in client.cookies
+            # An `http` origin is refused by OUR check, so the derivation is
+            # what is being tested and not the transport alone.
+            wrong = client.post(
+                f"{base}/api/sessions/main~network",
+                headers={"Host": "127.0.0.1", "Origin": f"http://127.0.0.1:{port}"},
+            )
+            assert wrong.status_code == 403
+            assert wrong.json()["code"] == "origin_rejected"
+            started = client.post(f"{base}/api/sessions/main~network", headers=origin)
+            assert started.status_code == 201, started.text
+            assert started.json()["state"] == "running"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)

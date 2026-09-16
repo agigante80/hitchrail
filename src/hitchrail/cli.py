@@ -14,7 +14,7 @@ from urllib.parse import quote
 import uvicorn
 from starlette.applications import Starlette
 
-from hitchrail import __version__
+from hitchrail import __version__, gateway, settings
 from hitchrail.config import (
     TOKEN_ENV,
     Config,
@@ -50,6 +50,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="hitchrail",
         description="Start and stop headless Claude Code sessions across a folder of projects.",
+        # #238. `flags_given` reads the option strings back out of argv to
+        # say where a value came from, and an abbreviation argparse would
+        # accept (`--stop 60`) is a spelling that scan cannot see. Exact
+        # names only, which is what every document here uses anyway.
+        allow_abbrev=False,
     )
     # **`label=path`, repeatable, and there is no default.** #119 made a
     # project's identifier `<root-label>~<folder>`, so a root without a label
@@ -65,6 +70,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         type=_root_argument,
         metavar="LABEL=PATH",
         help="a labelled folder holding projects, as label=path; repeatable",
+    )
+    # #154. The file is the other door for roots. `--root` on the command
+    # line still wins, outright: a flag beside a file does not add to it.
+    parser.add_argument(
+        "--config",
+        default=None,
+        type=Path,
+        metavar="FILE",
+        help="the config file; default ~/.config/hitchrail/config.toml",
     )
     parser.add_argument("--host", default="127.0.0.1", help="address to bind")
     parser.add_argument("--port", default=8787, type=int)
@@ -109,6 +123,41 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     # in v1 deliberately: they are a safety net rather than a preference, and
     # an operator who wants a different one is usually asking for a machine
     # with more memory.
+    # #152. TLS from the server itself, so a LAN deployment needs no second
+    # daemon. Both or neither, refused in `Config` before the bind.
+    parser.add_argument(
+        "--tls-cert",
+        default=None,
+        type=Path,
+        metavar="FILE",
+        help="a PEM certificate; serve HTTPS with it. Needs --tls-key",
+    )
+    parser.add_argument(
+        "--tls-key",
+        default=None,
+        type=Path,
+        metavar="FILE",
+        help="the PEM private key for --tls-cert",
+    )
+    # #207. The wrong network guard: the unit stays stopped when the default
+    # gateway is not the one named here. Off when absent.
+    parser.add_argument(
+        "--expect-gateway-mac",
+        default=None,
+        metavar="MAC",
+        help="refuse to start unless the default gateway has this MAC address: a guard "
+        "against a laptop serving on a network it joined by accident. Unset, off",
+    )
+    parser.add_argument(
+        "--session-prefix",
+        # `None` rather than "hr-", so the file's value is used when the flag
+        # is absent and the flag still wins when it is given (#123).
+        default=None,
+        metavar="PREFIX",
+        help="what every tmux session this instance creates is named with, and the "
+        "only sessions it will ever stop; default hr-. Two instances sharing a tmux "
+        "server need two prefixes, or each can stop the other's agents",
+    )
     parser.add_argument(
         "--stop-timeout",
         default=30,
@@ -116,7 +165,28 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="seconds to wait for a graceful stop before reporting it timed out",
     )
     parser.add_argument("--version", action="version", version=f"hitchrail {__version__}")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    args.given = flags_given(parser, argv)
+    return args
+
+
+def flags_given(parser: argparse.ArgumentParser, argv: list[str]) -> frozenset[str]:
+    """The destinations whose flag appears in argv, `--x v` and `--x=v` alike.
+
+    A value equal to the default is not the same as a default: `--stop-timeout
+    30` is the operator pinning it, and the settings page must say `flag` and
+    refuse to write over it. argparse does not record which is which, so this
+    reads the tokens. `--` ends the options, as it does for argparse.
+    """
+    names = {opt: action.dest for action in parser._actions for opt in action.option_strings}
+    given: set[str] = set()
+    for word in argv:
+        if word == "--":
+            break
+        dest = names.get(word.split("=", 1)[0])
+        if dest is not None:
+            given.add(dest)
+    return frozenset(given)
 
 
 # systemd sets this in a spawned service's environment when it has connected
@@ -169,8 +239,52 @@ def build_config(args: argparse.Namespace) -> Config:
         args.host, tuple(args.allow_hosts), tuple(args.allow_origins)
     ):
         token = secrets.token_urlsafe(24)
+    config_path = args.config or settings.default_config_path()
+    try:
+        file_settings = settings.read_config_file(config_path)
+    except settings.SettingsError as exc:
+        raise ConfigError(str(exc)) from exc
+    # The flags win outright (#154): a root the operator did not name on this
+    # command line appearing anyway is the surprise that matters on a tool
+    # that spawns agents.
+    roots = tuple(args.roots) if args.roots else file_settings.roots
+    # `is not None`, not truthiness: `--session-prefix ""` must reach the
+    # blank refusal in `Config` rather than fall through to the default.
+    prefix = args.session_prefix
+    if prefix is None:
+        prefix = file_settings.session_prefix
+    if prefix is None:
+        # The dataclass default stays the one place "hr-" is spelled.
+        prefix = Config.session_prefix
+    given: frozenset[str] = getattr(args, "given", frozenset())
+
+    def source(dest: str, from_file: bool = False) -> str:
+        return "flag" if dest in given else "file" if from_file else "default"
+
+    sources = {
+        "roots": source("roots", from_file=bool(file_settings.roots)),
+        "config": source("config"),
+        "host": source("host"),
+        "port": source("port"),
+        "token": "flag" if args.token else "env" if os.environ.get(TOKEN_ENV) else "generated",
+        "extra_hosts": source("allow_hosts"),
+        "extra_origins": source("allow_origins"),
+        "self_project": source("self_project"),
+        "agent_binary": source("agent_binary"),
+        "session_prefix": source("session_prefix", file_settings.session_prefix is not None),
+        "stop_timeout": source("stop_timeout"),
+        "tls": source("tls_cert"),
+        "expect_gateway_mac": source("expect_gateway_mac"),
+    }
     return Config(
-        roots=tuple(args.roots),
+        roots=roots,
+        state_path=settings.state_path_for(config_path),
+        config_path=config_path,
+        sources=sources,
+        session_prefix=prefix,
+        tls_cert=args.tls_cert,
+        tls_key=args.tls_key,
+        expect_gateway_mac=args.expect_gateway_mac,
         host=args.host,
         port=args.port,
         token=token,
@@ -226,7 +340,7 @@ def banner(config: Config) -> str:
     # costs nobody anything, which is the argument #21 settled the design on.
     fragment = "" if in_journal else f"#token={quote(config.token, safe='')}"
     lines += [
-        f"    http://{h}:{config.port}/grant{fragment}"
+        f"    {config.scheme}://{h}:{config.port}/grant{fragment}"
         for h in reachable
         if h not in {"::1", "[::1]"}
     ]
@@ -323,8 +437,59 @@ def preflight(
     return problems
 
 
+EXIT_REFUSED = 2
+EXIT_TRANSIENT = 3
+
+
+def gateway_verdict(
+    config: Config, gateway_mac: Callable[[], str] | None = None
+) -> tuple[int, str] | None:
+    """`None` to start; else the exit code and the sentence for the journal.
+
+    Resolved per call, for the reason `preflight`'s `look` gives: a default
+    bound at definition time is what a test's monkeypatch cannot reach, and
+    the first version of the exit 2 test read this machine's real tables and
+    passed because the developer's gateway happened not to match.
+    """
+    if config.expect_gateway_mac is None:
+        return None
+    read = gateway_mac if gateway_mac is not None else gateway.gateway_mac
+    try:
+        found = read()
+    except gateway.GatewayPinned as exc:
+        return (
+            EXIT_REFUSED,
+            f"--expect-gateway-mac is set and {exc}. Unpin it, or unset the flag",
+        )
+    except gateway.GatewayUnknown as exc:
+        return (
+            EXIT_TRANSIENT,
+            f"--expect-gateway-mac is set and the network cannot be identified yet: {exc}. "
+            "Refusing rather than guessing which network this is; the unit retries",
+        )
+    if found != config.expect_gateway_mac:
+        return (
+            EXIT_REFUSED,
+            f"the default gateway is {found}, not the expected "
+            f"{config.expect_gateway_mac}: this machine is on a different network "
+            "from the one --expect-gateway-mac names, so nothing is served. If "
+            "the network is right and the gateway changed, update the flag",
+        )
+    return None
+
+
 def _serve(app: Starlette, config: Config) -> int:
-    uvicorn.run(app, host=config.host, port=config.port, log_level="info")
+    # The paths as strings, or None: uvicorn reads `ssl_certfile=None` as
+    # "no TLS", and `Config._check_tls` has already loaded the pair once, so
+    # a failure here would be the file changing between the two reads.
+    uvicorn.run(
+        app,
+        host=config.host,
+        port=config.port,
+        log_level="info",
+        ssl_certfile=None if config.tls_cert is None else str(config.tls_cert),
+        ssl_keyfile=None if config.tls_key is None else str(config.tls_key),
+    )
     return 0
 
 
@@ -348,6 +513,20 @@ def main(argv: list[str] | None = None) -> int:
         for problem in problems:
             print(f"  - {problem}", file=sys.stderr)
         return 2
+    # #207. After the preflight, before the bind, and with two exit codes
+    # because the unit reads them differently. A MISMATCH is exit 2, the
+    # deliberate stop `RestartPreventExitStatus=2` keeps stopped until a
+    # person looks: this machine is on the wrong network. "Cannot tell", no
+    # default route yet or no ARP entry, is exit 3, the transient the unit
+    # retries within its budget: a boot where the DHCP lease lands after
+    # the first start is the measured case, and refusing it forever would
+    # leave the service dead on the right network (Phase 14 review, round
+    # 1). Both serve nothing: "cannot tell" is still a refusal, retried.
+    verdict = gateway_verdict(config)
+    if verdict is not None:
+        code, message = verdict
+        print(f"hitchrail: cannot start. {message}", file=sys.stderr)
+        return code
 
     text = banner(config)
     if text:

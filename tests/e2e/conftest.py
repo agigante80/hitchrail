@@ -158,6 +158,17 @@ while True:
     time.sleep(0.2)
 """
 
+# #107. An agent that ignores SIGTERM as well, so the signal route's
+# escalation, SIGKILL on a second explicit request, has something to
+# escalate against. SIGKILL cannot be ignored, which is the point of it.
+DEAF_BODY = """
+import signal
+signal.signal(signal.SIGINT, signal.SIG_IGN)
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+while True:
+    time.sleep(0.2)
+"""
+
 # Paints a bright Claude Code input row and leaves it there.
 #
 # #89: the graceful stop reads the box before it asks the agent to exit, and
@@ -380,6 +391,7 @@ class Harness:
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._meminfo = ""
+        self._ceiling_mb: int | None = None
         self.stopped_cleanly = True
         self.port = free_port()
         self.base = f"http://127.0.0.1:{self.port}"
@@ -441,6 +453,7 @@ class Harness:
         available_mb: int | None = None,
         stop_timeout: float = 30.0,
         ignores_graceful_stop: bool = False,
+        ignores_sigterm: bool = False,
         box_will_not_clear: bool = False,
         prompts_after_stop: bool = False,
         agent_exits_immediately: bool = False,
@@ -449,8 +462,16 @@ class Harness:
         also_in: dict[str, list[str]] | None = None,
         stopped_in: dict[str, list[str]] | None = None,
         ceiling_mb: int | None = None,
+        state_path: Path | None = None,
+        pinned_stop_timeout: bool = False,
     ) -> None:
         """Set the world up BEFORE the page loads.
+
+        `state_path` is where the settings page's choices persist (#154,
+        #238); `None` keeps them in memory for the life of the server, which
+        is what every test that does not restart wants. `pinned_stop_timeout`
+        tags the wait as given on the command line, so the page shows it
+        pinned.
 
         `ceiling_mb` is what every session's cgroup ceiling reads as (#243).
         Injected, never read from this machine: the development box carries
@@ -476,6 +497,8 @@ class Harness:
         body = SHIM_BODY
         if ignores_graceful_stop:
             body = STUBBORN_BODY
+        if ignores_sigterm:
+            body = DEAF_BODY
         if box_will_not_clear:
             body = UNCLEARABLE_BOX_BODY
         if prompts_after_stop:
@@ -566,6 +589,8 @@ class Harness:
             )
         )
 
+        sources = {"stop_timeout": "flag"} if pinned_stop_timeout else {}
+
         def build(protect: str | None) -> Config:
             if self.extra_roots:
                 return Config(
@@ -584,6 +609,8 @@ class Harness:
                     stop_timeout=stop_timeout,
                     token=token,
                     self_project=protect,
+                    state_path=state_path,
+                    sources=sources,
                 )
             return make_config(
                 self.root,
@@ -601,6 +628,8 @@ class Harness:
                 stop_timeout=stop_timeout,
                 token=token,
                 self_project=protect,
+                state_path=state_path,
+                sources=sources,
             )
 
         # Seeding runs through an engine with NO self_project and PLENTY of
@@ -712,13 +741,27 @@ class Harness:
             time.sleep(0.4)
 
         self._config = build(e2e_id(self_project) if self_project else None)
+        self._ceiling_mb = ceiling_mb
+        self.engine = self._build_engine()
+        self.start()
+
+    def _build_engine(self) -> Engine:
         # Read through the attribute rather than closed over, so `break_machine`
         # can make the reading unreadable mid test.
-        self.engine = Engine(
+        assert self._config is not None
+        return Engine(
             config=self._config,
             meminfo_fn=lambda: self._meminfo,
-            ceiling_fn=lambda pid: ceiling_mb,
+            ceiling_fn=lambda pid: self._ceiling_mb,
         )
+
+    def restart(self) -> None:
+        """The operator restarting Hitchrail (#238): a new engine over the
+        same configuration, which reads the state file again, on the same
+        port. The one thing a persistence claim can be proved against."""
+        self.stop_serving()
+        assert self.stopped_cleanly, "the old server did not stop, so a restart proves nothing"
+        self.engine = self._build_engine()
         self.start()
 
     # -- lifecycle ------------------------------------------------------
@@ -759,7 +802,8 @@ class Harness:
             env={k: v for k, v in os.environ.items() if k != "TMUX"},
             check=False,
         )
-        return result.stdout.split() if result.returncode == 0 else []
+        # `splitlines`: a session name can hold a space since #173.
+        return result.stdout.splitlines() if result.returncode == 0 else []
 
     def processes_still_naming(self, sock: str, grace: float = 0.0) -> list[str]:
         """Any process whose argv mentions this socket, tmux servers included.
@@ -801,6 +845,36 @@ class Harness:
             if args.strip() in wanted and pid.isdigit():
                 with contextlib.suppress(OSError):
                     os.kill(int(pid), signal.SIGTERM)
+
+    def reseed_detached(self, name: str) -> None:
+        """A new agent outside tmux under a name that already had one (#107):
+        the same shape `seed(detached=...)` spawns, after the first left."""
+        self._orphans.append(
+            subprocess.Popen(
+                claude_ipc.launch_argv(str(self._agent), e2e_id(name)),
+                cwd=self.root / e2e_name(name),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        )
+
+    def orphans_exited(self, timeout: float = 5.0) -> bool:
+        """Whether every process seeded as `detached` has left (#107): the
+        thing a signal test has to read from the machine, not from the row."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if all(orphan.poll() is not None for orphan in self._orphans):
+                return True
+            time.sleep(0.05)
+        return False
+
+    def end_orphans_now(self) -> None:
+        """Kill the seeded detached agents out from under the page, and reap
+        them, so the pid is gone by the time a tap lands (#107)."""
+        for orphan in self._orphans:
+            orphan.kill()
+            orphan.wait(timeout=5)
 
     def reap_orphans(self) -> None:
         """Anything spawned outside tmux is ours to clean up.
@@ -961,14 +1035,29 @@ class Harness:
             # the loop under them logs "Task was destroyed but it is pending"
             # once per test, which is noise that trains people to ignore
             # asyncio errors in this suite.
-            pending = asyncio.all_tasks(self._loop)
-            for task in pending:
-                task.cancel()
-            if pending:
-                self._loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-            # The fixture is function scoped, so an unclosed loop leaks its
-            # epoll and self pipe descriptors once per browser test.
-            self._loop.close()
+            loop = self._loop
+
+            def settle() -> None:
+                pending = asyncio.all_tasks(loop)
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                # The fixture is function scoped, so an unclosed loop leaks
+                # its epoll and self pipe descriptors once per browser test.
+                loop.close()
+
+            # From the fixture's finalizer this thread runs no loop and the
+            # old one can be driven here. From `restart`, called inside an
+            # async test, this thread's loop is RUNNING and asyncio refuses
+            # to run a second one on it, so the old loop is settled from a
+            # thread of its own; it is stopped, so any thread may drive it.
+            if asyncio._get_running_loop() is None:
+                settle()
+            else:
+                worker = threading.Thread(target=settle)
+                worker.start()
+                worker.join(timeout=10)
             self._loop = None
 
     # -- asking the machine, not the page -------------------------------

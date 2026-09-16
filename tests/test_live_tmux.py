@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
@@ -36,11 +37,12 @@ import pytest
 from hitchrail import claude_ipc, derive
 from hitchrail.claude_ipc import launch_argv
 from hitchrail.config import Config
+from hitchrail.engine import Engine
 from hitchrail.procs import snapshot
-from hitchrail.sessions import State
+from hitchrail.sessions import Gone, NoAgent, NotDetached, State
 from hitchrail.tmux import Tmux
 from hitchrail.tmuxnames import sanitize
-from support import make_config
+from support import DEFAULT_LABEL, make_config
 
 pytestmark = pytest.mark.live_tmux
 
@@ -94,6 +96,7 @@ PREFIX = "hrtest-"
 PROJECT_NAMESPACE = f"hrlt{os.getpid()}-"
 
 TIMEOUT = 10
+PLENTY = "MemTotal: 33554432 kB\nMemAvailable: 25198592 kB\n"
 
 
 def live_project(name: str) -> str:
@@ -134,7 +137,11 @@ class PrivateTmux:
     def sessions(self) -> list[str]:
         """What the server ACTUALLY holds, which is not what we asked for."""
         result = self.run("list-sessions", "-F", "#{session_name}")
-        return result.stdout.split() if result.returncode == 0 else []
+        # `splitlines`, not `split`: a session name can hold a space since
+        # #173, and splitting on whitespace read one session as two names
+        # neither of which `kill-session` could find, which leaked the
+        # server this teardown exists to prevent leaking.
+        return result.stdout.splitlines() if result.returncode == 0 else []
 
     def close(self) -> list[str]:
         """Kill what the SERVER says it has, not what we think we created.
@@ -234,12 +241,16 @@ def test_the_adapter_resolves_its_own_session_and_not_a_sibling(
     Both sessions exist; the adapter must find the exact one and not the
     sibling whose name it is a prefix of.
     """
-    server.new_session(f"{PREFIX}vessel")
-    server.new_session(f"{PREFIX}vessel-social")
+    # Qualified, as every session has been since #119: since #173 the pane
+    # map asks whether a name is one `session_name` could have made, and an
+    # unqualified one is not.
+    server.new_session(f"{PREFIX}main~vessel")
+    server.new_session(f"{PREFIX}main~vessel-social")
     tmux = adapter(server)
-    assert tmux.has_session("vessel") is True
-    assert tmux.pane_pid("vessel") is not None
-    assert tmux.panes().ours.keys() >= {f"{PREFIX}vessel", f"{PREFIX}vessel-social"}
+    assert tmux.has_session("main~vessel") is True
+    assert tmux.pane_pid("main~vessel") is not None
+    ours = tmux.panes().ours.keys()
+    assert ours >= {f"{PREFIX}main~vessel", f"{PREFIX}main~vessel-social"}
 
 
 def test_the_adapter_refuses_a_session_that_does_not_exist(
@@ -893,3 +904,162 @@ def test_the_session_prefix_and_the_project_namespace_are_not_the_same_thing() -
     """
     assert not PROJECT_NAMESPACE.startswith(PREFIX)
     assert not PREFIX.startswith(PROJECT_NAMESPACE)
+
+
+# -- #123: two prefixes on one server ---------------------------------------
+
+
+def _instance(server: PrivateTmux, tmp_path: Path, prefix: str, agent: Path) -> Engine:
+    """One Hitchrail, with its own root and its own prefix, on the SHARED
+    private socket: the arrangement #123 describes, two instances one per
+    tree, before one instance took several roots."""
+    root = tmp_path / prefix / "root"
+    (root / live_project("vessel")).mkdir(parents=True)
+    sessions = tmp_path / prefix / "sessions"
+    sessions.mkdir()
+    config = make_config(
+        root, agent_binary=str(agent), session_prefix=prefix, sessions_dir=sessions
+    )
+    return Engine(
+        config=config,
+        tmux=Tmux(prefix=prefix, socket=server.socket),
+        # Plenty, whatever the machine running the suite has free: what is
+        # under test is the prefix, not the memory guard.
+        meminfo_fn=lambda: "MemTotal: 33554432 kB\nMemAvailable: 25198592 kB\n",
+    )
+
+
+def test_two_instances_with_different_prefixes_cannot_stop_each_others_agents(
+    server: PrivateTmux, tmp_path: Path
+) -> None:
+    """#123's whole point, on a real tmux: the prefix scopes destruction.
+
+    Both instances have a folder of the same name, so their project names
+    are identical, and A starts its agent. What B sees is decided by #85 and
+    is written here as it is: NOT `stopped`, which the ticket predicted
+    before #85 landed, but `detached`, with A's session named as the owner,
+    because B's independent scan finds the agent by argv and B's `list-panes`
+    on the shared server can see who holds it. That is the honest row, and
+    the property that matters holds either way: B cannot address the
+    session, so B's kill is refused before anything is signalled and A's
+    agent is still running afterwards.
+    """
+    agent = Path(server._dir) / "agent"
+    agent.write_text("#!/bin/sh\nsleep 30\n")
+    agent.chmod(0o755)
+    a = _instance(server, tmp_path, f"{PREFIX}a-", agent)
+    b = _instance(server, tmp_path, f"{PREFIX}b-", agent)
+    name = f"{DEFAULT_LABEL}~{live_project('vessel')}"
+
+    started = a.start(name)
+    server.created.append(f"{PREFIX}a-{sanitize(name)}")
+    assert started.state is State.RUNNING
+    assert started.pid is not None
+
+    seen_by_b = b.get(name)
+    assert seen_by_b.state is State.DETACHED
+    assert seen_by_b.foreign_session == f"{PREFIX}a-{sanitize(name)}"
+    with pytest.raises(NoAgent):
+        b.kill(name)
+    with pytest.raises(NoAgent):
+        b.stop(name)
+
+    still = a.get(name)
+    assert still.state is State.RUNNING
+    assert still.pid == started.pid, "B's refusal reached A's agent anyway"
+    assert b.get(name).foreign_session == f"{PREFIX}a-{sanitize(name)}"
+
+    a.kill(name)
+    server.created.remove(f"{PREFIX}a-{sanitize(name)}")
+    assert a.get(name).state is State.STOPPED
+
+
+# -- #173: a session name with a space, on a real tmux ---------------------
+
+
+def test_tmux_stores_a_session_name_with_a_space_unchanged(server: PrivateTmux) -> None:
+    """What tmux ACTUALLY stores for a name with a space, established the way
+    the `.` rewrite was (#173): asked of the server, not of a fake. The
+    whole widening rests on this: if tmux rewrote the space the way it
+    rewrites a dot, `has-session -t =name` would miss the running session
+    and the row would say stopped. It does not, on 3.4: the name comes back
+    verbatim from `list-sessions`, `list-panes -a` reports it on one line
+    with the pid last, and the anchored target resolves it."""
+    name = f"{PREFIX}main~{live_project('my app')}"
+    server.new_session(name)
+    assert name in server.sessions(), "tmux rewrote the space"
+    assert server.run("has-session", "-t", f"={name}").returncode == 0
+    panes = adapter(server).panes()
+    assert name in panes.ours, panes
+    assert panes.foreign == {}
+
+
+# -- #107: the signal route against a real process -------------------------
+
+
+def _orphan(agent: Path, root: Path, name: str) -> subprocess.Popen[bytes]:
+    """An agent outside any tmux: the process derivation reports detached."""
+    return subprocess.Popen(
+        launch_argv(str(agent), name),
+        cwd=root / live_project("vessel"),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def test_a_real_detached_agent_is_ended_through_a_real_pidfd(
+    server: PrivateTmux, machine: Machine
+) -> None:
+    """The syscall path, which no fake can prove: `os.pidfd_open` on a real
+    pid, `signal.pidfd_send_signal` through it, and the process observed
+    leaving. The engine here has its REAL seams."""
+    name = f"{DEFAULT_LABEL}~{machine.project}"
+    child = _orphan(machine.agent, machine.config.roots[0].path, name)
+    try:
+        engine = Engine(config=machine.config, tmux=machine.adapter, meminfo_fn=lambda: PLENTY)
+        deadline = time.monotonic() + 5
+        while engine.get(name).state is not State.DETACHED and time.monotonic() < deadline:
+            time.sleep(0.1)
+        row = engine.get(name)
+        assert row.state is State.DETACHED and row.pid == child.pid, row
+        engine.signal_detached(name)
+        assert child.wait(timeout=5) is not None
+        assert child.returncode == -signal.SIGTERM, child.returncode
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait(timeout=5)
+
+
+def test_an_agent_that_left_between_the_listing_and_the_call_is_refused_with_nothing_sent(
+    server: PrivateTmux, machine: Machine
+) -> None:
+    """Premortem 4 of the Phase 14 plan, on a real process: the listing saw
+    it, it exited and was reaped before the call, and the route refuses
+    having signalled nothing. The re-read before the handle finds the row
+    stopped (`not_detached`); a process that leaves between that re-read
+    and the handle is `gone` at the open, the same refusal one step later.
+    Either way `os.kill` is never reached, and this asserts it."""
+    name = f"{DEFAULT_LABEL}~{machine.project}"
+    child = _orphan(machine.agent, machine.config.roots[0].path, name)
+    engine = Engine(config=machine.config, tmux=machine.adapter, meminfo_fn=lambda: PLENTY)
+    deadline = time.monotonic() + 5
+    while engine.get(name).state is not State.DETACHED and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert engine.get(name).pid == child.pid
+    child.kill()
+    child.wait(timeout=5)
+    sent: list[tuple[int, int]] = []
+    original = os.kill
+
+    def record(pid: int, sig: int) -> None:
+        sent.append((pid, sig))
+
+    os.kill = record
+    try:
+        with pytest.raises((NotDetached, Gone)):
+            engine.signal_detached(name)
+    finally:
+        os.kill = original
+    assert sent == []

@@ -42,6 +42,74 @@ class Protected(EngineError):
     """
 
 
+class UnknownRoot(EngineError):
+    """No configured root carries that label (#154).
+
+    The toggle takes a label and nothing else, and a label is validated by
+    membership in the configured set: allowlist, not pattern. A path in its
+    place is an unknown label, and this is the whole of what it can do.
+    """
+
+
+class OperatorDisabled(EngineError):
+    """The operator's file disables this root, so a request cannot enable it
+    (#154). The state file only ever narrows the operator's set."""
+
+
+class NotDetached(EngineError):
+    """The signal route is for an agent nothing addressable owns (#107). A
+    running, stale or stopped row has stop, kill and nothing respectively,
+    and `no_agent` already means the opposite of this on those routes."""
+
+
+class OwnedElsewhere(EngineError):
+    """A tmux session Hitchrail can see owns this agent (#107). The answer is
+    "attach there", named, not a signal: a courtesy refusal, and the safety
+    property is the handle, not this."""
+
+    def __init__(self, name: str, session: str) -> None:
+        super().__init__(f"{name} is running in the tmux session {session!r}; attach there")
+        self.session = session
+
+
+class Gone(EngineError):
+    """The process left between the listing and the call (#107). Nothing was
+    signalled: the handle could not be opened, or the send found nobody."""
+
+
+class NotOurs(EngineError):
+    """The pid is not the agent derivation identified (#107): reused by
+    another process, another user's, or the kernel refused the send. Nothing
+    was signalled."""
+
+
+class PidfdUnavailable(EngineError):
+    """This machine cannot signal through a race free handle (#107): no
+    `pidfd_open`, or a kernel or filter that refuses it. Refused rather than
+    served through `os.kill`, which is the racy path this route exists not
+    to take."""
+
+
+class OperatorPinned(EngineError):
+    """The operator set this on the command line, and a flag wins outright
+    over anything a request writes (#238). Refused rather than written to a
+    file the next restart would ignore."""
+
+
+class InvalidValue(EngineError):
+    """A settings value `Config` would refuse on the command line, in the
+    words it would use there (#238)."""
+
+
+class StateUnwritable(EngineError):
+    """The choice could not be persisted, so it was not made (#154).
+
+    Applying it in memory and reporting success would make a toggle that
+    silently reverts at the next restart, which is the drift a state file
+    exists to end. Nothing changed; the message says which file.
+    """
+
+
 class NotAsking(EngineError):
     """The screen is not showing a question, so no key was sent (#204).
 

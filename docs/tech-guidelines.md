@@ -111,8 +111,11 @@ non negotiable and each has a test that asserts the refusal.
    start without one. A README warning is not a mitigation. Compare tokens in
    constant time.
 5. **The root is a hard boundary.** Resolve every path and confirm it is a
-   direct child of the configured root before spawning anything or creating
+   direct child of a configured root before spawning anything or creating
    anything. Validate names against an allowlist pattern, never a denylist.
+   A root is configured by a person with filesystem access, on the command
+   line or in the config file, and by nothing else: no route accepts a path,
+   and a request may only choose among the roots already configured.
 6. **Never a bare `tmux kill-server`,** and never kill a session Hitchrail did not
    create. Scope every tmux invocation explicitly.
 7. **Report refusals honestly.** A guard that fails open, or an error rendered

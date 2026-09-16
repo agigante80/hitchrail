@@ -149,7 +149,7 @@ const state = {
   unsupportedTotal: 0,
   root: "",
   memory: { available_mb: null, total_mb: null },
-  server: { version: null, user: null, started_at: null },
+  server: { version: null, user: null, started_at: null, stop_timeout: null },
   tab: "all",
   query: "",
   // #146. Root labels to show; empty means all. A Set, never persisted as
@@ -157,6 +157,15 @@ const state = {
   // reload and is intersected with the roots actually present on every
   // listing, so a stale or forged value can only ever show MORE rows.
   rootFilter: new Set(),
+  // #154. Labels of configured roots absent from the listing today, so the
+  // empty state can say "hidden" rather than "no folder".
+  hiddenRoots: [],
+  // #107. `name:pid` pairs this page has already sent SIGTERM to, so the
+  // row offers the escalation and not the same request again. Per page:
+  // another client's SIGTERM is not this person's decision to escalate.
+  // The pid is in the key so a later agent under the same name starts
+  // from End again.
+  signalled: new Set(),
   // #164. The identifier a suggestion chose, or null. Choosing is exact where
   // typing is a substring: picking `vessel` from the list must not also show
   // `vessel-social`, and the suggestion carried its root, so this is the
@@ -368,6 +377,12 @@ function emptyReason() {
   if (query) return `No folder${where} is called that.`;
   if (state.tab === "running") return `Nothing${where} is running.`;
   if (state.tab === "stopped") return `Nothing${where} is stopped.`;
+  // #154. Every root hidden is not "no folder": the honest empty state
+  // names the roots that are not being listed, and settings is where they
+  // come back.
+  if (state.projects.length === 0 && state.hiddenRoots.length > 0) {
+    return `Every root is hidden (${state.hiddenRoots.join(", ")}). Show one in settings.`;
+  }
   return `No folder${where}.`;
 }
 
@@ -722,26 +737,64 @@ function buildActions(project, actions) {
   if (!project.protected && project.state === "stale") {
     add("Clear", "danger").addEventListener("click", () => confirmClear(project));
   }
-  // NO control on a detached row, and the absence is the decision (#83).
+  // ONE control on a detached row nothing visible owns (#107), and it is
+  // the first destructive control here that names a pid rather than a
+  // session. #83 removed a `Kill pid N` that had no route behind it; the
+  // route exists now, and the row and the route land together or neither
+  // does. Two things keep it honest: the confirmation says what Hitchrail
+  // does and does not know, and the server refuses everything the row is
+  // wrong about (an owner it can see, a pid that changed, a process that
+  // left) rather than the page guessing. A row a visible session owns gets
+  // no control: the answer there is "attach there", and it is in the meta.
   //
-  // It carried `Kill pid N`, styled `danger`, with no handler and no route
-  // behind it: the most consequential tap in the interface, and it did
-  // nothing. A browser test asserted the button was VISIBLE and so passed
-  // against that forever.
-  //
-  // Wiring it was the other option and was declined. Every destructive path
-  // here is scoped by construction rather than by a check: `kill_session` can
-  // only address `hr-<name>`, which is why `Tmux.__init__` refuses an empty
-  // prefix. A bare pid has no such scope, and this pid is DERIVED, matched out
-  // of `ps` by an argv tail that has been wrong twice this month (#84, and #96
-  // still open). Adding the first unscoped destructive path on top of that
-  // needs a security argument in the design's section 5, which is #107.
-  //
-  // The design already chose this shape: `detached` is surfaced with its pid
-  // and an explanation, and never silently reconciled, "because the safe
-  // action depends on what that agent is doing, which Hitchrail cannot know".
-  // The row says what is true and leaves the choice with the person, who has
-  // the pid in front of them.
+  // SIGTERM first, and SIGKILL only as a second explicit tap on the same
+  // row once the first has been sent: #169's rule that a kill is always
+  // available and never the default, kept by rendering the escalation only
+  // after the request that precedes it.
+  if (!project.protected && project.state === "detached" && !project.foreign_session) {
+    // Keyed by name AND pid (review round 1): keyed by name alone, a later
+    // agent under the same name on a page left open got Kill as its first
+    // control, SIGKILL before SIGTERM, the rule this exists to keep.
+    const escalate = state.signalled.has(`${project.name}:${project.pid}`);
+    add(escalate ? "Kill" : "End", "danger").addEventListener("click", () =>
+      confirmSignal(project, escalate),
+    );
+  }
+}
+
+/* The honest sentence (#107). Not a predicate claiming to know ownership:
+   `foreign_session` null means no owner was SEEN, from one `list-panes -a`
+   against our own tmux server, and a terminal, screen or another socket
+   would all arrive here looking the same. */
+function confirmSignal(project, escalate) {
+  showDialog({
+    title: escalate ? `Kill ${project.name}?` : `End ${project.name}?`,
+    body:
+      "Hitchrail can see no session that owns this agent. If it is open on a "
+      + "screen somewhere, this will end it there too."
+      + (escalate
+        ? " Kill ends the process immediately, and anything it has not written "
+          + "to disk is lost."
+        : ""),
+    actions: [
+      ["Cancel", "ghost", () => closeDialog()],
+      [escalate ? "Kill it" : "End it", "danger", () => signalNow(project, escalate)],
+    ],
+  });
+}
+
+async function signalNow(project, escalate) {
+  const path = `/api/sessions/${encodeURIComponent(project.name)}/signal${escalate ? "/force" : ""}`;
+  const result = await api(path, { method: "POST" });
+  closeDialog();
+  if (!result.ok) {
+    showRefusal(result, project);
+    return;
+  }
+  // Remembered so the row offers the escalation next: the server will not
+  // send SIGKILL without a second explicit request, and neither will this.
+  state.signalled.add(`${project.name}:${project.pid}`);
+  await refresh();
 }
 
 function renderList() {
@@ -1168,18 +1221,24 @@ async function killNow(project) {
   await refresh();
 }
 
-/* The server owns the real timeout and does not report it, so this is a
-   ceiling for the interface's own patience rather than a second copy of the
-   rule. Erring long is right: showing "no answer" while the engine is still
-   waiting would offer a kill the situation does not call for.
+/* The server owns the real timeout and reports it on the listing's `server`
+   object (#238), so the interface's patience is that number and never a
+   second copy of the rule: an operator who started with `--stop-timeout 60`
+   used to get a page that gave up at 30 and said "it has not finished"
+   while the server was still waiting. Erring long is right: showing "no
+   answer" while the engine is still waiting would offer a kill the
+   situation does not call for.
 
-   Overridable only so the browser tier can reach the timeout screen without
-   waiting thirty seconds per test. It is not read from the server, and a
-   client that shortened it would only make itself impatient. */
-let stopPatienceMs = 30_000;
+   The override exists only so the browser tier can reach the timeout screen
+   without waiting thirty seconds per test, and it wins over the server's
+   figure until the page is reloaded; a client that shortened it would only
+   make itself impatient. */
+let stopPatienceMs = null;
 
 function stopTimeoutMs() {
-  return stopPatienceMs;
+  if (stopPatienceMs !== null) return stopPatienceMs;
+  const seconds = state.server.stop_timeout;
+  return typeof seconds === "number" && seconds > 0 ? seconds * 1000 : 30_000;
 }
 
 export function setStopPatience(ms) {
@@ -1315,6 +1374,25 @@ function showRefusal(result, project) {
         + "not arrive in one piece. Nothing here says whether it worked. The "
         + "list will catch up.",
       actions: [["Close", "ghost", () => closeDialog()]],
+    });
+    return;
+  }
+  if (["gone", "not_ours", "owned_elsewhere", "not_detached"].includes(code)) {
+    // #107. The row was wrong about the world by the time of the tap, and
+    // the server refused rather than guessed: the process left, or changed
+    // identity, or a session took it, or the row is no longer detached at
+    // all. Not a dead end (#169): the next decision is to look again, so
+    // the dialog offers the refresh.
+    showDialog({
+      title: code === "owned_elsewhere" ? "A session owns it" : "Nothing was signalled",
+      body: message,
+      actions: [
+        ["Close", "ghost", () => closeDialog()],
+        ["Refresh", "accent", () => {
+          closeDialog();
+          refresh();
+        }],
+      ],
     });
     return;
   }
@@ -2248,6 +2326,7 @@ async function refresh() {
   state.rootFilter = new Set(
     roots.length > 1 ? [...state.rootFilter, ...storedRoots()].filter((l) => present.has(l)) : [],
   );
+  state.hiddenRoots = result.body.hidden_roots ?? [];
   state.memory = result.body.memory;
   state.server = result.body.server ?? state.server;
   render();
@@ -2349,6 +2428,7 @@ window.__hitchrail = {
   state,
   api,
   setStopPatience,
+  stopTimeoutMs,
   setReopenPace,
   openStream,
   get stream() {

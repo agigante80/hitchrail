@@ -457,12 +457,13 @@ def test_the_offender_buckets_do_not_report_one_character_twice() -> None:
     the sentence should not get a red test. Which characters it names, and how
     many times, is behaviour.
     """
-    # Written as an escape: a literal one is invisible in a diff, and ruff
-    # RUF001 refuses it for exactly that reason.
-    described = projectnames._describe_offenders([" "])
+    # A tab since #173, which admitted the plain space: still ASCII, still
+    # whitespace, so `isascii` and `isspace` are both true and the `and not`
+    # versus `or not` distinction is the same one.
+    described = projectnames._describe_offenders(["\t"])
 
-    assert described == "a space", (
-        f"a plain space landed in the `other` bucket as well as `spaces`, so one "
+    assert described == "whitespace other than a space", (
+        f"a tab landed in the `other` bucket as well as `spaces`, so one "
         f"character is reported as two problems: {described!r}"
     )
 
@@ -587,7 +588,7 @@ def test_the_grant_cookie_carries_every_attribute_it_needs() -> None:
     from hitchrail.security import COOKIE_MAX_AGE, TOKEN_COOKIE, set_token_cookie
 
     response: JSONResponse = JSONResponse({})
-    set_token_cookie(response, "s3cret")
+    set_token_cookie(response, "s3cret", secure=False)
     header = dict(response.headers)["set-cookie"]
 
     assert f"{TOKEN_COOKIE}=s3cret" in header

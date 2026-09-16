@@ -217,10 +217,10 @@ async def test_the_sheet_does_not_reimplement_the_name_rule(
     server.seed(stopped=["vessel"])
     await page.goto(server.base)
     await page.get_by_role("button", name="New").click()
-    await page.get_by_label("Folder name").fill("has a space")
+    await page.get_by_label("Folder name").fill("has  two")
     await page.get_by_role("button", name="Create").click()
     # The message is the server's, not one the page invented.
-    await expect(page.locator("[data-dialog]")).to_contain_text("space")
+    await expect(page.locator("[data-dialog]")).to_contain_text("two spaces in a row")
 
 
 # -- #168: the pane view, sized for where it is ------------------------------

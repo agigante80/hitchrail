@@ -7,6 +7,7 @@ import os
 import pathlib
 import re
 import shutil
+import signal
 import threading
 import time
 from collections.abc import AsyncIterator, Callable
@@ -22,6 +23,7 @@ from conftest import (
     SHELL_PROMPT_STALE,
     TRUST_MODAL,
     FakeClock,
+    FakePidfd,
     FakeTmux,
     ScriptedProcs,
     failing_procs,
@@ -1051,16 +1053,17 @@ async def test_the_listing_accounts_for_folders_it_cannot_open(
     """A folder the root holds but Hitchrail cannot use must be ACCOUNTED for,
     not absent. Dropping them silently made a folder called `my app` look like
     one Hitchrail could not see, which is issue #7."""
-    (config.roots[0].path / "my app").mkdir()
+    # `my (app)` rather than `my app`: #173 made the latter a project.
+    (config.roots[0].path / "my (app)").mkdir()
     (config.roots[0].path / ".hidden").mkdir()
     body = (await client.get("/api/projects", headers=HEADERS)).json()
 
     assert "unsupported" in body and "unsupported_total" in body
     names = {u["name"] for u in body["unsupported"]}
-    assert proj("my app") in names
+    assert proj("my (app)") in names
     assert all(u["reason"] for u in body["unsupported"]), "a reason is the point"
     assert body["unsupported_total"] >= len(body["unsupported"])
-    assert "my app" not in {p["name"] for p in body["projects"]}
+    assert "my (app)" not in {p["name"] for p in body["projects"]}
 
 
 async def test_a_folder_whose_name_is_not_utf8_does_not_500_the_listing(
@@ -2118,3 +2121,145 @@ async def test_a_scan_still_running_at_shutdown_does_not_hang_the_lifespan(
         f"returned: {left_behind}. The scan must be cancelled at teardown, or it "
         f"outlives the engine it runs against. See #180."
     )
+
+
+# -- #107: the signal route, every refusal with its code ---------------------
+
+
+def _signal_engine(config: Config, fake: FakePidfd, table: str = DETACHED_PS) -> Engine:
+    return Engine(
+        config=config,
+        tmux=FakeTmux(),
+        procs_fn=procs_from(table),
+        meminfo_fn=lambda: PLENTY,
+        ceiling_fn=lambda pid: None,
+        open_pidfd=fake.open,
+        send_signal=fake.send,
+        close_pidfd=fake.close,
+        owner_uid=fake.owner,
+    )
+
+
+async def test_the_signal_route_sends_sigterm_and_answers_202(config: Config) -> None:
+    fake = FakePidfd()
+    async with client_for(_signal_engine(config, fake), config) as c:
+        r = await c.post(f"/api/sessions/{proj('vessel')}/signal", headers=HEADERS)
+    assert r.status_code == 202, r.text
+    assert r.json()["state"] == "detached"
+    assert fake.signals == [signal.SIGTERM]
+
+
+async def test_the_force_route_is_the_only_way_to_sigkill(config: Config) -> None:
+    fake = FakePidfd()
+    async with client_for(_signal_engine(config, fake), config) as c:
+        r = await c.post(f"/api/sessions/{proj('vessel')}/signal/force", headers=HEADERS)
+    assert r.status_code == 202, r.text
+    assert fake.signals == [signal.SIGKILL]
+
+
+@pytest.mark.parametrize(
+    ("table", "fake", "status", "code"),
+    [
+        (RUNNING_PS, FakePidfd(), 409, "not_detached"),
+        ("", FakePidfd(), 409, "not_detached"),
+        (DETACHED_PS, FakePidfd(fail_open=OSError(3, "No such process")), 409, "gone"),
+        (DETACHED_PS, FakePidfd(fail_send=OSError(3, "No such process")), 409, "gone"),
+        (
+            DETACHED_PS,
+            FakePidfd(fail_send=OSError(1, "Operation not permitted")),
+            409,
+            "not_ours",
+        ),
+        (DETACHED_PS, FakePidfd(uid=os.getuid() + 1), 409, "not_ours"),
+        (DETACHED_PS, FakePidfd(fail_open=OSError(38, "no")), 501, "pidfd_unavailable"),
+        (
+            DETACHED_PS,
+            FakePidfd(fail_open=AttributeError("pidfd_open")),
+            501,
+            "pidfd_unavailable",
+        ),
+        (
+            DETACHED_PS,
+            FakePidfd(fail_open=OSError(24, "Too many open files")),
+            503,
+            "machine_unreadable",
+        ),
+    ],
+    ids=[
+        "running",
+        "stopped",
+        "gone-at-open",
+        "gone-at-send",
+        "kernel-refused",
+        "another-user",
+        "no-kernel-support",
+        "no-python-support",
+        "out-of-handles",
+    ],
+)
+async def test_every_signal_refusal_has_its_code_and_signals_nothing(
+    config: Config, table: str, fake: FakePidfd, status: int, code: str
+) -> None:
+    engine = _signal_engine(config, fake, table)
+    if table == RUNNING_PS:
+        engine.tmux = FakeTmux(sessions={proj("vessel"): 500})
+    async with client_for(engine, config) as c:
+        r = await c.post(f"/api/sessions/{proj('vessel')}/signal", headers=HEADERS)
+    assert r.status_code == status, r.text
+    assert r.json()["code"] == code
+    assert set(r.json()) >= {"code", "message"}
+    # Nothing delivered: the only sends are the ones the kernel refused, a
+    # zombie or an exit after the handle, recorded as an attempt to nobody.
+    assert fake.signals == ([signal.SIGTERM] if fake.fail_send is not None else [])
+    assert not fake.leaked
+
+
+async def test_a_foreign_owner_is_named_in_its_own_field(config: Config) -> None:
+    fake = FakePidfd()
+    table = " 700     1   4096   600 tmux new-session -d -s cc-vessel\n" + DETACHED_PS.replace(
+        " 900     1", " 900   700"
+    )
+    engine = _signal_engine(config, fake, table)
+    engine.tmux = FakeTmux(foreign={"cc-vessel": 700})
+    async with client_for(engine, config) as c:
+        r = await c.post(f"/api/sessions/{proj('vessel')}/signal", headers=HEADERS)
+    assert r.status_code == 409
+    assert r.json()["code"] == "owned_elsewhere"
+    assert r.json()["session"] == "cc-vessel"
+    assert fake.events == [] or all(k not in ("open", "send") for k, _ in fake.events)
+
+
+async def test_the_protected_project_is_423_on_the_signal_route(
+    root: pathlib.Path,
+) -> None:
+    config = make_config(
+        root,
+        sessions_dir=root / ".sessions",
+        agent_config_path=NO_AGENT_CONFIG,
+        self_project=proj("vessel"),
+    )
+    fake = FakePidfd()
+    async with client_for(_signal_engine(config, fake), config) as c:
+        r = await c.post(f"/api/sessions/{proj('vessel')}/signal", headers=HEADERS)
+    assert r.status_code == 423
+    assert r.json()["code"] == "self_protected"
+    assert fake.events == []
+
+
+@pytest.mark.parametrize("path", ["/signal", "/signal/force"])
+async def test_the_signal_routes_are_behind_the_origin_check(config: Config, path: str) -> None:
+    fake = FakePidfd()
+    async with client_for(_signal_engine(config, fake), config) as c:
+        r = await c.post(f"/api/sessions/{proj('vessel')}{path}", headers={"host": "localhost"})
+    assert r.status_code == 403
+    assert r.json()["code"] == "origin_missing"
+    assert fake.events == []
+
+
+async def test_an_unknown_project_is_404_on_the_signal_route(config: Config) -> None:
+    fake = FakePidfd()
+    async with client_for(_signal_engine(config, fake), config) as c:
+        r = await c.post(f"/api/sessions/{proj('nope')}/signal", headers=HEADERS)
+        other = await c.post("/api/sessions/other~vessel/signal", headers=HEADERS)
+    assert r.status_code == 404 and other.status_code == 404
+    assert fake.events == []

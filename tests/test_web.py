@@ -85,6 +85,8 @@ DIALOGS: dict[str, str] = {
         "reading is the action."
     ),
     '"New folder",': _MUST_ACT,
+    "escalate ? `Kill ${project.name}?` : `End ${project.name}?`,": _MUST_ACT,
+    'code === "owned_elsewhere" ? "A session owns it" : "Nothing was signalled",': _MUST_ACT,
 }
 
 

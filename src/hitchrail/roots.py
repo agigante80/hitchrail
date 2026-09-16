@@ -7,8 +7,9 @@ same split `hostnames` has beside `config` and `projectnames` beside
 `discovery`. What a name MEANS should be decidable without a machine.
 
 **The injectivity argument lives here, and it is structural rather than
-careful.** `projectnames.NAME_PATTERN` is `[A-Za-z0-9][A-Za-z0-9._-]*`, so
-neither a folder name nor a label can contain `~`. The qualified form therefore
+careful.** `projectnames.NAME_PATTERN` admits letters, digits, `.`, `_`, `-`
+and a single interior space, so neither a folder name nor a label can contain
+`~`. The qualified form therefore
 has exactly one split point, and two distinct project directories can never
 produce one identifier. That is the standard `tmux.sanitize` set when it threw
 out a digest suffix: injective by construction beats injective by hash, and it
@@ -53,6 +54,11 @@ class Root:
 
     label: str
     path: Path
+    # #154. Configured and shown, or configured and hidden today. A hidden
+    # root is still a root: its paths are still the perimeter, a session in it
+    # still derives and can still be addressed by name; it is absent from the
+    # listing and the sheet. Nothing about `enabled` changes what is reachable.
+    enabled: bool = True
 
 
 def parse_root_argument(raw: str) -> Root:
@@ -83,6 +89,11 @@ def parse_root_argument(raw: str) -> Root:
     complaint = explain_name(label)
     if complaint is not None:
         raise RootError(f"root label {label!r} is not usable: {complaint}")
+    # #173 admitted a space in a FOLDER name. A label is typed on a command
+    # line, in a URL and as a key in state.toml, and it is the half of the
+    # identifier the operator chose rather than inherited, so it stays plain.
+    if " " in label:
+        raise RootError(f"root label {label!r} is not usable: contains a space; use a hyphen")
     return Root(label=label, path=Path(path).expanduser().resolve())
 
 

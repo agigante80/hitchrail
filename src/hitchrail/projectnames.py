@@ -30,9 +30,22 @@ MAX_NAME_LENGTH = 255
 # walked straight past the cap the pattern is written to impose. \Z anchors at
 # the actual end of the string. This is the whole allowlist failing open over
 # one character, so it gets a named regression test.
-NAME_PATTERN = re.compile(rf"\A[A-Za-z0-9][A-Za-z0-9._-]{{0,{MAX_NAME_LENGTH - 1}}}\Z")
+#
+# #173. A single space BETWEEN two allowed characters is admitted: `my app`.
+# A space does none of the three things above, there is no shell anywhere in
+# the spawn path, and the refusal produced the workaround #32 documents, a
+# symlink with a valid name beside the folder. Never leading, never trailing,
+# never doubled, never any other whitespace: each `(?: ?X)` group is one
+# optional space followed by one allowed character, so a space can only sit
+# between two of them. The cap is a lookahead because the groups are one or
+# two characters long; `.` inside it does not match a newline, so the \Z
+# argument above still holds. tmux stores such a name unchanged, verified on
+# 3.4 in `tests/test_live_tmux.py`; `pane_pids` splits on the LAST space.
+NAME_PATTERN = re.compile(
+    rf"\A(?=.{{1,{MAX_NAME_LENGTH}}}\Z)[A-Za-z0-9](?: ?[A-Za-z0-9._-])*\Z"
+)
 
-_ALLOWED_CHARS = re.compile(r"[A-Za-z0-9._-]")
+_ALLOWED_CHARS = re.compile(r"[A-Za-z0-9._ -]")
 
 # How many rejected folders to name before giving up and reporting a count.
 # A root that shares a tree with a Downloads folder can hold thousands.
@@ -83,7 +96,8 @@ def _describe_offenders(offenders: list[str]) -> str:
 
     parts: list[str] = []
     if spaces:
-        parts.append("a space" if spaces == [" "] else "whitespace")
+        # Only whitespace other than a plain space reaches here since #173.
+        parts.append("whitespace other than a space")
     if non_ascii:
         shown = ", ".join(repr(c) for c in non_ascii[:3])
         parts.append(f"non ASCII characters ({shown}{', ...' if len(non_ascii) > 3 else ''})")
@@ -112,10 +126,18 @@ def explain_name(name: str) -> str | None:
         return f"{len(name)} characters, over the {MAX_NAME_LENGTH} limit"
     offenders = sorted({c for c in name if not _ALLOWED_CHARS.match(c)})
     if offenders:
+        # "Rename", said outright (#173): the refusal used to read as an
+        # invitation to put a validly named symlink beside the folder, which
+        # is the #32 workaround and renames a running project.
         return (
-            f"contains {_describe_offenders(offenders)}; names may use letters, "
-            "digits, dot, underscore and hyphen"
+            f"contains {_describe_offenders(offenders)}; rename the folder: names "
+            "may use letters, digits, dot, underscore, hyphen and single spaces "
+            "between words"
         )
+    if name.endswith(" "):
+        return "ends with a space; rename the folder"
+    if "  " in name:
+        return "has two spaces in a row; rename the folder"
     if not name[0].isalnum():
         # `_leading` reaches here: every character is in the allowed set, but
         # the first one is not a letter or a digit. Without this it fell
@@ -129,5 +151,14 @@ def explain_name(name: str) -> str | None:
 
 
 def validate_name(name: str) -> None:
+    """The guard, with the explanation attached (#173).
+
+    It said "not an acceptable project name" and nothing else, and the sheet
+    that creates a folder showed exactly that: the browser tier's check that
+    the sheet relays the server's reason passed only because the refused
+    name happened to contain the word it looked for. A person typing a name
+    into a phone gets the rule they broke, the same sentence the listing
+    gives an existing folder.
+    """
     if not NAME_PATTERN.match(name):
-        raise InvalidName(f"not an acceptable project name: {name!r}")
+        raise InvalidName(f"{name!r} is not an acceptable project name: {explain_name(name)}")

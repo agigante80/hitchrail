@@ -117,6 +117,12 @@ _ALLOWED_ROOT = frozenset(
         # still refused; only the bare word passes, and the bare word names
         # nobody.
         "personal",
+        # #154 moved the README's four example roots from `%h/...` in a unit
+        # into `~/...` in a config file. Same invented words, same document;
+        # the tilde is what changed. Bare words, and `confidential` is the one
+        # whose whole point is `enabled = false`.
+        "homelab",
+        "confidential",
         "<root>",
     }
 )

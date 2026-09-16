@@ -31,13 +31,16 @@ This module is in the engine layer and imports nothing from the web layer;
 from __future__ import annotations
 
 import builtins
+import errno
 import logging
+import os
+import signal
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import replace
 
-from hitchrail import attention, claude_ipc, derive, discovery, ram
+from hitchrail import attention, claude_ipc, derive, discovery, procs, ram, settings
 from hitchrail.config import TOKEN_ENV, Config
 from hitchrail.derive import Machine
 from hitchrail.events import EventBus
@@ -46,23 +49,50 @@ from hitchrail.roots import RootError, split_identifier
 from hitchrail.sessions import (
     AlreadyRunning,
     EngineError,
+    Gone,
+    InvalidValue,
     Locked,
     MachineUnreadable,
     MemoryNeedsAck,
     MemoryRefused,
     NoAgent,
     NotAsking,
+    NotDetached,
+    NotOurs,
     NotRunning,
+    OperatorDisabled,
+    OperatorPinned,
+    OwnedElsewhere,
+    PidfdUnavailable,
     Protected,
     Session,
     StartFailed,
     State,
+    StateUnwritable,
     StopRefused,
     UnknownProject,
+    UnknownRoot,
 )
 from hitchrail.tmux import Tmux, TmuxUnavailable
 
 logger = logging.getLogger(__name__)
+
+_NO_PIDFD = (
+    "this machine cannot signal through a race free handle (no pidfd support), "
+    "and Hitchrail will not fall back to signalling a bare pid"
+)
+
+
+def _refusal_for(exc: OSError, pid: int, verb: str) -> EngineError:
+    """Which refusal an errno is, at the open and at the send alike (#107)."""
+    if exc.errno == errno.ESRCH:
+        return Gone(f"pid {pid} is gone, so there is nothing to {verb}")
+    if exc.errno == errno.EPERM:
+        return NotOurs(f"the kernel refused to {verb} pid {pid}: it is not ours to signal")
+    if exc.errno in (errno.ENOSYS, errno.EINVAL, errno.EOPNOTSUPP):
+        return PidfdUnavailable(_NO_PIDFD)
+    # EMFILE, ENFILE, ENOMEM: the machine, not the process.
+    return MachineUnreadable(f"cannot {verb} pid {pid}: {exc}")
 
 
 def _no_session_here(session: Session, consequence: str) -> str:
@@ -115,6 +145,10 @@ class Engine:
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
         bus: EventBus | None = None,
+        open_pidfd: Callable[[int], int] | None = None,
+        send_signal: Callable[[int, int], None] | None = None,
+        close_pidfd: Callable[[int], None] | None = None,
+        owner_uid: Callable[[int], int] | None = None,
     ) -> None:
         self.config = config
         # #113. Named here rather than inside `Tmux`, because which variable
@@ -126,6 +160,13 @@ class Engine:
             scrub_env=(TOKEN_ENV,),
         )
         self._procs_fn = procs_fn or snapshot
+        # #107. The pidfd seam, four callables from `procs.py`; a test hands
+        # in a recorder. Held as attributes so a test that must prove the
+        # ORDER, handle before verification, can watch both through one fake.
+        self._open_pidfd = open_pidfd or procs.open_pidfd
+        self._send_signal = send_signal or procs.send_signal
+        self._close_pidfd = close_pidfd or procs.close_pidfd
+        self._owner_uid = owner_uid or procs.owner_uid
         self._meminfo_fn = meminfo_fn or ram.read_meminfo
         # #243. Cached per pid for `ram.CEILING_TTL_S`, because the reader is
         # ten sysfs reads and the listing route asks once per running row on
@@ -183,6 +224,13 @@ class Engine:
         # is the whole reason the lock exists.
         self._starting: set[str] = set()
         self._starting_guard = threading.Lock()
+        # #154, #238. What the interface may change: which configured roots
+        # are hidden, and the stop wait. `config.roots` stays every configured
+        # root and is what anything that RESOLVES a name reads: a session in a
+        # hidden root is still a session, and refusing it by name would be a
+        # lie. `prefs.active_roots()` is what the listing shows, the sheet
+        # creates in and the sweep reads.
+        self.prefs = settings.Preferences(config)
         # Generous on purpose. Being too eager reports a working start as a
         # failure; being too patient is only a slow error message.
         self.start_grace = 8.0
@@ -290,7 +338,7 @@ class Engine:
         """
         machine = self._look()
         names = (
-            discovery.list_root_projects(self.config.roots)
+            discovery.list_root_projects(self.prefs.active_roots())
             if listing is None
             else list(listing.projects)
         )
@@ -396,6 +444,11 @@ class Engine:
             discovery.validate_name(folder)
         except (discovery.InvalidName, RootError) as exc:
             raise UnknownProject(name) from exc
+        # The label is NOT checked against the configured roots here, on
+        # purpose (Phase 14 review of #107): a live `hr-main~alpha` left over
+        # after a restart under a different label has to stay stoppable, the
+        # #42 guarantee above, and the tmux routes are prefix scoped anyway.
+        # `signal_detached` checks it, because a pid is not.
 
     def _require_startable(self, name: str) -> str:
         """A name the listing actually RETURNS, and its directory.
@@ -416,6 +469,20 @@ class Engine:
         """
         if name not in discovery.list_root_projects(self.config.roots):
             raise UnknownProject(name)
+        # `enabled = false` in the operator's file narrows what can be
+        # STARTED, not only what is listed: the security audit of #154 read
+        # the README's `confidential` example the way an operator would, as
+        # "no agent runs there", and this is what makes that reading true.
+        # A root the INTERFACE hid is not refused here: hiding is a listing
+        # preference and the logs page can still start a row it shows.
+        # Everything that resolves a name for stop, kill and logs stays on
+        # `config.roots`, so an agent already in a disabled root can be ended.
+        label, _ = split_identifier(name)
+        if any(r.label == label and not r.enabled for r in self.config.roots):
+            raise OperatorDisabled(
+                f"root {label!r} is disabled in the operator's config file, so "
+                f"nothing is started in it"
+            )
         try:
             return str(discovery.resolve_identifier(self.config.roots, name))
         except (
@@ -815,10 +882,10 @@ class Engine:
         process that never left. Success reported for something that did not
         happen, which is worse than a refusal.
 
-        Whether Hitchrail should gain the power to signal a bare pid is a
-        design question with a security argument attached, and it stays open on
-        #83. Every destructive path today is scoped by the session prefix, and
-        a pid is not.
+        Whether Hitchrail should gain the power to signal a bare pid was a
+        design question with a security argument attached, and #107 answered
+        it: `signal_detached`, its own route, scoped by a check in one order
+        rather than by the prefix. This route stays what it was.
         """
         session = self._require_live(name)
         if session.state is State.DETACHED:
@@ -835,6 +902,124 @@ class Engine:
         updated = self._await_gone(name)
         self._announce(updated)
         return updated
+
+    def signal_detached(self, name: str, force: bool = False) -> Session:
+        """End an agent nothing addressable owns, through a handle (#107).
+
+        The one destructive path that is not scoped by the tmux prefix, so
+        it is scoped by a check, and the check is only sound in this order:
+        **acquire the handle, then verify, then signal through the handle.**
+        A pidfd refers to one process for as long as it is open; a pid reused
+        between the listing and the call is a different process the handle
+        does not refer to, and one that exited is `ESRCH` at the send. Verify
+        before open, and the window is open again, the same argument as
+        reading `ps` before tmux in `derive.look`.
+
+        What the handle buys, exactly: a stranger is never signalled. What it
+        does not buy is "the process derivation identified" in the strong
+        sense, since the anchor is an argv suffix and a DIFFERENT agent for
+        the same project passes verification. That is the operator's own
+        agent for that project either way, and the confirmation sentence
+        covers it: "Hitchrail can see no session that owns this agent. If it
+        is open on a screen somewhere, this will end it there too."
+
+        Refused before any handle is opened: the protected project, the
+        process tree this server runs in, a row that is not detached, an
+        owner Hitchrail can SEE (attach there instead), and another user's
+        process. Nothing here ever falls back to `os.kill`.
+
+        `force` is SIGKILL, and it is a second explicit request on its own
+        route, never the default: #169's rule that a kill is always available
+        and never what happens first.
+        """
+        self._require_addressable(name)
+        # The LABEL too, here and not in `_require_addressable`: an
+        # identifier under a label no root carries would still derive, and a
+        # second instance's agent with that identifier in its argv would
+        # match, a pid looked up for a project that cannot exist here. The
+        # tmux routes are prefix scoped and keep #42's reachability instead.
+        label, _ = split_identifier(name)
+        if not any(r.label == label for r in self.config.roots):
+            raise UnknownProject(name)
+        session = self.get(name)
+        if session.protected:
+            raise Protected(name)
+        if session.state is State.STOPPED:
+            # Unknown and stopped are two answers, as on stop and kill.
+            self._reject_if_not_a_project(name)
+        if session.state is not State.DETACHED or session.pid is None:
+            raise NotDetached(
+                f"{name} is {session.state.value}, and this route is for an agent "
+                "no session owns; use stop or kill for a session"
+            )
+        if session.foreign_session is not None:
+            raise OwnedElsewhere(name, session.foreign_session)
+        pid = session.pid
+        self._refuse_our_own_tree(pid)
+        try:
+            if self._owner_uid(pid) != os.getuid():
+                raise NotOurs(f"pid {pid} belongs to another user on this machine")
+        except OSError as exc:
+            raise Gone(f"pid {pid} is gone: {exc}") from exc
+
+        try:
+            pidfd = self._open_pidfd(pid)
+        except AttributeError as exc:
+            raise PidfdUnavailable(_NO_PIDFD) from exc
+        except OSError as exc:
+            raise _refusal_for(exc, pid, "open a handle to") from exc
+        try:
+            # AFTER the handle: what the machine says now is what is signalled.
+            verified = self.get(name)
+            if verified.state is not State.DETACHED or verified.pid != pid:
+                # Two answers, told apart on the error path only: the pid is
+                # gone from the table, or it is there under another identity.
+                # A table that could not be read says neither.
+                table = self._procs_fn()
+                if not table.ok:
+                    raise MachineUnreadable(
+                        "the process table could not be read after the handle"
+                    )
+                if pid not in table.by_pid:
+                    raise Gone(f"pid {pid} left between the listing and this request")
+                raise NotOurs(
+                    f"pid {pid} is no longer the agent for {name}: it changed identity "
+                    "between the listing and this request, so nothing was signalled"
+                )
+            if verified.foreign_session is not None:
+                raise OwnedElsewhere(name, verified.foreign_session)
+            try:
+                self._send_signal(pidfd, signal.SIGKILL if force else signal.SIGTERM)
+            except AttributeError as exc:
+                raise PidfdUnavailable(_NO_PIDFD) from exc
+            except OSError as exc:
+                raise _refusal_for(exc, pid, "signal") from exc
+        finally:
+            self._close_pidfd(pidfd)
+        self._announce(verified)
+        return verified
+
+    def _refuse_our_own_tree(self, pid: int) -> None:
+        """`self_project` is a name compare; this is the process tree. A
+        detached row whose pid is an ancestor of this server, tmux included,
+        would take the interface down with it, and nothing else refuses it."""
+        table = self._procs_fn()
+        if not table.ok:
+            # A guard that cannot look must not pass (control 7): an empty
+            # table from a failed `ps` would end the walk after one step.
+            raise MachineUnreadable(
+                "the process table could not be read, so nothing is signalled"
+            )
+        seen: set[int] = set()
+        current = os.getpid()
+        while current > 1 and current not in seen:
+            if current == pid:
+                raise Protected(f"pid {pid} is in the process tree this server runs in")
+            seen.add(current)
+            proc = table.by_pid.get(current)
+            if proc is None:
+                return
+            current = proc.ppid
 
     def _await_gone(self, name: str) -> Session:
         """Poll until the killed agent actually leaves the process table.
@@ -963,7 +1148,7 @@ class Engine:
             return []
         try:
             machine = self._look()
-            names = discovery.list_root_projects(self.config.roots)
+            names = discovery.list_root_projects(self.prefs.active_roots())
         except (MachineUnreadable, discovery.RootUnavailable):
             # We could not look. That is not evidence about anybody's screen,
             # so nothing is added and nothing already known is dropped.
@@ -1106,7 +1291,7 @@ class Engine:
             candidates = [
                 (name, began)
                 for name, began in self._stopping.items()
-                if now - began >= self.config.stop_timeout
+                if now - began >= self.prefs.stop_timeout()
             ]
             # No "is it still the same stop" check, deliberately. The
             # snapshot and the removal are inside ONE lock, so nothing can
@@ -1232,17 +1417,27 @@ __all__ = [
     "AlreadyRunning",
     "Engine",
     "EngineError",
+    "Gone",
+    "InvalidValue",
     "Locked",
     "MachineUnreadable",
     "MemoryNeedsAck",
     "MemoryRefused",
     "NoAgent",
     "NotAsking",
+    "NotDetached",
+    "NotOurs",
     "NotRunning",
+    "OperatorDisabled",
+    "OperatorPinned",
+    "OwnedElsewhere",
+    "PidfdUnavailable",
     "Protected",
     "Session",
     "StartFailed",
     "State",
+    "StateUnwritable",
     "StopRefused",
     "UnknownProject",
+    "UnknownRoot",
 ]

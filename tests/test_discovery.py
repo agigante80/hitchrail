@@ -67,7 +67,12 @@ def test_dotted_names_are_allowed(tmp_path: Path) -> None:
         "-lead",
         "--dangerously-skip-permissions",
         "x" * (MAX_NAME_LENGTH + 1),
-        "a b",
+        " a",
+        "a ",
+        "a  b",
+        "a\tb",
+        "a\u00a0b",
+        "a b\n",
         "a\x00b",
         "a‮b",
     ],
@@ -82,7 +87,12 @@ def test_dotted_names_are_allowed(tmp_path: Path) -> None:
         "leading-hyphen",
         "flag-shaped",
         "too-long",
-        "space",
+        "leading-space",
+        "trailing-space",
+        "double-space",
+        "tab",
+        "nbsp",
+        "space-then-newline",
         "null-byte",
         "rtl-override",
     ],
@@ -362,19 +372,24 @@ def test_scan_reports_the_folders_it_cannot_offer(tmp_path: Path) -> None:
     These folders used to vanish from the listing with no signal at all, and
     the honest reading from a phone was that Hitchrail could not see them.
     """
-    for name in ("normal", "my app", "café", "report(final)", "-flag"):
+    for name in ("normal", "my app", "café", "report(final)", "-flag", "two  spaces"):
         (tmp_path / name).mkdir()
 
     listing = scan(tmp_path)
-    assert listing.projects == ("normal",)
+    # `my app` is a project since #173: one space between two words.
+    assert listing.projects == ("my app", "normal")
 
     reported = {u.name: u.reason for u in listing.unsupported}
-    assert set(reported) == {"my app", "café", "report(final)", "-flag"}
-    assert "a space" in reported["my app"]
+    assert set(reported) == {"café", "report(final)", "-flag", "two  spaces"}
     assert "non ASCII" in reported["café"]
     assert "flag" in reported["-flag"]
-    # Every reason names the rule, so somebody can act on it.
+    assert "two spaces in a row" in reported["two  spaces"]
+    # Every reason names the rule, so somebody can act on it, and the ones
+    # a rename fixes say "rename" rather than reading as an invitation to
+    # put a validly named symlink beside the folder (#173, the #32 workaround).
     assert all(r and not r.endswith(".") for r in reported.values())
+    assert "rename the folder" in reported["café"]
+    assert "rename the folder" in reported["two  spaces"]
 
 
 def test_scan_does_not_report_dot_directories_as_rejected_projects(
@@ -410,7 +425,7 @@ def test_scan_reports_a_symlink_out_of_the_root_rather_than_hiding_it(
 def test_list_projects_still_answers_the_plain_question(tmp_path: Path) -> None:
     # The engine only acts on projects and should not have to unpack a Listing.
     (tmp_path / "one").mkdir()
-    (tmp_path / "my app").mkdir()
+    (tmp_path / "café").mkdir()
     assert list_projects(tmp_path) == ["one"]
 
 
@@ -431,11 +446,11 @@ def test_scan_makes_one_pass_over_the_root(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_scan_is_sorted_case_insensitively_on_both_halves(tmp_path: Path) -> None:
-    for name in ("Zebra", "apple", "My App", "beta gamma"):
+    for name in ("Zebra", "apple", "My(App)", "beta(gamma)"):
         (tmp_path / name).mkdir()
     listing = scan(tmp_path)
     assert listing.projects == ("apple", "Zebra")
-    assert [u.name for u in listing.unsupported] == ["beta gamma", "My App"]
+    assert [u.name for u in listing.unsupported] == ["beta(gamma)", "My(App)"]
 
 
 def test_one_unreadable_entry_does_not_erase_its_neighbours(
@@ -473,7 +488,10 @@ def test_one_unreadable_entry_does_not_erase_its_neighbours(
         (".hidden", "dot"),
         ("-flag", "hyphen"),
         ("a" * 300, "over the 255 limit"),
-        ("my app", "a space"),
+        ("my app", None),
+        ("a  b", "two spaces in a row"),
+        ("a ", "ends with a space"),
+        ("a\tb", "whitespace other than a space"),
         ("café", "non ASCII"),
     ],
 )
@@ -607,7 +625,7 @@ def test_the_report_is_capped_but_the_count_is_honest(tmp_path: Path) -> None:
     the very bug this whole type exists to fix.
     """
     for i in range(MAX_REPORTED_UNSUPPORTED + 25):
-        (tmp_path / f"bad name {i:03d}").mkdir()
+        (tmp_path / f"bad(name){i:03d}").mkdir()
     (tmp_path / "good").mkdir()
 
     listing = scan(tmp_path)
@@ -728,7 +746,7 @@ def test_links_to_an_unlistable_target_fall_back_to_name_order(tmp_path: Path) -
     """The residual case the symlink tie break does NOT close. See #32.
 
     When the shared target is itself unlistable, here because the allowlist
-    refuses a name with a space, every candidate is a symlink and there is no
+    refuses a non ASCII name, every candidate is a symlink and there is no
     durable name to prefer. The tie falls back to name order, and adding a link
     that sorts earlier still renames the project.
 
@@ -737,11 +755,11 @@ def test_links_to_an_unlistable_target_fall_back_to_name_order(tmp_path: Path) -
     """
     root = tmp_path / "root"
     root.mkdir()
-    (root / "my app").mkdir()  # real, and refused by NAME_PATTERN
-    (root / "zebra").symlink_to(root / "my app", target_is_directory=True)
+    (root / "café").mkdir()  # real, and refused by NAME_PATTERN
+    (root / "zebra").symlink_to(root / "café", target_is_directory=True)
     assert scan(root).projects == ("zebra",)
 
-    (root / "alpha").symlink_to(root / "my app", target_is_directory=True)
+    (root / "alpha").symlink_to(root / "café", target_is_directory=True)
     # Known gap: the running project is renamed. #32.
     assert scan(root).projects == ("alpha",)
 
@@ -939,7 +957,7 @@ def test_an_unsupported_folder_says_which_root_it_is_in(tmp_path: Path) -> None:
     work, personal = tmp_path / "work", tmp_path / "personal"
     # A name the allowlist rejects and REPORTS. A dot prefixed folder is
     # skipped silently by design, so it is the wrong probe for this.
-    (work / "has space").mkdir(parents=True)
+    (work / "has(parens)").mkdir(parents=True)
     personal.mkdir()
     listing = scan_roots(_roots(("work", work), ("personal", personal)))
     assert any(u.name.startswith("work") for u in listing.unsupported)
@@ -947,8 +965,8 @@ def test_an_unsupported_folder_says_which_root_it_is_in(tmp_path: Path) -> None:
 
 def test_the_unsupported_total_sums_across_roots(tmp_path: Path) -> None:
     a, b = tmp_path / "a", tmp_path / "b"
-    (a / "one two").mkdir(parents=True)
-    (b / "three four").mkdir(parents=True)
+    (a / "one(two)").mkdir(parents=True)
+    (b / "three(four)").mkdir(parents=True)
     listing = scan_roots(_roots(("a", a), ("b", b)))
     assert listing.unsupported_total == 2
 

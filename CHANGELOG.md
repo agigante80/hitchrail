@@ -32,6 +32,87 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+## 0.8.0 - 2026-09-16
+
+Phase 14: the perimeter, chosen rather than assumed. Upgrading is safe with
+no action: every flag still works and still wins. Two things worth knowing
+before you do: `--stop 60` no longer stands in for `--stop-timeout 60`
+(flags are exact now), and a config file writable by others, or owned by
+somebody else, refuses to start.
+
+Still not protected, and stated so it is read rather than discovered:
+Hitchrail does not sandbox the sessions it starts, and over plain HTTP on a
+LAN the token crosses the network in cleartext, which `--tls-cert` now ends
+from the server itself.
+
+### Added
+
+**A config file.** Roots can live in `~/.config/hitchrail/config.toml`, one
+`[[roots]]` table each with `label`, `path` and an optional `enabled`, read
+once at startup. Every refusal `--root` makes, the file makes identically,
+and a file that does not parse, or has an unknown key, or is writable by
+others, refuses to start naming the file and the line. `--config FILE` names
+a different file. The unit template's `ExecStart` no longer carries a root.
+
+**Hide a root.** `PATCH /api/config` toggles `enabled` on a root already in
+the file, and that is the only setting a request can change: no route accepts
+a path, and a test reads the real route table to keep it so. The choice is
+kept in Hitchrail's own `state.toml` beside the config file and only ever
+narrows what the file allows. A hidden root's projects leave the listing,
+which now names them in `hidden_roots`; its sessions keep running and still
+answer by name.
+
+**A detached agent can be ended.** `POST /api/sessions/{name}/signal`
+sends SIGTERM to the agent a detached row names, through a pidfd acquired
+before the row is re-checked, so a pid another process has taken over is
+refused rather than signalled; `/signal/force` is SIGKILL, a second explicit
+request. Refused before anything is opened: the self project, this server's
+own process tree, a row a visible tmux session owns (attach there), another
+user's process. A machine without pidfd support is told so; nothing ever
+falls back to signalling a bare pid. The row's End control carries the
+honest sentence: Hitchrail can see no session that owns this agent, and if
+it is open on a screen somewhere, this will end it there too.
+
+**The wrong network, noticed.** `--expect-gateway-mac` names the default
+gateway of the network a named bind was meant for; a start whose gateway is
+another refuses with exit 2 and the unit stays stopped until somebody looks,
+and one whose gateway cannot be identified yet refuses with exit 3, which the
+unit retries. Checked once, at start. Read from `/proc`, no subprocess. A
+guard against a laptop serving where it was carried by accident, and the code
+says it is not one against an attacker on the LAN, who can present any MAC.
+
+**A folder called `my app` is a project.** The name allowlist admits one
+space between two words; a leading, trailing or doubled space, and any other
+whitespace, are still refused, and the refusal now says to rename the folder
+rather than reading as an invitation to put a symlink beside it, which is
+the #32 workaround. Root labels stay spaceless. tmux stores such a name
+unchanged, checked on a real server.
+
+**HTTPS from the server itself.** `--tls-cert` and `--tls-key`, both or
+neither, refused at startup before the bind when one is missing or the pair
+cannot be loaded, so the failure is never plain HTTP on the port you believed
+was TLS. The origins the server derives, the banner's links and the cookie's
+`Secure` flag follow the scheme. `docs/guides/phone-access.md` route 2a says
+where a certificate for a private address comes from, and that the CA has to
+be trusted on the phone; Tailscale stays first.
+
+**A settings page.** The footer's "settings" link, and `GET /api/config`
+behind it: every value with where it came from, the token never. The stop
+wait can be set there, persists in `state.toml`, and the page's own wait now
+follows the server's: `--stop-timeout 60` used to get a page that gave up at
+thirty seconds and said "it has not finished" while the server was still
+waiting. A wait given as a flag is pinned and shown as text.
+
+**Flags are exact.** `--stop 60` no longer stands in for `--stop-timeout 60`.
+argparse accepted any unambiguous abbreviation; the settings page needs to
+know which flags were given, and reads the names. Nothing documented ever
+abbreviated one.
+
+**`--session-prefix`, and `session_prefix` in the file.** The setting
+existed with its refusals and nothing reached it. Two instances on one tmux
+server need two prefixes: with one, each reads the other's agent in a same
+named folder as its own and can stop it, and now they cannot.
+
 ## 0.7.0 - 2026-09-14
 
 Phase 13: fifty rows on a phone. Upgrading is safe with no action. Four

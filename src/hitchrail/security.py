@@ -339,10 +339,13 @@ class TokenMiddleware:
     sends it on a top level GET and still withholds it from a cross site POST,
     and the mutations that matter are behind the origin check regardless.
 
-    It is deliberately not `Secure`. Over plain HTTP on a LAN, a documented and
-    supported deployment, a `Secure` cookie is never sent and the tool silently
-    stops working. The cleartext exposure is stated as a limitation in the
-    README, with a TLS terminating proxy as the remedy.
+    `Secure` exactly when this server terminates TLS (#152). Over plain HTTP
+    on a LAN, a documented and supported deployment, a `Secure` cookie is
+    never sent and the tool silently stops working; over our own HTTPS a
+    cookie without it would be offered to a plain `http://` request to the
+    same host, which is the exposure TLS was configured to end. Behind a TLS
+    terminating proxy the server still speaks HTTP and the flag stays off,
+    which the README's proxy paragraph says.
     """
 
     def __init__(self, app: ASGIApp, token: str | None) -> None:
@@ -393,21 +396,22 @@ class TokenMiddleware:
         await deny(401, "unauthorized", "a valid token is required")(scope, receive, send)
 
 
-def set_token_cookie(response: Response, token: str) -> None:
+def set_token_cookie(response: Response, token: str, *, secure: bool) -> None:
     """One place, because more than one caller sets it.
 
     `POST /api/grant` in `server.py` sets it, and the query grant used to until
     #115. A cookie that differed between callers would be a security control
     with two definitions, which is why this stayed one function even now that
-    the second carrier is gone. Not `Secure`, for the reason in
-    `TokenMiddleware`'s docstring:
-    over plain HTTP on a LAN, a supported deployment, a `Secure` cookie is never
-    sent and the tool silently stops working.
+    the second carrier is gone. `secure` is `Config.tls` and nothing else, for
+    the reason in `TokenMiddleware`'s docstring: over plain HTTP on a LAN a
+    `Secure` cookie is never sent back, and the tool silently stops working.
+    Keyword only, so a caller cannot pass it by accident in the token's place.
     """
     response.set_cookie(
         TOKEN_COOKIE,
         token,
         httponly=True,
+        secure=secure,
         samesite="lax",
         path="/",
         max_age=COOKIE_MAX_AGE,

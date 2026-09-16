@@ -145,7 +145,11 @@ button {
          serialisation, so dropping it costs nothing. Today the fallback is
          unreachable because the form starts hidden, and an accidental guard is
          not one. -->
-    <input id="key" type="password" autocomplete="off" autocapitalize="off"
+    <!-- `current-password`, not `off` (#171): a password manager is how a
+         device is enrolled without retyping the token, and this is the hint
+         that lets one offer the entry it holds for this address. Nothing is
+         stored by the page itself. -->
+    <input id="key" type="password" autocomplete="current-password" autocapitalize="off"
            autocorrect="off" spellcheck="false" data-key>
     <p class="bad" role="alert" data-error hidden></p>
     <button type="submit">Unlock</button>

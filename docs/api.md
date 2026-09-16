@@ -19,7 +19,9 @@ Two carriers for one token.
 The cookie exists because `EventSource` cannot set request headers, so a token
 living only in `Authorization` would authenticate every route except the live
 update stream, which is the one the interface depends on. `POST /api/grant`
-trades a token for the cookie.
+trades a token for the cookie: `HttpOnly`, `SameSite=Lax`, `Path=/`, and
+`Secure` exactly when the server terminates TLS itself (`--tls-cert`), never
+behind a proxy that does, where the server still speaks HTTP.
 
 **A token is demanded whenever anything outside the machine can reach the
 server**: a non loopback bind, or a non loopback name passed to `--allow-host`
@@ -32,7 +34,9 @@ an unauthenticated caller cannot enumerate the origin allowlist by watching a
 403 become a 401.
 
 The origin check applies to mutating requests only. `GET` is exempt, because
-`EventSource` cannot set headers.
+`EventSource` cannot set headers. The origins derived from the server's own
+bind carry its own scheme, `https` with `--tls-cert` and `http` without; an
+origin a proxy presents is `--allow-origin`, with the proxy's scheme and port.
 
 ## What `{name}` is
 
@@ -47,8 +51,9 @@ POST /api/sessions/work~vessel
 POST /api/sessions/personal~vessel
 ```
 
-Both halves are held to the same allowlist, `[A-Za-z0-9][A-Za-z0-9._-]*`, so
-neither can contain `~`. The identifier therefore has exactly one split point
+Both halves are held to the same allowlist, letters, digits, `.`, `_`, `-`
+and, in a folder name, a single space between words (`work~my app`, sent as
+`work~my%20app`), so neither can contain `~`. The identifier therefore has exactly one split point
 and two project directories can never produce one name. A bare `vessel` is not
 an identifier and is refused: with more than one root it would name two things,
 and choosing one for the caller at a destructive route is the ambiguity this
@@ -71,10 +76,14 @@ See `CHANGELOG.md`.
 | `POST` | `/api/sessions/{name}` | start a session |
 | `DELETE` | `/api/sessions/{name}` | begin a graceful stop, returns immediately |
 | `POST` | `/api/sessions/{name}/kill` | kill now, valid at any point |
+| `POST` | `/api/sessions/{name}/signal` | SIGTERM to a detached agent nothing addressable owns, through a pidfd |
+| `POST` | `/api/sessions/{name}/signal/force` | SIGKILL to the same, a second explicit request |
 | `POST` | `/api/sessions/{name}/answer` | send one key to a prompt the agent is blocked on |
 | `GET` | `/api/sessions/{name}/logs` | tail of the pane |
 | `GET` | `/api/sessions/{name}/url` | the session's link, once it has one |
 | `GET` | `/api/events` | SSE stream of state changes |
+| `GET` | `/api/config` | the effective configuration, every value with its source, never the token |
+| `PATCH` | `/api/config` | hide or show a configured root, or set the stop wait; the two settings a request may change |
 | `GET` | `/logs/{name}` | a page showing one project's tail, bookmarkable; refuses a name exactly as `/api/sessions/{name}/logs` does |
 
 **Graceful stop and kill are separate routes, not one route with a flag.** A
@@ -93,11 +102,13 @@ in both directions by the suite:
 | `unsupported` | folders that cannot be projects, each with the rule it broke, capped |
 | `unsupported_total` | the true count behind that cap |
 | `memory` | the machine's `available_mb` and `total_mb`, null when unreadable |
-| `roots` | every configured root as `{label, path}`, one root still a list |
+| `roots` | every root the interface shows as `{label, path}`, one root still a list |
+| `hidden_roots` | the labels of configured roots absent from the listing today, disabled in the config file or hidden by a request; an empty page says "hidden" rather than "no projects" |
 | `server` | this server, as distinct from this machine |
 | `server.version` | the version the installed distribution carries, the string `hitchrail --version` prints; null from a bare checkout |
 | `server.user` | the account this server runs as, which is the account every session it starts runs as; the numeric uid when the account has no passwd entry |
 | `server.started_at` | when this process started, Unix seconds; format it in the viewer's timezone, never the server's |
+| `server.stop_timeout` | seconds the server waits for a graceful stop before reporting it timed out; the browser's own patience is this number, read here rather than assumed |
 
 ### The session payload
 
@@ -154,6 +165,79 @@ route, and `no_agent` (409) for both states that hold no agent to answer:
   Pure and Powerlevel10k, so a stale pane on a developer's machine looks exactly
   like a prompt awaiting an answer.
 
+### `POST /api/sessions/{name}/signal`, and `/signal/force`
+
+For a `detached` row: an agent alive with no tmux session Hitchrail can
+address, which stop and kill cannot reach. `/signal` sends SIGTERM and
+`/signal/force` sends SIGKILL; the second is its own route and never what
+happens first. 202 with the session body as it was verified a moment before
+the signal; the listing shows the row go.
+
+**This is the one destructive route not scoped by the tmux prefix**, so it is
+scoped by a check, in one order: a pidfd is acquired, the row is re-derived
+and must still be `detached` for that project and that pid with no owner,
+and the signal goes through the handle. A pid reused between the listing and
+the call is a different process the handle does not refer to (`not_ours`);
+one that exited is `gone`; nothing is ever signalled by `os.kill`, and a
+machine that cannot open a pidfd is told so (`pidfd_unavailable`, 501).
+
+Refused before any handle is opened: the self project (`self_protected`), a
+pid in the process tree this server runs in (also `self_protected`), a row
+that is not detached (`not_detached`), a row a visible tmux session owns
+(`owned_elsewhere`, with the session in a `session` field: attach there), and
+another user's process (`not_ours`).
+
+### `GET /api/config`
+
+The effective configuration, for a person on a phone asking "what is this
+instance pointed at" without SSH. Every value is `{value, source}` where
+`source` is `flag`, `file`, `env` or `default`: `host`, `port`,
+`allow_hosts`, `allow_origins`, `self_project`, `agent_binary`,
+`session_prefix`, `tls` (the certificate's path, or null), the three memory
+figures, `config_file` and `state_file`.
+`roots` is every configured root as `{label, path, enabled, editable,
+source}`, hidden ones included, with `hidden_roots` beside it; `stop_timeout`
+is `{value, source, editable}`, its source `state` when the interface set it.
+**`token` carries its source and never its value**, and `none` means the
+server runs without one, which only a loopback bind allows.
+
+### `PATCH /api/config`
+
+Body: `{"roots": {"work": {"enabled": false}}, "stop_timeout": 45}`, either
+half optional. One boolean per configured label, as many labels as the body
+names, and a whole number of seconds; the response is the same document
+`GET` returns, as it now stands.
+
+**No route accepts a path, and this is the route that would have.** Roots are
+read once at startup from `~/.config/hitchrail/config.toml` or `--root`, and
+the set of paths Hitchrail can reach is fixed by a person with filesystem
+access. This route chooses among them: `enabled` is the whole of what it
+edits, the label is validated by membership in the configured set, and
+`tests/test_settings_route.py` asserts both against the real route table.
+
+The choice persists in Hitchrail's own `state.toml` beside the config file,
+never in the operator's file, and it only ever narrows: a root the config file
+sets `enabled = false` on is `editable: false` here, and a request to enable
+it is `operator_disabled` (409). Every label in a body is checked before
+anything is written, so one unknown label (`unknown_root`, 404) changes
+nothing. Any key outside `roots.<label>.enabled` is `not_editable` (400), the
+same answer whether the key is a root's `path` or the server's `host`.
+
+Hiding a root removes its projects from the listing and stops nothing: a
+session in a hidden root still answers to its name on every session route,
+so an agent hidden by mistake can still be stopped. `enabled = false` in the
+config file is stronger than hiding: `POST /api/sessions/{name}` in such a
+root is `operator_disabled` (409) and spawns nothing, while stop, kill and
+logs still resolve the name, so an agent already there can be ended.
+
+`stop_timeout` is the one policy value: a longer wait lets a request do
+nothing it could not already do. It passes the refusal `--stop-timeout`
+passes (`invalid_value`, 400), persists in `state.toml`, and is read by the
+engine and reported on the listing's `server` object from the next request.
+A `--stop-timeout` flag pins it: the value shows `source: "flag"`,
+`editable: false`, and a request to change it is `operator_pinned` (409)
+rather than a write the next restart would ignore.
+
 ## Session states
 
 Derived on demand, never stored.
@@ -206,6 +290,12 @@ than by position.
 | `origin_rejected` | 403 | a mutating request whose `Origin` is not allowed |
 | `not_found` | 404 | no such route |
 | `unknown_project` | 404 | no such folder under the root |
+| `unknown_root` | 404 | no configured root carries that label |
+| `not_editable` | 400 | the settings body names something a request may not change |
+| `operator_disabled` | 409 | the config file disables that root: a request cannot enable it, and nothing is started in it |
+| `operator_pinned` | 409 | that setting is given on the command line, and a request cannot override a flag |
+| `invalid_value` | 400 | a settings value the command line would refuse too, in the same words |
+| `state_unwritable` | 503 | the choice could not be written to `state.toml`, so it was not made |
 | `already_exists` | 409 | a folder of that name is already there |
 | `already_running` | 409 | that project already has a live session |
 | `locked` | 409 | a start is already in flight for that project |
@@ -213,6 +303,11 @@ than by position.
 | `invalid_key` | 400 | the key asked for is not one of the keys Hitchrail will send |
 | `not_asking` | 409 | a key was sent but the screen is not showing a question to answer |
 | `not_running` | 409 | a stop or kill was asked for something that is not running |
+| `not_detached` | 409 | the signal route was asked for a row that is running, stale or stopped |
+| `owned_elsewhere` | 409 | a tmux session Hitchrail can see owns the agent; the `session` field names it |
+| `gone` | 409 | the process left between the listing and the call; nothing was signalled |
+| `not_ours` | 409 | the pid is not the agent derivation identified: reused, another user's, or refused by the kernel; nothing was signalled |
+| `pidfd_unavailable` | 501 | this machine cannot signal through a race free handle, and Hitchrail will not signal a bare pid |
 | `ram_soft` | 409 | memory is tight; retry with acknowledgement to start anyway |
 | `stop_unsafe` | 409 | the pane is not in a state where a stop can be requested safely |
 | `url_pending` | 409 | the session has no link yet; ask again |

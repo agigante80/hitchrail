@@ -33,7 +33,7 @@ async def test_every_derived_state_renders_as_itself(page: Page, server: Harness
     )
 
 
-async def test_a_detached_row_names_its_pid_and_offers_nothing_that_cannot_act(
+async def test_a_detached_row_names_its_pid_and_offers_only_what_acts(
     page: Page, server: Harness
 ) -> None:
     """The state the design surfaces loudly and deliberately does not act on.
@@ -48,10 +48,9 @@ async def test_a_detached_row_names_its_pid_and_offers_nothing_that_cannot_act(
     is not behaviour, and a test that only checks the first will pin the second
     at whatever it happens to be.
 
-    The button is gone rather than wired. Every destructive path in this tool
-    is scoped by construction, `kill_session` can only address `hr-<name>`, and
-    a bare pid has no such scope. Adding the first unscoped one is a decision
-    with a security argument attached, and it is #107 rather than a handler.
+    The button was gone rather than wired until #107 built the route with
+    its constraints (design section 5.2b); the control on the row now is End,
+    and the browser test beside this one watches the process leave.
     """
     server.seed(detached=["forge-kit"])
     assert server.engine is not None
@@ -68,11 +67,11 @@ async def test_a_detached_row_names_its_pid_and_offers_nothing_that_cannot_act(
     await expect(row).to_contain_text("no session Hitchrail can address")
     await expect(row).to_contain_text(f"pid {pid}")
 
-    # And no control at all, because every one this row could offer either does
-    # nothing or needs a power the tool does not have.
-    assert await row.get_by_role("button").count() == 0, (
-        "a detached row is offering a control; if it cannot act, it is #83 again"
-    )
+    # One control, and it acts (#107): `tests/e2e/test_signal.py` proves the
+    # SIGTERM reaches the real process. A control that could not act would
+    # be #83 again, which is why the count is exact rather than "at least".
+    assert await row.get_by_role("button", name="End").count() == 1
+    assert await row.get_by_role("button").count() == 1
 
 
 async def test_an_agent_in_another_tools_tmux_session_says_where_it_is(
@@ -187,15 +186,15 @@ async def test_a_folder_that_cannot_be_a_project_is_accounted_for(
 ) -> None:
     """#7: dropping them silently made a folder called `my app` look like one
     Hitchrail could not see."""
-    server.seed(stopped=["vessel"], unsupported=["my app"])
+    # `my (app)` since #173 made `my app` a project.
+    server.seed(stopped=["vessel"], unsupported=["my (app)"])
     await page.goto(server.base)
-    # Qualified, like every other name the interface shows. "`my app` is not a
-    # project" is a puzzle when two roots are configured and only one has it.
-    await expect(page.locator(f'[data-unsupported="{DEFAULT_LABEL}~my app"]')).to_be_visible()
-    await expect(page.locator(f'[data-unsupported="{DEFAULT_LABEL}~my app"]')).to_contain_text(
-        "space"
-    )
-    await expect(page.locator('[data-project="my app"]')).to_have_count(0)
+    # Qualified, like every other name the interface shows. "`my (app)` is not
+    # a project" is a puzzle when two roots are configured and only one has it.
+    row = page.locator(f'[data-unsupported="{DEFAULT_LABEL}~my (app)"]')
+    await expect(row).to_be_visible()
+    await expect(row).to_contain_text("rename")
+    await expect(page.locator('[data-project="my (app)"]')).to_have_count(0)
 
 
 async def test_a_project_name_is_rendered_as_text_and_never_as_markup(

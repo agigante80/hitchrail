@@ -189,6 +189,55 @@ def sanitize(name: str) -> str:
     return f"{_ENCODED_PREFIX}{body}"
 
 
+def unsanitize(session: str) -> str | None:
+    """The inverse of `sanitize`, or None for a string it could not have
+    produced: an unencoded string carrying a separator, an encoded one with a
+    dangling escape. Existence of this inverse is what "injective" means, and
+    `could_be_ours` is the reason it is spelled out."""
+    if not session.startswith(_ENCODED_PREFIX):
+        return None if _needs_encoding(session) else session
+    body = session[len(_ENCODED_PREFIX) :]
+    out: list[str] = []
+    i = 0
+    escapes = {"-": "-", "d": ".", "c": ":"}
+    while i < len(body):
+        char = body[i]
+        if char == "-":
+            if i + 1 >= len(body) or body[i + 1] not in escapes:
+                return None
+            out.append(escapes[body[i + 1]])
+            i += 2
+        else:
+            out.append(char)
+            i += 1
+    decoded = "".join(out)
+    # An encoded form is only produced for a name that NEEDED encoding.
+    return decoded if _needs_encoding(decoded) else None
+
+
+def could_be_ours(session: str) -> bool:
+    """Whether a session name, prefix already stripped, is one `session_name`
+    could have created: `sanitize(<label>~<folder>)` with a label and folder
+    the allowlist admits, the label spaceless (#173).
+
+    The pane map used to disqualify a name by one test, "has a space",
+    because `NAME_PATTERN` refused one. #173 admitted a space into a folder
+    name, so that test would have handed our own `hr-main~my app` to the
+    foreign half and derived a running agent as detached. The question was
+    always "could we have created this", and this asks it.
+    """
+    from hitchrail.projectnames import NAME_PATTERN
+    from hitchrail.roots import QUALIFIER
+
+    identifier = unsanitize(session)
+    if identifier is None:
+        return False
+    label, sep, folder = identifier.partition(QUALIFIER)
+    if not sep or QUALIFIER in folder:
+        return False
+    return " " not in label and bool(NAME_PATTERN.match(label) and NAME_PATTERN.match(folder))
+
+
 def _needs_encoding(name: str) -> bool:
     """A name is encoded if it holds a separator, or could be mistaken for one
     that was. The second half is what keeps the two spaces disjoint."""

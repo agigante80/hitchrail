@@ -21,7 +21,7 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from hitchrail.tmuxnames import BINARY, foreign_name, sanitize
+from hitchrail.tmuxnames import BINARY, could_be_ours, foreign_name, sanitize
 
 # What a subprocess call looks like from here. Injected so the whole engine can
 # be tested without a machine, which is the single seam the architecture rests
@@ -287,11 +287,14 @@ class Tmux:
                 # parser should be true of its input rather than of one
                 # version's output, at the cost of one comparison.
                 continue
-            # **A space disqualifies a name from being ours, and that is not
-            # belt and braces.** `session_name` is `prefix + sanitize(project)`,
-            # `sanitize` introduces no space, and both halves of
-            # `<root-label>~<folder>` go through `NAME_PATTERN`, which forbids
-            # one. So a name with a space is one we could not have created.
+            # **A name we could not have created is not ours, and that is
+            # not belt and braces.** `session_name` is `prefix +
+            # sanitize(<root-label>~<folder>)`, and `could_be_ours` asks
+            # exactly whether a name is of that shape. It used to be one
+            # test, "has a space", because `NAME_PATTERN` refused one; #173
+            # admitted a space into a folder name, so `hr-main~my app` is
+            # now ours and `hr-my project` still is not, since it holds no
+            # `~`.
             #
             # Without this, `rpartition` makes things WORSE than the parser it
             # replaced for one input: a foreign session called `hr-my project`
@@ -302,7 +305,7 @@ class Tmux:
             # folder this whole module's derivation exists to prevent. Found in
             # review, and it is the reverted narrow fix's outcome reached
             # through the parser.
-            if " " in name or not name.startswith(self.prefix):
+            if not name.startswith(self.prefix) or not could_be_ours(name[len(self.prefix) :]):
                 # Keyed by PID rather than by name, because the question asked
                 # of this half is "who owns this process", never "where is
                 # session X".

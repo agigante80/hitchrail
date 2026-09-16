@@ -26,7 +26,7 @@ from hitchrail.config import ConfigError
 from hitchrail.hostnames import is_valid_host, normalise_host, normalise_origin
 from hitchrail.procs import ProcTable, parse_ps
 from hitchrail.security import parse_host
-from hitchrail.tmuxnames import sanitize
+from hitchrail.tmuxnames import sanitize, unsanitize
 from support import make_config
 
 settings.register_profile("hitchrail", derandomize=True, max_examples=400)
@@ -56,7 +56,10 @@ hosts = st.text(alphabet="abcx.-_0129:[]", min_size=0, max_size=16)
 # and the escape character meet, and a broad alphabet with long strings almost
 # never draws a colliding pair: the first version of this test used `names` and
 # passed against a naive replacement. Density beats breadth for injectivity.
-collidable = st.text(alphabet=".:-ae", min_size=0, max_size=4)
+# A space in the alphabet since #173: `sanitize` leaves it alone, and the
+# property has to hold over what `NAME_PATTERN` now admits, not over what it
+# admitted when the test was written.
+collidable = st.text(alphabet=".:-ae ", min_size=0, max_size=4)
 
 
 @given(batch=st.lists(collidable, min_size=2, max_size=12))
@@ -82,6 +85,17 @@ def test_sanitize_is_injective(batch: list[str]) -> None:
     """
     unique = set(batch)
     assert len({sanitize(n) for n in unique}) == len(unique)
+
+
+@given(name=st.text(alphabet="abc.:-~e ", min_size=0, max_size=8))
+@example(name="main~my app")
+@example(name="e-x")
+@example(name="a.b")
+def test_sanitize_has_an_inverse(name: str) -> None:
+    """Injective means an inverse exists, and `unsanitize` is it, spelled
+    out because the pane map asks it whether a session name could be ours
+    (#173). Round trip over the widened alphabet, space included."""
+    assert unsanitize(sanitize(name)) == name
 
 
 @given(name=names)

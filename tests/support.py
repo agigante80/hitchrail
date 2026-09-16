@@ -33,3 +33,51 @@ def make_config(root: Path, **kw: Any) -> Config:
     if "roots" in kw:
         raise TypeError("pass roots= to Config directly, not through make_config")
     return Config(roots=(Root(label=DEFAULT_LABEL, path=root.resolve()),), **kw)
+
+
+def make_certificate(directory: Path) -> tuple[Path, Path]:
+    """A self signed certificate for 127.0.0.1 and `localhost`, minted into a
+    temporary directory (#152).
+
+    Generated rather than committed: a private key in a public repository is
+    a private key somebody will one day copy into a deployment, and the
+    `no_private_data` guard would rightly ask what it is. `openssl` is what
+    every machine with a TLS stack has, and the tiers that need one FAIL
+    without it rather than skip, for the reason `.claude/CLAUDE.md` gives:
+    a tier that skips everywhere looks like coverage while proving nothing.
+    """
+    import shutil
+    import subprocess
+
+    assert shutil.which("openssl") is not None, (
+        "openssl is not installed, and the TLS tests FAIL rather than skip: a "
+        "certificate has to come from somewhere, and a committed one is a key "
+        "in a public repository."
+    )
+    cert = directory / "cert.pem"
+    key = directory / "key.pem"
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "ec",
+            "-pkeyopt",
+            "ec_paramgen_curve:prime256v1",
+            "-nodes",
+            "-keyout",
+            str(key),
+            "-out",
+            str(cert),
+            "-days",
+            "2",
+            "-subj",
+            "/CN=localhost",
+            "-addext",
+            "subjectAltName=DNS:localhost,IP:127.0.0.1",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return cert, key

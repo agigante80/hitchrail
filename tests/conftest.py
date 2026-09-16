@@ -6,16 +6,20 @@ now it holds the one guard that keeps the hermetic tier honest.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 
+from hitchrail import gateway
 from hitchrail.claude_ipc import launch_argv
 from hitchrail.cli import JOURNAL_ENV
 from hitchrail.config import TOKEN_ENV
 from hitchrail.procs import ProcTable, parse_ps
+from hitchrail.settings import CONFIG_HOME_ENV
 from hitchrail.tmux import Panes, Tmux
 
 # What the stubbed resolver answers with. `.invalid` is reserved by RFC 2606
@@ -48,6 +52,37 @@ def no_real_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(
         "hitchrail.config.local_addresses", lambda: (STUB_HOSTNAME, STUB_ADDRESS)
     )
+
+
+_real_gateway_mac = gateway.gateway_mac
+
+
+def _no_gateway_read(*args: object, **kwargs: object) -> str:
+    """The real reader only with tables a test handed in; bare, it refuses."""
+    if args or kwargs:
+        return _real_gateway_mac(*args, **kwargs)  # type: ignore[arg-type]
+    raise AssertionError(
+        "the real gateway reader was reached: pass gateway_mac= to gateway_verdict, "
+        "or monkeypatch hitchrail.gateway.gateway_mac"
+    )
+
+
+def _no_nudge(ip: str) -> None:
+    raise AssertionError(f"a test tried to put a datagram on the wire, to {ip}")
+
+
+@pytest.fixture(autouse=True)
+def no_real_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The same rule for the network identity reader (#207, security audit).
+
+    `gateway_verdict` with no seam reads this machine's `/proc/net/route` and
+    `/proc/net/arp` and, when the gateway's entry is absent, sends a datagram
+    to it. A test that reached it would pass or fail by the runner's network,
+    which is the defect the first version of the exit 2 test had. Stubbed for
+    every test; `tests/test_gateway.py` hands its own tables in.
+    """
+    monkeypatch.setattr("hitchrail.gateway.gateway_mac", _no_gateway_read)
+    monkeypatch.setattr("hitchrail.gateway._nudge", _no_nudge)
 
 
 @pytest.fixture(autouse=True)
@@ -84,7 +119,7 @@ STUB_CEILING_CALLS: list[int] = []
 #:
 #: Naming the CONSTANTS rather than the strings, so a rename moves both ends at
 #: once instead of leaving a scrub for a variable nothing reads any more.
-AMBIENT_ENV = (JOURNAL_ENV, TOKEN_ENV)
+AMBIENT_ENV = (JOURNAL_ENV, TOKEN_ENV, CONFIG_HOME_ENV)
 
 
 @pytest.fixture(autouse=True)
@@ -116,6 +151,17 @@ def no_ambient_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     for name in AMBIENT_ENV:
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def no_real_config_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#154. `settings.default_config_path()` reads `XDG_CONFIG_HOME` and falls
+    back to the home directory, so a test that builds a config without
+    `--config` would read the developer's real `~/.config/hitchrail/` and its
+    state file could hide a root from a test that never mentioned it. Every
+    test gets an empty config directory of its own; one that wants a file
+    writes it there or passes `--config`."""
+    monkeypatch.setenv(CONFIG_HOME_ENV, str(tmp_path / "xdg"))
 
 
 # -- Phase 4 fakes ---------------------------------------------------------
@@ -295,6 +341,61 @@ class FakeClock:
             )
         self.slept.append(seconds)
         self.advance(seconds)
+
+
+class FakePidfd:
+    """The pidfd seam's recorder (#107): one object behind all four callables,
+    so a test that must prove the ORDER, handle before verification, can read
+    one log.
+
+    `fail_open` and `fail_send` are exceptions to raise at those points; `uid`
+    is what `/proc/<pid>` reports as owner. `events` holds every call in
+    order, and `ProcsWatch` beside it records the table reads, so "opened
+    before the second look" is one list to assert on.
+    """
+
+    def __init__(
+        self,
+        *,
+        fail_open: BaseException | None = None,
+        fail_send: BaseException | None = None,
+        uid: int | None = None,
+    ) -> None:
+        self.events: list[tuple[str, object]] = []
+        self.fail_open = fail_open
+        self.fail_send = fail_send
+        self.uid = uid if uid is not None else os.getuid()
+        self._next = 100
+
+    def open(self, pid: int) -> int:
+        self.events.append(("open", pid))
+        if self.fail_open is not None:
+            raise self.fail_open
+        self._next += 1
+        return self._next
+
+    def send(self, pidfd: int, sig: int) -> None:
+        self.events.append(("send", (pidfd, sig)))
+        if self.fail_send is not None:
+            raise self.fail_send
+
+    def close(self, pidfd: int) -> None:
+        self.events.append(("close", pidfd))
+
+    def owner(self, pid: int) -> int:
+        self.events.append(("owner", pid))
+        return self.uid
+
+    @property
+    def signals(self) -> list[int]:
+        return [payload[1] for kind, payload in self.events if kind == "send"]  # type: ignore[index]
+
+    @property
+    def leaked(self) -> bool:
+        """A handle opened and never closed, on any path."""
+        opened = sum(1 for kind, _ in self.events if kind == "open" and self.fail_open is None)
+        closed = sum(1 for kind, _ in self.events if kind == "close")
+        return opened != closed
 
 
 class ScriptedProcs:

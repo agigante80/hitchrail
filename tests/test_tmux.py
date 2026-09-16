@@ -120,9 +120,9 @@ def test_the_pane_map_is_one_call_whatever_the_session_count() -> None:
     The engine calls this once per list, not once per project. A call per
     project is a subprocess spawn per row.
     """
-    runner = FakeRunner(stdout={"list-panes": "hr-a 1\nhr-b 2\nhr-c 3\n"})
+    runner = FakeRunner(stdout={"list-panes": "hr-main~a 1\nhr-main~b 2\nhr-main~c 3\n"})
     tmux = Tmux(prefix="hr-", run=runner)
-    assert tmux.panes().ours == {"hr-a": 1, "hr-b": 2, "hr-c": 3}
+    assert tmux.panes().ours == {"hr-main~a": 1, "hr-main~b": 2, "hr-main~c": 3}
     assert len(runner.calls) == 1
     assert "-a" in runner.calls[0]
 
@@ -135,9 +135,9 @@ def test_both_halves_of_the_pane_map_come_from_the_same_call() -> None:
     asked twice would be the per row spawn the budget forbids, arrived at from
     a different direction.
     """
-    runner = FakeRunner(stdout={"list-panes": "cc-vessel 111\nhr-vessel 4242\n"})
+    runner = FakeRunner(stdout={"list-panes": "cc-vessel 111\nhr-main~vessel 4242\n"})
     panes = Tmux(prefix="hr-", run=runner).panes()
-    assert panes.ours == {"hr-vessel": 4242}
+    assert panes.ours == {"hr-main~vessel": 4242}
     assert panes.foreign == {111: "cc-vessel"}
     assert len(runner.calls) == 1
 
@@ -150,46 +150,69 @@ def test_a_foreign_session_is_named_but_never_ours() -> None:
     orphan. Foreign sessions are now visible to the READ path and still absent
     from `ours`, which is what every write path builds its target from.
     """
-    runner = FakeRunner(stdout={"list-panes": "work 111\nhr-vessel 4242\n"})
+    runner = FakeRunner(stdout={"list-panes": "work 111\nhr-main~vessel 4242\n"})
     panes = Tmux(prefix="hr-", run=runner).panes()
-    assert panes.ours == {"hr-vessel": 4242}
+    assert panes.ours == {"hr-main~vessel": 4242}
     assert "work" not in panes.ours
     assert panes.foreign == {111: "work"}
 
 
-def test_a_prefixed_name_with_a_space_is_not_ours() -> None:
+def test_a_prefixed_name_we_could_not_have_created_is_not_ours() -> None:
     """Found in review of #85, and it is the parser making things worse.
 
     `rpartition` fixed a foreign name with a space being DROPPED. For one
-    input it made the outcome worse instead: `hr-my project` classifies as
-    ours, its pane pid lands in `owned`, the agent underneath is hidden, and
-    the row derives `stopped`. `stopped` offers Start, and Start on a folder
-    that already has an agent is the second agent in one folder the whole
-    derivation exists to prevent.
+    input it made the outcome worse instead: `hr-my project` classified as
+    ours, its pane pid landed in `owned`, the agent underneath was hidden,
+    and the row derived `stopped`. `stopped` offers Start, and Start on a
+    folder that already has an agent is the second agent in one folder the
+    whole derivation exists to prevent.
 
-    A space is what disqualifies it: `session_name` is `prefix + sanitize(...)`
-    and both halves of a qualified identifier go through `NAME_PATTERN`, which
-    forbids one, so we could not have created this session.
+    The test used to be "has a space". #173 admitted a space into a folder
+    name, so it is now "could `session_name` have produced this": `hr-my
+    project` holds no `~` and cannot be `<label>~<folder>`, `hr-my lab~x`
+    has a space in the label, and `hr-main~a.b` holds a separator that
+    `sanitize` would have encoded. None is ours.
     """
-    runner = FakeRunner(stdout={"list-panes": "hr-my project 5000\nhr-vessel 4242\n"})
+    lines = [
+        "hr-my project 5000",
+        "hr-my lab~x 5001",
+        "hr-main~a.b 5002",
+        "hr-main~vessel 4242",
+    ]
+    runner = FakeRunner(stdout={"list-panes": "\n".join(lines) + "\n"})
     panes = Tmux(prefix="hr-", run=runner).panes()
-    assert panes.ours == {"hr-vessel": 4242}
-    assert panes.foreign == {5000: "hr-my project"}
+    assert panes.ours == {"hr-main~vessel": 4242}
+    assert panes.foreign == {5000: "hr-my project", 5001: "hr-my lab~x", 5002: "hr-main~a.b"}
+
+
+def test_our_own_session_for_a_folder_with_a_space_is_ours() -> None:
+    """#173's pane map half: `hr-main~my app` is exactly what `session_name`
+    makes of the project `main~my app`, and it must land in `ours` with the
+    right pid, or a running agent derives as detached and the row offers
+    the wrong action. `rpartition` reads the pid from the end, so the space
+    inside the name never reaches `int()`."""
+    tmux = Tmux(
+        prefix="hr-",
+        run=FakeRunner(stdout={"list-panes": "hr-main~my app 4242\nhr-main~vessel 4243\n"}),
+    )
+    assert tmux.session_name("main~my app") == "hr-main~my app"
+    panes = tmux.panes()
+    assert panes.ours == {"hr-main~my app": 4242, "hr-main~vessel": 4243}
+    assert panes.foreign == {}
 
 
 def test_a_foreign_session_name_with_a_space_survives_the_parse() -> None:
     """#85, and the reason the split is `rpartition`.
 
-    Our own names cannot hold a space, because `NAME_PATTERN` refuses one
-    (#173). A foreign name is chosen by whoever made that session. Splitting on
-    the FIRST space read the pid as `work 111`, dropped the line, and left the
+    A foreign name is chosen by whoever made that session. Splitting on the
+    FIRST space read the pid as `work 111`, dropped the line, and left the
     agent inside that session looking unowned: the defect this ticket removes,
     reintroduced by the parser.
     """
-    runner = FakeRunner(stdout={"list-panes": "my work 111\nhr-vessel 4242\n"})
+    runner = FakeRunner(stdout={"list-panes": "my work 111\nhr-main~vessel 4242\n"})
     panes = Tmux(prefix="hr-", run=runner).panes()
     assert panes.foreign == {111: "my work"}
-    assert panes.ours == {"hr-vessel": 4242}
+    assert panes.ours == {"hr-main~vessel": 4242}
 
 
 def test_a_foreign_session_name_is_escaped_on_the_way_in() -> None:
@@ -215,13 +238,13 @@ def test_a_failed_list_panes_is_an_empty_map_not_an_exception() -> None:
 
 
 def test_a_malformed_pane_line_is_skipped_and_the_rest_survive() -> None:
-    runner = FakeRunner(stdout={"list-panes": "hr-a notapid\nhr-b 7\n\n"})
-    assert Tmux(prefix="hr-", run=runner).panes().ours == {"hr-b": 7}
+    runner = FakeRunner(stdout={"list-panes": "hr-main~a notapid\nhr-main~b 7\n\n"})
+    assert Tmux(prefix="hr-", run=runner).panes().ours == {"hr-main~b": 7}
 
 
 def test_the_first_pane_wins_for_a_multi_pane_session() -> None:
-    runner = FakeRunner(stdout={"list-panes": "hr-a 10\nhr-a 11\n"})
-    assert Tmux(prefix="hr-", run=runner).panes().ours == {"hr-a": 10}
+    runner = FakeRunner(stdout={"list-panes": "hr-main~a 10\nhr-main~a 11\n"})
+    assert Tmux(prefix="hr-", run=runner).panes().ours == {"hr-main~a": 10}
 
 
 def test_both_panes_of_one_foreign_session_survive_because_the_map_is_pid_keyed() -> None:
@@ -739,7 +762,7 @@ def test_the_pane_map_asks_for_every_pane_in_one_format() -> None:
     answer parseable, and nothing checked it: `#{session_name} #{pane_pid}` is
     two fields separated by one space, and the parser below splits on it.
     """
-    runner = FakeRunner(stdout={"list-panes": "hr-vessel 4\n"})
+    runner = FakeRunner(stdout={"list-panes": "hr-main~vessel 4\n"})
     Tmux(prefix="hr-", run=runner).panes()
 
     assert runner.calls[-1] == [

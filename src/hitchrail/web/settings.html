@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>hitchrail settings</title>
+<link rel="stylesheet" href="/app.css">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#F3ECE1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#362D24" media="(prefers-color-scheme: dark)">
+</head>
+<body class="settings-page">
+<!-- #238. What this instance is pointed at, from the phone, and the two
+     things a request may change. Two kinds of setting and the page does not
+     blur them: the perimeter (roots and their paths, the bind, the
+     allowlists, the token, the agent, the prefix) is rendered as TEXT with
+     where it came from, never as a disabled input, so nothing suggests it
+     can be changed from here. What can be changed is a root's checkbox and
+     the stop wait, and the API refuses everything else by name. -->
+<header class="bar">
+  <div class="bar-titles">
+    <h1>hitchrail</h1>
+    <p class="root">settings</p>
+  </div>
+  <div class="bar-actions">
+    <a class="btn ghost" href="/">Back</a>
+  </div>
+</header>
+<p class="stream-note" role="status" data-note></p>
+<main class="settings-main" data-settings>
+  <section class="settings-group">
+    <h2>Roots</h2>
+    <p class="settings-help">Folders whose projects are listed. Hiding one leaves its sessions running; it only leaves the list. Adding one is an edit to the config file on the machine.</p>
+    <ul class="settings-roots" data-roots></ul>
+  </section>
+  <section class="settings-group">
+    <h2>Stopping</h2>
+    <label class="settings-field" data-stop-field>
+      <span class="settings-label">Wait for a graceful stop, in seconds</span>
+      <span class="settings-control">
+        <input type="number" inputmode="numeric" min="1" step="1" data-stop-timeout>
+        <button type="button" class="accent" data-stop-save>Save</button>
+      </span>
+      <span class="settings-source" data-stop-source></span>
+    </label>
+  </section>
+  <section class="settings-group">
+    <h2>This instance</h2>
+    <p class="settings-help">Set on the machine, in the config file or on the command line, and shown here so you do not have to go and look.</p>
+    <dl class="settings-facts" data-facts></dl>
+  </section>
+</main>
+<script type="module" src="/settings.js"></script>
+</body>
+</html>

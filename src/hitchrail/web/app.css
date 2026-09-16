@@ -597,6 +597,47 @@ dialog[data-dialog]::backdrop { background: rgba(46, 37, 28, 0.55); }
 .logs-full[data-stale] { opacity: 0.6; }
 .logs-page .stream-note { display: none; }
 
+/* -- #238: the settings page ----------------------------------------------
+   Read only values as text with their source beside them; the two controls
+   a request may use are a checkbox row and a number field, each a 44px
+   target. The checkbox row is the whole label, so the tap box is the row. */
+.settings-main { padding: 12px 16px calc(24px + env(safe-area-inset-bottom)); }
+.settings-group { margin-bottom: 24px; }
+.settings-group h2 { font-size: 15px; margin: 0 0 4px; }
+.settings-help { margin: 0 0 10px; font-size: 13px; color: var(--muted); }
+.settings-roots { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.settings-root label {
+  display: grid; grid-template-columns: auto 1fr; column-gap: 12px; align-items: center;
+  min-height: var(--touch); padding: 8px 14px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  cursor: pointer;
+}
+.settings-root input[type="checkbox"] { width: 24px; height: 24px; margin: 0; accent-color: var(--accent); }
+/* No checkbox, no column: the text starts where the box would have. */
+.settings-root label:not(:has(input)) { grid-template-columns: 1fr; }
+.settings-root-name { font-weight: 700; grid-column: 2; }
+.settings-root label:not(:has(input)) .settings-root-name { grid-column: 1; }
+.settings-root-path, .settings-root .settings-source { grid-column: 2; }
+.settings-root label:not(:has(input)) .settings-root-path,
+.settings-root label:not(:has(input)) .settings-source { grid-column: 1; }
+.settings-root-path { font-family: var(--mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.settings-source { font-size: 12px; color: var(--muted-2); }
+.settings-field { display: grid; gap: 6px; }
+.settings-label { font-weight: 600; }
+.settings-control { display: flex; gap: 8px; align-items: center; }
+.settings-control input {
+  min-height: var(--touch); width: 7ch; padding: 0 10px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface); color: var(--ink); font: inherit;
+}
+.settings-control input[hidden], .settings-control button[hidden] { display: none; }
+.settings-facts { margin: 0; display: grid; grid-template-columns: 1fr; gap: 10px; }
+.settings-facts dt { font-size: 12px; color: var(--muted); }
+.settings-facts dd { margin: 0 0 2px; display: grid; gap: 2px; }
+.settings-value { font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
+.settings-page .stream-note { display: none; }
+.settings-page .stream-note:not(:empty) { display: block; }
+
 /* -- #240: the bulk wait ------------------------------------------------
    One line per row, scrolling inside the dialog so fifty of them leave the
    actions on screen at a phone height. */

@@ -119,7 +119,8 @@ design section 7's rule holds for the list as for the row, and the bulk kill
 lives inside Stop all's wait as its escalation.
 
 ## Phase: Phase 14: The perimeter, chosen rather than assumed
-state: planned
+state: open
+plan: docs/superpowers/plans/2026-09-14-hitchrail-phase-14-perimeter.md
 
 The operator chooses how this is reached and how it is proved, instead of
 being handed one answer. Every ticket here touches a security control, so each
@@ -132,6 +133,12 @@ of it; a way for a person holding a token to get in without the saved link;
 roots and the session prefix from configuration the operator can reach rather
 than only from a unit's `ExecStart`; and a settings page with the line drawn
 between what it shows and what a request may change.
+
+Five decisions were taken on the day it opened, 2026-09-14, and the plan
+carries them: the detached agent signal is built with an honest sentence in
+place of a predicate claiming to know ownership, enrolling a device is a
+paragraph and not a QR or a pairing code, the name pattern admits a space,
+and the config file and the network guard take their tickets' own answers.
 
 Two of those are deliberately not what was first asked for, and the tickets
 argue it rather than quietly narrowing. Replacing a 192 bit token with a

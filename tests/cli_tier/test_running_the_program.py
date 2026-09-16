@@ -269,3 +269,33 @@ def test_the_banner_withholds_the_token_when_stdout_is_the_journal(
         f"the token reached the journal, which #110 decided it must not:\n{printed}"
     )
     assert "#token=" not in printed, f"the link carries the token into the journal:\n{printed}"
+
+
+def test_a_certificate_that_cannot_be_loaded_leaves_nothing_serving(
+    roots: Path, agent: Path, tmp_path: Path
+) -> None:
+    """#152's unhappy path, and the half of it that matters is the second.
+
+    Exit 2 is the deliberate stop the unit never restarts. But a version that
+    refused the certificate and then fell back to plain HTTP on the port
+    nobody rechecked would also print a refusal; what rules that out here is
+    that the process EXITED: `run_cli` waits for it, and a server left
+    listening would still be running when the timeout fired.
+    """
+    garbage = tmp_path / "garbage.pem"
+    garbage.write_text("-----BEGIN CERTIFICATE-----\nnope\n-----END CERTIFICATE-----\n")
+    key = tmp_path / "key.pem"
+    key.write_text("-----BEGIN PRIVATE KEY-----\nnope\n-----END PRIVATE KEY-----\n")
+    result = run_cli(
+        "--root",
+        f"main={roots / 'main'}",
+        "--agent-binary",
+        str(agent),
+        "--tls-cert",
+        str(garbage),
+        "--tls-key",
+        str(key),
+    )
+    assert result.returncode == 2, result.stderr
+    assert "garbage.pem" in result.stderr
+    assert "nothing will be served" in result.stderr

@@ -85,7 +85,10 @@ interface requires a token, and the server refuses to start without one. It
 validates the `Host` header on every request, because a localhost service
 without that check can be driven by any website you visit, through DNS
 rebinding. Over plain HTTP on a LAN the token crosses the network in cleartext;
-put a TLS terminating reverse proxy in front of it if that matters to you.
+`--tls-cert` and `--tls-key` serve HTTPS from the server itself, with the
+certificate for a private address coming from a local CA you also trust on
+the phone (`docs/guides/phone-access.md`, route 2a), or put a TLS terminating
+reverse proxy in front of it.
 
 Behind such a proxy, tell Hitchrail the origin the browser will actually send,
 because it cannot be derived: the scheme and the port are the proxy's, not
@@ -136,10 +139,17 @@ you typing. That is what makes a gentle stop possible at all, and it is worth
 reading rather than discovering. Hitchrail only ever sends the stop sequence,
 and one test enforces that only the module owning it may send anything.
 
-Hitchrail cannot end a `detached` agent, the state where a process outlived its
-terminal. It shows the pid and stops there, because everything it can destroy
-is addressed by the session name it created, and signalling a bare pid would be
-the first thing outside that.
+**Hitchrail can end a `detached` agent, the state where a process outlived
+its terminal, and that is the one thing it destroys by pid rather than by a
+session name it created.** Everything else it can destroy is addressed by the
+tmux session it made, which cannot reach anybody else's. The End control on
+a detached row signals a pid, so it is scoped by a check instead: the pid
+comes from Hitchrail's own derivation, a handle to that exact process is
+taken before anything is re-checked, and a pid another process has since
+taken over, a process a visible session owns, another user's, or this
+server's own tree, is refused with nothing sent. The confirmation says what
+Hitchrail knows: it can see no session that owns the agent, and if it is open
+on a screen somewhere, this will end it there too.
 
 **Found a hole?** [`SECURITY.md`](SECURITY.md) says what is in scope, what is
 this design rather than a bug, and where to report privately. Please do not
@@ -191,33 +201,55 @@ printf 'HITCHRAIL_TOKEN=%s\n' "$(python3 -c 'import secrets;print(secrets.token_
     > ~/.config/hitchrail/env
 chmod 600 ~/.config/hitchrail/env
 
-# 3. The unit template, then edit the roots and the address into it.
+# 3. The folders, in a config file. Mode 644: a file others can write is
+#    refused, because it decides where an agent may run.
+$EDITOR ~/.config/hitchrail/config.toml
+chmod 644 ~/.config/hitchrail/config.toml
+```
+
+```toml
+[[roots]]
+label = "work"
+path = "~/work"
+
+[[roots]]
+label = "personal"
+path = "~/personal"
+
+[[roots]]
+label = "homelab"
+path = "~/homelab"
+
+[[roots]]
+label = "confidential"
+path = "~/confidential"
+enabled = false
+```
+
+```sh
+# 4. The unit template, then edit the address into it.
 mkdir -p ~/.config/systemd/user
 curl -fsSL https://raw.githubusercontent.com/agigante80/hitchrail/main/packaging/hitchrail.service \
     -o ~/.config/systemd/user/hitchrail.service
 $EDITOR ~/.config/systemd/user/hitchrail.service
 ```
 
-The one line to change is `ExecStart`. Point it at your folders and at the
-address your phone will use:
+The one line to change is `ExecStart`. Point it at the address your phone
+will use; the roots come from the file:
 
 ```ini
 ExecStart=%h/.local/bin/hitchrail \
     --host 192.168.1.10 \
-    --root work=%h/work \
-    --root personal=%h/personal \
-    --root homelab=%h/homelab \
-    --root confidential=%h/confidential \
     --self-project work~hitchrail
 ```
 
 ```sh
-# 4. Start it, and make it survive logout and reboot.
+# 5. Start it, and make it survive logout and reboot.
 systemctl --user daemon-reload
 systemctl --user enable --now hitchrail
 loginctl enable-linger "$USER"
 
-# 5. Read the token, and open the link on your phone.
+# 6. Read the token, and open the link on your phone.
 cat ~/.config/hitchrail/env
 #   http://192.168.1.10:8787/grant#token=<the value from that file>
 ```
@@ -233,6 +265,15 @@ If your agent needs something outside those directories, add it to that line,
 and prefer a stable path over a version pinned one: a pinned one goes stale at
 the next upgrade and fails at the next boot rather than at the upgrade.
 
+**Settings, from the phone.** The footer's "settings" link shows what this
+instance is pointed at: every root, the bind, the allowlists, the agent, the
+prefix, and where each came from, as text. Two things can be changed there
+and they are the only two: a root already in the file can be hidden from the
+list and shown again, and the wait before a stop is reported as unanswered.
+Both are kept in `~/.config/hitchrail/state.toml`, which is Hitchrail's own.
+Everything else is the perimeter and changes only in the config file or on
+the command line, on the machine.
+
 `journalctl --user -u hitchrail` shows the startup banner, which lists every
 address the server will answer to. It prints the links without the `#token=`
 fragment on purpose, because the journal is persistent and readable by root and
@@ -241,13 +282,20 @@ already have.
 
 ### What each part of that is doing
 
-**`--root LABEL=PATH`, repeated.** Every directory directly inside each root
-becomes a row. The label becomes part of the project's name, so
+**`[[roots]]`, one table per folder.** Every directory directly inside each
+root becomes a row. The label becomes part of the project's name, so
 `work~vessel` and `personal~vessel` are two projects rather than one ambiguous
 row, and stopping one leaves the other alone. The label is required even with a
 single root: if one root were unlabelled, adding a second later would rename
 everything you had saved a link to. A root inside another root is refused at
-startup, naming both.
+startup, naming both. `enabled = false` keeps a root configured, out of the
+listing, and closed to Start: nothing is spawned there until you change the
+file, though an agent already running there can still be stopped. Hiding
+from the interface is weaker: it only leaves the list, and that choice is
+kept in `state.toml` beside the file. Nothing the interface does can add
+a folder: the file is read once at startup, edited on the machine, and never
+written by Hitchrail. `--root LABEL=PATH` on the command line still works and
+wins outright over the file.
 
 **`--self-project`.** The folder Hitchrail itself runs from, if it is inside one
 of your roots. Its row then refuses to be stopped, so you cannot end the session
@@ -285,7 +333,12 @@ woke up.
 The address above is the **second** of three answers to "how does my phone reach
 this", and it is second for a reason. It needs nothing installed and it is
 correct while you are on a network you trust. Nothing will tell you when the
-machine joins one you do not.
+machine joins one you do not, unless you ask: `--expect-gateway-mac` names
+the default gateway of the network you meant, and a start anywhere else
+refuses and stays stopped until you look. That is a guard against carrying
+the machine somewhere by accident, not against somebody on the LAN who can
+present that address, and it is checked once, when the unit starts: a
+network joined while it is running is noticed at the next start.
 [`docs/guides/phone-access.md`](docs/guides/phone-access.md) is that decision in
 full, best first: an overlay network such as `tailscale serve`, which opens no
 inbound port and stays correct when the machine moves; then the named address
@@ -333,7 +386,8 @@ reach Hitchrail. Binding off loopback is one way to say so; passing
 because that is what you do to put Hitchrail behind a proxy such as
 `tailscale serve`. In both cases the server refuses to start without one. Everything after the `#` stays in the browser and
 reaches no server log. Over plain HTTP the cookie it becomes still crosses your
-network in clear, so put TLS in front of it if that matters to you.
+network in clear; `--tls-cert` and `--tls-key`, or TLS in front of it, end
+that.
 
 ### Every option
 
@@ -343,7 +397,8 @@ install it first.
 
 | Option | Default | What it does |
 |---|---|---|
-| `--root LABEL=PATH` | none, and required | A labelled folder holding projects. **Repeatable**, and the label becomes part of every project's name, so `work~vessel` and `personal~vessel` are two projects rather than one ambiguous row |
+| `--root LABEL=PATH` | the config file | A labelled folder holding projects. **Repeatable**, and the label becomes part of every project's name, so `work~vessel` and `personal~vessel` are two projects rather than one ambiguous row. Given, it replaces the file's roots outright; absent, the roots come from the file, and neither means Hitchrail refuses to start |
+| `--config FILE` | `~/.config/hitchrail/config.toml` | The config file: `[[roots]]` tables and `session_prefix`, read once at startup. A file that does not parse, has a key Hitchrail does not know, or is writable by others refuses to start |
 | `--host` | `127.0.0.1` | Address to bind. The default is the safe one: loopback |
 | `--port` | `8787` | Port to bind |
 | `--token` | generated | Required as soon as anything off this machine can reach Hitchrail. Prefer `HITCHRAIL_TOKEN`; see below |
@@ -351,6 +406,9 @@ install it first.
 | `--allow-origin` | none | An exact origin a browser may claim, `scheme://host[:port]`. Repeatable. Needed behind a TLS terminating proxy, whose scheme and port cannot be derived from our own bind |
 | `--self-project` | none | A project that must never be stopped, named as `label~folder`. Point it at the folder Hitchrail itself runs from |
 | `--agent-binary` | `claude` | The agent executable to run. Must be on `PATH` or an absolute path |
+| `--tls-cert`, `--tls-key` | none | A PEM certificate and its key: serve HTTPS from the server itself. Both or neither, refused at startup before the bind when one is missing or the pair cannot be loaded. Derived origins, banner links and the cookie's `Secure` flag follow |
+| `--expect-gateway-mac` | none | Refuse to start unless the default gateway has this MAC address, read from `/proc/net/route` and `/proc/net/arp`. A guard against a laptop serving on a network it joined by accident; a MAC is spoofable, so not against an attacker on the LAN. Checked once at start. A mismatch is exit 2, which the unit keeps stopped; "cannot tell" (no route yet, no ARP entry, a pinned entry) is exit 3, which it retries |
+| `--session-prefix` | `hr-` | What every tmux session this instance creates is named with, and the only sessions it will ever stop. Two instances on one tmux server need two prefixes: with one, each reads the other's agent in a same named folder as its own and can stop it. Also `session_prefix` in the config file |
 | `--stop-timeout` | `30` | Seconds to wait for a graceful stop before reporting that it timed out. It reports; it does not escalate |
 | `--version` | | Print the version and exit |
 | `-h`, `--help` | | Print the options and exit |
