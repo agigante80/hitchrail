@@ -52,6 +52,13 @@ narrows what the file allows. A hidden root's projects leave the listing,
 which now names them in `hidden_roots`; its sessions keep running and still
 answer by name.
 
+**A folder called `my app` is a project.** The name allowlist admits one
+space between two words; a leading, trailing or doubled space, and any other
+whitespace, are still refused, and the refusal now says to rename the folder
+rather than reading as an invitation to put a symlink beside it, which is
+the #32 workaround. Root labels stay spaceless. tmux stores such a name
+unchanged, checked on a real server.
+
 **HTTPS from the server itself.** `--tls-cert` and `--tls-key`, both or
 neither, refused at startup before the bind when one is missing or the pair
 cannot be loaded, so the failure is never plain HTTP on the port you believed

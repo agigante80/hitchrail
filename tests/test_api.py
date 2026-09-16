@@ -1051,16 +1051,17 @@ async def test_the_listing_accounts_for_folders_it_cannot_open(
     """A folder the root holds but Hitchrail cannot use must be ACCOUNTED for,
     not absent. Dropping them silently made a folder called `my app` look like
     one Hitchrail could not see, which is issue #7."""
-    (config.roots[0].path / "my app").mkdir()
+    # `my (app)` rather than `my app`: #173 made the latter a project.
+    (config.roots[0].path / "my (app)").mkdir()
     (config.roots[0].path / ".hidden").mkdir()
     body = (await client.get("/api/projects", headers=HEADERS)).json()
 
     assert "unsupported" in body and "unsupported_total" in body
     names = {u["name"] for u in body["unsupported"]}
-    assert proj("my app") in names
+    assert proj("my (app)") in names
     assert all(u["reason"] for u in body["unsupported"]), "a reason is the point"
     assert body["unsupported_total"] >= len(body["unsupported"])
-    assert "my app" not in {p["name"] for p in body["projects"]}
+    assert "my (app)" not in {p["name"] for p in body["projects"]}
 
 
 async def test_a_folder_whose_name_is_not_utf8_does_not_500_the_listing(

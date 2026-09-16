@@ -788,7 +788,8 @@ class Harness:
             env={k: v for k, v in os.environ.items() if k != "TMUX"},
             check=False,
         )
-        return result.stdout.split() if result.returncode == 0 else []
+        # `splitlines`: a session name can hold a space since #173.
+        return result.stdout.splitlines() if result.returncode == 0 else []
 
     def processes_still_naming(self, sock: str, grace: float = 0.0) -> list[str]:
         """Any process whose argv mentions this socket, tmux servers included.

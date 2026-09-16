@@ -51,8 +51,9 @@ POST /api/sessions/work~vessel
 POST /api/sessions/personal~vessel
 ```
 
-Both halves are held to the same allowlist, `[A-Za-z0-9][A-Za-z0-9._-]*`, so
-neither can contain `~`. The identifier therefore has exactly one split point
+Both halves are held to the same allowlist, letters, digits, `.`, `_`, `-`
+and, in a folder name, a single space between words (`work~my app`, sent as
+`work~my%20app`), so neither can contain `~`. The identifier therefore has exactly one split point
 and two project directories can never produce one name. A bare `vessel` is not
 an identifier and is refused: with more than one root it would name two things,
 and choosing one for the caller at a destructive route is the ambiguity this

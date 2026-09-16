@@ -1154,7 +1154,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 543 to 553 for #175: the empty-name guard and the note saying it
         # defends a format change rather than a defect, measured against tmux
         # 3.4, so nobody goes looking for a bug that is not there.
-        "tmux.py": 553,
+        # 553 to 556 for #173: the pane map asks `could_be_ours` rather than
+        # "has a space", and the comment says why the question changed.
+        "tmux.py": 556,
         # 413, and thirteen lines over the guideline is not a second job. #18
         # already took the host vocabulary out of this file, and what is left
         # is one dataclass and its startup refusals, which is one thing. The

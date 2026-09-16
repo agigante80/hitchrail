@@ -135,7 +135,11 @@ class PrivateTmux:
     def sessions(self) -> list[str]:
         """What the server ACTUALLY holds, which is not what we asked for."""
         result = self.run("list-sessions", "-F", "#{session_name}")
-        return result.stdout.split() if result.returncode == 0 else []
+        # `splitlines`, not `split`: a session name can hold a space since
+        # #173, and splitting on whitespace read one session as two names
+        # neither of which `kill-session` could find, which leaked the
+        # server this teardown exists to prevent leaking.
+        return result.stdout.splitlines() if result.returncode == 0 else []
 
     def close(self) -> list[str]:
         """Kill what the SERVER says it has, not what we think we created.
@@ -235,12 +239,16 @@ def test_the_adapter_resolves_its_own_session_and_not_a_sibling(
     Both sessions exist; the adapter must find the exact one and not the
     sibling whose name it is a prefix of.
     """
-    server.new_session(f"{PREFIX}vessel")
-    server.new_session(f"{PREFIX}vessel-social")
+    # Qualified, as every session has been since #119: since #173 the pane
+    # map asks whether a name is one `session_name` could have made, and an
+    # unqualified one is not.
+    server.new_session(f"{PREFIX}main~vessel")
+    server.new_session(f"{PREFIX}main~vessel-social")
     tmux = adapter(server)
-    assert tmux.has_session("vessel") is True
-    assert tmux.pane_pid("vessel") is not None
-    assert tmux.panes().ours.keys() >= {f"{PREFIX}vessel", f"{PREFIX}vessel-social"}
+    assert tmux.has_session("main~vessel") is True
+    assert tmux.pane_pid("main~vessel") is not None
+    ours = tmux.panes().ours.keys()
+    assert ours >= {f"{PREFIX}main~vessel", f"{PREFIX}main~vessel-social"}
 
 
 def test_the_adapter_refuses_a_session_that_does_not_exist(
@@ -962,3 +970,23 @@ def test_two_instances_with_different_prefixes_cannot_stop_each_others_agents(
     a.kill(name)
     server.created.remove(f"{PREFIX}a-{sanitize(name)}")
     assert a.get(name).state is State.STOPPED
+
+
+# -- #173: a session name with a space, on a real tmux ---------------------
+
+
+def test_tmux_stores_a_session_name_with_a_space_unchanged(server: PrivateTmux) -> None:
+    """What tmux ACTUALLY stores for a name with a space, established the way
+    the `.` rewrite was (#173): asked of the server, not of a fake. The
+    whole widening rests on this: if tmux rewrote the space the way it
+    rewrites a dot, `has-session -t =name` would miss the running session
+    and the row would say stopped. It does not, on 3.4: the name comes back
+    verbatim from `list-sessions`, `list-panes -a` reports it on one line
+    with the pid last, and the anchored target resolves it."""
+    name = f"{PREFIX}main~{live_project('my app')}"
+    server.new_session(name)
+    assert name in server.sessions(), "tmux rewrote the space"
+    assert server.run("has-session", "-t", f"={name}").returncode == 0
+    panes = adapter(server).panes()
+    assert name in panes.ours, panes
+    assert panes.foreign == {}

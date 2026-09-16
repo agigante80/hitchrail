@@ -187,15 +187,15 @@ async def test_a_folder_that_cannot_be_a_project_is_accounted_for(
 ) -> None:
     """#7: dropping them silently made a folder called `my app` look like one
     Hitchrail could not see."""
-    server.seed(stopped=["vessel"], unsupported=["my app"])
+    # `my (app)` since #173 made `my app` a project.
+    server.seed(stopped=["vessel"], unsupported=["my (app)"])
     await page.goto(server.base)
-    # Qualified, like every other name the interface shows. "`my app` is not a
-    # project" is a puzzle when two roots are configured and only one has it.
-    await expect(page.locator(f'[data-unsupported="{DEFAULT_LABEL}~my app"]')).to_be_visible()
-    await expect(page.locator(f'[data-unsupported="{DEFAULT_LABEL}~my app"]')).to_contain_text(
-        "space"
-    )
-    await expect(page.locator('[data-project="my app"]')).to_have_count(0)
+    # Qualified, like every other name the interface shows. "`my (app)` is not
+    # a project" is a puzzle when two roots are configured and only one has it.
+    row = page.locator(f'[data-unsupported="{DEFAULT_LABEL}~my (app)"]')
+    await expect(row).to_be_visible()
+    await expect(row).to_contain_text("rename")
+    await expect(page.locator('[data-project="my (app)"]')).to_have_count(0)
 
 
 async def test_a_project_name_is_rendered_as_text_and_never_as_markup(

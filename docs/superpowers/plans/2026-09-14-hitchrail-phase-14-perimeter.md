@@ -144,7 +144,7 @@ before `Config` does.
 
 ### Batch 3: the edges of the perimeter, tasks 83 to 85
 
-- [ ] **Task 83, #173.** `NAME_PATTERN` admits a space. `sanitize` re-proven
+- [x] **Task 83, #173.** `NAME_PATTERN` admits a space. `sanitize` re-proven
       injective over the wider input, by property test rather than by
       enumeration, since that is how the first version of the pattern was
       caught failing open. A live tmux test of what tmux actually stores for
