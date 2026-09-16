@@ -2186,30 +2186,25 @@ async def test_the_force_route_is_the_only_way_to_sigkill(config: Config) -> Non
     assert fake.signals == [signal.SIGKILL]
 
 
+# Keyword arguments for the recorder, not instances: a parametrised
+# instance lives for the whole session, and `_signal_engine` pins where the
+# process runs on first use, so a second run of the same case (the mutation
+# sweep collects the suite from two paths) judged a stale root as another
+# instance's. Built inside the test, once per case, every time.
 @pytest.mark.parametrize(
-    ("table", "fake", "status", "code"),
+    ("table", "fake_kw", "status", "code"),
     [
-        (RUNNING_PS, FakePidfd(), 409, "not_detached"),
-        ("", FakePidfd(), 409, "not_detached"),
-        (DETACHED_PS, FakePidfd(fail_open=OSError(3, "No such process")), 409, "gone"),
-        (DETACHED_PS, FakePidfd(fail_send=OSError(3, "No such process")), 409, "gone"),
+        (RUNNING_PS, {}, 409, "not_detached"),
+        ("", {}, 409, "not_detached"),
+        (DETACHED_PS, {"fail_open": OSError(3, "No such process")}, 409, "gone"),
+        (DETACHED_PS, {"fail_send": OSError(3, "No such process")}, 409, "gone"),
+        (DETACHED_PS, {"fail_send": OSError(1, "Operation not permitted")}, 409, "not_ours"),
+        (DETACHED_PS, {"uid": os.getuid() + 1}, 409, "not_ours"),
+        (DETACHED_PS, {"fail_open": OSError(38, "no")}, 501, "pidfd_unavailable"),
+        (DETACHED_PS, {"fail_open": AttributeError("pidfd_open")}, 501, "pidfd_unavailable"),
         (
             DETACHED_PS,
-            FakePidfd(fail_send=OSError(1, "Operation not permitted")),
-            409,
-            "not_ours",
-        ),
-        (DETACHED_PS, FakePidfd(uid=os.getuid() + 1), 409, "not_ours"),
-        (DETACHED_PS, FakePidfd(fail_open=OSError(38, "no")), 501, "pidfd_unavailable"),
-        (
-            DETACHED_PS,
-            FakePidfd(fail_open=AttributeError("pidfd_open")),
-            501,
-            "pidfd_unavailable",
-        ),
-        (
-            DETACHED_PS,
-            FakePidfd(fail_open=OSError(24, "Too many open files")),
+            {"fail_open": OSError(24, "Too many open files")},
             503,
             "machine_unreadable",
         ),
@@ -2227,8 +2222,9 @@ async def test_the_force_route_is_the_only_way_to_sigkill(config: Config) -> Non
     ],
 )
 async def test_every_signal_refusal_has_its_code_and_signals_nothing(
-    config: Config, table: str, fake: FakePidfd, status: int, code: str
+    config: Config, table: str, fake_kw: dict[str, object], status: int, code: str
 ) -> None:
+    fake = FakePidfd(**fake_kw)  # type: ignore[arg-type]
     engine = _signal_engine(config, fake, table)
     if table == RUNNING_PS:
         engine.tmux = FakeTmux(sessions={proj("vessel"): 500})

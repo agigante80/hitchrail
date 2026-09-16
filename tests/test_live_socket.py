@@ -30,6 +30,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from conftest import FakeTmux, procs_from
+from hitchrail.cli import build_tls_context
 from hitchrail.config import Config
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
@@ -408,14 +409,18 @@ def test_a_grant_and_a_start_go_through_our_own_tls(tmp_path: Path) -> None:
     )
     engine = make_engine(config, FakeTmux(), ScriptedProcs("", STARTED_PS), PLENTY)
     app = create_app(engine=engine, config=config, bus=EventBus())
+    # The CLI's own context through the factory, never the two paths (#267):
+    # premortem 1 of the Phase 20 plan is a factory that differs from the
+    # `ssl_certfile=` path the hermetic tier cannot see.
+    context = build_tls_context(config)
+    assert context is not None
     server = uvicorn.Server(
         uvicorn.Config(
             app,
             host="127.0.0.1",
             port=port,
             log_level="warning",
-            ssl_certfile=str(cert),
-            ssl_keyfile=str(key),
+            ssl_context_factory=lambda _config, _default: context,
         )
     )
     thread = threading.Thread(target=server.run, daemon=True)
@@ -448,6 +453,13 @@ def test_a_grant_and_a_start_go_through_our_own_tls(tmp_path: Path) -> None:
             started = client.post(f"{base}/api/sessions/main~network", headers=origin)
             assert started.status_code == 201, started.text
             assert started.json()["state"] == "running"
+            # The floor held on the wire: what the socket negotiated is at
+            # least 1.2, which is the assertion premortem 1 names.
+            with (
+                socket.create_connection(("127.0.0.1", port), timeout=TIMEOUT) as raw,
+                trust.wrap_socket(raw, server_hostname="localhost") as tls,
+            ):
+                assert tls.version() in {"TLSv1.2", "TLSv1.3"}, tls.version()
     finally:
         server.should_exit = True
         thread.join(timeout=10)

@@ -12,6 +12,7 @@ and a mutating request through a real certificate.
 from __future__ import annotations
 
 import pathlib
+import ssl
 
 import httpx
 import pytest
@@ -20,7 +21,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from conftest import FakeTmux, procs_from
-from hitchrail.cli import banner, build_config, main, parse_args
+from hitchrail.cli import banner, build_config, build_tls_context, main, parse_args
 from hitchrail.config import Config, ConfigError
 from hitchrail.events import EventBus
 from hitchrail.roots import Root
@@ -76,16 +77,18 @@ def test_a_certificate_that_cannot_be_loaded_refuses_at_startup(
     tmp_path: pathlib.Path, certificate: tuple[pathlib.Path, pathlib.Path]
 ) -> None:
     """The failure that must never happen is plain HTTP on the port the
-    operator believed was TLS. A garbage certificate is loaded ONCE at
-    construction and refused with the file named, before any bind; the cli
-    tier proves the port then holds nothing."""
+    operator believed was TLS. A garbage certificate is loaded ONCE, by the
+    CLI before any bind, and refused with the file named; the cli tier
+    proves the port then holds nothing. `Config` itself no longer reads the
+    pair (#267): it names two files and stops."""
     _, key = certificate
     garbage = tmp_path / "garbage.pem"
     garbage.write_text(
         "-----BEGIN CERTIFICATE-----\nnot a certificate\n-----END CERTIFICATE-----\n"
     )
+    config = Config(roots=_roots(tmp_path), tls_cert=garbage, tls_key=key)
     with pytest.raises(ConfigError, match=r"cannot be loaded, so nothing will be served"):
-        Config(roots=_roots(tmp_path), tls_cert=garbage, tls_key=key)
+        build_tls_context(config)
     # And from the command line: exit 2, the deliberate stop the unit never
     # restarts, not uvicorn's exit 1 that it retries.
     argv = [
@@ -106,7 +109,42 @@ def test_a_key_that_does_not_match_the_certificate_refuses(
     (tmp_path / "other").mkdir()
     _, other_key = make_certificate(tmp_path / "other")
     with pytest.raises(ConfigError, match="cannot be loaded"):
-        Config(roots=_roots(tmp_path), tls_cert=cert, tls_key=other_key)
+        build_tls_context(Config(roots=_roots(tmp_path), tls_cert=cert, tls_key=other_key))
+
+
+def test_a_config_opens_no_file(
+    tmp_path: pathlib.Path,
+    certificate: tuple[pathlib.Path, pathlib.Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#267's done-when. `Preferences.apply` validates a settings value
+    through `Config.check_stop_timeout`, and a `Config` built anywhere reads
+    nothing: a key rotated after start used to make a stop-wait change
+    answer "cannot be loaded, so nothing will be served" while serving."""
+    cert, key = certificate
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise AssertionError("Config loaded the certificate pair")
+
+    monkeypatch.setattr(ssl.SSLContext, "load_cert_chain", refuse)
+    config = Config(roots=_roots(tmp_path), token="t", tls_cert=cert, tls_key=key)
+    assert config.tls
+    Config.check_stop_timeout(45)
+    with pytest.raises(ConfigError, match="at most"):
+        Config.check_stop_timeout(3601)
+
+
+def test_the_context_has_a_floor_of_tls_1_2(
+    tmp_path: pathlib.Path, certificate: tuple[pathlib.Path, pathlib.Path]
+) -> None:
+    """Set, not inherited: uvicorn's default context sets no floor, and
+    OpenSSL 3's security level happens to refuse 1.1 where a 1.1.1 build
+    would not."""
+    cert, key = certificate
+    context = build_tls_context(Config(roots=_roots(tmp_path), tls_cert=cert, tls_key=key))
+    assert context is not None
+    assert context.minimum_version == ssl.TLSVersion.TLSv1_2
+    assert build_tls_context(Config(roots=_roots(tmp_path))) is None
 
 
 # -- the part that is not the two flags -------------------------------------
@@ -252,11 +290,14 @@ def test_the_banner_prints_links_in_the_servers_scheme(
     assert "http://" not in text
 
 
-def test_the_flags_reach_uvicorn_as_the_certificate_pair(
+def test_the_flags_reach_uvicorn_as_one_context(
     tmp_path: pathlib.Path,
     certificate: tuple[pathlib.Path, pathlib.Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The context itself, through `ssl_context_factory`, never the two
+    paths: with a factory uvicorn serves from the object it is handed and
+    reads no file, so the check-then-bind window is gone (#267)."""
     cert, key = certificate
     captured: dict[str, object] = {}
 
@@ -275,10 +316,14 @@ def test_the_flags_reach_uvicorn_as_the_certificate_pair(
         str(key),
     ]
     assert main(argv) == 0
-    assert captured["ssl_certfile"] == str(cert)
-    assert captured["ssl_keyfile"] == str(key)
-    # And nothing without the flags: `None` is how uvicorn spells "no TLS".
+    factory = captured["ssl_context_factory"]
+    assert callable(factory)
+    context = factory(None, None)
+    assert isinstance(context, ssl.SSLContext)
+    assert context.minimum_version == ssl.TLSVersion.TLSv1_2
+    assert "ssl_certfile" not in captured and "ssl_keyfile" not in captured
+    # And nothing without the flags: no factory is how uvicorn spells "no TLS".
     captured.clear()
     code = main(["--root", f"main={tmp_path / 'root'}"])
     assert code == 0
-    assert (captured.get("ssl_certfile"), captured.get("ssl_keyfile")) == (None, None)
+    assert captured.get("ssl_context_factory") is None

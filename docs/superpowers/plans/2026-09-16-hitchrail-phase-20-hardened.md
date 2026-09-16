@@ -86,7 +86,7 @@ Independent, small, and each is a scenario that was executed against the code.
 
 ### Batch 2: the two that change structure, tasks 92 and 93
 
-- [ ] **Task 92, #267.** `Config` no longer opens a file: the certificate pair
+- [x] **Task 92, #267.** `Config` no longer opens a file: the certificate pair
       is loaded once in `cli`, into a real `ssl.SSLContext` handed to uvicorn
       through `ssl_context_factory`, with `minimum_version = TLSv1_2` set and
       asserted; `Preferences.apply` validates the timeout through a static
@@ -95,7 +95,7 @@ Independent, small, and each is a scenario that was executed against the code.
       socket test still runs a grant and a Start through the certificate**,
       premortem 1 below.
 
-- [ ] **Task 93, #273.** `settings.py` and `gateway.py` in `[tool.mutmut]
+- [x] **Task 93, #273.** `settings.py` and `gateway.py` in `[tool.mutmut]
       source_paths` and the security rule, `uv run mutmut run` over both, and
       the survivors READ: each real one gets a killing test written from the
       code around it, and the ticket records which survivors were equivalent.

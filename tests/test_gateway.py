@@ -267,3 +267,69 @@ def test_the_verdict_is_the_exit_code_from_the_command_line(
     # The FAKE's words, so this cannot pass by reading the real machine's
     # tables and happening not to match, which the first version did.
     assert ("de:ad:be:ef:00:01" in err) if found else ("no IPv4 default route" in err)
+
+
+# -- #273: the survivors, read and killed --------------------------------------
+#
+# The mutation sweep over this module left sixteen survivors. Half were prose
+# or a boundary no real table reaches (a line with exactly four fields; `>`
+# against `>=` on a monotonic clock); these are the ones that were real, each
+# a table shape the first fixtures happened not to contain.
+
+# A VPN's default route first, with no gateway (RTF_UP only), then a static
+# route THROUGH a gateway that is not the default, then the LAN default. The
+# first fixture had the default route first, so `continue` and `break` were
+# the same, an `and` for the `or` was the same, and any flag test that let
+# `0x1` through was the same.
+ROUTE_MIXED = """\
+Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT
+tun0\t00000000\t00000000\t0001\t0\t0\t50\t00000000\t0\t0\t0
+enx803f5df75e5f\t0A0A0A0A\t0221A8C0\t0007\t0\t0\t100\tFFFFFFFF\t0\t0\t0
+short line
+weird0\t00000000\tNOTHEX00\t0003\t0\t0\t100\t00000000\t0\t0\t0
+enx803f5df75e5f\t00000000\t0121A8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0
+"""
+
+
+def test_a_vpn_default_and_a_static_route_before_the_lan_default_are_skipped() -> None:
+    """The tun default has no gateway (flags 0x1), the static route has a
+    gateway but a destination, the short line and the one whose gateway is
+    not hex are malformed: every one is passed over and the LAN default is
+    the answer."""
+    assert gateway.default_gateway(ROUTE_MIXED) == "192.168.33.1"
+
+
+def test_only_a_vpn_default_is_no_default_at_all() -> None:
+    only_tun = "\n".join(ROUTE_MIXED.splitlines()[:2]) + "\n"
+    assert gateway.default_gateway(only_tun) is None
+
+
+def test_the_gateways_arp_line_can_be_the_first_line() -> None:
+    """The first fixture had the gateway on the second data line, so a walk
+    that skipped one line too many still found it."""
+    first = "\n".join([ARP.splitlines()[0], ARP.splitlines()[2], ARP.splitlines()[1]]) + "\n"
+    assert gateway.mac_for("192.168.33.1", first) == GATEWAY
+
+
+def test_the_wait_after_the_nudge_is_a_real_wait(tmp_path: Path) -> None:
+    """The table fills some time AFTER the datagram, not inside the nudge:
+    a deadline computed as `clock() - RESOLVE_WAIT_S` refuses on the first
+    re-read, and a fixture whose nudge filled the table synchronously could
+    not tell."""
+    route, arp = _tables(tmp_path, arp=ARP.replace(GATEWAY.upper(), "00:00:00:00:00:00"))
+    clock = FakeClock()
+    nudged_at: list[float] = []
+
+    def nudge(ip: str) -> None:
+        nudged_at.append(clock())
+
+    def sleep(seconds: float) -> None:
+        clock.sleep(seconds)
+        # Resolved half a second after the nudge, as a real ARP exchange is
+        # milliseconds and a slow one is not.
+        if clock() - nudged_at[0] >= 0.5:
+            arp.write_text(ARP)
+
+    started = clock()
+    assert gateway.gateway_mac(route, arp, nudge=nudge, clock=clock, sleep=sleep) == GATEWAY
+    assert 0.5 <= clock() - started < gateway.RESOLVE_WAIT_S

@@ -419,6 +419,45 @@ def test_the_pages_ceiling_is_the_validators() -> None:
     assert f'max="{MAX_STOP_TIMEOUT_S}"' in html
 
 
+async def test_a_settings_write_succeeds_after_the_key_file_is_gone(
+    tmp_path: pathlib.Path,
+) -> None:
+    """#267. `Preferences.apply` validated the wait by rebuilding a Config,
+    which re-read the private key: rotate or remove it after start and the
+    settings write answered "cannot be loaded, so nothing will be served"
+    while serving the response. The key is read once, by the CLI."""
+    from support import make_certificate
+
+    cert, key = make_certificate(tmp_path)
+    (tmp_path / "root").mkdir()
+    config = Config(
+        roots=(Root(label="main", path=(tmp_path / "root").resolve()),),
+        token="s3cret-token-value",
+        tls_cert=cert,
+        tls_key=key,
+        state_path=tmp_path / "state" / "state.toml",
+        sessions_dir=tmp_path / ".sessions",
+        agent_config_path=NO_AGENT_CONFIG,
+    )
+    engine = make_engine(config, FakeTmux(), procs_from(""), PLENTY)
+    app = create_app(engine=engine, config=config, bus=EventBus())
+    key.unlink()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://localhost"
+    ) as c:
+        r = await c.patch(
+            "/api/config",
+            json={"stop_timeout": 45},
+            headers={
+                "host": "localhost",
+                "origin": "https://localhost:8787",
+                "authorization": "Bearer s3cret-token-value",
+            },
+        )
+    assert r.status_code == 200, r.text
+    assert r.json()["stop_timeout"]["value"] == 45
+
+
 async def test_a_body_that_is_not_json_is_invalid_body(client: httpx.AsyncClient) -> None:
     r = await client.patch("/api/config", content=b"{not json", headers=HEADERS)
     assert r.status_code == 400

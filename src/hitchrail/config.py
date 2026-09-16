@@ -8,7 +8,6 @@ and the derived allowlists; that one owns what a valid host or origin IS.
 from __future__ import annotations
 
 import contextlib
-import ssl
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -299,12 +298,15 @@ class Config:
 
     def _check_tls(self) -> None:
         """One flag without the other is a configuration error, not half a
-        configuration; a certificate that cannot be loaded stops the start.
+        configuration. Both must name a file.
 
-        Loaded here, once, into a throwaway context: uvicorn would load it
-        again at bind time and exit 1 on failure, which the unit RETRIES,
-        and after the retries what is listening is nothing. Refusing here
-        is exit 2, which the unit leaves alone, with the file named.
+        The pair is NOT loaded here (#267). It was, once, so a bad pair
+        refused at construction; but `Preferences.apply` rebuilds a `Config`
+        to validate a settings value, so every settings write re-read the
+        private key from disk and a key rotated after start answered a
+        stop-wait change with "cannot be loaded, so nothing will be served"
+        while serving the response. `cli.build_tls_context` loads it once,
+        before the bind, with the same refusal and exit code.
         """
         if (self.tls_cert is None) != (self.tls_key is None):
             missing = "--tls-key" if self.tls_key is None else "--tls-cert"
@@ -315,14 +317,6 @@ class Config:
         for flag, path in (("--tls-cert", self.tls_cert), ("--tls-key", self.tls_key)):
             if not path.is_file():
                 raise ConfigError(f"{flag} {path}: not a readable file")
-        try:
-            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            context.load_cert_chain(str(self.tls_cert), str(self.tls_key))
-        except (ssl.SSLError, OSError) as exc:
-            raise ConfigError(
-                f"--tls-cert {self.tls_cert} with --tls-key {self.tls_key} cannot be "
-                f"loaded, so nothing will be served on this port: {exc}"
-            ) from exc
         # #268. A plain `http://` origin off loopback beside our own TLS is a
         # deployment that cannot work: the cookie is `Secure` and is never
         # sent back on that origin, so the grant succeeds and every request
@@ -370,17 +364,7 @@ class Config:
     def _check_numbers(self) -> None:
         if not (1 <= self.port <= 65535):
             raise ConfigError(f"port out of range: {self.port}")
-        if self.stop_timeout <= 0:
-            raise ConfigError(f"stop timeout must be positive: {self.stop_timeout}")
-        if self.stop_timeout > MAX_STOP_TIMEOUT_S:
-            # #265. A wait past an hour is not one anybody is watching, and
-            # the engine held a `stopping` marker for it; the page polls in
-            # 700 ms ticks against a deadline, so the browser timer overflow
-            # the ticket first blamed is not what it does (review, round 1).
-            raise ConfigError(
-                f"stop timeout must be at most {MAX_STOP_TIMEOUT_S} seconds: "
-                f"{self.stop_timeout}"
-            )
+        self.check_stop_timeout(self.stop_timeout)
         for name in ("hard_floor_mb", "soft_floor_mb", "session_mb"):
             value = getattr(self, name)
             if value < 0:
@@ -392,6 +376,22 @@ class Config:
             raise ConfigError(
                 f"soft floor {self.soft_floor_mb} is below hard floor "
                 f"{self.hard_floor_mb}, which makes the confirmation gate unreachable"
+            )
+
+    @staticmethod
+    def check_stop_timeout(seconds: float) -> None:
+        """The one validator for the wait, callable without a Config (#267):
+        `Preferences.apply` used to rebuild the whole dataclass to reach it,
+        which re-ran every check including a file read."""
+        if seconds <= 0:
+            raise ConfigError(f"stop timeout must be positive: {seconds}")
+        if seconds > MAX_STOP_TIMEOUT_S:
+            # #265. A wait past an hour is not one anybody is watching, and
+            # the engine held a `stopping` marker for it; the page polls in
+            # 700 ms ticks against a deadline, so the browser timer overflow
+            # the ticket first blamed is not what it does (review, round 1).
+            raise ConfigError(
+                f"stop timeout must be at most {MAX_STOP_TIMEOUT_S} seconds: {seconds}"
             )
 
     def _check_bind_host(self) -> None:

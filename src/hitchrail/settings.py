@@ -379,7 +379,7 @@ class Preferences:
                     "stop_timeout is set on the command line, which a request cannot override"
                 )
             try:
-                replace(self._config, stop_timeout=stop_timeout)
+                Config.check_stop_timeout(stop_timeout)
             except ValueError as exc:
                 raise InvalidValue(str(exc)) from exc
         with self._guard:

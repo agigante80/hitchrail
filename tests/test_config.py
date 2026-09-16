@@ -1223,7 +1223,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # own function with two exit codes, mismatch and not yet.
         # 556 after 8601915: the pinned entry's own exit code, and the words
         # for it. Bumped a commit late, which #261 notes.
-        "cli.py": 556,
+        # #267 moved the certificate load here from `Config`, one read into
+        # the context uvicorn serves with; `config.py` shrank by as much.
+        "cli.py": 587,
         # 409, nine lines over, down from 542. #115 deleted the `?token=`
         # carrier: 135 lines once the two blocks inside `TokenMiddleware`
         # that only served it are counted.

@@ -191,13 +191,50 @@ def test_group_writable_is_refused_unless_the_group_is_the_owners_own(
     (tmp_path / "work").mkdir()
     path = _write(tmp_path, ROOTS_TOML.format(label="work", path=tmp_path / "work"))
     path.chmod(0o664)
-    monkeypatch.setattr(settings, "_group_is_private", lambda gid, uid: True)
+    asked: list[tuple[int, int]] = []
+
+    def private(gid: int, uid: int) -> bool:
+        asked.append((gid, uid))
+        return True
+
+    monkeypatch.setattr(settings, "_group_is_private", private)
     assert [r.label for r in build_config(parse_args(["--config", str(path)])).roots] == [
         "work"
     ]
+    # The FILE's group and owner, not a constant: a mutant that passed None
+    # for either survived a predicate that ignored its arguments.
+    info = path.stat()
+    assert asked == [(info.st_gid, info.st_uid)]
     monkeypatch.setattr(settings, "_group_is_private", lambda gid, uid: False)
     with pytest.raises(ConfigError, match=r"mode 0664"):
         build_config(parse_args(["--config", str(path)]))
+    # And a 644 file is accepted whatever the group says: the group is only
+    # consulted when the group can write. A mutant that always consulted it
+    # refused every file on a shared group.
+    path.chmod(0o644)
+    assert [r.label for r in build_config(parse_args(["--config", str(path)])).roots] == [
+        "work"
+    ]
+
+
+def test_a_root_owned_file_is_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Root can edit anything regardless, so a root owned config is not a
+    widening; the exception is uid 0 exactly, which a mutant made uid 1."""
+    (tmp_path / "work").mkdir()
+    path = _write(tmp_path, ROOTS_TOML.format(label="work", path=tmp_path / "work"))
+    real = os.fstat
+
+    def as_root(fd: int) -> os.stat_result:
+        info = real(fd)
+        fields = list(info)
+        fields[4] = 0  # st_uid
+        fields[5] = 0  # st_gid
+        return os.stat_result(tuple(fields))
+
+    monkeypatch.setattr(os, "fstat", as_root)
+    assert [r.label for r in build_config(parse_args(["--config", str(path)])).roots] == [
+        "work"
+    ]
 
 
 def test_a_file_owned_by_somebody_else_is_refused_whatever_its_mode(
@@ -230,13 +267,24 @@ def test_the_private_group_convention_is_read_from_the_passwd_database(
     def group(name: str, members: list[str] | None = None) -> grp.struct_group:
         return grp.struct_group((name, "x", 0, members or []))
 
-    monkeypatch.setattr(pwd, "getpwuid", lambda uid: user("alice", 1000))
-    monkeypatch.setattr(grp, "getgrgid", lambda gid: group("alice"))
+    # The fakes check what they are asked for: a mutant that looked up
+    # `None` survived fakes that ignored their argument.
+    def getpwuid(uid: int) -> pwd.struct_passwd:
+        assert uid == 1000, uid
+        return user("alice", 1000)
+
+    def getgrgid_alice(gid: int) -> grp.struct_group:
+        assert gid == 1000, gid
+        return group("alice")
+
+    monkeypatch.setattr(pwd, "getpwuid", getpwuid)
+    monkeypatch.setattr(grp, "getgrgid", getgrgid_alice)
     assert settings._group_is_private(1000, 1000)
     monkeypatch.setattr(grp, "getgrgid", lambda gid: group("users"))
     assert not settings._group_is_private(1000, 1000)
     monkeypatch.setattr(grp, "getgrgid", lambda gid: group("alice"))
     assert not settings._group_is_private(1001, 1000)
+    monkeypatch.setattr(grp, "getgrgid", getgrgid_alice)
     # `usermod -aG alice bob`: private in name only, and the audit's case.
     monkeypatch.setattr(grp, "getgrgid", lambda gid: group("alice", ["bob"]))
     assert not settings._group_is_private(1000, 1000)
@@ -474,3 +522,110 @@ def test_a_prefix_in_the_file_earns_the_same_refusal_as_the_flag(tmp_path: Path)
     )
     with pytest.raises(ConfigError, match="non blank and unpadded"):
         build_config(parse_args(["--config", str(path)]))
+
+
+# -- #273: the survivors in the file reader, read and killed ------------------
+
+
+def test_the_default_path_is_xdg_then_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Never exercised until the sweep: every test passed `--config` or the
+    autouse XDG stub, so the two halves of the default were free to drift."""
+    monkeypatch.setenv(settings.CONFIG_HOME_ENV, str(tmp_path / "xdg"))
+    assert settings.default_config_path() == tmp_path / "xdg" / "hitchrail" / "config.toml"
+    monkeypatch.delenv(settings.CONFIG_HOME_ENV)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    expected = tmp_path / "home" / ".config" / "hitchrail" / "config.toml"
+    assert settings.default_config_path() == expected
+
+
+def test_a_missing_file_is_no_roots_as_a_tuple(tmp_path: Path) -> None:
+    assert settings.read_config_file(tmp_path / "absent.toml") == settings.FileSettings(
+        roots=()
+    )
+
+
+@pytest.mark.parametrize(
+    ("text", "fragment"),
+    [
+        ('roots = "not a list"\n', "must be a list of tables"),
+        ("roots = [1]\n", "entry 1 is not a table"),
+        ('[[roots]]\npath = "{d}"\n', "has an empty label"),
+        ('[[roots]]\nlabel = "work"\n', "has an empty path"),
+        ('[[roots]]\nlabel = 1\npath = "{d}"\n', "label and path must be strings"),
+        ('[[roots]]\nlabel = "work"\npath = 1\n', "label and path must be strings"),
+        ('[[roots]]\nlabel = "work"\npath = "{d}"\nenabled = "yes"\n', "must be true or false"),
+        ('wat = 1\n[[roots]]\nlabel = "work"\npath = "{d}"\n', "unknown key 'wat'"),
+    ],
+)
+def test_every_shape_the_file_refuses_says_so(tmp_path: Path, text: str, fragment: str) -> None:
+    """Each refusal in its own words, asserted on the words: a mutant that
+    raised with no message, accepted an unknown top level key, or defaulted
+    a missing label to something the allowlist admits survived tests that
+    checked only that something was refused."""
+    (tmp_path / "work").mkdir()
+    path = _write(tmp_path, text.format(d=tmp_path / "work"))
+    with pytest.raises(ConfigError, match=fragment):
+        build_config(parse_args(["--config", str(path)]))
+
+
+def test_a_refusal_names_the_entry_by_its_position(tmp_path: Path) -> None:
+    (tmp_path / "work").mkdir()
+    path = _write(
+        tmp_path,
+        ROOTS_TOML.format(label="work", path=tmp_path / "work") + "[[roots]]\nlabel = 2\n",
+    )
+    with pytest.raises(ConfigError, match="roots entry 2:"):
+        build_config(parse_args(["--config", str(path)]))
+
+
+def test_the_state_files_boundaries_are_honoured(tmp_path: Path) -> None:
+    """1 and 3600 are waits; 0 and 3601 are not. The sweep flipped each
+    boundary by one and nothing noticed."""
+    state = tmp_path / "state.toml"
+    for value in (1, 3600):
+        state.write_text(f"stop_timeout = {value}\n")
+        assert settings.read_state(state).stop_timeout == value
+
+
+def test_two_hidden_labels_and_a_timeout_survive_a_round_trip(tmp_path: Path) -> None:
+    """Two labels, so the separator is real TOML; both fields, so writing
+    the second does not lose the first."""
+    state = tmp_path / "state.toml"
+    settings.write_state(
+        state,
+        settings.State(hidden=frozenset({"home", "work"}), stop_timeout=45),
+        configured={"work", "home"},
+    )
+    read = settings.read_state(state)
+    assert read.hidden == {"home", "work"}
+    assert read.stop_timeout == 45
+
+
+def test_a_file_that_cannot_be_opened_says_so(tmp_path: Path) -> None:
+    (tmp_path / "work").mkdir()
+    path = _write(tmp_path, ROOTS_TOML.format(label="work", path=tmp_path / "work"))
+    path.chmod(0o000)
+    try:
+        with pytest.raises(ConfigError, match="cannot be read"):
+            build_config(parse_args(["--config", str(path)]))
+    finally:
+        path.chmod(0o644)
+
+
+def test_a_file_with_only_a_prefix_configures_no_roots(tmp_path: Path) -> None:
+    """`roots` absent is no roots, not a refusal: the flags are the other
+    door. A mutant that defaulted the key to `None` refused the file."""
+    path = _write(tmp_path, 'session_prefix = "work-"\n')
+    read = settings.read_config_file(path)
+    assert read.roots == ()
+    assert read.session_prefix == "work-"
+
+
+def test_the_state_file_is_written_two_levels_deep(tmp_path: Path) -> None:
+    """`--config` can name a file in a directory that does not exist yet,
+    and the state file sits beside it."""
+    state = tmp_path / "a" / "b" / "state.toml"
+    settings.write_state(state, settings.State(hidden=frozenset({"work"})), configured={"work"})
+    assert settings.read_state(state).hidden == {"work"}

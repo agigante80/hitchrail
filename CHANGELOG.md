@@ -40,6 +40,14 @@ origin) and now says so at startup.
 
 ### Fixed
 
+**A settings write no longer re-reads the TLS private key.** Changing the
+stop wait from the settings page rebuilt the configuration to validate it,
+which loaded the certificate pair again; a key rotated or removed after
+start answered "cannot be loaded, so nothing will be served on this port"
+while the server was serving the reply. The pair is loaded once, by the
+command line, into the context the server serves with, and TLS 1.2 is the
+floor, set rather than inherited.
+
 **Five session routes answered a bare 500 when a root was unmounted.**
 Stop, kill, answer, the session link and the signal route on a stopped name
 now answer 503 `root_unavailable` in the envelope, as the listing and logs
