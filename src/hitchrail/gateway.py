@@ -56,7 +56,13 @@ _POLL_S = 0.05
 
 
 class GatewayUnknown(RuntimeError):
-    """The gateway's MAC could not be determined, and why, for the operator."""
+    """The gateway's MAC could not be determined, and why, for the operator.
+    A transient: the unit retries it."""
+
+
+class GatewayPinned(GatewayUnknown):
+    """The operator pinned the gateway's entry, so the answer will not change
+    on a retry; the unit stays stopped until they look."""
 
 
 def normalise_mac(raw: str) -> str | None:
@@ -143,15 +149,19 @@ def _nudge(ip: str) -> None:
 def gateway_mac(
     route: Path = ROUTE,
     arp: Path = ARP,
-    nudge: Callable[[str], None] = _nudge,
+    nudge: Callable[[str], None] | None = None,
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
 ) -> str:
     """The default gateway's MAC, or `GatewayUnknown` saying what was missing.
 
     Every external surface is a parameter, so the unit tests never read this
-    machine's tables or put a packet on its network.
+    machine's tables or put a packet on its network. `nudge` is resolved per
+    call rather than bound as a default: a default binds at definition time,
+    which is what the suite's stub of `_nudge` could not reach (Phase 14
+    review, round 2).
     """
+    send = nudge if nudge is not None else _nudge
     try:
         route_text = route.read_text()
     except OSError as exc:
@@ -166,7 +176,10 @@ def gateway_mac(
         except OSError as exc:
             raise GatewayUnknown(f"{arp} cannot be read: {exc}") from exc
         except PinnedEntry as exc:
-            raise GatewayUnknown(str(exc)) from exc
+            # Exit 2, not 3: nothing about a pinned entry changes between
+            # retries, and twelve refusals landing in start-limit-hit would
+            # hide the one line that says what to do (review, round 2).
+            raise GatewayPinned(str(exc)) from exc
 
     mac = read_arp()
     if mac is not None:
@@ -174,7 +187,7 @@ def gateway_mac(
     # A refused send is itself evidence about the network; the table is
     # still asked again below, in case it filled meanwhile.
     with contextlib.suppress(OSError):
-        nudge(ip)
+        send(ip)
     deadline = clock() + RESOLVE_WAIT_S
     while True:
         mac = read_arp()

@@ -456,6 +456,11 @@ def gateway_verdict(
     read = gateway_mac if gateway_mac is not None else gateway.gateway_mac
     try:
         found = read()
+    except gateway.GatewayPinned as exc:
+        return (
+            EXIT_REFUSED,
+            f"--expect-gateway-mac is set and {exc}. Unpin it, or unset the flag",
+        )
     except gateway.GatewayUnknown as exc:
         return (
             EXIT_TRANSIENT,

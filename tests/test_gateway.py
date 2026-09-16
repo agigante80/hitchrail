@@ -53,17 +53,31 @@ def test_a_pinned_arp_entry_is_cannot_tell(tmp_path: Path) -> None:
     with pytest.raises(gateway.PinnedEntry, match="permanent"):
         gateway.mac_for("192.168.33.1", pinned)
     route, arp = _tables(tmp_path, arp=pinned)
-    with pytest.raises(gateway.GatewayUnknown, match="pinned by hand"):
+    with pytest.raises(gateway.GatewayPinned, match="pinned by hand"):
         gateway.gateway_mac(route, arp, nudge=lambda ip: None)
+    # Exit 2, not the retried 3: a retry changes nothing about a pinned entry.
+    config = make_config(tmp_path, expect_gateway_mac=GATEWAY)
+
+    def read() -> str:
+        return gateway.gateway_mac(route, arp, nudge=lambda ip: None)
+
+    verdict = gateway_verdict(config, gateway_mac=read)
+    assert verdict is not None and verdict[0] == 2
+    assert "Unpin it" in verdict[1]
 
 
-def test_the_real_reader_is_stubbed_for_every_test() -> None:
+def test_the_real_reader_is_stubbed_for_every_test(tmp_path: Path) -> None:
     """The guard's guard: an engine or a verdict built with no seam reaches
     the stub in `conftest.no_real_gateway` and nothing else."""
     with pytest.raises(AssertionError, match="real gateway reader"):
         gateway.gateway_mac()
     with pytest.raises(AssertionError, match="datagram"):
         gateway._nudge("192.0.2.1")
+    # And through `gateway_mac` with tables but no nudge, which is the call a
+    # default bound at definition time let through (review, round 2).
+    route, arp = _tables(tmp_path, arp=ARP.splitlines()[0] + "\n")
+    with pytest.raises(AssertionError, match="datagram"):
+        gateway.gateway_mac(route, arp)
 
 
 def test_the_arp_table_yields_the_mac_and_treats_all_zeros_as_absent() -> None:

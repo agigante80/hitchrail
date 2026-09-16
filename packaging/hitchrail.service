@@ -32,7 +32,8 @@
 # gateway is not the one named refuses with exit 2, and
 # `RestartPreventExitStatus=2` below keeps it stopped until you look; a
 # start where the gateway cannot be identified yet (no route before the DHCP
-# lease lands, no ARP entry) is exit 3, which the budget above retries, so a
+# lease lands, no ARP entry) is exit 3, which the restart budget below
+# retries, so a
 # slow boot on the RIGHT network is not a dead unit. Checked once, at start:
 # a network the machine joins while running is noticed at the next start. A
 # MAC is spoofable by anyone already on the LAN, so this guards against

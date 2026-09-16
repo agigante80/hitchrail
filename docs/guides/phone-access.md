@@ -90,8 +90,7 @@ the exposure plainly before choosing it:
   Checked once, when the unit starts: a machine that joins another network
   while it is running is not noticed until the next start. `ip route show
   default` names the gateway's address, and `ip neigh show` the MAC beside
-  it; the password manager entry for `/grant` is keyed by origin, so a new
-  scheme or port means a new entry there too.
+  it.
 
 That last point is why this is second rather than first. It is not less secure
 in the moment. It is a decision that silently stops being the one you made.
@@ -184,6 +183,7 @@ fills: **put the token in your password manager as the password for the
 address Hitchrail serves on**, and enrolling the next device is opening
 `/grant` and letting the manager fill the field. The credential is never
 retyped, never in a message, and lives where your other credentials live.
+The entry is keyed by origin, so a new scheme or port means a new entry.
 
 That is the whole of it, and it was a decision (#171). A QR code printed by
 the server would cost a fourth runtime dependency or a hand rolled encoder
