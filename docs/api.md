@@ -187,10 +187,13 @@ that is not detached (`not_detached`), a row a visible tmux session owns
 (`owned_elsewhere`, with the session in a `session` field: attach there),
 and another user's process (`not_ours`). Refused after the handle, on the
 process the handle refers to: a pid that changed identity or left (`not_ours`,
-`gone`), and a process whose working directory is not a child of this
-instance's root for that label (`not_ours`), because the argv this route
-matches on is what a second instance as the same user writes too and only
-the directory tells the two apart.
+`gone`), and a process whose working directory is not under this
+instance's root for that label as configured, at any depth, since an agent
+in a worktree runs below its project (`not_ours`: another instance's agent,
+or a root that moved since the agent started), because the argv this
+route matches on is what a second instance as the same user writes too and
+only the directory tells the two apart. A folder deleted under a running
+agent still reads as under the root, so that agent can still be ended.
 
 ### `GET /api/config`
 

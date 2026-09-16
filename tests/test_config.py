@@ -1098,7 +1098,7 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # refuse when it could not be read.
         # 1468 after Phase 20 batch 1's review: the process's working
         # directory is read after the handle, the one fact argv does not carry.
-        "engine.py": 1468,
+        "engine.py": 1478,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon

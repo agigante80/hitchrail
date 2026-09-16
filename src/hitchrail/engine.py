@@ -1005,13 +1005,23 @@ class Engine:
             # agent can still be ended here.
             try:
                 cwd = self._cwd_of(pid)
+            except PermissionError as exc:
+                # Readable for our own processes; another user's, reached
+                # through a pid reused between the uid check and the handle,
+                # is refused here in the right words.
+                raise NotOurs(f"pid {pid} is another user's process: {exc}") from exc
             except OSError as exc:
                 raise Gone(f"pid {pid} is gone: {exc}") from exc
-            if cwd.parent != root.path:
+            # UNDER the root, at any depth, not a direct child: the agent
+            # binary moves into `<project>/.claude/worktrees/<name>` for a
+            # worktree session (review round 2), and a parent equality
+            # refused that agent as another instance's. Roots cannot nest,
+            # so "under this root" is exactly "not under another instance's".
+            if not cwd.is_relative_to(root.path):
                 raise NotOurs(
-                    f"pid {pid} runs in {cwd}, which is not under this instance's root "
-                    f"{root.label!r} ({root.path}); it is another instance's agent, "
-                    "and nothing was signalled"
+                    f"pid {pid} runs in {cwd}, which is not under root {root.label!r} as "
+                    f"configured ({root.path}): another instance's agent, or a root that "
+                    "moved since it started. Nothing was signalled"
                 )
             try:
                 self._send_signal(pidfd, signal.SIGKILL if force else signal.SIGTERM)

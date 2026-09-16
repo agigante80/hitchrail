@@ -251,6 +251,13 @@ def cwd_of(pid: int) -> Path:
     agents with one identifier. The kernel tracks the directory by inode, so
     a folder renamed under a running agent reads as its new name here, which
     is what lets that agent still be ended. Raises `OSError` when the
-    process is gone or is another user's (the link is not readable).
+    process is gone or a zombie (ENOENT) and `PermissionError` when it is
+    another user's.
+
+    `readlink`, never `resolve` (review round 2): the kernel's answer is
+    already canonical, and a folder DELETED under a running agent reads as
+    `/root/foo (deleted)`, a path that does not exist, so a resolve that
+    checked existence reported a live agent as gone and made it unendable.
+    The suffix sits on the last component, so the parent is still the root.
     """
-    return Path(f"/proc/{pid}/cwd").resolve(strict=True)
+    return Path(f"/proc/{pid}/cwd").readlink()
