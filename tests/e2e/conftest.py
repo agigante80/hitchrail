@@ -63,6 +63,7 @@ import pytest
 import uvicorn
 from playwright.async_api import Page, async_playwright
 
+from conftest import REAL_CWD_OF
 from hitchrail import claude_ipc, discovery
 from hitchrail.config import Config
 from hitchrail.engine import Engine
@@ -753,6 +754,9 @@ class Harness:
             config=self._config,
             meminfo_fn=lambda: self._meminfo,
             ceiling_fn=lambda pid: self._ceiling_mb,
+            # The real `/proc/<pid>/cwd` reader: the detached agents this
+            # harness seeds are real children in real folders (#264).
+            cwd_of=REAL_CWD_OF,
         )
 
     def restart(self) -> None:

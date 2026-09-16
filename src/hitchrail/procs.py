@@ -240,3 +240,17 @@ def close_pidfd(pidfd: int) -> None:
 def owner_uid(pid: int) -> int:
     """Whose process, from `/proc`. Raises `OSError` when it is already gone."""
     return Path(f"/proc/{pid}").stat().st_uid
+
+
+def cwd_of(pid: int) -> Path:
+    """Where a process is running, from `/proc`, resolved (#264).
+
+    The one fact the argv does not carry. `find_detached` matches an agent
+    by its command line, and the command line is what a second instance as
+    the same user writes too, so two roots both holding `foo` produce two
+    agents with one identifier. The kernel tracks the directory by inode, so
+    a folder renamed under a running agent reads as its new name here, which
+    is what lets that agent still be ended. Raises `OSError` when the
+    process is gone or is another user's (the link is not readable).
+    """
+    return Path(f"/proc/{pid}/cwd").resolve(strict=True)

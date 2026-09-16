@@ -34,6 +34,7 @@ from pathlib import Path
 
 import pytest
 
+from conftest import REAL_CWD_OF
 from hitchrail import claude_ipc, derive
 from hitchrail.claude_ipc import launch_argv
 from hitchrail.config import Config
@@ -1017,7 +1018,12 @@ def test_a_real_detached_agent_is_ended_through_a_real_pidfd(
     name = f"{DEFAULT_LABEL}~{machine.project}"
     child = _orphan(machine.agent, machine.config.roots[0].path, name)
     try:
-        engine = Engine(config=machine.config, tmux=machine.adapter, meminfo_fn=lambda: PLENTY)
+        engine = Engine(
+            config=machine.config,
+            tmux=machine.adapter,
+            meminfo_fn=lambda: PLENTY,
+            cwd_of=REAL_CWD_OF,
+        )
         deadline = time.monotonic() + 5
         while engine.get(name).state is not State.DETACHED and time.monotonic() < deadline:
             time.sleep(0.1)
@@ -1043,7 +1049,12 @@ def test_an_agent_that_left_between_the_listing_and_the_call_is_refused_with_not
     Either way `os.kill` is never reached, and this asserts it."""
     name = f"{DEFAULT_LABEL}~{machine.project}"
     child = _orphan(machine.agent, machine.config.roots[0].path, name)
-    engine = Engine(config=machine.config, tmux=machine.adapter, meminfo_fn=lambda: PLENTY)
+    engine = Engine(
+        config=machine.config,
+        tmux=machine.adapter,
+        meminfo_fn=lambda: PLENTY,
+        cwd_of=REAL_CWD_OF,
+    )
     deadline = time.monotonic() + 5
     while engine.get(name).state is not State.DETACHED and time.monotonic() < deadline:
         time.sleep(0.1)

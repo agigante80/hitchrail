@@ -801,6 +801,7 @@ async def test_the_logs_routes_say_the_root_is_unavailable_rather_than_faulting(
         ("POST", "/api/sessions/{name}/kill"),
         ("POST", "/api/sessions/{name}/signal"),
         ("POST", "/api/sessions/{name}/signal/force"),
+        ("POST", "/api/sessions/{name}/answer"),
     ],
 )
 async def test_the_session_routes_say_the_root_is_unavailable_rather_than_faulting(
@@ -810,8 +811,11 @@ async def test_the_session_routes_say_the_root_is_unavailable_rather_than_faulti
     stopped name's ladder lists the root to tell unknown from not running,
     the root is gone, and the answer was a bare 500."""
     shutil.rmtree(config.roots[0].path)
+    body = {"key": "Enter"} if path.endswith("/answer") else None
     async with client_for(engine, config) as c:
-        r = await c.request(method, path.replace("{name}", proj("network")), headers=HEADERS)
+        r = await c.request(
+            method, path.replace("{name}", proj("network")), headers=HEADERS, json=body
+        )
     assert r.status_code == 503, r.text
     assert r.json()["code"] == "root_unavailable"
 
@@ -2149,6 +2153,8 @@ async def test_a_scan_still_running_at_shutdown_does_not_hang_the_lifespan(
 
 
 def _signal_engine(config: Config, fake: FakePidfd, table: str = DETACHED_PS) -> Engine:
+    if fake.cwd is None:
+        fake.runs_in(config.roots[0].path / "vessel")
     return Engine(
         config=config,
         tmux=FakeTmux(),
@@ -2159,6 +2165,7 @@ def _signal_engine(config: Config, fake: FakePidfd, table: str = DETACHED_PS) ->
         send_signal=fake.send,
         close_pidfd=fake.close,
         owner_uid=fake.owner,
+        cwd_of=fake.cwd_of,
     )
 
 

@@ -407,9 +407,15 @@ def test_a_stop_timeout_persists_and_a_flag_pins_it(tmp_path: Path) -> None:
         pinned.set_stop_timeout(45)
 
 
-def test_a_bad_timeout_in_the_state_file_loses_nothing_beside_it(tmp_path: Path) -> None:
+@pytest.mark.parametrize("bad", ["true", "0", "-5", "3601", "9999999", '"45"'])
+def test_a_bad_timeout_in_the_state_file_loses_nothing_beside_it(
+    tmp_path: Path, bad: str
+) -> None:
+    """Including one past the ceiling (#265, review round 1): a state file
+    written by 0.8.0's page, which accepted any positive number, or by
+    hand, is not a way past the one validator."""
     state = tmp_path / "state.toml"
-    state.write_text('disabled = ["home"]\nstop_timeout = true\n')
+    state.write_text(f'disabled = ["home"]\nstop_timeout = {bad}\n')
     read = settings.read_state(state)
     assert read.hidden == {"home"}
     assert read.stop_timeout is None

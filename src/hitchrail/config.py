@@ -328,7 +328,9 @@ class Config:
         # sent back on that origin, so the grant succeeds and every request
         # after it is refused. A proxy in front of an HTTPS backend speaks
         # https to the browser; the loopback exception is a developer's own
-        # tools on the same machine.
+        # tools on the same machine, and it holds for Chrome and Firefox,
+        # which treat `http://localhost` as a secure context for cookies,
+        # and not for Safari, which drops a Secure cookie there.
         for entry in self.extra_origins:
             parts = urlsplit(entry.strip().rstrip("/").lower())
             if (
@@ -371,9 +373,10 @@ class Config:
         if self.stop_timeout <= 0:
             raise ConfigError(f"stop timeout must be positive: {self.stop_timeout}")
         if self.stop_timeout > MAX_STOP_TIMEOUT_S:
-            # #265. Above 2^31-1 ms a browser's `setTimeout` fires at once, so
-            # the page reported a timeout while the engine waited forever;
-            # and a wait past an hour is not a wait anybody is watching.
+            # #265. A wait past an hour is not one anybody is watching, and
+            # the engine held a `stopping` marker for it; the page polls in
+            # 700 ms ticks against a deadline, so the browser timer overflow
+            # the ticket first blamed is not what it does (review, round 1).
             raise ConfigError(
                 f"stop timeout must be at most {MAX_STOP_TIMEOUT_S} seconds: "
                 f"{self.stop_timeout}"

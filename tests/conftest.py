@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from hitchrail import gateway
+from hitchrail import gateway, procs
 from hitchrail.claude_ipc import launch_argv
 from hitchrail.cli import JOURNAL_ENV
 from hitchrail.config import TOKEN_ENV
@@ -83,6 +83,26 @@ def no_real_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.setattr("hitchrail.gateway.gateway_mac", _no_gateway_read)
     monkeypatch.setattr("hitchrail.gateway._nudge", _no_nudge)
+
+
+# The real reader, kept for the tiers that run a real child and want the
+# real answer about it: the browser harness and the live tmux tier.
+REAL_CWD_OF = procs.cwd_of
+
+
+def _no_proc_cwd(pid: int) -> Path:
+    raise AssertionError(
+        f"the real /proc/{pid}/cwd reader was reached: pass cwd_of= to Engine, or use "
+        "FakePidfd.cwd_of"
+    )
+
+
+@pytest.fixture(autouse=True)
+def no_real_proc_cwd(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The same rule for the pid route's directory check (#264). An engine
+    built with no `cwd_of` seam would read `/proc/<pid>/cwd` for a fake pid
+    and answer by whatever this machine happens to be running there."""
+    monkeypatch.setattr("hitchrail.procs.cwd_of", _no_proc_cwd)
 
 
 @pytest.fixture(autouse=True)
@@ -360,12 +380,20 @@ class FakePidfd:
         fail_open: BaseException | None = None,
         fail_send: BaseException | None = None,
         uid: int | None = None,
+        cwd: Path | None = None,
     ) -> None:
         self.events: list[tuple[str, object]] = []
         self.fail_open = fail_open
         self.fail_send = fail_send
         self.uid = uid if uid is not None else os.getuid()
+        # Where the process runs, or None for "the folder the test's root
+        # holds under the project's own name", set by the test through
+        # `runs_in`. A test about another instance points it elsewhere.
+        self.cwd = cwd
         self._next = 100
+
+    def runs_in(self, path: Path) -> None:
+        self.cwd = path
 
     def open(self, pid: int) -> int:
         self.events.append(("open", pid))
@@ -385,6 +413,12 @@ class FakePidfd:
     def owner(self, pid: int) -> int:
         self.events.append(("owner", pid))
         return self.uid
+
+    def cwd_of(self, pid: int) -> Path:
+        self.events.append(("cwd", pid))
+        if self.cwd is None:
+            raise AssertionError("the test did not say where the process runs: call runs_in()")
+        return self.cwd
 
     @property
     def signals(self) -> list[int]:

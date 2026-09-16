@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from conftest import FakePidfd, FakeTmux, ScriptedProcs, ps_row
+from hitchrail.config import Config
 from hitchrail.engine import (
     Engine,
     Gone,
@@ -61,6 +62,10 @@ def _engine(
         agent_config_path=root / "no-agent-config.json",
         self_project=self_project,
     )
+    # Where the process runs, unless the test said otherwise: the folder the
+    # row names, under this root.
+    if fake.cwd is None:
+        fake.runs_in(root / "vessel")
     return Engine(
         config,
         tmux=FakeTmux(sessions=sessions, foreign=foreign),
@@ -71,6 +76,7 @@ def _engine(
         send_signal=fake.send,
         close_pidfd=fake.close,
         owner_uid=fake.owner,
+        cwd_of=fake.cwd_of,
     )
 
 
@@ -281,38 +287,77 @@ def test_an_unknown_root_label_is_refused_before_any_pid_is_looked_up(root: Path
     assert [k for k, _ in fake.events if k in ("open", "send", "owner")] == []
 
 
-def test_a_folder_the_root_has_never_heard_of_is_refused_before_any_pid_is_looked_up(
-    root: Path,
+def test_another_instances_agent_under_the_same_label_is_refused_by_where_it_runs(
+    root: Path, tmp_path: Path
 ) -> None:
     """#264. Two instances as the same user, both labelled `main` as the
-    README suggests, different roots: B's agent carries `main~ledger` in its
-    argv and this instance has no `ledger`. The label check passes; the
-    listing is what says this is not our project, and it is asked before
-    the derive so the pid is never even read."""
+    README suggests, roots `/a` and `/b` both holding `foo`: B's agent
+    carries `main~foo` in its argv and matches A's derivation exactly, and
+    no snapshot tells the two apart. Where the process runs does. Read
+    after the handle, so the process the handle refers to is the one
+    judged; nothing is signalled and the handle is closed."""
     fake = FakePidfd()
-    theirs = ps_row(ORPHAN, 1, project=proj("ledger"))
-    engine = _engine(root, Watched(fake, theirs), fake)
-    with pytest.raises(UnknownProject):
-        engine.signal_detached(proj("ledger"))
-    assert [k for k, _ in fake.events if k in ("open", "send", "owner")] == []
+    other_root = tmp_path / "other-instance"
+    (other_root / "vessel").mkdir(parents=True)
+    fake.runs_in(other_root / "vessel")
+    engine = _engine(root, Watched(fake, DETACHED), fake)
+    with pytest.raises(NotOurs, match="another instance's agent"):
+        engine.signal_detached(proj("vessel"))
+    assert fake.signals == []
+    kinds = [k for k, _ in fake.events]
+    assert kinds.index("open") < kinds.index("cwd"), "the directory was read before the handle"
+    assert not fake.leaked
 
 
-def test_a_detached_agent_in_a_renamed_folder_is_refused_here_and_reachable_by_tmux(
-    root: Path,
-) -> None:
-    """Premortem 2 of the Phase 20 plan: the listing check must not make a
-    live session unreachable. A folder renamed under a running agent keeps
-    its tmux session, and stop and kill reach it by the prefix (#42); only
-    the pid route, which has no prefix, refuses the name the root no longer
-    lists, and its refusal names the listing."""
+def test_a_detached_agent_in_a_renamed_folder_can_still_be_ended(root: Path) -> None:
+    """Premortem 2 of the Phase 20 plan, on the case that broke: the review's
+    first version checked the listing and made a detached agent whose folder
+    had been renamed unreachable on the one route that reaches past tmux,
+    while logs still reported its pid. The kernel reports the renamed folder
+    by its new name, which is still under this root, so it can be ended."""
     fake = FakePidfd()
     (root / "vessel").rename(root / "vessel-renamed")
-    running = ps_row(500, 1, args="tmux") + ps_row(501, 500, project=proj("vessel"))
-    engine = _engine(root, Watched(fake, running), fake, sessions={proj("vessel"): 500})
-    assert engine.get(proj("vessel")).state is State.RUNNING
-    with pytest.raises(UnknownProject):
-        engine.signal_detached(proj("vessel"))
-    engine.kill(proj("vessel"))
+    fake.runs_in(root / "vessel-renamed")
+    engine = _engine(root, Watched(fake, DETACHED), fake)
+    assert engine.get(proj("vessel")).state is State.DETACHED
+    engine.signal_detached(proj("vessel"))
+    assert fake.signals == [signal.SIGTERM]
+
+
+def test_an_unplugged_spare_root_does_not_block_the_pid_route(
+    root: Path, tmp_path: Path
+) -> None:
+    """The review's third finding on the listing check: it scanned every
+    root, so a disabled root on an unplugged drive refused every project.
+    Only the root the label names is consulted now."""
+    from hitchrail.roots import Root
+
+    fake = FakePidfd()
+    main = tmp_path / "a"
+    (main / "vessel").mkdir(parents=True)
+    gone = tmp_path / "usb"
+    gone.mkdir()
+    config = Config(
+        roots=(Root(label="main", path=main), Root(label="usb", path=gone, enabled=False)),
+        sessions_dir=tmp_path / ".sessions",
+        agent_config_path=tmp_path / "no-agent-config.json",
+    )
+    gone.rmdir()
+    fake.runs_in(main / "vessel")
+    engine = Engine(
+        config,
+        tmux=FakeTmux(),
+        procs_fn=Watched(fake, DETACHED),
+        meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
+        ceiling_fn=lambda pid: None,
+        open_pidfd=fake.open,
+        send_signal=fake.send,
+        close_pidfd=fake.close,
+        owner_uid=fake.owner,
+        cwd_of=fake.cwd_of,
+    )
+    engine.signal_detached(proj("vessel"))
+    assert fake.signals == [signal.SIGTERM]
 
 
 # -- round 1 of the review, pinned -----------------------------------------

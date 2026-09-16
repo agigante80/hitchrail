@@ -40,19 +40,24 @@ origin) and now says so at startup.
 
 ### Fixed
 
-**Three session routes answered a bare 500 when a root was unmounted.**
-Stop, kill and the signal route on a stopped name now answer 503
-`root_unavailable` in the envelope, as the listing and logs did.
+**Five session routes answered a bare 500 when a root was unmounted.**
+Stop, kill, answer, the session link and the signal route on a stopped name
+now answer 503 `root_unavailable` in the envelope, as the listing and logs
+did.
 
 **The signal route could reach past this instance's root.** Two instances as
-the same user, both labelled `main`, with different folders: one could end
-the other's agent for a folder it did not have, because the pid route checked
-the label and not the listing. It checks the listing first now; the tmux
-routes are unchanged and keep a renamed folder's session reachable.
+the same user, both labelled `main`, each with a folder of the same name: one
+could end the other's agent, because the pid route matched the process by
+its command line and a command line does not say where the process runs.
+It reads the process's working directory after taking the handle and refuses
+one outside this instance's root. The tmux routes are unchanged, and a
+detached agent whose folder was renamed can still be ended.
 
-**The stop wait has a ceiling, 3600 seconds**, on the flag and the settings
-page alike. Above about 24 days a browser's timer fires at once, so the page
-said "it has not finished" while the server waited forever.
+**The stop wait has a ceiling, 3600 seconds**, on the flag, the settings
+page and the state file alike: a wait past an hour is not one anybody is
+watching, and the settings page accepted any number. A `state.toml` holding
+a larger value from 0.8.0's page falls back to the default rather than being
+honoured, and a `--stop-timeout` above the ceiling refuses at startup.
 
 ## 0.8.0 - 2026-09-16
 

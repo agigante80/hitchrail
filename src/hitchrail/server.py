@@ -559,6 +559,8 @@ def create_app(
             return _error(409, "not_asking", str(exc))
         except eng.MachineUnreadable as exc:
             return _error(503, "machine_unreadable", str(exc))
+        except discovery.RootUnavailable as exc:
+            return _error(503, "root_unavailable", str(exc))  # #263, the fourth route
         return JSONResponse(session.as_dict(), status_code=200)
 
     async def kill(request: Request) -> Response:
@@ -696,6 +698,8 @@ def create_app(
             return _error(409, "not_running", str(exc))
         except eng.MachineUnreadable as exc:
             return _error(503, "machine_unreadable", str(exc))
+        except discovery.RootUnavailable as exc:
+            return _error(503, "root_unavailable", str(exc))  # #263, the fifth route
         # No `Protected` arm here either, for the same reason as `logs`:
         # `engine.session_url` gates on the name only, so it cannot fire.
         if found is None:

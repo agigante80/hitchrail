@@ -39,6 +39,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import replace
+from pathlib import Path
 
 from hitchrail import attention, claude_ipc, derive, discovery, procs, ram, settings
 from hitchrail.config import TOKEN_ENV, Config
@@ -149,6 +150,7 @@ class Engine:
         send_signal: Callable[[int, int], None] | None = None,
         close_pidfd: Callable[[int], None] | None = None,
         owner_uid: Callable[[int], int] | None = None,
+        cwd_of: Callable[[int], Path] | None = None,
     ) -> None:
         self.config = config
         # #113. Named here rather than inside `Tmux`, because which variable
@@ -167,6 +169,7 @@ class Engine:
         self._send_signal = send_signal or procs.send_signal
         self._close_pidfd = close_pidfd or procs.close_pidfd
         self._owner_uid = owner_uid or procs.owner_uid
+        self._cwd_of = cwd_of or procs.cwd_of
         self._meminfo_fn = meminfo_fn or ram.read_meminfo
         # #243. Cached per pid for `ram.CEILING_TTL_S`, because the reader is
         # ten sysfs reads and the listing route asks once per running row on
@@ -933,20 +936,23 @@ class Engine:
         and never what happens first.
         """
         self._require_addressable(name)
-        # The LISTING, here and not in `_require_addressable`, and before the
-        # derive rather than only on the way to a refusal (#264). The pid
-        # route matches an agent by argv, and argv is what a second instance
-        # as the same user writes too: with both labelled `main`, A's
-        # `main~foo` would match B's agent for a folder A does not have. The
-        # label alone closed only a label no root carries. The tmux routes are
-        # prefix scoped and keep #42's reachability instead; nothing a tmux
-        # session could reach is lost by refusing a folder the root has never
-        # heard of on the one route that reaches past tmux.
-        if name not in discovery.list_root_projects(self.config.roots):
+        # The label names the root whose child the process must be running
+        # in, checked after the handle below (#264). Not the listing: the
+        # review's first version refused a folder the root no longer listed,
+        # which made a detached agent in a renamed folder unreachable on the
+        # one route that reaches past tmux, and scanned every root, so an
+        # unplugged spare root refused every project. The tmux routes are
+        # prefix scoped and never needed either.
+        label, _ = split_identifier(name)
+        root = next((r for r in self.config.roots if r.label == label), None)
+        if root is None:
             raise UnknownProject(name)
         session = self.get(name)
         if session.protected:
             raise Protected(name)
+        if session.state is State.STOPPED:
+            # Unknown and stopped are two answers, as on stop and kill.
+            self._reject_if_not_a_project(name)
         if session.state is not State.DETACHED or session.pid is None:
             raise NotDetached(
                 f"{name} is {session.state.value}, and this route is for an agent "
@@ -988,6 +994,25 @@ class Engine:
                 )
             if verified.foreign_session is not None:
                 raise OwnedElsewhere(name, verified.foreign_session)
+            # The DIRECTORY, which the argv does not carry (#264). Two
+            # instances as the same user, both labelled `main` as the README
+            # suggests, roots `/a` and `/b` both holding `foo`: B's agent
+            # carries `main~foo` in its argv and matches A's derivation
+            # exactly, and nothing in a snapshot tells the two apart. Where
+            # the process actually runs does. Read after the handle, so it is
+            # the process the handle refers to that is judged; the kernel
+            # reports a renamed folder by its new name, which is why such an
+            # agent can still be ended here.
+            try:
+                cwd = self._cwd_of(pid)
+            except OSError as exc:
+                raise Gone(f"pid {pid} is gone: {exc}") from exc
+            if cwd.parent != root.path:
+                raise NotOurs(
+                    f"pid {pid} runs in {cwd}, which is not under this instance's root "
+                    f"{root.label!r} ({root.path}); it is another instance's agent, "
+                    "and nothing was signalled"
+                )
             try:
                 self._send_signal(pidfd, signal.SIGKILL if force else signal.SIGTERM)
             except AttributeError as exc:

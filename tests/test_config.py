@@ -1096,7 +1096,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # And to 1441 after round 1 of its review: the label check moved here
         # from `_require_addressable`, and two guards that read the table
         # refuse when it could not be read.
-        "engine.py": 1443,
+        # 1468 after Phase 20 batch 1's review: the process's working
+        # directory is read after the handle, the one fact argv does not carry.
+        "engine.py": 1468,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -1207,7 +1209,7 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 608 for #265: the ceiling, and the sentence on why a browser fires
         # a timeout above 2^31-1 ms at once.
         # And to 627 for #268: TLS on beside a plain http origin refuses.
-        "config.py": 627,
+        "config.py": 630,
         # 460 for #123, #154 and #238: `--config`, `--session-prefix` and the
         # source tagging the settings page shows, which is one function
         # reading the flags back out of argv. Nothing here parses a value
@@ -1253,6 +1255,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 436 to 440 for #152: the cookie's `Secure` flag is `Config.tls`,
         # and the paragraph on why not behind a proxy.
         "security.py": 440,
+        # #154, #238: the operator's file and Hitchrail's state file, one
+        # module because the split between them IS the security argument in
+        # its docstring; over by the ceiling's four lines (#265).
+        "settings.py": 404,
         # rather than one. A refusal handler is the shape this file is made of.
         # 513 to 517 for #120. The listing payload reports every configured
         # root as a labelled list rather than one path string, and the comment
@@ -1292,7 +1298,7 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # one call that applies both halves of a settings body together.
         # +40 for #107: two routes and every refusal's code.
         # 894 for #263: the root_unavailable arm on three more routes.
-        "server.py": 894,
+        "server.py": 898,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

@@ -181,13 +181,16 @@ the call is a different process the handle does not refer to (`not_ours`);
 one that exited is `gone`; nothing is ever signalled by `os.kill`, and a
 machine that cannot open a pidfd is told so (`pidfd_unavailable`, 501).
 
-Refused before any handle is opened: a folder the root does not list
-(`unknown_project`, checked before anything is derived, because the argv
-this route matches on is what a second instance as the same user writes too),
-the self project (`self_protected`), a pid in the process tree this server
-runs in (also `self_protected`), a row that is not detached (`not_detached`),
-a row a visible tmux session owns (`owned_elsewhere`, with the session in a
-`session` field: attach there), and another user's process (`not_ours`).
+Refused before any handle is opened: the self project (`self_protected`),
+a pid in the process tree this server runs in (also `self_protected`), a row
+that is not detached (`not_detached`), a row a visible tmux session owns
+(`owned_elsewhere`, with the session in a `session` field: attach there),
+and another user's process (`not_ours`). Refused after the handle, on the
+process the handle refers to: a pid that changed identity or left (`not_ours`,
+`gone`), and a process whose working directory is not a child of this
+instance's root for that label (`not_ours`), because the argv this route
+matches on is what a second instance as the same user writes too and only
+the directory tells the two apart.
 
 ### `GET /api/config`
 

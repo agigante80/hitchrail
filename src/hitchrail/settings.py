@@ -36,7 +36,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from hitchrail.config import Config
+from hitchrail.config import MAX_STOP_TIMEOUT_S, Config
 from hitchrail.roots import Root, RootError, parse_root_argument
 from hitchrail.sessions import (
     InvalidValue,
@@ -238,7 +238,14 @@ def read_state(path: Path) -> State:
     )
     timeout = data.get("stop_timeout")
     # `bool` is an `int` in Python, and `stop_timeout = true` is not a wait.
-    if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
+    # The ceiling applies here too (#265): a state file written before it
+    # existed, or by hand, is not a way past the one validator.
+    if (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, int)
+        or timeout <= 0
+        or timeout > MAX_STOP_TIMEOUT_S
+    ):
         timeout = None
     return State(hidden=hidden, stop_timeout=timeout)
 

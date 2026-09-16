@@ -585,27 +585,38 @@ class RouteSurfaces:
                 if converter:
                     self.converters.add(f"{name}:{converter}")
         tree = ast.parse(source)
-        # Every name bound to a parsed body, in any function, by any spelling:
-        # `body = await request.json()`, `data = await request.json()`.
+        # Every name bound to a parsed body, by any binding and any parser:
+        # `body = await request.json()`, `data: dict = await request.json()`,
+        # `(data := await request.json())`, `json.loads(await request.body())`,
+        # `await request.form()`. Bound names are collected first so a read
+        # anywhere in the file resolves, and an inline `(await
+        # request.json())["path"]` is a read whose owner IS the parse.
         bodies: set[str] = set()
         for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Assign)
-                and isinstance(node.value, ast.Await)
-                and ast.unparse(node.value.value).endswith("request.json()")
-            ):
-                bodies.update(t.id for t in node.targets if isinstance(t, ast.Name))
+            targets: list[ast.expr] = []
+            value: ast.expr | None = None
+            if isinstance(node, ast.Assign):
+                targets, value = node.targets, node.value
+            elif isinstance(node, ast.AnnAssign | ast.NamedExpr):
+                targets, value = [node.target], node.value
+            if value is not None and _parses_a_request(value):
+                bodies.update(t.id for t in targets if isinstance(t, ast.Name))
         assert bodies, "no parsed body found, so the walk has stopped matching"
         self.bodies = bodies
+
+        def is_body(owner: ast.expr) -> bool:
+            return (isinstance(owner, ast.Name) and owner.id in bodies) or _parses_a_request(
+                owner
+            )
+
         self.body_keys: set[str] = set()
         self.query_keys: set[str] = set()
         for node in ast.walk(tree):
             # x["key"], for x a body or the query string
             if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant):
-                owner = ast.unparse(node.value)
-                if owner in bodies:
+                if is_body(node.value):
                     self.body_keys.add(str(node.slice.value))
-                if owner == "request.query_params":
+                if ast.unparse(node.value) == "request.query_params":
                     self.query_keys.add(str(node.slice.value))
             # x.get("key"), same owners
             if (
@@ -615,11 +626,20 @@ class RouteSurfaces:
                 and node.args
                 and isinstance(node.args[0], ast.Constant)
             ):
-                owner = ast.unparse(node.func.value)
-                if owner in bodies:
+                if is_body(node.func.value):
                     self.body_keys.add(str(node.args[0].value))
-                if owner == "request.query_params":
+                if ast.unparse(node.func.value) == "request.query_params":
                     self.query_keys.add(str(node.args[0].value))
+
+
+_REQUEST_PARSERS = ("request.json()", "request.body()", "request.form()")
+
+
+def _parses_a_request(expr: ast.expr) -> bool:
+    """Whether an expression contains a call that parses the request body,
+    awaited or not, wrapped or not."""
+    text = ast.unparse(expr)
+    return any(parser in text for parser in _REQUEST_PARSERS)
 
 
 def _surfaces(engine: Engine, config: Config, source: str | None = None) -> RouteSurfaces:
@@ -649,11 +669,35 @@ def test_no_route_accepts_a_path(engine: Engine, config: Config) -> None:
 # The guard's guard (#266): each bypass the review named, applied to a copy of
 # the source, and the walk shown to see it. A guard that a plausible edit
 # walks around is a guard that reads as configured.
+_ANCHOR = '        name = request.path_params["name"]\n        try:\n            lines = int('
+_HEAD = '        name = request.path_params["name"]\n'
+_TAIL = "        try:\n            lines = int("
 _BYPASSES = {
     "a-third-body-name": (
-        '        name = request.path_params["name"]\n        try:\n            lines = int(',
-        '        name = request.path_params["name"]\n        data = await request.json()\n'
-        '        _ = data["path"]\n        try:\n            lines = int(',
+        _ANCHOR,
+        _HEAD + '        data = await request.json()\n        _ = data["path"]\n' + _TAIL,
+    ),
+    "an-annotated-binding": (
+        _ANCHOR,
+        _HEAD + '        data: dict = await request.json()\n        _ = data["path"]\n' + _TAIL,
+    ),
+    "a-walrus": (
+        _ANCHOR,
+        _HEAD + '        _ = (data := await request.json())["path"]\n' + _TAIL,
+    ),
+    "an-inline-await": (
+        _ANCHOR,
+        _HEAD + '        _ = (await request.json())["path"]\n' + _TAIL,
+    ),
+    "a-form-body": (
+        _ANCHOR,
+        _HEAD + '        form = await request.form()\n        _ = form.get("path")\n' + _TAIL,
+    ),
+    "raw-bytes-loaded": (
+        _ANCHOR,
+        _HEAD
+        + '        data = json.loads(await request.body())\n        _ = data["path"]\n'
+        + _TAIL,
     ),
     "query-by-subscript": (
         '            lines = int(request.query_params.get("lines", 40))',
@@ -670,10 +714,10 @@ def test_the_guard_sees_each_bypass_in_the_source(
     source = pathlib.Path(server.__file__).read_text()
     assert source.count(before) == 1, f"the anchor for {bypass} moved; re-aim it"
     found = _surfaces(engine, config, source.replace(before, after))
-    if bypass == "a-third-body-name":
-        assert "path" in found.body_keys and not found.body_keys <= BODY_KEYS
-    else:
+    if bypass == "query-by-subscript":
         assert "path" in found.query_keys
+    else:
+        assert "path" in found.body_keys and not found.body_keys <= BODY_KEYS
 
 
 def test_the_guard_sees_a_path_converter(engine: Engine, config: Config) -> None:
