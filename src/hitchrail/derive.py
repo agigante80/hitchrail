@@ -46,6 +46,9 @@ class Machine:
     # folder the whole derivation exists to prevent. This map changes what the
     # row SAYS about the agent, never whether it is found.
     foreign_owners: dict[int, str]
+    # The pid of the tmux server on our socket, or None with none running
+    # (#189), from the same `list-panes -a`. See `_held_by_another_server`.
+    server_pid: int | None = None
     # Which folders the agent will not show a trust prompt for, or None when
     # that cannot be told (#88). Read ONCE per look, like everything else here:
     # the alternative is a `capture-pane` per running row on every listing,
@@ -125,6 +128,7 @@ def look(
         pane_pids=panes.ours,
         owned=frozenset(owned),
         foreign_owners=foreign_owners,
+        server_pid=panes.server_pid,
         trusted=claude_ipc.trusted_folders(agent_config) if agent_config else None,
         ceiling_mb=ceiling_mb,
     )
@@ -213,6 +217,13 @@ def derive(
             # The copy above this has to keep that distinction; the old row
             # said "no tmux session" and was overclaiming.
             foreign_session=machine.foreign_owners.get(orphan),
+            # #189. An owner the pane map could not see, found by ancestry:
+            # a tmux server on another socket is a row in the same `ps` and
+            # is the agent's ancestor. Set AFTER `find_detached` returned,
+            # so what the row SAYS changes and what it FINDS does not; it
+            # cannot name the session, only the server. Nothing here gates
+            # an action; the engine reads it as "somebody holds this".
+            foreign_server_pid=_held_by_another_server(orphan, machine),
         )
 
     # Never `stopping` here, whatever the marker says. The graceful stop is an
@@ -321,6 +332,38 @@ def _awaiting_trust(name: str, machine: Machine, config: Config) -> bool:
     return str(folder) not in machine.trusted
 
 
+def _tmux_server_above(pid: int, table: ProcTable) -> int | None:
+    """The nearest ancestor that is a tmux server, or None (#189).
+
+    `is_tmux_argv` is the one predicate, so `tmuxinator` and friends are not
+    claimed here either: the walk answers "a tmux holds this, one we do not
+    talk to", never "some program with tmux in its name".
+    """
+    for ancestor in table.ancestors(pid):
+        if is_tmux_argv(ancestor.args):
+            return ancestor.pid
+    return None
+
+
+def _held_by_another_server(orphan: int, machine: Machine) -> int | None:
+    """The pid of a tmux server that holds `orphan` and is not ours (#189).
+
+    None when a foreign pane on our own socket already owns it, since
+    `foreign_session` names that better, and None when the server above it
+    IS ours: the pane map on our socket saw no pane owning this agent, so it
+    outlived its pane under our server (a pane killed while the agent
+    ignored the hangup), which is exactly the detached case End exists for.
+    Calling our own server "one Hitchrail is not configured for" would be
+    false, and would withhold End from the one process it was built to end.
+    """
+    if orphan in machine.foreign_owners:
+        return None
+    above = _tmux_server_above(orphan, machine.table)
+    if above is None or above == machine.server_pid:
+        return None
+    return above
+
+
 def live(
     name: str,
     pid: int,
@@ -332,6 +375,7 @@ def live(
     awaiting_trust: bool = False,
     awaiting_input: bool = False,
     foreign_session: str | None = None,
+    foreign_server_pid: int | None = None,
 ) -> Session:
     proc = machine.table.by_pid.get(pid)
     return Session(
@@ -351,4 +395,5 @@ def live(
         awaiting_trust=awaiting_trust,
         awaiting_input=awaiting_input,
         foreign_session=foreign_session,
+        foreign_server_pid=foreign_server_pid,
     )

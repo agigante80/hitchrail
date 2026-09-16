@@ -176,6 +176,26 @@ def test_a_foreign_owned_agent_is_refused_and_the_session_is_named(root: Path) -
     assert [k for k, _ in fake.events if k in ("open", "send", "cwd")] == []
 
 
+def test_an_agent_under_a_tmux_on_another_socket_is_refused_and_the_server_is_named(
+    root: Path,
+) -> None:
+    """#189 at the pid route: an owner the pane map could not see but the
+    process tree can. A courtesy refusal, and the control is withheld on the
+    row; the safety property is still the handle."""
+    fake = FakePidfd()
+    table = (
+        ps_row(800, 1, args="tmux -S /tmp/other/s")
+        + ps_row(801, 800, args="bash")
+        + ps_row(ORPHAN, 801, project=proj("vessel"))
+    )
+    engine = _engine(root, Watched(fake, table), fake)
+    with pytest.raises(OwnedElsewhere, match=r"not configured for \(pid 800\)") as caught:
+        engine.signal_detached(proj("vessel"))
+    assert caught.value.session is None
+    assert caught.value.server_pid == 800
+    assert [k for k, _ in fake.events if k in ("open", "send", "cwd")] == []
+
+
 def test_a_row_that_is_not_detached_is_refused_before_any_handle(root: Path) -> None:
     fake = FakePidfd()
     running = ps_row(500, 1, args="tmux") + ps_row(501, 500, project=proj("vessel"))

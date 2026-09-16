@@ -238,6 +238,10 @@ class FakeTmux(Tmux):
         # client was killed. Both outcomes are real and they need different
         # handling, so the fake expresses both rather than one.
         self.new_session_creates = True
+        # The pid of the server the fake stands for, or None (#189): a test
+        # about an agent that outlived its pane under OUR server sets it to
+        # the tmux row it put in the process table.
+        self.server_pid: int | None = None
 
     @staticmethod
     def _never(argv: list[str]) -> subprocess.CompletedProcess[str]:
@@ -252,6 +256,7 @@ class FakeTmux(Tmux):
         return Panes(
             ours={self.session_name(project): pid for project, pid in self.sessions.items()},
             foreign={pid: name for name, pid in self.foreign.items()},
+            server_pid=self.server_pid,
         )
 
     def has_session(self, project: str) -> bool:

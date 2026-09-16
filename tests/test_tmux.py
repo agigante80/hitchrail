@@ -15,7 +15,15 @@ from pathlib import Path
 import pytest
 
 from hitchrail.procs import _default_runner as procs_runner
-from hitchrail.tmux import NotOurSession, Tmux, TmuxUnavailable, _scrub_flags
+from hitchrail.tmux import (
+    PANE_FORMAT,
+    RECORD_END,
+    NotOurSession,
+    Panes,
+    Tmux,
+    TmuxUnavailable,
+    _scrub_flags,
+)
 from hitchrail.tmux import _default_runner as tmux_runner
 from hitchrail.tmuxnames import sanitize
 
@@ -120,7 +128,9 @@ def test_the_pane_map_is_one_call_whatever_the_session_count() -> None:
     The engine calls this once per list, not once per project. A call per
     project is a subprocess spawn per row.
     """
-    runner = FakeRunner(stdout={"list-panes": "hr-main~a 1\nhr-main~b 2\nhr-main~c 3\n"})
+    runner = FakeRunner(
+        stdout={"list-panes": "9 hr-main~a 1:\n9 hr-main~b 2:\n9 hr-main~c 3:\n"}
+    )
     tmux = Tmux(prefix="hr-", run=runner)
     assert tmux.panes().ours == {"hr-main~a": 1, "hr-main~b": 2, "hr-main~c": 3}
     assert len(runner.calls) == 1
@@ -135,7 +145,7 @@ def test_both_halves_of_the_pane_map_come_from_the_same_call() -> None:
     asked twice would be the per row spawn the budget forbids, arrived at from
     a different direction.
     """
-    runner = FakeRunner(stdout={"list-panes": "cc-vessel 111\nhr-main~vessel 4242\n"})
+    runner = FakeRunner(stdout={"list-panes": "9 cc-vessel 111:\n9 hr-main~vessel 4242:\n"})
     panes = Tmux(prefix="hr-", run=runner).panes()
     assert panes.ours == {"hr-main~vessel": 4242}
     assert panes.foreign == {111: "cc-vessel"}
@@ -150,7 +160,7 @@ def test_a_foreign_session_is_named_but_never_ours() -> None:
     orphan. Foreign sessions are now visible to the READ path and still absent
     from `ours`, which is what every write path builds its target from.
     """
-    runner = FakeRunner(stdout={"list-panes": "work 111\nhr-main~vessel 4242\n"})
+    runner = FakeRunner(stdout={"list-panes": "9 work 111:\n9 hr-main~vessel 4242:\n"})
     panes = Tmux(prefix="hr-", run=runner).panes()
     assert panes.ours == {"hr-main~vessel": 4242}
     assert "work" not in panes.ours
@@ -179,7 +189,7 @@ def test_a_prefixed_name_we_could_not_have_created_is_not_ours() -> None:
         "hr-main~a.b 5002",
         "hr-main~vessel 4242",
     ]
-    runner = FakeRunner(stdout={"list-panes": "\n".join(lines) + "\n"})
+    runner = FakeRunner(stdout={"list-panes": "".join(f"9 {line}:\n" for line in lines)})
     panes = Tmux(prefix="hr-", run=runner).panes()
     assert panes.ours == {"hr-main~vessel": 4242}
     assert panes.foreign == {5000: "hr-my project", 5001: "hr-my lab~x", 5002: "hr-main~a.b"}
@@ -193,7 +203,9 @@ def test_our_own_session_for_a_folder_with_a_space_is_ours() -> None:
     inside the name never reaches `int()`."""
     tmux = Tmux(
         prefix="hr-",
-        run=FakeRunner(stdout={"list-panes": "hr-main~my app 4242\nhr-main~vessel 4243\n"}),
+        run=FakeRunner(
+            stdout={"list-panes": "9 hr-main~my app 4242:\n9 hr-main~vessel 4243:\n"}
+        ),
     )
     assert tmux.session_name("main~my app") == "hr-main~my app"
     panes = tmux.panes()
@@ -209,7 +221,7 @@ def test_a_foreign_session_name_with_a_space_survives_the_parse() -> None:
     agent inside that session looking unowned: the defect this ticket removes,
     reintroduced by the parser.
     """
-    runner = FakeRunner(stdout={"list-panes": "my work 111\nhr-main~vessel 4242\n"})
+    runner = FakeRunner(stdout={"list-panes": "9 my work 111:\n9 hr-main~vessel 4242:\n"})
     panes = Tmux(prefix="hr-", run=runner).panes()
     assert panes.foreign == {111: "my work"}
     assert panes.ours == {"hr-main~vessel": 4242}
@@ -223,7 +235,7 @@ def test_a_foreign_session_name_is_escaped_on_the_way_in() -> None:
     where untrusted output enters, rather than at each of the places that
     render it.
     """
-    runner = FakeRunner(stdout={"list-panes": "ev\x1b[2Jil 111\n"})
+    runner = FakeRunner(stdout={"list-panes": "9 ev\x1b[2Jil 111:\n"})
     # The ESC is escaped and the rest is left alone, which is exactly enough:
     # `[2J` without an ESC in front of it is four printable characters.
     assert Tmux(prefix="hr-", run=runner).panes().foreign == {111: "ev\\u001b[2Jil"}
@@ -238,12 +250,12 @@ def test_a_failed_list_panes_is_an_empty_map_not_an_exception() -> None:
 
 
 def test_a_malformed_pane_line_is_skipped_and_the_rest_survive() -> None:
-    runner = FakeRunner(stdout={"list-panes": "hr-main~a notapid\nhr-main~b 7\n\n"})
+    runner = FakeRunner(stdout={"list-panes": "9 hr-main~a notapid:\n9 hr-main~b 7:\n:\n"})
     assert Tmux(prefix="hr-", run=runner).panes().ours == {"hr-main~b": 7}
 
 
 def test_the_first_pane_wins_for_a_multi_pane_session() -> None:
-    runner = FakeRunner(stdout={"list-panes": "hr-main~a 10\nhr-main~a 11\n"})
+    runner = FakeRunner(stdout={"list-panes": "9 hr-main~a 10:\n9 hr-main~a 11:\n"})
     assert Tmux(prefix="hr-", run=runner).panes().ours == {"hr-main~a": 10}
 
 
@@ -263,7 +275,7 @@ def test_both_panes_of_one_foreign_session_survive_because_the_map_is_pid_keyed(
     this process". A later change to name keying would silently lose one of two
     panes and answer that question wrongly for the survivor.
     """
-    runner = FakeRunner(stdout={"list-panes": "cc-a 10\ncc-a 11\n"})
+    runner = FakeRunner(stdout={"list-panes": "9 cc-a 10:\n9 cc-a 11:\n"})
     foreign = Tmux(prefix="hr-", run=runner).panes().foreign
     # The length FIRST and with the message, because that is the assertion whose
     # failure explains itself: under name keying one pane is lost and the reader
@@ -678,7 +690,7 @@ def test_a_line_with_no_name_is_dropped_rather_than_named_empty_string() -> None
     stays because a parser should be true of its input rather than of one
     version's output, and the check costs one comparison.
     """
-    runner = FakeRunner(stdout={"list-panes": "1234\ncc-real 5678\n"})
+    runner = FakeRunner(stdout={"list-panes": "9 1234:\n9 cc-real 5678:\n"})
     panes = Tmux(prefix="hr-", run=runner).panes()
 
     assert panes.foreign == {5678: "cc-real"}, (
@@ -686,6 +698,63 @@ def test_a_line_with_no_name_is_dropped_rather_than_named_empty_string() -> None
         f"is not what docs/api.md promises. See #175."
     )
     assert panes.ours == {}
+
+
+def test_a_foreign_name_holding_a_newline_cannot_hand_the_map_a_pid() -> None:
+    """#175, the newline half, with the ticket's own input.
+
+    tmux up to 3.1 stores `innocent\\nhr-main~vessel` verbatim and prints it
+    over two lines; 3.2 and later escape the newline on the way in, which
+    `tests/test_live_tmux.py` shows on a real server, so this tier is the
+    one that can hand the parser the raw input. Split at newlines, the
+    second line was `hr-main~vessel 7777`: a name `could_be_ours` accepts,
+    followed by a FOREIGN pane's pid. That pid went into `ours`, hid the
+    agent under it, and derived `stopped` for a folder that has an agent,
+    which offers Start, the second agent in one folder. Records end at
+    `:\\n` now, and `:` is the one character no tmux stores in a session
+    name, so the whole name arrives in one record and `could_be_ours`
+    refuses it. It stays foreign, keyed by ITS pid, with the newline escaped
+    like any other control character.
+    """
+    poison = "9 innocent\nhr-main~vessel 7777:\n9 hr-main~vessel 4242:\n"
+    panes = Tmux(prefix="hr-", run=FakeRunner(stdout={"list-panes": poison})).panes()
+
+    assert panes.ours == {"hr-main~vessel": 4242}, (
+        f"a foreign pid reached `ours` through a newline in a foreign name: {panes.ours}"
+    )
+    assert panes.foreign == {7777: "innocent\\u000ahr-main~vessel"}
+
+
+def test_the_pane_map_carries_the_servers_pid_and_none_without_a_server() -> None:
+    """#189. `#{pid}` is the server's, the same on every record, read from
+    the first that parses; with no server (a non zero exit) or no pane the
+    map has no server to name. A record whose first field is not a pid is
+    dropped whole rather than read as a name."""
+    stdout = "17 hr-main~vessel 4:\n17 cc-x 5:\n"
+    assert (
+        Tmux(prefix="hr-", run=FakeRunner(stdout={"list-panes": stdout})).panes().server_pid
+        == 17
+    )
+    assert Tmux(prefix="hr-", run=FakeRunner(rc={"list-panes": 1})).panes().server_pid is None
+    assert (
+        Tmux(prefix="hr-", run=FakeRunner(stdout={"list-panes": ""})).panes().server_pid is None
+    )
+    malformed = Tmux(prefix="hr-", run=FakeRunner(stdout={"list-panes": "hr-main~vessel 4:\n"}))
+    assert malformed.panes() == Panes(ours={}, foreign={}, server_pid=None)
+
+
+def test_a_record_is_never_ended_by_a_newline_alone() -> None:
+    """The mechanism behind the test above, pinned on its own: the parser
+    splits on the terminator, and `splitlines()` would pass the poison."""
+    assert RECORD_END == ":\n"
+    assert PANE_FORMAT.endswith(":")
+    # A name holding a newline is ONE record whatever follows the newline,
+    # never two records of which the second is ours.
+    panes = Tmux(
+        prefix="hr-", run=FakeRunner(stdout={"list-panes": "9 a\nhr-main~x 1:\n"})
+    ).panes()
+    assert panes.ours == {}
+    assert panes.foreign == {1: "a\\u000ahr-main~x"}
 
 
 # -- #135: pane_is_dead, whose caller acts destructively on True --------------
@@ -762,7 +831,7 @@ def test_the_pane_map_asks_for_every_pane_in_one_format() -> None:
     answer parseable, and nothing checked it: `#{session_name} #{pane_pid}` is
     two fields separated by one space, and the parser below splits on it.
     """
-    runner = FakeRunner(stdout={"list-panes": "hr-main~vessel 4\n"})
+    runner = FakeRunner(stdout={"list-panes": "9 hr-main~vessel 4:\n"})
     Tmux(prefix="hr-", run=runner).panes()
 
     assert runner.calls[-1] == [
@@ -770,7 +839,7 @@ def test_the_pane_map_asks_for_every_pane_in_one_format() -> None:
         "list-panes",
         "-a",
         "-F",
-        "#{session_name} #{pane_pid}",
+        "#{pid} #{session_name} #{pane_pid}:",
     ]
 
 

@@ -129,6 +129,7 @@ One project, as `projects` lists it, as `POST` and `DELETE` on
 | `awaiting_trust` | the agent is sitting on its trust prompt |
 | `awaiting_input` | the agent is sitting on a question only a person can answer |
 | `foreign_session` | the tmux session another tool runs the agent under, when one is visible; null otherwise |
+| `foreign_server_pid` | the pid of a tmux server above the agent that Hitchrail is not configured for, found by walking the process tree; null when none is, which still means none was seen |
 
 ### `POST /api/sessions/{name}/answer`
 
@@ -183,8 +184,9 @@ machine that cannot open a pidfd is told so (`pidfd_unavailable`, 501).
 
 Refused before any handle is opened: the self project (`self_protected`),
 a pid in the process tree this server runs in (also `self_protected`), a row
-that is not detached (`not_detached`), a row a visible tmux session owns
-(`owned_elsewhere`, with the session in a `session` field: attach there),
+that is not detached (`not_detached`), a row a tmux Hitchrail can see holds
+(`owned_elsewhere`, with the session in a `session` field, or the server's
+pid in `server_pid` when it is one on another socket: attach there),
 and another user's process (`not_ours`). Refused after the handle, on the
 process the handle refers to: a pid that changed identity or left (`not_ours`,
 `gone`), and a process whose working directory is not under this
@@ -313,7 +315,7 @@ than by position.
 | `not_asking` | 409 | a key was sent but the screen is not showing a question to answer |
 | `not_running` | 409 | a stop or kill was asked for something that is not running |
 | `not_detached` | 409 | the signal route was asked for a row that is running, stale or stopped |
-| `owned_elsewhere` | 409 | a tmux session Hitchrail can see owns the agent; the `session` field names it |
+| `owned_elsewhere` | 409 | a tmux Hitchrail can see holds the agent: `session` names it when the pane map saw it, else `server_pid` names a server on another socket found in the process tree |
 | `gone` | 409 | the process left between the listing and the call; nothing was signalled |
 | `not_ours` | 409 | the pid is not the agent derivation identified: reused, another user's, or refused by the kernel; nothing was signalled |
 | `pidfd_unavailable` | 501 | this machine cannot signal through a race free handle, and Hitchrail will not signal a bare pid |

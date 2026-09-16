@@ -102,14 +102,14 @@ Independent, small, and each is a scenario that was executed against the code.
 
 ### Batch 3: what the row can see, tasks 94 and 95
 
-- [ ] **Task 94, #189.** Mechanism A: walk `ppid` from a detached candidate to
+- [x] **Task 94, #189.** Mechanism A: walk `ppid` from a detached candidate to
       the first ancestor `is_tmux_argv` recognises and name it on the row, so
       an agent under another socket says "in a tmux session" rather than "no
       session Hitchrail can address", and `signal_detached` refuses it as
       `owned_elsewhere`. **Not a gate**: nothing here authorises a signal, it
       only withholds the control. A live tmux test on a second private socket.
 
-- [ ] **Task 95, #175.** The pane map's newline half: a foreign session name
+- [x] **Task 95, #175.** The pane map's newline half: a foreign session name
       containing a newline no longer yields a line `could_be_ours` accepts.
       Ask tmux for a delimiter a name cannot contain, or refuse a name holding
       a newline before the split, and a test with the ticket's own input.

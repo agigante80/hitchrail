@@ -72,7 +72,7 @@ from hitchrail.roots import Root
 from hitchrail.server import create_app
 from hitchrail.tmux import Tmux
 from hitchrail.tmuxnames import is_tmux_argv
-from support import DEFAULT_LABEL, make_config
+from support import DEFAULT_LABEL, Orphan, make_config
 
 pytestmark = pytest.mark.e2e
 
@@ -399,7 +399,7 @@ class Harness:
         self.bus = EventBus()
         self.engine: Engine | None = None
         self._config: Config | None = None
-        self._orphans: list[subprocess.Popen[bytes]] = []
+        self._orphans: list[Orphan] = []
         # OUTSIDE the project root. `discovery.scan` lists every direct
         # subfolder, so a `bin/` beside the projects becomes a project: the
         # tab counts read one too high and every count assertion is off by the
@@ -654,14 +654,14 @@ class Harness:
         # kills the pane's process group with it, which leaves `stopped` and
         # not `detached`: the state a naive tool gets wrong cannot be faked by
         # breaking the tmux half.
+        #
+        # `Orphan`, not `Popen` (#189): reparented to init, so no tmux the
+        # suite itself runs inside sits above it. `support.py` says why.
         for name in detached or []:
             self._orphans.append(
-                subprocess.Popen(
+                Orphan(
                     claude_ipc.launch_argv(str(self._agent), e2e_id(name)),
                     cwd=self.root / e2e_name(name),
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
                 )
             )
         if detached:
@@ -854,12 +854,9 @@ class Harness:
         """A new agent outside tmux under a name that already had one (#107):
         the same shape `seed(detached=...)` spawns, after the first left."""
         self._orphans.append(
-            subprocess.Popen(
+            Orphan(
                 claude_ipc.launch_argv(str(self._agent), e2e_id(name)),
                 cwd=self.root / e2e_name(name),
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
             )
         )
 
@@ -893,6 +890,7 @@ class Harness:
                 orphan.wait(timeout=5)
             except subprocess.TimeoutExpired:  # pragma: no cover - a stuck fake
                 orphan.kill()
+            orphan.close()
         self._orphans.clear()
 
     def _abort_connections(self) -> int:

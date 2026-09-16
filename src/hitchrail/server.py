@@ -623,7 +623,9 @@ def create_app(
         except eng.NotDetached as exc:
             return _error(409, "not_detached", str(exc))
         except eng.OwnedElsewhere as exc:
-            return _error(409, "owned_elsewhere", str(exc), session=exc.session)
+            return _error(
+                409, "owned_elsewhere", str(exc), session=exc.session, server_pid=exc.server_pid
+            )
         except eng.Gone as exc:
             return _error(409, "gone", str(exc))
         except eng.NotOurs as exc:

@@ -121,6 +121,23 @@ class ProcTable:
     def children(self, pid: int) -> list[Proc]:
         return list(self._by_ppid.get(pid, ()))
 
+    def ancestors(self, pid: int) -> list[Proc]:
+        """The chain above `pid`, nearest first, stopping at init or at a
+        cycle (#189). The mirror of `descendants`, with the same guard: a
+        snapshot of a moving table can hold a ppid that points back down
+        into its own subtree, and an unguarded walk spins on the event loop."""
+        out: list[Proc] = []
+        seen: set[int] = {pid}
+        current = self.by_pid.get(pid)
+        while current is not None and current.ppid > 1 and current.ppid not in seen:
+            parent = self.by_pid.get(current.ppid)
+            if parent is None:
+                break
+            seen.add(parent.pid)
+            out.append(parent)
+            current = parent
+        return out
+
     def descendants(self, pid: int) -> list[Proc]:
         """The subtree below `pid`, guarded against cycles.
 

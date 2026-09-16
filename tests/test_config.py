@@ -1098,7 +1098,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # refuse when it could not be read.
         # 1468 after Phase 20 batch 1's review: the process's working
         # directory is read after the handle, the one fact argv does not carry.
-        "engine.py": 1478,
+        # 1479 for #189: the refusals read `held_elsewhere`, a session name
+        # or a server pid, rather than the session name alone.
+        "engine.py": 1479,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -1174,7 +1176,11 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 3.4, so nobody goes looking for a bug that is not there.
         # 553 to 556 for #173: the pane map asks `could_be_ours` rather than
         # "has a space", and the comment says why the question changed.
-        "tmux.py": 556,
+        # 595 for #175 and #189: records end at a terminator no tmux stores
+        # in a name, with the note on which tmux versions store a newline,
+        # and the server's pid rides in the same call so `derive` can tell
+        # our own server from another one.
+        "tmux.py": 595,
         # 413, and thirteen lines over the guideline is not a second job. #18
         # already took the host vocabulary out of this file, and what is left
         # is one dataclass and its startup refusals, which is one thing. The
@@ -1300,7 +1306,8 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # one call that applies both halves of a settings body together.
         # +40 for #107: two routes and every refusal's code.
         # 894 for #263: the root_unavailable arm on three more routes.
-        "server.py": 898,
+        # 900 for #189: the `server_pid` field on the owned_elsewhere refusal.
+        "server.py": 900,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

@@ -467,6 +467,11 @@ function metaFor(project) {
     if (project.foreign_session) {
       return `pid ${project.pid}  ·  in tmux session ${project.foreign_session}`;
     }
+    // #189. A tmux server above the agent that is not the one Hitchrail
+    // talks to: the row can say a tmux holds it, and cannot name the session.
+    if (project.foreign_server_pid) {
+      return `pid ${project.pid}  ·  in a tmux server Hitchrail is not configured for (pid ${project.foreign_server_pid})`;
+    }
     return `pid ${project.pid}  ·  no session Hitchrail can address`;
   }
   if (project.state === "stale") return "no agent in the session";
@@ -751,7 +756,12 @@ function buildActions(project, actions) {
   // row once the first has been sent: #169's rule that a kill is always
   // available and never the default, kept by rendering the escalation only
   // after the request that precedes it.
-  if (!project.protected && project.state === "detached" && !project.foreign_session) {
+  if (
+    !project.protected
+    && project.state === "detached"
+    && !project.foreign_session
+    && !project.foreign_server_pid
+  ) {
     // Keyed by name AND pid (review round 1): keyed by name alone, a later
     // agent under the same name on a page left open got Kill as its first
     // control, SIGKILL before SIGTERM, the rule this exists to keep.

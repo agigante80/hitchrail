@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import signal
 import subprocess
 import tempfile
 import time
@@ -40,10 +39,10 @@ from hitchrail.claude_ipc import launch_argv
 from hitchrail.config import Config
 from hitchrail.engine import Engine
 from hitchrail.procs import snapshot
-from hitchrail.sessions import Gone, NoAgent, NotDetached, State
+from hitchrail.sessions import Gone, NoAgent, NotDetached, OwnedElsewhere, State
 from hitchrail.tmux import Tmux
 from hitchrail.tmuxnames import sanitize
-from support import DEFAULT_LABEL, make_config
+from support import DEFAULT_LABEL, Orphan, make_config
 
 pytestmark = pytest.mark.live_tmux
 
@@ -137,12 +136,17 @@ class PrivateTmux:
 
     def sessions(self) -> list[str]:
         """What the server ACTUALLY holds, which is not what we asked for."""
-        result = self.run("list-sessions", "-F", "#{session_name}")
-        # `splitlines`, not `split`: a session name can hold a space since
-        # #173, and splitting on whitespace read one session as two names
-        # neither of which `kill-session` could find, which leaked the
-        # server this teardown exists to prevent leaking.
-        return result.stdout.splitlines() if result.returncode == 0 else []
+        result = self.run("list-sessions", "-F", "#{session_name}:")
+        # Records end at `:\n`, not at a newline and not at whitespace. A
+        # name can hold a space since #173, and splitting on whitespace read
+        # one session as two names neither of which `kill-session` could
+        # find; a name can hold a NEWLINE too (#175), and `splitlines()` did
+        # the same to the session the #175 tests create. Either leaks the
+        # server this teardown exists to prevent leaking. `:` is the one
+        # character tmux never stores in a name, proved above.
+        if result.returncode != 0:
+            return []
+        return [name for name in result.stdout.split(":\n") if name]
 
     def close(self) -> list[str]:
         """Kill what the SERVER says it has, not what we think we created.
@@ -229,6 +233,45 @@ def test_tmux_rewrites_a_dot_in_a_session_name(server: PrivateTmux) -> None:
     listed = server.run("list-sessions", "-F", "#{session_name}").stdout
     assert f"{PREFIX}dotted.site" not in listed
     assert f"{PREFIX}dotted_site" in listed
+
+
+def test_tmux_rewrites_a_colon_in_a_session_name_on_creation_and_rename(
+    server: PrivateTmux,
+) -> None:
+    """The premise the pane map's record terminator rests on (#175): a session
+    name cannot hold `:`, because tmux rewrites it to `_` on both of the
+    commands that set one. `session_check_name` in the source; here, the
+    server itself, on 3.4."""
+    server.new_session(f"{PREFIX}a:b")
+    assert server.run("rename-session", "-t", f"={PREFIX}a_b", f"{PREFIX}x:y").returncode == 0
+    assert server.sessions() == [f"{PREFIX}x_y"]
+
+
+def test_tmux_escapes_a_newline_in_a_session_name_and_the_map_keeps_it_foreign(
+    server: PrivateTmux,
+) -> None:
+    """#175's finding, as the ticket asked for it: tmux 3.2 and later do not
+    store a newline. `session_check_name` escapes it to the two characters
+    `\\n` (CHANGES "3.1c to 3.2"), so the name the server prints is one
+    line and the newline half of the ticket is unreachable here. It IS
+    reachable on 3.1 and earlier, which is what the unit test with the raw
+    input covers, and what this proves is the rest: the escaped name stays
+    foreign under its own pid, and our own session's pid is our own pane's.
+    """
+    ours = f"{PREFIX}{sanitize('main~vessel')}"
+    server.new_session(f"innocent\n{ours}")
+    assert server.sessions() == [f"innocent\\n{ours}"]
+    tmux = adapter(server)
+
+    poisoned = tmux.panes()
+    assert poisoned.ours == {}, f"a foreign pane's pid reached ours: {poisoned.ours}"
+    assert list(poisoned.foreign.values()) == [f"innocent\\n{ours}"]
+
+    server.new_session(ours)
+    own_pid = int(server.run("list-panes", "-t", f"={ours}:", "-F", "#{pane_pid}").stdout)
+    both = tmux.panes()
+    assert both.ours == {ours: own_pid}
+    assert own_pid not in both.foreign
 
 
 # -- the adapter against the real thing ------------------------------------
@@ -998,15 +1041,30 @@ def test_tmux_stores_a_session_name_with_a_space_unchanged(server: PrivateTmux) 
 # -- #107: the signal route against a real process -------------------------
 
 
-def _orphan(agent: Path, root: Path, name: str) -> subprocess.Popen[bytes]:
-    """An agent outside any tmux: the process derivation reports detached."""
-    return subprocess.Popen(
+# Writes which signal ended it, since nobody can `wait` on a process that is
+# not their child. `sleep` in the background and `wait`, so the trap runs
+# while the script is waiting rather than after `sleep` returns.
+_TRAPPING_AGENT = """#!/bin/sh
+trap 'echo TERM > "$HR_ENDED_BY"; exit 0' TERM
+sleep 30 &
+wait
+"""
+
+
+def _orphan(root: Path, name: str, workdir: Path) -> tuple[Orphan, Path]:
+    """An agent outside any tmux, including the one this suite may be running
+    in: the process derivation reports detached, and #189's walk finds no
+    server above it."""
+    agent = workdir / "trapping-agent"
+    agent.write_text(_TRAPPING_AGENT)
+    agent.chmod(0o755)
+    ended_by = workdir / "ended-by"
+    orphan = Orphan(
         launch_argv(str(agent), name),
         cwd=root / live_project("vessel"),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        env={**os.environ, "HR_ENDED_BY": str(ended_by)},
     )
+    return orphan, ended_by
 
 
 def test_a_real_detached_agent_is_ended_through_a_real_pidfd(
@@ -1016,7 +1074,7 @@ def test_a_real_detached_agent_is_ended_through_a_real_pidfd(
     pid, `signal.pidfd_send_signal` through it, and the process observed
     leaving. The engine here has its REAL seams."""
     name = f"{DEFAULT_LABEL}~{machine.project}"
-    child = _orphan(machine.agent, machine.config.roots[0].path, name)
+    orphan, ended_by = _orphan(machine.config.roots[0].path, name, Path(server._dir))
     try:
         engine = Engine(
             config=machine.config,
@@ -1028,14 +1086,13 @@ def test_a_real_detached_agent_is_ended_through_a_real_pidfd(
         while engine.get(name).state is not State.DETACHED and time.monotonic() < deadline:
             time.sleep(0.1)
         row = engine.get(name)
-        assert row.state is State.DETACHED and row.pid == child.pid, row
+        assert row.state is State.DETACHED and row.pid == orphan.pid, row
+        assert row.foreign_server_pid is None, "the orphan still has a tmux above it"
         engine.signal_detached(name)
-        assert child.wait(timeout=5) is not None
-        assert child.returncode == -signal.SIGTERM, child.returncode
+        assert orphan.wait(timeout=5) == 0, "the agent is still running"
+        assert ended_by.read_text() == "TERM\n"
     finally:
-        if child.poll() is None:
-            child.kill()
-            child.wait(timeout=5)
+        orphan.close()
 
 
 def test_an_agent_that_left_between_the_listing_and_the_call_is_refused_with_nothing_sent(
@@ -1048,7 +1105,7 @@ def test_an_agent_that_left_between_the_listing_and_the_call_is_refused_with_not
     and the handle is `gone` at the open, the same refusal one step later.
     Either way `os.kill` is never reached, and this asserts it."""
     name = f"{DEFAULT_LABEL}~{machine.project}"
-    child = _orphan(machine.agent, machine.config.roots[0].path, name)
+    orphan, _ = _orphan(machine.config.roots[0].path, name, Path(server._dir))
     engine = Engine(
         config=machine.config,
         tmux=machine.adapter,
@@ -1058,9 +1115,12 @@ def test_an_agent_that_left_between_the_listing_and_the_call_is_refused_with_not
     deadline = time.monotonic() + 5
     while engine.get(name).state is not State.DETACHED and time.monotonic() < deadline:
         time.sleep(0.1)
-    assert engine.get(name).pid == child.pid
-    child.kill()
-    child.wait(timeout=5)
+    assert engine.get(name).pid == orphan.pid
+    orphan.close()
+    # Reaped by init, not by us: gone from the table once `/proc` drops it.
+    deadline = time.monotonic() + 5
+    while Path(f"/proc/{orphan.pid}").exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
     sent: list[tuple[int, int]] = []
     original = os.kill
 
@@ -1074,3 +1134,48 @@ def test_an_agent_that_left_between_the_listing_and_the_call_is_refused_with_not
     finally:
         os.kill = original
     assert sent == []
+
+
+# -- #189: a tmux server on a SECOND private socket --------------------------
+
+
+def test_an_agent_under_a_tmux_on_another_socket_is_named_by_its_server(
+    server: PrivateTmux, machine: Machine
+) -> None:
+    """The case no fake distinguishes from a foreign session: the owner is a
+    real tmux server on a socket Hitchrail was not configured with, so the
+    pane map cannot see it and only the process tree can. A second private
+    server, created and torn down here, holds the agent; Hitchrail's adapter
+    talks to the first."""
+    other = PrivateTmux()
+    name = f"{DEFAULT_LABEL}~{machine.project}"
+    try:
+        other.run(
+            "new-session",
+            "-d",
+            "-s",
+            f"{FOREIGN_PREFIX}{machine.project}",
+            "-c",
+            str(machine.config.roots[0].path / machine.project),
+            *launch_argv(str(machine.agent), name),
+        )
+        other.created.append(f"{FOREIGN_PREFIX}{machine.project}")
+        time.sleep(0.5)
+        server_pid = int(other.run("display-message", "-p", "#{pid}").stdout.strip())
+
+        engine = Engine(
+            config=machine.config,
+            tmux=machine.adapter,
+            meminfo_fn=lambda: PLENTY,
+            cwd_of=REAL_CWD_OF,
+        )
+        row = engine.get(name)
+        assert row.state is State.DETACHED, row
+        assert row.foreign_session is None, "the pane map cannot see another socket"
+        assert row.foreign_server_pid == server_pid
+        with pytest.raises(OwnedElsewhere, match=f"pid {server_pid}"):
+            engine.signal_detached(name)
+        alive = other.run("has-session", "-t", f"={FOREIGN_PREFIX}{machine.project}")
+        assert alive.returncode == 0, "the refusal touched the other server's session"
+    finally:
+        assert other.close() == [], "a session outlived the test on the second socket"

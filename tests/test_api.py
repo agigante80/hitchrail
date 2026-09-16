@@ -2251,7 +2251,23 @@ async def test_a_foreign_owner_is_named_in_its_own_field(config: Config) -> None
     assert r.status_code == 409
     assert r.json()["code"] == "owned_elsewhere"
     assert r.json()["session"] == "cc-vessel"
+    assert r.json()["server_pid"] is None
     assert fake.events == [] or all(k not in ("open", "send") for k, _ in fake.events)
+
+
+async def test_a_server_on_another_socket_is_named_by_pid(config: Config) -> None:
+    fake = FakePidfd()
+    table = (
+        " 800     1   4096   600 tmux -S /tmp/other/s\n"
+        " 801   800   4096   600 bash\n" + DETACHED_PS.replace(" 900     1", " 900   801")
+    )
+    async with client_for(_signal_engine(config, fake, table), config) as c:
+        r = await c.post(f"/api/sessions/{proj('vessel')}/signal", headers=HEADERS)
+    assert r.status_code == 409
+    assert r.json()["code"] == "owned_elsewhere"
+    assert r.json()["session"] is None
+    assert r.json()["server_pid"] == 800
+    assert fake.signals == []
 
 
 async def test_the_protected_project_is_423_on_the_signal_route(

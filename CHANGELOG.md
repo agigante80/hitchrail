@@ -67,6 +67,25 @@ watching, and the settings page accepted any number. A `state.toml` holding
 a larger value from 0.8.0's page falls back to the default rather than being
 honoured, and a `--stop-timeout` above the ceiling refuses at startup.
 
+**An agent inside a tmux Hitchrail is not configured for is no longer
+offered End.** A tmux server on another socket, or the one your own terminal
+runs in, holds the agent, and the pane map cannot see it because Hitchrail
+only asks its own server. The row now finds that server in the process tree
+and says "in a tmux server Hitchrail is not configured for (pid N)" instead
+of "no session Hitchrail can address"; the signal route refuses it as
+`owned_elsewhere` with the pid in a `server_pid` field, and the listing
+carries it as `foreign_server_pid`. An agent that outlived its pane under
+Hitchrail's own server is still detached and can still be ended.
+
+**A foreign session name holding a newline could put somebody else's pane
+into your listing.** tmux 3.1 and earlier store a newline in a session name
+verbatim, so a session called `innocent<newline>hr-main~vessel` printed a
+line the pane map read as ours, with the foreign pane's pid: the project
+then derived running or stale from a process that was never its own. Records
+are now ended by a character no tmux stores in a name, so the whole name
+arrives together and is refused. tmux 3.2 and later escape the newline
+themselves; the fix is for the versions that do not.
+
 ## 0.8.0 - 2026-09-16
 
 Phase 14: the perimeter, chosen rather than assumed. Upgrading is safe with

@@ -112,12 +112,11 @@ def _no_session_here(session: Session, consequence: str) -> str:
     of step with the row's copy by being edited separately, which is the whole
     shape of this defect.
     """
-    if session.foreign_session is not None:
+    if session.held_elsewhere is not None:
         return (
-            f"the agent for {session.name} is in the tmux session "
-            f"{session.foreign_session}, which Hitchrail did not create, so "
-            f"there is {consequence} here; attach to that session, or end its "
-            f"process, {session.pid}, directly"
+            f"the agent for {session.name} is in {session.held_elsewhere}, which "
+            f"Hitchrail did not create, so there is {consequence} here; attach "
+            f"there, or end its process, {session.pid}, directly"
         )
     return (
         f"the agent for {session.name} is in no tmux session Hitchrail can "
@@ -958,8 +957,8 @@ class Engine:
                 f"{name} is {session.state.value}, and this route is for an agent "
                 "no session owns; use stop or kill for a session"
             )
-        if session.foreign_session is not None:
-            raise OwnedElsewhere(name, session.foreign_session)
+        if session.held_elsewhere is not None:
+            raise OwnedElsewhere(name, session.foreign_session, session.foreign_server_pid)
         pid = session.pid
         self._refuse_our_own_tree(pid)
         try:
@@ -992,8 +991,10 @@ class Engine:
                     f"pid {pid} is no longer the agent for {name}: it changed identity "
                     "between the listing and this request, so nothing was signalled"
                 )
-            if verified.foreign_session is not None:
-                raise OwnedElsewhere(name, verified.foreign_session)
+            if verified.held_elsewhere is not None:
+                raise OwnedElsewhere(
+                    name, verified.foreign_session, verified.foreign_server_pid
+                )
             # The DIRECTORY, which the argv does not carry (#264). Two
             # instances as the same user, both labelled `main` as the README
             # suggests, roots `/a` and `/b` both holding `foo`: B's agent

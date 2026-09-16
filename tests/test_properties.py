@@ -268,3 +268,24 @@ def test_every_accepted_host_is_stored_matchable(extra: list[str]) -> None:
         assert any(parse_host(s) == entry for s in spellings), (
             f"{entry!r} is in the allowlist but no Host header spelling reaches it"
         )
+
+
+@given(
+    rows=st.lists(
+        st.tuples(
+            st.integers(min_value=2, max_value=12),
+            st.integers(min_value=0, max_value=12),
+        ),
+        max_size=25,
+    )
+)
+def test_ancestors_terminates_on_any_parent_map(rows: list[tuple[int, int]]) -> None:
+    """The mirror of the walk above (#189): a ppid can point back DOWN into
+    the walker's own path in a snapshot of a moving table, and the ancestry
+    walk now runs on every detached row."""
+    text = "".join(f"{pid} {ppid} 1 1 cmd\n" for pid, ppid in rows)
+    table = ProcTable(parse_ps(text))
+    for pid, _ in rows:
+        found = table.ancestors(pid)
+        assert len({p.pid for p in found}) == len(found)
+        assert pid not in {p.pid for p in found}
