@@ -47,7 +47,7 @@ next phase, never here.
 | 2. No file is read at request time that was read at startup | 92 |
 | 3. The two Phase 14 modules are proved, not only passed | 93 |
 | 4. End is offered to fewer rows the page is wrong about | 94, 95 |
-| 5. Every P3 is done or declined with its reason | 96 |
+| 5. Every P3 is done or declined with its reason | 96 to 103 |
 
 ## Expected work
 
@@ -114,21 +114,68 @@ Independent, small, and each is a scenario that was executed against the code.
       Ask tmux for a delimiter a name cannot contain, or refuse a name holding
       a newline before the split, and a test with the ticket's own input.
 
-### Batch 4: the P3s, decided one by one, task 96
+### Batch 4: the P3s, one task each, tasks 96 to 101
 
-- [ ] **Task 96.** #256, #258, #260, #270, #271, #272, #237, and #269 once the
-      operator has decided it. Each closes done or declined with its reason on
-      the ticket. The order within the batch: #269 first if decided, since
-      #258 and #272 touch the same files; then the ones whose tests already
-      name the scenario (#270, #271, #260); then #256; then #237, which is
-      reading rather than writing and can stop at any point.
+Task 96 was one line carrying eight tickets, which is not a plan for any of
+them. Split on 2026-09-16, after reading each against the tree: three were
+done in one commit, one left the phase, and two were narrowed to what this
+phase's objective admits.
+
+- [x] **Task 96, #270.** The config file's remaining refusals in words: a label
+      holding `=` asked of the allowlist before it is composed, a NUL escape
+      and a non UTF-8 file refused with exit 2 naming the file, the config
+      DIRECTORY held to the file's own rule, and the state file written
+      through a fresh `O_EXCL` name so a symlink at `state.tmp` is not written
+      through.
+
+- [x] **Task 97, #271.** The argv suffix match's reason written where the
+      refusal that keeps it true lives, a property test over both parsers'
+      alphabet, and `check_roots` re-asking a label's shape so a `Root` built
+      in code cannot reach the pane map as something `could_be_ours` refuses.
+
+- [x] **Task 98, #260.** The ARP entry matched by the route's interface as
+      well as its address, `normalise_mac` matching its own refusal message,
+      both tables decoded with replacement, the STALE window documented as a
+      limit rather than closed, one operator command in the guide, and
+      `expect_gateway_mac` on the config view with a test.
+
+- [ ] **Task 99, #272.** The signal route's smaller refusals: EPERM at the
+      open as `pidfd_unavailable`, the uid window written down as advisory
+      with the kernel's refusal named as the property, `state.signalled`
+      pruned on render, one `Machine` behind the gone-versus-reused split, and
+      the live test's orphaned `sleep`. Item 4 of that ticket, binding a
+      signal to the pid the person saw, is SPLIT OUT to #279: it changes a
+      contract, and this phase adds none.
+
+- [ ] **Task 100, #258.** An encrypted TLS key refuses at startup in words,
+      naming the key, without ever reaching a prompt. The passphrase INPUT
+      that ticket also offered is split out to #280, because a new operator
+      input is a new flag and this phase adds none.
+
+- [ ] **Task 101, #256.** The settings page keeps a refused toggle's reason
+      through the repaint, and the empty state stops naming roots it cannot
+      show.
+
+- [ ] **Task 102, #269.** MOVED OUT of this batch's ordering only: it is a
+      decision for the operator, not work, and the phase cannot close until
+      it is taken. Whichever way it goes, the rule and its reason go into
+      `security.set_token_cookie` and `docs/api.md`.
+
+- [ ] **Task 103, #237.** MOVED OUT to Backlog, issue #237. It is the mutation
+      sweep over the five modules Phase 10 did not reach, about 139 survivors
+      to read, and it has nothing to do with this phase's objective. Its own
+      body says it was filed to Backlog deliberately, for the reason this plan
+      gives in "What this phase is NOT about": a phase that absorbs work like
+      this never ends. It reached the milestone in a triage pass that read it
+      as one more P3 to decide.
 
 ## Done looks like
 
 - [ ] Every task above is ticked, or is marked MOVED OUT with the issue that
       carries it.
 - [ ] Every ticket in the milestone on 2026-09-16 is closed, done or declined
-      with the reason on the ticket, and #269's decision is written into
+      with the reason on the ticket, or moved out with the issue that carries
+      it named in the task above, and #269's decision is written into
       `security.py` whichever way it went.
 - [ ] `docs/api.md` documents every code this phase added or changed, held to
       the server both ways.
