@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from hitchrail.gateway import normalise_mac
 from hitchrail.hostnames import (
     DEFAULT_PORTS,
     HOSTNAME_PATTERN,
@@ -187,6 +188,11 @@ class Config:
     # `resolve_child`: they are outside every root on purpose.
     tls_cert: Path | None = None
     tls_key: Path | None = None
+    # #207. The MAC of the default gateway on the network the operator meant,
+    # normalised in `__post_init__`; `cli.preflight` refuses a start whose
+    # gateway is another. `None` is the check off. `gateway.py` says what it
+    # guards against, and what it does not.
+    expect_gateway_mac: str | None = None
     tmux_socket: str | None = None
     self_project: str | None = None
     resolver: Resolver | None = None
@@ -223,6 +229,7 @@ class Config:
         self._check_extra_origins()
         self._check_self_project()
         self._check_tls()
+        self._check_gateway_mac()
 
         reach = remote_reach(self.host, self.extra_hosts, self.extra_origins)
         if reach and not self.token:
@@ -309,6 +316,18 @@ class Config:
                 f"--tls-cert {self.tls_cert} with --tls-key {self.tls_key} cannot be "
                 f"loaded, so nothing will be served on this port: {exc}"
             ) from exc
+
+    def _check_gateway_mac(self) -> None:
+        """Six octets in any of the usual spellings, stored in one."""
+        if self.expect_gateway_mac is None:
+            return
+        mac = normalise_mac(self.expect_gateway_mac)
+        if mac is None:
+            raise ConfigError(
+                f"--expect-gateway-mac {self.expect_gateway_mac!r} is not a MAC address: "
+                f"six pairs of hex digits, like aa:bb:cc:dd:ee:ff"
+            )
+        object.__setattr__(self, "expect_gateway_mac", mac)
 
     def _check_agent_binary(self) -> None:
         """A binary name beginning with '-' becomes a flag in an argv slot.

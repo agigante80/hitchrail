@@ -52,6 +52,13 @@ narrows what the file allows. A hidden root's projects leave the listing,
 which now names them in `hidden_roots`; its sessions keep running and still
 answer by name.
 
+**The wrong network, noticed.** `--expect-gateway-mac` names the default
+gateway of the network a named bind was meant for; a start whose gateway is
+another, or cannot be identified, refuses with exit 2 and the unit stays
+stopped until somebody looks. Read from `/proc`, no subprocess. A guard
+against a laptop serving where it was carried by accident, and the code says
+it is not one against an attacker on the LAN, who can present any MAC.
+
 **A folder called `my app` is a project.** The name allowlist admits one
 space between two words; a leading, trailing or doubled space, and any other
 whitespace, are still refused, and the refusal now says to rename the folder

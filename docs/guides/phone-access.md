@@ -81,7 +81,12 @@ the exposure plainly before choosing it:
 - **It is a decision with an expiry date you will not be told about.** This
   choice is correct while you are on a network you trust. Nothing warns you
   when the machine joins one you do not, and a laptop's whole job is joining
-  other networks.
+  other networks. `--expect-gateway-mac` is the one thing that will: it names
+  the default gateway of the network you meant, and a start anywhere else,
+  or anywhere the gateway cannot be identified, refuses with exit 2 and the
+  unit stays stopped until you look (`ip neigh show default` or the router's
+  label gives you the address). It catches the cafe, the hotel and the
+  replaced router, and not an attacker on the LAN, who can present any MAC.
 
 That last point is why this is second rather than first. It is not less secure
 in the moment. It is a decision that silently stops being the one you made.

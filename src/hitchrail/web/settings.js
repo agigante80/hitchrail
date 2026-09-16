@@ -177,6 +177,7 @@ const FACTS = [
   ["agent_binary", "Agent"],
   ["session_prefix", "Session prefix"],
   ["tls", "TLS certificate"],
+  ["expect_gateway_mac", "Expected gateway"],
   ["hard_floor_mb", "Hard memory floor, MB"],
   ["soft_floor_mb", "Soft memory floor, MB"],
   ["session_mb", "Per session estimate, MB"],

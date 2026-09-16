@@ -1187,14 +1187,18 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 523 to 575 for #152: the TLS pair, loaded once at construction so
         # a certificate that cannot be read refuses BEFORE the bind, with
         # the paragraph on why that is exit 2 and not uvicorn's retried 1.
-        "config.py": 575,
+        # 575 to 594 for #207: the expected gateway MAC, normalised once.
+        "config.py": 594,
         # 460 for #123, #154 and #238: `--config`, `--session-prefix` and the
         # source tagging the settings page shows, which is one function
         # reading the flags back out of argv. Nothing here parses a value
         # twice; `settings.py` is where the file is read.
         # 461 to 490 for #152: two flags, and the uvicorn call spelling the
         # pair out as `None` rather than omitting it.
-        "cli.py": 490,
+        # 490 to 527 for #207: the flag and the preflight arm that refuses
+        # the wrong network, with the sentence on why the seam is resolved
+        # per call. The reading itself is `gateway.py`.
+        "cli.py": 527,
         # 409, nine lines over, down from 542. #115 deleted the `?token=`
         # carrier: 135 lines once the two blocks inside `TokenMiddleware`
         # that only served it are counted.
@@ -1263,7 +1267,7 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # split, and the settings routes are its first candidate.
         # 844 after round 1 of the Phase 14 review: the null refusal and the
         # one call that applies both halves of a settings body together.
-        "server.py": 846,
+        "server.py": 847,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

@@ -14,7 +14,7 @@ from urllib.parse import quote
 import uvicorn
 from starlette.applications import Starlette
 
-from hitchrail import __version__, settings
+from hitchrail import __version__, gateway, settings
 from hitchrail.config import (
     TOKEN_ENV,
     Config,
@@ -138,6 +138,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         type=Path,
         metavar="FILE",
         help="the PEM private key for --tls-cert",
+    )
+    # #207. The wrong network guard: the unit stays stopped when the default
+    # gateway is not the one named here. Off when absent.
+    parser.add_argument(
+        "--expect-gateway-mac",
+        default=None,
+        metavar="MAC",
+        help="refuse to start unless the default gateway has this MAC address: a guard "
+        "against a laptop serving on a network it joined by accident. Unset, off",
     )
     parser.add_argument(
         "--session-prefix",
@@ -265,6 +274,7 @@ def build_config(args: argparse.Namespace) -> Config:
         "session_prefix": source("session_prefix", file_settings.session_prefix is not None),
         "stop_timeout": source("stop_timeout"),
         "tls": source("tls_cert"),
+        "expect_gateway_mac": source("expect_gateway_mac"),
     }
     return Config(
         roots=roots,
@@ -274,6 +284,7 @@ def build_config(args: argparse.Namespace) -> Config:
         session_prefix=prefix,
         tls_cert=args.tls_cert,
         tls_key=args.tls_key,
+        expect_gateway_mac=args.expect_gateway_mac,
         host=args.host,
         port=args.port,
         token=token,
@@ -371,6 +382,7 @@ def preflight(
     config: Config,
     which: Callable[[str], str | None] | None = None,
     meminfo: Path = MEMINFO,
+    gateway_mac: Callable[[], str] | None = None,
 ) -> list[str]:
     """What is missing, in the operator's words. Empty means good to go.
 
@@ -423,6 +435,31 @@ def preflight(
             "rather than run without the check that stops it filling the "
             "machine with agents"
         )
+    if config.expect_gateway_mac is not None:
+        # #207. Exit 2 either way, mismatch or "cannot tell", which
+        # `RestartPreventExitStatus=2` keeps stopped until a person looks:
+        # a guard against joining the wrong network by accident, and the
+        # module says why an attacker on the LAN is not what it is for.
+        # Resolved per call for the reason `look` is above: a default bound
+        # at definition time is what a test's monkeypatch cannot reach, and
+        # the first version of this test read the real machine's tables and
+        # passed because the developer's gateway happened not to match.
+        read = gateway_mac if gateway_mac is not None else gateway.gateway_mac
+        try:
+            found = read()
+        except gateway.GatewayUnknown as exc:
+            problems.append(
+                f"--expect-gateway-mac is set and the network cannot be identified: {exc}. "
+                "Refusing rather than guessing which network this is"
+            )
+        else:
+            if found != config.expect_gateway_mac:
+                problems.append(
+                    f"the default gateway is {found}, not the expected "
+                    f"{config.expect_gateway_mac}: this machine is on a different network "
+                    "from the one --expect-gateway-mac names, so nothing is served. If "
+                    "the network is right and the gateway changed, update the flag"
+                )
     return problems
 
 

@@ -382,6 +382,7 @@ def create_app(
             "session_prefix": shown("session_prefix", config.session_prefix),
             # The certificate's path, or none: what "is this HTTPS" needs.
             "tls": shown("tls", _text(config.tls_cert)),
+            "expect_gateway_mac": shown("expect_gateway_mac", config.expect_gateway_mac),
             "hard_floor_mb": shown("hard_floor_mb", config.hard_floor_mb),
             "soft_floor_mb": shown("soft_floor_mb", config.soft_floor_mb),
             "session_mb": shown("session_mb", config.session_mb),

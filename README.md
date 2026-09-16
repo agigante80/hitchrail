@@ -326,7 +326,11 @@ woke up.
 The address above is the **second** of three answers to "how does my phone reach
 this", and it is second for a reason. It needs nothing installed and it is
 correct while you are on a network you trust. Nothing will tell you when the
-machine joins one you do not.
+machine joins one you do not, unless you ask: `--expect-gateway-mac` names
+the default gateway of the network you meant, and a start anywhere else
+refuses and stays stopped until you look. That is a guard against carrying
+the machine somewhere by accident, not against somebody on the LAN who can
+present that address.
 [`docs/guides/phone-access.md`](docs/guides/phone-access.md) is that decision in
 full, best first: an overlay network such as `tailscale serve`, which opens no
 inbound port and stays correct when the machine moves; then the named address
@@ -395,6 +399,7 @@ install it first.
 | `--self-project` | none | A project that must never be stopped, named as `label~folder`. Point it at the folder Hitchrail itself runs from |
 | `--agent-binary` | `claude` | The agent executable to run. Must be on `PATH` or an absolute path |
 | `--tls-cert`, `--tls-key` | none | A PEM certificate and its key: serve HTTPS from the server itself. Both or neither, refused at startup before the bind when one is missing or the pair cannot be loaded. Derived origins, banner links and the cookie's `Secure` flag follow |
+| `--expect-gateway-mac` | none | Refuse to start unless the default gateway has this MAC address, read from `/proc/net/route` and `/proc/net/arp`. A guard against a laptop serving on a network it joined by accident; a MAC is spoofable, so not against an attacker on the LAN. "Cannot tell" refuses too. Exit 2, which the unit keeps stopped |
 | `--session-prefix` | `hr-` | What every tmux session this instance creates is named with, and the only sessions it will ever stop. Two instances on one tmux server need two prefixes: with one, each reads the other's agent in a same named folder as its own and can stop it. Also `session_prefix` in the config file |
 | `--stop-timeout` | `30` | Seconds to wait for a graceful stop before reporting that it timed out. It reports; it does not escalate |
 | `--version` | | Print the version and exit |

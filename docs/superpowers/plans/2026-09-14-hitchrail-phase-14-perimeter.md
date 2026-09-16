@@ -152,7 +152,7 @@ before `Config` does.
       unsupported message for the characters still refused says to rename,
       not something a symlink answers.
 
-- [ ] **Task 84, #207.** An `ExecStartPre` in the unit template that reads
+- [x] **Task 84, #207.** An `ExecStartPre` in the unit template that reads
       the default gateway's MAC and exits 2 when it is not the expected one,
       so `RestartPreventExitStatus=2` makes the unit dead until a human acts.
       The code says it guards against joining the wrong network by accident

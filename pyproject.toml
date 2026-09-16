@@ -154,6 +154,7 @@ source_modules = [
   "hitchrail.config",
   "hitchrail.hostnames",
   "hitchrail.discovery",
+  "hitchrail.gateway",
   "hitchrail.projectnames",
   "hitchrail.roots",
   "hitchrail.settings",
@@ -263,6 +264,8 @@ also_copy = [
   "src/hitchrail/__init__.py",
   # #154. `cli.py` imports it; copied for the same reason as `__init__.py`.
   "src/hitchrail/settings.py",
+  # #207. `config.py` and `cli.py` import it.
+  "src/hitchrail/gateway.py",
   # #221. Copied rather than mutated, and its ABSENCE was not a gap but a
   # break: `engine.py` imports it, so the assembled tree had the importer and
   # not the module, `tests/conftest.py` failed to import, and pytest exited 4.
