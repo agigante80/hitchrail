@@ -406,7 +406,7 @@ install it first.
 | `--allow-origin` | none | An exact origin a browser may claim, `scheme://host[:port]`. Repeatable. Needed behind a TLS terminating proxy, whose scheme and port cannot be derived from our own bind. With `--tls-cert` set, a plain `http://` origin off loopback is refused, since the `Secure` cookie would never come back on it; `http://localhost` is allowed, and works in Chrome and Firefox, not Safari |
 | `--self-project` | none | A project that must never be stopped, named as `label~folder`. Point it at the folder Hitchrail itself runs from |
 | `--agent-binary` | `claude` | The agent executable to run. Must be on `PATH` or an absolute path |
-| `--tls-cert`, `--tls-key` | none | A PEM certificate and its key: serve HTTPS from the server itself. Both or neither, refused at startup before the bind when one is missing or the pair cannot be loaded. Derived origins, banner links and the cookie's `Secure` flag follow |
+| `--tls-cert`, `--tls-key` | none | A PEM certificate and its key: serve HTTPS from the server itself. Both or neither, refused at startup before the bind when one is missing or the pair cannot be loaded. The key must be unencrypted, and one with a passphrase refuses saying so rather than prompting, because under the unit there is no terminal to prompt at. Derived origins, banner links and the cookie's `Secure` flag follow |
 | `--expect-gateway-mac` | none | Refuse to start unless the default gateway has this MAC address, read from `/proc/net/route` and `/proc/net/arp`. A guard against a laptop serving on a network it joined by accident; a MAC is spoofable, so not against an attacker on the LAN. Checked once at start. A mismatch is exit 2, which the unit keeps stopped; "cannot tell" (no route yet, no ARP entry, a pinned entry) is exit 3, which it retries |
 | `--session-prefix` | `hr-` | What every tmux session this instance creates is named with, and the only sessions it will ever stop. Two instances on one tmux server need two prefixes: with one, each reads the other's agent in a same named folder as its own and can stop it. Also `session_prefix` in the config file |
 | `--stop-timeout` | `30` | Seconds to wait for a graceful stop before reporting that it timed out, at most 3600. It reports; it does not escalate |
@@ -496,7 +496,6 @@ survive.
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | how a change is expected to arrive |
 | [`CHANGELOG.md`](CHANGELOG.md) | what upgrading costs you |
 | [`docs/releasing.md`](docs/releasing.md) | how a release is cut and published |
-| [`.claude/CLAUDE.md`](.claude/CLAUDE.md) | the architecture and the non negotiables, for humans and agents alike |
 
 ## Not affiliated with Anthropic
 

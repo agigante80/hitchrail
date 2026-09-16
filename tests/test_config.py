@@ -1242,7 +1242,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # for it. Bumped a commit late, which #261 notes.
         # #267 moved the certificate load here from `Config`, one read into
         # the context uvicorn serves with; `config.py` shrank by as much.
-        "cli.py": 587,
+        # 616 for #258: the callback that makes OpenSSL's tty prompt
+        # unreachable, and the refusal naming the key and the command that
+        # decrypts it.
+        "cli.py": 616,
         # 409, nine lines over, down from 542. #115 deleted the `?token=`
         # carrier: 135 lines once the two blocks inside `TokenMiddleware`
         # that only served it are counted.
@@ -1914,10 +1917,12 @@ def test_every_mutated_module_loads_the_security_rules_when_it_is_edited() -> No
     **It skips rather than fails without `.claude/rules/`**, which is
     gitignored, so this is not a gate: it runs on the machine where the list is
     edited and on no CI leg. That is the honest cost of deriving the check from
-    a file the repository does not carry. The directory asked about is `rules/`
-    and not `.claude/` itself: `.claude/CLAUDE.md` is tracked since 2026-09-11,
-    so `.claude/` exists in every clone, and asking about it would have turned
-    this skip into a failure on every CI leg.
+    a file the repository does not carry. The directory asked about is
+    `rules/` rather than `.claude/` itself, which used to matter because
+    `.claude/CLAUDE.md` was tracked and the parent therefore existed in every
+    clone. Since 2026-09-16 nothing under `.claude/` is published, so both
+    spellings skip everywhere but a working checkout; `rules/` is kept
+    because it is the directory this check is actually about.
 
     **It is deliberately NOT in `[tool.mutmut] pytest_add_cli_args`, against the
     ticket's own instruction.** #198 required a `--deselect` entry beside the

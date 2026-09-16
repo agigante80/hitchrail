@@ -81,6 +81,12 @@ of "no session Hitchrail can address"; the signal route refuses it as
 carries it as `foreign_server_pid`. An agent that outlived its pane under
 Hitchrail's own server is still detached and can still be ended.
 
+**A TLS key with a passphrase refuses instead of asking for one.** It used
+to reach OpenSSL's terminal prompt: interactively that was two prompts, one
+at the configuration check and one inside the server, and under the systemd
+unit, where there is no terminal, the start failed saying nothing useful.
+It now stops at startup naming the key and the command that decrypts it.
+
 **A handle the kernel refuses is no longer reported as somebody else's
 process.** `pidfd_open` does not refuse on ownership grounds, so an EPERM
 there is a seccomp filter or an LSM denying the syscall; the route now says

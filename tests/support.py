@@ -41,6 +41,45 @@ def make_config(root: Path, **kw: Any) -> Config:
     return Config(roots=(Root(label=DEFAULT_LABEL, path=root.resolve()),), **kw)
 
 
+# Not a secret: it protects a certificate minted for one test and thrown
+# away with the temporary directory. Named rather than defaulted, so the
+# linter's hardcoded-password rule is not silenced on a real one later.
+THROWAWAY_PASSPHRASE = "x"
+
+
+def make_encrypted_certificate(directory: Path) -> tuple[Path, Path]:
+    """A pair whose key carries a passphrase, which is what `openssl req`
+    writes WITHOUT `-nodes` and what #258 is about. Its own directory, so it
+    cannot be confused with the usable pair beside it."""
+    cert = directory / "encrypted-cert.pem"
+    key = directory / "encrypted-key.pem"
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "ec",
+            "-pkeyopt",
+            "ec_paramgen_curve:prime256v1",
+            "-keyout",
+            str(key),
+            "-out",
+            str(cert),
+            "-days",
+            "2",
+            "-subj",
+            "/CN=localhost",
+            "-passout",
+            f"pass:{THROWAWAY_PASSPHRASE}",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    assert "ENCRYPTED" in key.read_text().splitlines()[0], key.read_text().splitlines()[0]
+    return cert, key
+
+
 def make_certificate(directory: Path) -> tuple[Path, Path]:
     """A self signed certificate for 127.0.0.1 and `localhost`, minted into a
     temporary directory (#152).

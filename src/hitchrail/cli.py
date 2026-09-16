@@ -479,6 +479,16 @@ def gateway_verdict(
     return None
 
 
+class _KeyIsEncrypted(Exception):
+    """OpenSSL asked for a passphrase, which means the key has one (#258)."""
+
+
+def _refuse_to_be_asked() -> bytes:
+    """The `password=` callback. Called only for an encrypted key, and it
+    raises rather than returning, so the tty prompt is never reached."""
+    raise _KeyIsEncrypted
+
+
 def build_tls_context(config: Config) -> ssl.SSLContext | None:
     """The certificate pair, loaded ONCE, into the context uvicorn serves
     with (#267). `None` is no TLS.
@@ -493,13 +503,32 @@ def build_tls_context(config: Config) -> ssl.SSLContext | None:
     TLS 1.2 is the floor, set rather than inherited: uvicorn's default
     context sets none, and OpenSSL 3's security level happens to refuse 1.1
     where a 1.1.1 build would not.
+
+    An ENCRYPTED key refuses here in words rather than prompting (#258).
+    `openssl req` without `-nodes` writes one, and with no `password=`
+    OpenSSL asks on the tty: interactively that is two prompts, one here and
+    one inside uvicorn, and under the unit there is no tty and the start
+    fails saying nothing useful. The callback below is what makes the prompt
+    unreachable: OpenSSL calls it only for an encrypted key, and it refuses
+    instead of answering. A way to SUPPLY the passphrase is #280; this is
+    the refusal.
     """
     if config.tls_cert is None or config.tls_key is None:
         return None
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     try:
-        context.load_cert_chain(str(config.tls_cert), str(config.tls_key))
+        context.load_cert_chain(
+            str(config.tls_cert), str(config.tls_key), password=_refuse_to_be_asked
+        )
+    except _KeyIsEncrypted as exc:
+        raise ConfigError(
+            f"--tls-key {config.tls_key} is encrypted with a passphrase, and Hitchrail "
+            f"will not ask for one: under the unit there is no terminal to ask at, so the "
+            f"start would hang rather than refuse. Decrypt it "
+            f"(`openssl rsa -in {config.tls_key} -out {config.tls_key}`), or serve behind "
+            f"a proxy that holds the key"
+        ) from exc
     except (ssl.SSLError, OSError) as exc:
         raise ConfigError(
             f"--tls-cert {config.tls_cert} with --tls-key {config.tls_key} cannot be "

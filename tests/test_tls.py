@@ -27,7 +27,7 @@ from hitchrail.events import EventBus
 from hitchrail.roots import Root
 from hitchrail.security import middleware_stack
 from hitchrail.server import create_app
-from support import make_certificate, make_config
+from support import make_certificate, make_config, make_encrypted_certificate
 from test_api import NO_AGENT_CONFIG, PLENTY, make_engine
 
 
@@ -110,6 +110,44 @@ def test_a_key_that_does_not_match_the_certificate_refuses(
     _, other_key = make_certificate(tmp_path / "other")
     with pytest.raises(ConfigError, match="cannot be loaded"):
         build_tls_context(Config(roots=_roots(tmp_path), tls_cert=cert, tls_key=other_key))
+
+
+def test_an_encrypted_key_refuses_in_words_and_is_never_asked_about(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#258. `openssl req` without `-nodes` writes a passphrase protected
+    key, and OpenSSL asks for it on the tty when no `password=` is given:
+    interactively twice, here and again inside uvicorn, and under the unit
+    there is no tty at all, so the start hangs or fails saying nothing.
+
+    The refusal names the key and says what it is. What proves nothing was
+    ASKED is the second half: `getpass` is the module OpenSSL's prompt goes
+    through in no Python path at all, so instead this asserts on the one
+    mechanism that can reach a terminal, `/dev/tty`, by making opening it
+    fail the test. A way to supply the passphrase is #280.
+    """
+    (tmp_path / "enc").mkdir()
+    cert, key = make_encrypted_certificate(tmp_path / "enc")
+    real_open = open
+
+    def refuse_a_terminal(file, *args, **kwargs):  # type: ignore[no-untyped-def]
+        assert "tty" not in str(file), f"something tried to prompt on {file}"
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", refuse_a_terminal)
+    config = Config(roots=_roots(tmp_path), tls_cert=cert, tls_key=key)
+    with pytest.raises(ConfigError, match=r"is encrypted with a passphrase"):
+        build_tls_context(config)
+
+    argv = [
+        "--root",
+        f"main={tmp_path / 'root'}",
+        "--tls-cert",
+        str(cert),
+        "--tls-key",
+        str(key),
+    ]
+    assert main(argv) == 2
 
 
 def test_a_config_opens_no_file(

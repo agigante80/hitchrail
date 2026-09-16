@@ -147,7 +147,7 @@ phase's objective admits.
       signal to the pid the person saw, is SPLIT OUT to #279: it changes a
       contract, and this phase adds none.
 
-- [ ] **Task 100, #258.** An encrypted TLS key refuses at startup in words,
+- [x] **Task 100, #258.** An encrypted TLS key refuses at startup in words,
       naming the key, without ever reaching a prompt. The passphrase INPUT
       that ticket also offered is split out to #280, because a new operator
       input is a new flag and this phase adds none.

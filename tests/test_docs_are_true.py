@@ -74,7 +74,7 @@ def test_no_document_calls_an_implemented_module_a_placeholder(doc: Path) -> Non
     A reader told `server.py` is a placeholder will not read it, and an agent
     told the same will try to write it from scratch over 430 working lines.
     """
-    text = doc.read_text()
+    text = _conventions() if doc == CLAUDE_MD else doc.read_text()
     sizes = _modules()
     for sentence in re.split(r"(?<=[.!?])\s+", text):
         if "placeholder" not in sentence.lower() and "does not exist" not in sentence.lower():
@@ -89,30 +89,33 @@ def test_no_document_calls_an_implemented_module_a_placeholder(doc: Path) -> Non
         )
 
 
-def test_the_conventions_file_is_tracked() -> None:
-    """`.gitignore` excludes `.claude/*` and re-admits `.claude/CLAUDE.md`. Fold
-    that back into a bare `.claude/` and the file stays on this machine while
-    every guard in this module fails in CI on a file that is not there. Asked of
-    git rather than of the ignore file's text, because the text can say
-    `!.claude/CLAUDE.md` under a pattern that makes it inert."""
-    listed = subprocess.run(
-        ["git", "ls-files", "--error-unmatch", str(CLAUDE_MD.relative_to(ROOT))],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert listed.returncode == 0, (
-        f"{CLAUDE_MD.relative_to(ROOT)} is not tracked: {listed.stderr.strip()}. "
-        "It is the file every contributor and CI leg reads; see .gitignore."
-    )
+def _conventions() -> str:
+    """The conventions file's text, or a skip when this checkout has none.
+
+    **It is not published any more**, decided 2026-09-16 (`a87c590`, "Stop
+    publishing AI-assistant files"): `.gitignore` carries `.claude/` with no
+    exception, so the file is local working state. That reverses #60's
+    reversal, and the honest consequence is written here rather than left to
+    be discovered: every check in this module that reads it runs on the
+    machine where it is edited and on NO CI leg, exactly like the security
+    rules guard in `tests/test_config.py`. A skip everywhere would be a lie
+    about coverage; a skip on the checkouts that genuinely do not carry the
+    file is the cost of deriving a check from something the repository does
+    not publish.
+    """
+    if not CLAUDE_MD.exists():
+        pytest.skip(
+            f"{CLAUDE_MD.relative_to(ROOT)} is not in this checkout: it is local "
+            "working state since 2026-09-16, so this check runs only where it is edited"
+        )
+    return CLAUDE_MD.read_text()
 
 
 @pytest.mark.parametrize("doc", [CLAUDE_MD, ROADMAP, README], ids=lambda p: p.name)
 def test_no_document_hardcodes_a_test_count(doc: Path) -> None:
     """ "519 tests" was true once. A number that decays silently is worse than
     no number, because it reads as precision."""
-    text = doc.read_text()
+    text = _conventions() if doc == CLAUDE_MD else doc.read_text()
     stale = re.findall(r"\b(\d{3,5})\s+tests\b", text)
     assert not stale, (
         f"{doc.name} hardcodes a test count {stale}, which will be wrong within "
@@ -122,7 +125,7 @@ def test_no_document_hardcodes_a_test_count(doc: Path) -> None:
 
 def _named_in_claude_md() -> set[str]:
     """The modules the architecture block claims exist, by their listed name."""
-    return set(re.findall(r"^\s{2}(\w+\.py)\s", CLAUDE_MD.read_text(), re.M))
+    return set(re.findall(r"^\s{2}(\w+\.py)\s", _conventions(), re.M))
 
 
 # `__init__.py` is a package marker rather than a module anybody navigates to,
@@ -432,7 +435,7 @@ _CONTROL_CLASSES = {
 def test_claude_md_states_the_middleware_order_the_code_uses(tmp_path: Path) -> None:
     from hitchrail.security import middleware_stack
 
-    line = re.search(r"^\s{2}security\.py\s+(.+)$", CLAUDE_MD.read_text(), re.M)
+    line = re.search(r"^\s{2}security\.py\s+(.+)$", _conventions(), re.M)
     assert line, ".claude/CLAUDE.md's architecture block no longer describes security.py"
 
     described = [
@@ -543,7 +546,7 @@ def test_contributing_and_claude_md_list_the_same_gates() -> None:
     """
     pattern = re.compile(r"^uv run ([a-z-]+)", re.M)
     contributing = set(pattern.findall(CONTRIBUTING.read_text()))
-    claude_md = set(pattern.findall(CLAUDE_MD.read_text()))
+    claude_md = set(pattern.findall(_conventions()))
     gates = {"pytest", "ruff", "mypy", "lint-imports"}
     assert gates <= contributing, f"CONTRIBUTING.md omits gates: {sorted(gates - contributing)}"
     assert gates <= claude_md, f".claude/CLAUDE.md omits gates: {sorted(gates - claude_md)}"
