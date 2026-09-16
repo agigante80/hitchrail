@@ -1206,6 +1206,8 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # per call. The reading itself is `gateway.py`.
         # 551 after the Phase 14 batch 3 review: the gateway verdict is its
         # own function with two exit codes, mismatch and not yet.
+        # 556 after 8601915: the pinned entry's own exit code, and the words
+        # for it. Bumped a commit late, which #261 notes.
         "cli.py": 556,
         # 409, nine lines over, down from 542. #115 deleted the `?token=`
         # carrier: 135 lines once the two blocks inside `TokenMiddleware`
