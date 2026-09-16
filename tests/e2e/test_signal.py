@@ -80,6 +80,34 @@ async def test_kill_is_offered_only_after_end_was_sent(page: Page, server: Harne
     await expect(row).to_have_attribute("data-state", "stopped", timeout=15_000)
 
 
+async def test_a_later_agent_under_the_same_name_starts_from_end_again(
+    page: Page, server: Harness
+) -> None:
+    """Review round 1: keyed by name alone, a page left open offered Kill as
+    the FIRST control to a later agent under the same name. The escalation
+    is per pid."""
+    server.seed(detached=["forge-kit"])
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("forge-kit")}"]')
+    await expect(row).to_have_attribute("data-state", "detached")
+    await row.get_by_role("button", name="End").click()
+    await page.locator("[data-dialog]").get_by_role("button", name="End it").click()
+    assert server.orphans_exited()
+    await expect(row).to_have_attribute("data-state", "stopped", timeout=15_000)
+
+    server.reseed_detached("forge-kit")
+    # The SAME page, refreshed rather than reloaded: a reload would empty
+    # the page's memory of what it sent and prove nothing.
+    for _ in range(50):
+        await page.evaluate("() => window.__hitchrail.refresh()")
+        if await row.get_attribute("data-state") == "detached":
+            break
+        await page.wait_for_timeout(200)
+    await expect(row).to_have_attribute("data-state", "detached")
+    await expect(row.get_by_role("button", name="End")).to_be_visible()
+    assert await row.get_by_role("button", name="Kill").count() == 0
+
+
 async def test_an_agent_gone_before_the_tap_is_a_refusal_with_a_next_step(
     page: Page, server: Harness
 ) -> None:

@@ -846,6 +846,19 @@ class Harness:
                 with contextlib.suppress(OSError):
                     os.kill(int(pid), signal.SIGTERM)
 
+    def reseed_detached(self, name: str) -> None:
+        """A new agent outside tmux under a name that already had one (#107):
+        the same shape `seed(detached=...)` spawns, after the first left."""
+        self._orphans.append(
+            subprocess.Popen(
+                claude_ipc.launch_argv(str(self._agent), e2e_id(name)),
+                cwd=self.root / e2e_name(name),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        )
+
     def orphans_exited(self, timeout: float = 5.0) -> bool:
         """Whether every process seeded as `detached` has left (#107): the
         thing a signal test has to read from the machine, not from the row."""

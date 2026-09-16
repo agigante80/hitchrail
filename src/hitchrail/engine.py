@@ -440,16 +440,15 @@ class Engine:
         # forbids: the separator was doing its job and this check was reading
         # it as the thing it protects against.
         try:
-            label, folder = split_identifier(name)
+            _, folder = split_identifier(name)
             discovery.validate_name(folder)
         except (discovery.InvalidName, RootError) as exc:
             raise UnknownProject(name) from exc
-        # The LABEL too (#107). It used to be discarded here, so an identifier
-        # under a label no root carries went on to derivation, where a second
-        # instance's agent with that identifier in its argv would have
-        # matched: a pid looked up for a project that cannot exist here.
-        if not any(r.label == label for r in self.config.roots):
-            raise UnknownProject(name)
+        # The label is NOT checked against the configured roots here, on
+        # purpose (Phase 14 review of #107): a live `hr-main~alpha` left over
+        # after a restart under a different label has to stay stoppable, the
+        # #42 guarantee above, and the tmux routes are prefix scoped anyway.
+        # `signal_detached` checks it, because a pid is not.
 
     def _require_startable(self, name: str) -> str:
         """A name the listing actually RETURNS, and its directory.
@@ -934,6 +933,14 @@ class Engine:
         and never what happens first.
         """
         self._require_addressable(name)
+        # The LABEL too, here and not in `_require_addressable`: an
+        # identifier under a label no root carries would still derive, and a
+        # second instance's agent with that identifier in its argv would
+        # match, a pid looked up for a project that cannot exist here. The
+        # tmux routes are prefix scoped and keep #42's reachability instead.
+        label, _ = split_identifier(name)
+        if not any(r.label == label for r in self.config.roots):
+            raise UnknownProject(name)
         session = self.get(name)
         if session.protected:
             raise Protected(name)
@@ -965,6 +972,16 @@ class Engine:
             # AFTER the handle: what the machine says now is what is signalled.
             verified = self.get(name)
             if verified.state is not State.DETACHED or verified.pid != pid:
+                # Two answers, told apart on the error path only: the pid is
+                # gone from the table, or it is there under another identity.
+                # A table that could not be read says neither.
+                table = self._procs_fn()
+                if not table.ok:
+                    raise MachineUnreadable(
+                        "the process table could not be read after the handle"
+                    )
+                if pid not in table.by_pid:
+                    raise Gone(f"pid {pid} left between the listing and this request")
                 raise NotOurs(
                     f"pid {pid} is no longer the agent for {name}: it changed identity "
                     "between the listing and this request, so nothing was signalled"
@@ -987,6 +1004,12 @@ class Engine:
         detached row whose pid is an ancestor of this server, tmux included,
         would take the interface down with it, and nothing else refuses it."""
         table = self._procs_fn()
+        if not table.ok:
+            # A guard that cannot look must not pass (control 7): an empty
+            # table from a failed `ps` would end the walk after one step.
+            raise MachineUnreadable(
+                "the process table could not be read, so nothing is signalled"
+            )
         seen: set[int] = set()
         current = os.getpid()
         while current > 1 and current not in seen:

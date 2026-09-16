@@ -160,9 +160,11 @@ const state = {
   // #154. Labels of configured roots absent from the listing today, so the
   // empty state can say "hidden" rather than "no folder".
   hiddenRoots: [],
-  // #107. Detached projects this page has already sent SIGTERM to, so the
+  // #107. `name:pid` pairs this page has already sent SIGTERM to, so the
   // row offers the escalation and not the same request again. Per page:
   // another client's SIGTERM is not this person's decision to escalate.
+  // The pid is in the key so a later agent under the same name starts
+  // from End again.
   signalled: new Set(),
   // #164. The identifier a suggestion chose, or null. Choosing is exact where
   // typing is a substring: picking `vessel` from the list must not also show
@@ -750,7 +752,10 @@ function buildActions(project, actions) {
   // available and never the default, kept by rendering the escalation only
   // after the request that precedes it.
   if (!project.protected && project.state === "detached" && !project.foreign_session) {
-    const escalate = state.signalled.has(project.name);
+    // Keyed by name AND pid (review round 1): keyed by name alone, a later
+    // agent under the same name on a page left open got Kill as its first
+    // control, SIGKILL before SIGTERM, the rule this exists to keep.
+    const escalate = state.signalled.has(`${project.name}:${project.pid}`);
     add(escalate ? "Kill" : "End", "danger").addEventListener("click", () =>
       confirmSignal(project, escalate),
     );
@@ -788,7 +793,7 @@ async function signalNow(project, escalate) {
   }
   // Remembered so the row offers the escalation next: the server will not
   // send SIGKILL without a second explicit request, and neither will this.
-  state.signalled.add(project.name);
+  state.signalled.add(`${project.name}:${project.pid}`);
   await refresh();
 }
 

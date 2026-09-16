@@ -28,7 +28,7 @@ from hitchrail.engine import (
     State,
     UnknownProject,
 )
-from hitchrail.procs import ProcTable
+from hitchrail.procs import ProcTable, parse_ps
 from support import DEFAULT_LABEL, make_config
 
 ORPHAN = 900
@@ -279,3 +279,47 @@ def test_an_unknown_root_label_is_refused_before_any_pid_is_looked_up(root: Path
     with pytest.raises(UnknownProject):
         engine.signal_detached("other~vessel")
     assert [k for k, _ in fake.events if k in ("open", "send", "owner")] == []
+
+
+# -- round 1 of the review, pinned -----------------------------------------
+
+
+def test_a_leftover_session_under_another_label_is_still_stoppable(root: Path) -> None:
+    """#42's guarantee, kept: the label check lives on the signal route and
+    not in `_require_addressable`, so a live `hr-other~vessel` left over
+    after a restart under a different label can still be stopped and
+    killed, while the pid route refuses the label before any lookup."""
+    fake = FakePidfd()
+    running = ps_row(500, 1, args="tmux") + ps_row(501, 500, project="other~vessel")
+    engine = _engine(root, Watched(fake, running), fake, sessions={"other~vessel": 500})
+    assert engine.get("other~vessel").state is State.RUNNING
+    engine.kill("other~vessel")
+    with pytest.raises(UnknownProject):
+        engine.signal_detached("other~vessel")
+
+
+def test_an_unreadable_table_fails_the_ancestry_walk_closed(root: Path) -> None:
+    """A guard that cannot look must not pass: an empty table from a failed
+    `ps` would end the ppid walk after one step and let the signal through."""
+    fake = FakePidfd()
+    stages = [ProcTable(parse_ps(DETACHED)), ProcTable([], ok=False)]
+
+    def procs() -> ProcTable:
+        # The first look derives the row; the second, the ancestry walk, fails.
+        return stages.pop(0) if len(stages) > 1 else stages[0]
+
+    engine = _engine(root, procs, fake)
+    with pytest.raises(MachineUnreadable, match="process table"):
+        engine.signal_detached(proj("vessel"))
+    assert [k for k, _ in fake.events if k in ("open", "send")] == []
+
+
+def test_a_process_that_left_after_the_handle_is_gone_not_reused(root: Path) -> None:
+    """Two answers after the handle, told apart by the table: the pid still
+    there under another identity is `not_ours`, the pid absent is `gone`."""
+    fake = FakePidfd()
+    engine = _engine(root, Watched(fake, DETACHED, ""), fake)
+    with pytest.raises(Gone, match="left between the listing"):
+        engine.signal_detached(proj("vessel"))
+    assert fake.signals == []
+    assert not fake.leaked
