@@ -36,6 +36,16 @@ function note(message) {
    GET landing after a PATCH must not paint the older document. */
 let generation = 0;
 
+/* #256. A request that SUCCEEDS clears the strip; one that carries a
+   refusal sets it, and the repaint that follows must not wipe it. `toggle`
+   refuses, then repaints from a GET so the checkbox goes back where the
+   truth is, and that GET's `note("")` left a checkbox that would not stay
+   checked with no sentence saying why. Set here rather than in `toggle`,
+   because every caller repaints and the rule is about the pair, not about
+   one of them: a refusal's words survive until the next request the person
+   makes. */
+let keepNote = false;
+
 async function call(method, body) {
   const mine = ++generation;
   let response;
@@ -49,7 +59,10 @@ async function call(method, body) {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
-    if (mine === generation) note("Not connected. Retrying is up to you: nothing was changed.");
+    if (mine === generation) {
+      note("Not connected. Retrying is up to you: nothing was changed.");
+      keepNote = true;
+    }
     return null;
   }
   if (mine !== generation) return null;
@@ -69,9 +82,11 @@ async function call(method, body) {
     // `operator_pinned` on a phone still deserves the sentence.
     const message = parsed?.message ?? "The answer could not be read.";
     note(`Not changed. ${message}`);
+    keepNote = true;
     return null;
   }
-  note("");
+  if (keepNote) keepNote = false;
+  else note("");
   return parsed;
 }
 
@@ -160,6 +175,7 @@ async function saveStop() {
   const ceiling = Number(input.max);
   if (!Number.isInteger(seconds) || seconds < 1 || seconds > ceiling) {
     note(`Not changed. The wait is a whole number of seconds, 1 to ${ceiling}.`);
+    keepNote = true;
     return;
   }
   const config = await call("PATCH", { stop_timeout: seconds });

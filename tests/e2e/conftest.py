@@ -465,6 +465,7 @@ class Harness:
         ceiling_mb: int | None = None,
         state_path: Path | None = None,
         pinned_stop_timeout: bool = False,
+        disabled_roots: list[str] | None = None,
     ) -> None:
         """Set the world up BEFORE the page loads.
 
@@ -484,6 +485,13 @@ class Harness:
         what the two root tests use. The folders are created under a sibling
         directory named for the label, so the roots are genuinely disjoint and
         the overlap refusal is not what is under test.
+
+        `disabled_roots` names labels the OPERATOR'S file disables, which is
+        a different thing from a root hidden through the settings page and
+        the distinction #256 is about: no request can bring one back, so the
+        page must not offer a checkbox for it or send somebody looking for
+        one. Labels here must also appear in `also_in` or `stopped_in`,
+        since only those create a root to disable.
         """
         # `stopped_in` is `also_in` without the start: the root is registered
         # and the folders exist, and no shim runs in them. The fifty row
@@ -594,11 +602,16 @@ class Harness:
 
         def build(protect: str | None) -> Config:
             if self.extra_roots:
+                off = set(disabled_roots or ())
                 return Config(
                     roots=(
-                        Root(label=DEFAULT_LABEL, path=self.root.resolve()),
+                        Root(
+                            label=DEFAULT_LABEL,
+                            path=self.root.resolve(),
+                            enabled=DEFAULT_LABEL not in off,
+                        ),
                         *(
-                            Root(label=label, path=path.resolve())
+                            Root(label=label, path=path.resolve(), enabled=label not in off)
                             for label, path in self.extra_roots.items()
                         ),
                     ),

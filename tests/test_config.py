@@ -1288,7 +1288,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # through a fresh `O_EXCL` name. Every line is a refusal or its
         # reason, and the seam that would split this module is the one its
         # docstring says must not be split.
-        "settings.py": 448,
+        # 460 for #256: `hidden_roots_a_request_can_show`, the operator's
+        # `enabled` asked where the listing needs it rather than only where
+        # the settings page does.
+        "settings.py": 460,
         # rather than one. A refusal handler is the shape this file is made of.
         # 513 to 517 for #120. The listing payload reports every configured
         # root as a labelled list rather than one path string, and the comment
@@ -1329,7 +1332,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # +40 for #107: two routes and every refusal's code.
         # 894 for #263: the root_unavailable arm on three more routes.
         # 900 for #189: the `server_pid` field on the owned_elsewhere refusal.
-        "server.py": 900,
+        # 904 for #256: the listing says which hidden roots a request can
+        # bring back, so the empty page stops sending somebody to a checkbox
+        # that is not there.
+        "server.py": 904,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

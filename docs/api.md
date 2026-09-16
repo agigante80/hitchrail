@@ -109,6 +109,7 @@ in both directions by the suite:
 | `memory` | the machine's `available_mb` and `total_mb`, null when unreadable |
 | `roots` | every root the interface shows as `{label, path}`, one root still a list |
 | `hidden_roots` | the labels of configured roots absent from the listing today, disabled in the config file or hidden by a request; an empty page says "hidden" rather than "no projects" |
+| `hidden_roots_editable` | of those, the ones a request can bring back: the config file's own `enabled = false` is not one, so an empty page can say where the choice lives |
 | `server` | this server, as distinct from this machine |
 | `server.version` | the version the installed distribution carries, the string `hitchrail --version` prints; null from a bare checkout |
 | `server.user` | the account this server runs as, which is the account every session it starts runs as; the numeric uid when the account has no passwd entry |

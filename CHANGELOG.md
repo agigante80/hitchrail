@@ -81,6 +81,16 @@ of "no session Hitchrail can address"; the signal route refuses it as
 carries it as `foreign_server_pid`. An agent that outlived its pane under
 Hitchrail's own server is still detached and can still be ended.
 
+**A refused toggle on the settings page no longer loses its reason.** With
+a state directory that cannot be written, the checkbox snapped back and the
+strip went blank, so the person saw a control that would not stay set and no
+sentence saying why. The refusal's words survive the repaint that follows it.
+
+**The empty list stops claiming every root is hidden when one is merely
+empty**, and stops sending somebody to the settings page for a root the
+config file disables, where there is no checkbox to find. It names the file
+instead. The listing carries `hidden_roots_editable` for that distinction.
+
 **A TLS key with a passphrase refuses instead of asking for one.** It used
 to reach OpenSSL's terminal prompt: interactively that was two prompts, one
 at the configuration check and one inside the server, and under the systemd

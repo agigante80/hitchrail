@@ -242,6 +242,10 @@ def create_app(
                     {"label": r.label, "path": str(r.path)} for r in engine.prefs.active_roots()
                 ],
                 "hidden_roots": list(engine.prefs.hidden_roots()),
+                # Of those, the ones a request can bring back (#256): the
+                # empty state told somebody to show a root in settings that
+                # the operator's file disables, where there is no checkbox.
+                "hidden_roots_editable": list(engine.prefs.hidden_roots_a_request_can_show()),
                 # This server rather than this machine: what a person holding
                 # a phone needs before trusting the rest of the page (#147).
                 "server": facts(),

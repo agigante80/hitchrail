@@ -152,7 +152,7 @@ phase's objective admits.
       that ticket also offered is split out to #280, because a new operator
       input is a new flag and this phase adds none.
 
-- [ ] **Task 101, #256.** The settings page keeps a refused toggle's reason
+- [x] **Task 101, #256.** The settings page keeps a refused toggle's reason
       through the repaint, and the empty state stops naming roots it cannot
       show.
 

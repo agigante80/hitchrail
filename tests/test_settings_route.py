@@ -91,6 +91,9 @@ async def test_the_listing_shows_the_active_roots_and_names_the_hidden(
     body = await _listing(client)
     assert [r["label"] for r in body["roots"]] == ["work", "home"]
     assert body["hidden_roots"] == ["vault"]
+    # And which of those a request could bring back (#256): `vault` is
+    # disabled by the operator's file, so the page must not offer it.
+    assert body["hidden_roots_editable"] == []
     # The listing sorts by folder, which is the name a person reads.
     assert [p["name"] for p in body["projects"]] == ["work~vessel", "home~attic"]
 
@@ -115,6 +118,9 @@ async def test_hiding_a_root_removes_its_projects_and_keeps_its_session(
     body = await _listing(client)
     assert [x["label"] for x in body["roots"]] == ["home"]
     assert body["hidden_roots"] == ["work", "vault"]
+    # `work` was hidden by this request and can be shown again; `vault` is
+    # the operator's and cannot (#256).
+    assert body["hidden_roots_editable"] == ["work"]
     assert [p["name"] for p in body["projects"]] == ["home~attic"]
     assert tmux.killed == []
     # Still a session: the graceful stop is accepted, not "unknown project".

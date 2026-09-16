@@ -160,6 +160,9 @@ const state = {
   // #154. Labels of configured roots absent from the listing today, so the
   // empty state can say "hidden" rather than "no folder".
   hiddenRoots: [],
+  // #256. Of those, the ones a request can bring back, so the empty state
+  // does not send somebody to a page with no checkbox on it.
+  hiddenRootsEditable: [],
   // #107. `name:pid` pairs this page has already sent SIGTERM to, so the
   // row offers the escalation and not the same request again. Per page:
   // another client's SIGTERM is not this person's decision to escalate.
@@ -380,8 +383,20 @@ function emptyReason() {
   // #154. Every root hidden is not "no folder": the honest empty state
   // names the roots that are not being listed, and settings is where they
   // come back.
-  if (state.projects.length === 0 && state.hiddenRoots.length > 0) {
-    return `Every root is hidden (${state.hiddenRoots.join(", ")}). Show one in settings.`;
+  //
+  // Two corrections from #256, both about saying something that is not
+  // true. It used to fire on zero PROJECTS, so a visible root that is
+  // merely empty beside a hidden one read as "every root is hidden"; the
+  // question is whether any root is being listed at all, which is
+  // `state.roots`. And it said "show one in settings" for roots the
+  // operator's file disables, where the settings page has no checkbox:
+  // `hidden_roots_editable` is the ones a request can bring back, and
+  // when there are none the sentence names the file instead.
+  if ((state.roots ?? []).length === 0 && state.hiddenRoots.length > 0) {
+    const named = state.hiddenRoots.join(", ");
+    return state.hiddenRootsEditable.length > 0
+      ? `Every root is hidden (${named}). Show one in settings.`
+      : `Every root is hidden (${named}), by the config file. Enable one there.`;
   }
   return `No folder${where}.`;
 }
@@ -2358,6 +2373,7 @@ async function refresh() {
     roots.length > 1 ? [...state.rootFilter, ...storedRoots()].filter((l) => present.has(l)) : [],
   );
   state.hiddenRoots = result.body.hidden_roots ?? [];
+  state.hiddenRootsEditable = result.body.hidden_roots_editable ?? [];
   state.memory = result.body.memory;
   state.server = result.body.server ?? state.server;
   render();

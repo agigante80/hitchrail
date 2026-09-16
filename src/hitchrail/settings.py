@@ -360,6 +360,18 @@ class Preferences:
         shown = {r.label for r in self.active_roots()}
         return tuple(r.label for r in self._roots if r.label not in shown)
 
+    def hidden_roots_a_request_can_show(self) -> tuple[str, ...]:
+        """Of those, the ones the settings page has a checkbox for (#256).
+
+        A root the OPERATOR'S file disables is not one of them: it is hidden
+        and no request can bring it back, so telling somebody to "show one in
+        settings" sends them to a page where it is greyed out. The same
+        `enabled` that `root_views` reports as `editable`, asked here so the
+        listing can carry the distinction the empty state needs.
+        """
+        shown = {r.label for r in self.active_roots()}
+        return tuple(r.label for r in self._roots if r.label not in shown and r.enabled)
+
     def root_views(self) -> list[RootView]:
         hidden = self._state.hidden
         return [
