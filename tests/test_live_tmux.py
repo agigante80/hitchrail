@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
@@ -38,7 +39,7 @@ from hitchrail.claude_ipc import launch_argv
 from hitchrail.config import Config
 from hitchrail.engine import Engine
 from hitchrail.procs import snapshot
-from hitchrail.sessions import NoAgent, State
+from hitchrail.sessions import Gone, NoAgent, NotDetached, State
 from hitchrail.tmux import Tmux
 from hitchrail.tmuxnames import sanitize
 from support import DEFAULT_LABEL, make_config
@@ -95,6 +96,7 @@ PREFIX = "hrtest-"
 PROJECT_NAMESPACE = f"hrlt{os.getpid()}-"
 
 TIMEOUT = 10
+PLENTY = "MemTotal: 33554432 kB\nMemAvailable: 25198592 kB\n"
 
 
 def live_project(name: str) -> str:
@@ -990,3 +992,74 @@ def test_tmux_stores_a_session_name_with_a_space_unchanged(server: PrivateTmux) 
     panes = adapter(server).panes()
     assert name in panes.ours, panes
     assert panes.foreign == {}
+
+
+# -- #107: the signal route against a real process -------------------------
+
+
+def _orphan(agent: Path, root: Path, name: str) -> subprocess.Popen[bytes]:
+    """An agent outside any tmux: the process derivation reports detached."""
+    return subprocess.Popen(
+        launch_argv(str(agent), name),
+        cwd=root / live_project("vessel"),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def test_a_real_detached_agent_is_ended_through_a_real_pidfd(
+    server: PrivateTmux, machine: Machine
+) -> None:
+    """The syscall path, which no fake can prove: `os.pidfd_open` on a real
+    pid, `signal.pidfd_send_signal` through it, and the process observed
+    leaving. The engine here has its REAL seams."""
+    name = f"{DEFAULT_LABEL}~{machine.project}"
+    child = _orphan(machine.agent, machine.config.roots[0].path, name)
+    try:
+        engine = Engine(config=machine.config, tmux=machine.adapter, meminfo_fn=lambda: PLENTY)
+        deadline = time.monotonic() + 5
+        while engine.get(name).state is not State.DETACHED and time.monotonic() < deadline:
+            time.sleep(0.1)
+        row = engine.get(name)
+        assert row.state is State.DETACHED and row.pid == child.pid, row
+        engine.signal_detached(name)
+        assert child.wait(timeout=5) is not None
+        assert child.returncode == -signal.SIGTERM, child.returncode
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait(timeout=5)
+
+
+def test_an_agent_that_left_between_the_listing_and_the_call_is_refused_with_nothing_sent(
+    server: PrivateTmux, machine: Machine
+) -> None:
+    """Premortem 4 of the Phase 14 plan, on a real process: the listing saw
+    it, it exited and was reaped before the call, and the route refuses
+    having signalled nothing. The re-read before the handle finds the row
+    stopped (`not_detached`); a process that leaves between that re-read
+    and the handle is `gone` at the open, the same refusal one step later.
+    Either way `os.kill` is never reached, and this asserts it."""
+    name = f"{DEFAULT_LABEL}~{machine.project}"
+    child = _orphan(machine.agent, machine.config.roots[0].path, name)
+    engine = Engine(config=machine.config, tmux=machine.adapter, meminfo_fn=lambda: PLENTY)
+    deadline = time.monotonic() + 5
+    while engine.get(name).state is not State.DETACHED and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert engine.get(name).pid == child.pid
+    child.kill()
+    child.wait(timeout=5)
+    sent: list[tuple[int, int]] = []
+    original = os.kill
+
+    def record(pid: int, sig: int) -> None:
+        sent.append((pid, sig))
+
+    os.kill = record
+    try:
+        with pytest.raises((NotDetached, Gone)):
+            engine.signal_detached(name)
+    finally:
+        os.kill = original
+    assert sent == []

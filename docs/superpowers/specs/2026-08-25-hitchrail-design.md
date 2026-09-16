@@ -568,22 +568,52 @@ characters to be typed into any agent session under the configured root.** That
 follows from everything above and is defensible. It should be read rather than
 discovered.
 
-**Pid signalling, which does not exist and is the next thing somebody adds.**
-A `detached` agent has no tmux session, so nothing Hitchrail can currently do
-touches it, and on a phone there is no shell to fall back to. The row names the
-pid and explains, and that is where it stops.
+**Pid signalling, and what constrains it (#107, built in Phase 14).** A
+`detached` agent has no tmux session Hitchrail can address, so stop and kill
+cannot reach it, and on a phone there is no shell to fall back to. `POST
+/api/sessions/{name}/signal` sends it SIGTERM; `/signal/force`, a second
+explicit request on its own route, sends SIGKILL.
 
-Every destructive path here is scoped by construction rather than by a check.
-`Tmux.kill_session` can only address `hr-<name>`; what protects the operator's
-other sessions is the empty prefix refusal in `Tmux.__init__`, and the obvious
-guard inside the kill was removed as a tautology. The property is that
-**Hitchrail can only kill things it named.**
+Every other destructive path here is scoped by construction rather than by a
+check. `Tmux.kill_session` can only address `hr-<name>`; what protects the
+operator's other sessions is the empty prefix refusal in `Tmux.__init__`, and
+the obvious guard inside the kill was removed as a tautology. A bare pid has no
+name and no prefix, so this path is scoped by a CHECK, and the property this
+section used to state, "Hitchrail can only kill things it named", becomes:
+**Hitchrail can only kill things it named, or a process its own derivation
+identifies as an agent nothing it can see owns, verified through a handle that
+cannot be reused.** The five constraints:
 
-A bare pid has no name and no prefix. Signalling one would be the first path
-outside that property, and the pid is derived by matching an argv tail out of
-`ps`, a match that has been wrong twice (#84, #96). A pid is good enough to
-SHOW. Signalling it is a higher bar than showing it, and #107 carries the
-argument rather than the code.
+1. Its own route, never a flag on the existing kill.
+2. Refused when a session is SEEN to own it: `foreign_session` set means the
+   answer is "attach there", named. A courtesy refusal, not the safety
+   property.
+3. **Acquire, then verify, then signal through the handle.** `os.pidfd_open`
+   first; then re-derive and refuse unless the row is still `detached` for
+   that project and that pid with no owner; then `signal.pidfd_send_signal`.
+   A pidfd refers to one process for as long as it is open, so a pid reused
+   between the listing and the call is a different process the handle does
+   not refer to, and one that exited is `ESRCH` at the send. Verify before
+   open and the window is open again. Where the syscall is unavailable the
+   route refuses and never falls back to `os.kill`: a race free path that
+   silently degrades to a racy one is the guard failing open control 7
+   forbids.
+4. SIGTERM, then SIGKILL only on a second explicit request, mirroring the
+   stop then kill escalation.
+5. The protected project is refused before any handle is opened, and so is
+   the process tree this server runs in, walked by ppid; another user's
+   process is refused by uid before the open and by the kernel at the send.
+
+What the handle buys, exactly: a stranger is never signalled. What it does not
+buy is "the process derivation identified" in the strong sense: the anchor is
+an argv suffix, so a DIFFERENT but genuinely matching agent for the same
+project passes verification. That is the operator's own agent for that project
+either way, alive under a terminal Hitchrail cannot see, and the confirmation
+says so rather than a predicate claiming to know: "Hitchrail can see no session
+that owns this agent. If it is open on a screen somewhere, this will end it
+there too." A SIGTERM to an on screen agent is the class of loss the existing
+kill already carries behind a confirmation; this adds no new class, it widens
+which processes can be reached.
 
 ### 5.3 Stated limitations
 

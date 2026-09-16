@@ -16,8 +16,11 @@ This module is in the engine layer and imports nothing from the web layer;
 
 from __future__ import annotations
 
+import os
+import signal
 import subprocess
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from hitchrail.tmux import Runner
 
@@ -200,3 +203,40 @@ def snapshot(run: Runner | None = None) -> ProcTable:
     if result.returncode != 0:
         return ProcTable([], ok=False)
     return ProcTable(parse_ps(result.stdout))
+
+
+# -- the pidfd seam (#107) ----------------------------------------------------
+#
+# The one destructive path in this project that is not scoped by a tmux
+# prefix. A bare pid has no name, so the engine scopes it by a CHECK, and the
+# check is only sound because the handle is a stable reference to ONE
+# process: acquired first, verified second, signalled through the handle. A
+# pid reused between the listing and the call is a different process the
+# handle does not refer to, and a process that exited is `ESRCH` at the send.
+#
+# Four callables rather than a Protocol, the way `snapshot` takes a runner:
+# the engine holds them as attributes, the real ones are the stdlib syscalls,
+# and `tests/conftest.py` carries the recorder. Nothing here is called at
+# import, and nothing here ever falls back to `os.kill`: a machine that
+# cannot open a pidfd is told so, because a race free path that silently
+# degrades to a racy one is the guard failing open control 7 forbids.
+
+
+def open_pidfd(pid: int) -> int:
+    """`os.pidfd_open`, Linux 5.3 and Python 3.9. `AttributeError` on a build
+    without it is the engine's `unsupported`, as `ENOSYS` is."""
+    return os.pidfd_open(pid)
+
+
+def send_signal(pidfd: int, sig: int) -> None:
+    """`signal.pidfd_send_signal`, Linux 5.1 and Python 3.9."""
+    signal.pidfd_send_signal(pidfd, sig)
+
+
+def close_pidfd(pidfd: int) -> None:
+    os.close(pidfd)
+
+
+def owner_uid(pid: int) -> int:
+    """Whose process, from `/proc`. Raises `OSError` when it is already gone."""
+    return Path(f"/proc/{pid}").stat().st_uid

@@ -160,6 +160,10 @@ const state = {
   // #154. Labels of configured roots absent from the listing today, so the
   // empty state can say "hidden" rather than "no folder".
   hiddenRoots: [],
+  // #107. Detached projects this page has already sent SIGTERM to, so the
+  // row offers the escalation and not the same request again. Per page:
+  // another client's SIGTERM is not this person's decision to escalate.
+  signalled: new Set(),
   // #164. The identifier a suggestion chose, or null. Choosing is exact where
   // typing is a substring: picking `vessel` from the list must not also show
   // `vessel-social`, and the suggestion carried its root, so this is the
@@ -731,26 +735,61 @@ function buildActions(project, actions) {
   if (!project.protected && project.state === "stale") {
     add("Clear", "danger").addEventListener("click", () => confirmClear(project));
   }
-  // NO control on a detached row, and the absence is the decision (#83).
+  // ONE control on a detached row nothing visible owns (#107), and it is
+  // the first destructive control here that names a pid rather than a
+  // session. #83 removed a `Kill pid N` that had no route behind it; the
+  // route exists now, and the row and the route land together or neither
+  // does. Two things keep it honest: the confirmation says what Hitchrail
+  // does and does not know, and the server refuses everything the row is
+  // wrong about (an owner it can see, a pid that changed, a process that
+  // left) rather than the page guessing. A row a visible session owns gets
+  // no control: the answer there is "attach there", and it is in the meta.
   //
-  // It carried `Kill pid N`, styled `danger`, with no handler and no route
-  // behind it: the most consequential tap in the interface, and it did
-  // nothing. A browser test asserted the button was VISIBLE and so passed
-  // against that forever.
-  //
-  // Wiring it was the other option and was declined. Every destructive path
-  // here is scoped by construction rather than by a check: `kill_session` can
-  // only address `hr-<name>`, which is why `Tmux.__init__` refuses an empty
-  // prefix. A bare pid has no such scope, and this pid is DERIVED, matched out
-  // of `ps` by an argv tail that has been wrong twice this month (#84, and #96
-  // still open). Adding the first unscoped destructive path on top of that
-  // needs a security argument in the design's section 5, which is #107.
-  //
-  // The design already chose this shape: `detached` is surfaced with its pid
-  // and an explanation, and never silently reconciled, "because the safe
-  // action depends on what that agent is doing, which Hitchrail cannot know".
-  // The row says what is true and leaves the choice with the person, who has
-  // the pid in front of them.
+  // SIGTERM first, and SIGKILL only as a second explicit tap on the same
+  // row once the first has been sent: #169's rule that a kill is always
+  // available and never the default, kept by rendering the escalation only
+  // after the request that precedes it.
+  if (!project.protected && project.state === "detached" && !project.foreign_session) {
+    const escalate = state.signalled.has(project.name);
+    add(escalate ? "Kill" : "End", "danger").addEventListener("click", () =>
+      confirmSignal(project, escalate),
+    );
+  }
+}
+
+/* The honest sentence (#107). Not a predicate claiming to know ownership:
+   `foreign_session` null means no owner was SEEN, from one `list-panes -a`
+   against our own tmux server, and a terminal, screen or another socket
+   would all arrive here looking the same. */
+function confirmSignal(project, escalate) {
+  showDialog({
+    title: escalate ? `Kill ${project.name}?` : `End ${project.name}?`,
+    body:
+      "Hitchrail can see no session that owns this agent. If it is open on a "
+      + "screen somewhere, this will end it there too."
+      + (escalate
+        ? " Kill ends the process immediately, and anything it has not written "
+          + "to disk is lost."
+        : ""),
+    actions: [
+      ["Cancel", "ghost", () => closeDialog()],
+      [escalate ? "Kill it" : "End it", "danger", () => signalNow(project, escalate)],
+    ],
+  });
+}
+
+async function signalNow(project, escalate) {
+  const path = `/api/sessions/${encodeURIComponent(project.name)}/signal${escalate ? "/force" : ""}`;
+  const result = await api(path, { method: "POST" });
+  closeDialog();
+  if (!result.ok) {
+    showRefusal(result, project);
+    return;
+  }
+  // Remembered so the row offers the escalation next: the server will not
+  // send SIGKILL without a second explicit request, and neither will this.
+  state.signalled.add(project.name);
+  await refresh();
 }
 
 function renderList() {
@@ -1330,6 +1369,25 @@ function showRefusal(result, project) {
         + "not arrive in one piece. Nothing here says whether it worked. The "
         + "list will catch up.",
       actions: [["Close", "ghost", () => closeDialog()]],
+    });
+    return;
+  }
+  if (["gone", "not_ours", "owned_elsewhere", "not_detached"].includes(code)) {
+    // #107. The row was wrong about the world by the time of the tap, and
+    // the server refused rather than guessed: the process left, or changed
+    // identity, or a session took it, or the row is no longer detached at
+    // all. Not a dead end (#169): the next decision is to look again, so
+    // the dialog offers the refresh.
+    showDialog({
+      title: code === "owned_elsewhere" ? "A session owns it" : "Nothing was signalled",
+      body: message,
+      actions: [
+        ["Close", "ghost", () => closeDialog()],
+        ["Refresh", "accent", () => {
+          closeDialog();
+          refresh();
+        }],
+      ],
     });
     return;
   }

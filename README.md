@@ -139,10 +139,17 @@ you typing. That is what makes a gentle stop possible at all, and it is worth
 reading rather than discovering. Hitchrail only ever sends the stop sequence,
 and one test enforces that only the module owning it may send anything.
 
-Hitchrail cannot end a `detached` agent, the state where a process outlived its
-terminal. It shows the pid and stops there, because everything it can destroy
-is addressed by the session name it created, and signalling a bare pid would be
-the first thing outside that.
+**Hitchrail can end a `detached` agent, the state where a process outlived
+its terminal, and that is the one thing it destroys by pid rather than by a
+session name it created.** Everything else it can destroy is addressed by the
+tmux session it made, which cannot reach anybody else's. The End control on
+a detached row signals a pid, so it is scoped by a check instead: the pid
+comes from Hitchrail's own derivation, a handle to that exact process is
+taken before anything is re-checked, and a pid another process has since
+taken over, a process a visible session owns, another user's, or this
+server's own tree, is refused with nothing sent. The confirmation says what
+Hitchrail knows: it can see no session that owns the agent, and if it is open
+on a screen somewhere, this will end it there too.
 
 **Found a hole?** [`SECURITY.md`](SECURITY.md) says what is in scope, what is
 this design rather than a bug, and where to report privately. Please do not

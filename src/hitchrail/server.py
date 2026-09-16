@@ -589,6 +589,44 @@ def create_app(
             return _error(503, "machine_unreadable", str(exc))
         return JSONResponse(session.as_dict(), status_code=200)
 
+    async def signal_detached(request: Request) -> Response:
+        """SIGTERM to an agent nothing addressable owns (#107); `/force` below
+        is SIGKILL, a second explicit request on its own route.
+
+        202 rather than 200: the signal was delivered and nothing waited for
+        the process to leave, because a graceful end can take as long as the
+        agent needs and the listing will show the row go. Every refusal is
+        its own code, since a person acts differently on each: attach there
+        (`owned_elsewhere`), look again (`gone`, `not_ours`), or stop asking
+        this machine (`pidfd_unavailable`).
+        """
+        return await _signal(request, force=False)
+
+    async def signal_force(request: Request) -> Response:
+        return await _signal(request, force=True)
+
+    async def _signal(request: Request, *, force: bool) -> Response:
+        name = request.path_params["name"]
+        try:
+            session = await in_thread(engine.signal_detached, name, force)
+        except eng.UnknownProject as exc:
+            return _error(404, "unknown_project", str(exc))
+        except eng.Protected as exc:
+            return _error(423, "self_protected", str(exc))
+        except eng.NotDetached as exc:
+            return _error(409, "not_detached", str(exc))
+        except eng.OwnedElsewhere as exc:
+            return _error(409, "owned_elsewhere", str(exc), session=exc.session)
+        except eng.Gone as exc:
+            return _error(409, "gone", str(exc))
+        except eng.NotOurs as exc:
+            return _error(409, "not_ours", str(exc))
+        except eng.PidfdUnavailable as exc:
+            return _error(501, "pidfd_unavailable", str(exc))
+        except eng.MachineUnreadable as exc:
+            return _error(503, "machine_unreadable", str(exc))
+        return JSONResponse(session.as_dict(), status_code=202)
+
     async def logs(request: Request) -> Response:
         name = request.path_params["name"]
         try:
@@ -824,6 +862,8 @@ def create_app(
             # Its own route, deliberately. #52 and the design's section 6.
             Route("/api/sessions/{name}/answer", answer, methods=["POST"]),
             Route("/api/sessions/{name}/kill", kill, methods=["POST"]),
+            Route("/api/sessions/{name}/signal", signal_detached, methods=["POST"]),
+            Route("/api/sessions/{name}/signal/force", signal_force, methods=["POST"]),
             Route("/api/sessions/{name}/logs", logs, methods=["GET"]),
             Route("/api/sessions/{name}/url", session_url, methods=["GET"]),
             Route("/api/events", event_stream, methods=["GET"]),

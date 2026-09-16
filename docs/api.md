@@ -76,6 +76,8 @@ See `CHANGELOG.md`.
 | `POST` | `/api/sessions/{name}` | start a session |
 | `DELETE` | `/api/sessions/{name}` | begin a graceful stop, returns immediately |
 | `POST` | `/api/sessions/{name}/kill` | kill now, valid at any point |
+| `POST` | `/api/sessions/{name}/signal` | SIGTERM to a detached agent nothing addressable owns, through a pidfd |
+| `POST` | `/api/sessions/{name}/signal/force` | SIGKILL to the same, a second explicit request |
 | `POST` | `/api/sessions/{name}/answer` | send one key to a prompt the agent is blocked on |
 | `GET` | `/api/sessions/{name}/logs` | tail of the pane |
 | `GET` | `/api/sessions/{name}/url` | the session's link, once it has one |
@@ -162,6 +164,28 @@ route, and `no_agent` (409) for both states that hold no agent to answer:
   cannot catch it, because U+276F is the default prompt character of Starship,
   Pure and Powerlevel10k, so a stale pane on a developer's machine looks exactly
   like a prompt awaiting an answer.
+
+### `POST /api/sessions/{name}/signal`, and `/signal/force`
+
+For a `detached` row: an agent alive with no tmux session Hitchrail can
+address, which stop and kill cannot reach. `/signal` sends SIGTERM and
+`/signal/force` sends SIGKILL; the second is its own route and never what
+happens first. 202 with the session body as it was verified a moment before
+the signal; the listing shows the row go.
+
+**This is the one destructive route not scoped by the tmux prefix**, so it is
+scoped by a check, in one order: a pidfd is acquired, the row is re-derived
+and must still be `detached` for that project and that pid with no owner,
+and the signal goes through the handle. A pid reused between the listing and
+the call is a different process the handle does not refer to (`not_ours`);
+one that exited is `gone`; nothing is ever signalled by `os.kill`, and a
+machine that cannot open a pidfd is told so (`pidfd_unavailable`, 501).
+
+Refused before any handle is opened: the self project (`self_protected`), a
+pid in the process tree this server runs in (also `self_protected`), a row
+that is not detached (`not_detached`), a row a visible tmux session owns
+(`owned_elsewhere`, with the session in a `session` field: attach there), and
+another user's process (`not_ours`).
 
 ### `GET /api/config`
 
@@ -279,6 +303,11 @@ than by position.
 | `invalid_key` | 400 | the key asked for is not one of the keys Hitchrail will send |
 | `not_asking` | 409 | a key was sent but the screen is not showing a question to answer |
 | `not_running` | 409 | a stop or kill was asked for something that is not running |
+| `not_detached` | 409 | the signal route was asked for a row that is running, stale or stopped |
+| `owned_elsewhere` | 409 | a tmux session Hitchrail can see owns the agent; the `session` field names it |
+| `gone` | 409 | the process left between the listing and the call; nothing was signalled |
+| `not_ours` | 409 | the pid is not the agent derivation identified: reused, another user's, or refused by the kernel; nothing was signalled |
+| `pidfd_unavailable` | 501 | this machine cannot signal through a race free handle, and Hitchrail will not signal a bare pid |
 | `ram_soft` | 409 | memory is tight; retry with acknowledgement to start anyway |
 | `stop_unsafe` | 409 | the pane is not in a state where a stop can be requested safely |
 | `url_pending` | 409 | the session has no link yet; ask again |

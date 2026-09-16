@@ -56,6 +56,40 @@ class OperatorDisabled(EngineError):
     (#154). The state file only ever narrows the operator's set."""
 
 
+class NotDetached(EngineError):
+    """The signal route is for an agent nothing addressable owns (#107). A
+    running, stale or stopped row has stop, kill and nothing respectively,
+    and `no_agent` already means the opposite of this on those routes."""
+
+
+class OwnedElsewhere(EngineError):
+    """A tmux session Hitchrail can see owns this agent (#107). The answer is
+    "attach there", named, not a signal: a courtesy refusal, and the safety
+    property is the handle, not this."""
+
+    def __init__(self, name: str, session: str) -> None:
+        super().__init__(f"{name} is running in the tmux session {session!r}; attach there")
+        self.session = session
+
+
+class Gone(EngineError):
+    """The process left between the listing and the call (#107). Nothing was
+    signalled: the handle could not be opened, or the send found nobody."""
+
+
+class NotOurs(EngineError):
+    """The pid is not the agent derivation identified (#107): reused by
+    another process, another user's, or the kernel refused the send. Nothing
+    was signalled."""
+
+
+class PidfdUnavailable(EngineError):
+    """This machine cannot signal through a race free handle (#107): no
+    `pidfd_open`, or a kernel or filter that refuses it. Refused rather than
+    served through `os.kill`, which is the racy path this route exists not
+    to take."""
+
+
 class OperatorPinned(EngineError):
     """The operator set this on the command line, and a flag wins outright
     over anything a request writes (#238). Refused rather than written to a

@@ -167,7 +167,7 @@ before `Config` does.
 
 ### Batch 4: the destructive path, task 86
 
-- [ ] **Task 86, #107.** `POST /api/sessions/{name}/signal`. Acquire the
+- [x] **Task 86, #107.** `POST /api/sessions/{name}/signal`. Acquire the
       pidfd, then re-derive and refuse unless the row is still `detached` for
       that project and that pid with no seen owner; SIGTERM, SIGKILL only on a
       second explicit request; the protected project and this server's own

@@ -52,6 +52,17 @@ narrows what the file allows. A hidden root's projects leave the listing,
 which now names them in `hidden_roots`; its sessions keep running and still
 answer by name.
 
+**A detached agent can be ended.** `POST /api/sessions/{name}/signal`
+sends SIGTERM to the agent a detached row names, through a pidfd acquired
+before the row is re-checked, so a pid another process has taken over is
+refused rather than signalled; `/signal/force` is SIGKILL, a second explicit
+request. Refused before anything is opened: the self project, this server's
+own process tree, a row a visible tmux session owns (attach there), another
+user's process. A machine without pidfd support is told so; nothing ever
+falls back to signalling a bare pid. The row's End control carries the
+honest sentence: Hitchrail can see no session that owns this agent, and if
+it is open on a screen somewhere, this will end it there too.
+
 **The wrong network, noticed.** `--expect-gateway-mac` names the default
 gateway of the network a named bind was meant for; a start whose gateway is
 another refuses with exit 2 and the unit stays stopped until somebody looks,

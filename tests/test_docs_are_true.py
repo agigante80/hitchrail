@@ -845,7 +845,9 @@ _INSTRUCTION_HEADINGS = ("## Run it", "## Install")
 _LIMITATIONS = {
     "the agent is unsandboxed": "dangerously-skip-permissions",
     "the token buys keystrokes": "typed into",
-    "a detached agent cannot be ended": "cannot end",
+    # #107 turned "cannot end" into "can end, by pid, scoped by a check"; the
+    # limitation that remains is that this one path is not scoped by a name.
+    "a detached agent is ended by pid, not by a name": "by pid rather than",
     "cleartext on plain HTTP": "cleartext",
 }
 

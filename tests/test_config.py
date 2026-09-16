@@ -1080,7 +1080,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # and the sentence saying why name resolution keeps every root.
         # 1279 after the security audit of #154: an operator disabled root
         # refuses Start, with the sentence on why hiding does not.
-        "engine.py": 1279,
+        # 1279 to 1420 for #107: `signal_detached`, the one destructive
+        # path scoped by a check, with the order that makes the check sound
+        # written where it is enforced. Phase 18 carries the split.
+        "engine.py": 1420,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -1198,7 +1201,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 490 to 527 for #207: the flag and the preflight arm that refuses
         # the wrong network, with the sentence on why the seam is resolved
         # per call. The reading itself is `gateway.py`.
-        "cli.py": 527,
+        # 551 after the Phase 14 batch 3 review: the gateway verdict is its
+        # own function with two exit codes, mismatch and not yet.
+        "cli.py": 551,
         # 409, nine lines over, down from 542. #115 deleted the `?token=`
         # carrier: 135 lines once the two blocks inside `TokenMiddleware`
         # that only served it are counted.
@@ -1267,7 +1272,8 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # split, and the settings routes are its first candidate.
         # 844 after round 1 of the Phase 14 review: the null refusal and the
         # one call that applies both halves of a settings body together.
-        "server.py": 847,
+        # +40 for #107: two routes and every refusal's code.
+        "server.py": 887,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

@@ -158,6 +158,17 @@ while True:
     time.sleep(0.2)
 """
 
+# #107. An agent that ignores SIGTERM as well, so the signal route's
+# escalation, SIGKILL on a second explicit request, has something to
+# escalate against. SIGKILL cannot be ignored, which is the point of it.
+DEAF_BODY = """
+import signal
+signal.signal(signal.SIGINT, signal.SIG_IGN)
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+while True:
+    time.sleep(0.2)
+"""
+
 # Paints a bright Claude Code input row and leaves it there.
 #
 # #89: the graceful stop reads the box before it asks the agent to exit, and
@@ -442,6 +453,7 @@ class Harness:
         available_mb: int | None = None,
         stop_timeout: float = 30.0,
         ignores_graceful_stop: bool = False,
+        ignores_sigterm: bool = False,
         box_will_not_clear: bool = False,
         prompts_after_stop: bool = False,
         agent_exits_immediately: bool = False,
@@ -485,6 +497,8 @@ class Harness:
         body = SHIM_BODY
         if ignores_graceful_stop:
             body = STUBBORN_BODY
+        if ignores_sigterm:
+            body = DEAF_BODY
         if box_will_not_clear:
             body = UNCLEARABLE_BOX_BODY
         if prompts_after_stop:
@@ -831,6 +845,23 @@ class Harness:
             if args.strip() in wanted and pid.isdigit():
                 with contextlib.suppress(OSError):
                     os.kill(int(pid), signal.SIGTERM)
+
+    def orphans_exited(self, timeout: float = 5.0) -> bool:
+        """Whether every process seeded as `detached` has left (#107): the
+        thing a signal test has to read from the machine, not from the row."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if all(orphan.poll() is not None for orphan in self._orphans):
+                return True
+            time.sleep(0.05)
+        return False
+
+    def end_orphans_now(self) -> None:
+        """Kill the seeded detached agents out from under the page, and reap
+        them, so the pid is gone by the time a tap lands (#107)."""
+        for orphan in self._orphans:
+            orphan.kill()
+            orphan.wait(timeout=5)
 
     def reap_orphans(self) -> None:
         """Anything spawned outside tmux is ours to clean up.
