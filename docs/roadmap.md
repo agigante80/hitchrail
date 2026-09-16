@@ -161,7 +161,8 @@ holding a token can get in without a saved link, and adding a folder does not
 mean editing a systemd unit.
 
 ## Phase: Phase 20: The perimeter, hardened
-state: planned
+state: open
+plan: docs/superpowers/plans/2026-09-16-hitchrail-phase-20-hardened.md
 
 The second pass over what Phase 14 built, taken while the reasoning is
 fresh. Every ticket here is a finding from the review of that phase's own
