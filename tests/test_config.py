@@ -1180,7 +1180,11 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # in a name, with the note on which tmux versions store a newline,
         # and the server's pid rides in the same call so `derive` can tell
         # our own server from another one.
-        "tmux.py": 595,
+        # 619 after round 1 of that review: the invariant restated as it
+        # holds on 3.7a, the unnamed session kept rather than dropped, and
+        # the server's pid asked for on its own when there is no pane to
+        # list it from (`exit-empty off`).
+        "tmux.py": 619,
         # 413, and thirteen lines over the guideline is not a second job. #18
         # already took the host vocabulary out of this file, and what is left
         # is one dataclass and its startup refusals, which is one thing. The

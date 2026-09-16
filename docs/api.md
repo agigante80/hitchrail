@@ -128,7 +128,7 @@ One project, as `projects` lists it, as `POST` and `DELETE` on
 | `protected` | the self project; refuses every mutating route |
 | `awaiting_trust` | the agent is sitting on its trust prompt |
 | `awaiting_input` | the agent is sitting on a question only a person can answer |
-| `foreign_session` | the tmux session another tool runs the agent under, when one is visible; null otherwise |
+| `foreign_session` | the tmux session another tool runs the agent under, when one is visible, or `(unnamed)` when that session has no name (tmux 3.7a admits one); null otherwise |
 | `foreign_server_pid` | the pid of a tmux server above the agent that Hitchrail is not configured for, found by walking the process tree; null when none is, which still means none was seen |
 
 ### `POST /api/sessions/{name}/answer`

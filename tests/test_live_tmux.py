@@ -41,7 +41,7 @@ from hitchrail.engine import Engine
 from hitchrail.procs import snapshot
 from hitchrail.sessions import Gone, NoAgent, NotDetached, OwnedElsewhere, State
 from hitchrail.tmux import Tmux
-from hitchrail.tmuxnames import sanitize
+from hitchrail.tmuxnames import UNNAMED_SESSION, sanitize
 from support import DEFAULT_LABEL, Orphan, make_config
 
 pytestmark = pytest.mark.live_tmux
@@ -146,7 +146,14 @@ class PrivateTmux:
         # character tmux never stores in a name, proved above.
         if result.returncode != 0:
             return []
-        return [name for name in result.stdout.split(":\n") if name]
+        # Every record ends in the terminator, so the split's last element
+        # is the empty string after the final one, and ONLY that one is
+        # dropped: a session can be named `""` on 3.7a and must be listed.
+        return result.stdout.split(":\n")[:-1]
+
+    def _session_ids(self) -> list[str]:
+        result = self.run("list-sessions", "-F", "#{session_id}")
+        return result.stdout.split() if result.returncode == 0 else []
 
     def close(self) -> list[str]:
         """Kill what the SERVER says it has, not what we think we created.
@@ -162,8 +169,11 @@ class PrivateTmux:
         from what tmux actually did. `kill-server` still appears nowhere: a
         tmux server exits on its own once its last session is gone.
         """
-        for name in self.sessions():
-            self.run("kill-session", "-t", f"={name}")
+        # By session ID, never by name: a name is whatever the test asked
+        # for, and on tmux 3.7a that can hold `:` or `.` or be empty, none of
+        # which a `-t =name` target can address. `$N` always can.
+        for session_id in self._session_ids():
+            self.run("kill-session", "-t", session_id)
         # Checked BEFORE the socket goes. Afterwards `list-sessions` cannot
         # connect and returns nothing, so any assertion made then is vacuously
         # true: the first version of this leak check was exactly that, and it
@@ -224,27 +234,53 @@ def test_the_trailing_colon_makes_the_anchor_take_effect(server: PrivateTmux) ->
 
 
 def test_tmux_rewrites_a_dot_in_a_session_name(server: PrivateTmux) -> None:
-    """Footgun 1, sharper than the design said.
+    """Footgun 1, sharper than the design said, and then blunter.
 
-    tmux does not reject `dotted.site`. It stores it under a REWRITTEN name, so
-    the session exists where nobody looked and presents as having vanished.
+    tmux 3.2 to 3.7 do not reject `dotted.site`. They store it under a
+    REWRITTEN name, so the session exists where nobody looked and presents
+    as having vanished. 3.7a stores it verbatim (CHANGES "3.7 to 3.7a"),
+    where `.` is still the window separator in a target. Either way the
+    name we asked for is not one to address a session by, and `sanitize`
+    never emits it.
     """
     server.new_session(f"{PREFIX}dotted.site")
-    listed = server.run("list-sessions", "-F", "#{session_name}").stdout
-    assert f"{PREFIX}dotted.site" not in listed
-    assert f"{PREFIX}dotted_site" in listed
+    assert server.sessions() in ([f"{PREFIX}dotted_site"], [f"{PREFIX}dotted.site"])
 
 
-def test_tmux_rewrites_a_colon_in_a_session_name_on_creation_and_rename(
-    server: PrivateTmux,
-) -> None:
-    """The premise the pane map's record terminator rests on (#175): a session
-    name cannot hold `:`, because tmux rewrites it to `_` on both of the
-    commands that set one. `session_check_name` in the source; here, the
-    server itself, on 3.4."""
+def test_a_colon_in_a_session_name_never_breaks_a_pane_record(server: PrivateTmux) -> None:
+    """The premise the pane map's record terminator rests on (#175), as it
+    holds on every version: NOT that a name cannot hold `:`, which 3.2 to
+    3.7 rewrite to `_` and 3.7a stores verbatim (the round 1 review of
+    #189 caught the overclaim), but that no version stores a `:` together
+    with a raw newline, since 3.2 and later escape the newline. Whichever
+    name this server stored, the record parses and the session is foreign.
+    """
     server.new_session(f"{PREFIX}a:b")
-    assert server.run("rename-session", "-t", f"={PREFIX}a_b", f"{PREFIX}x:y").returncode == 0
-    assert server.sessions() == [f"{PREFIX}x_y"]
+    assert server.run("rename-session", "-t", f"={PREFIX}a_b", f"{PREFIX}x:y").returncode in (
+        0,
+        1,
+    )
+    [stored] = server.sessions()
+    assert stored in (f"{PREFIX}x_y", f"{PREFIX}x:y", f"{PREFIX}a:b"), stored
+    panes = adapter(server).panes()
+    assert panes.ours == {}
+    assert list(panes.foreign.values()) == [stored]
+
+
+def test_an_unnamed_session_is_refused_or_named_as_such(server: PrivateTmux) -> None:
+    """3.7a admits an empty session name; up to 3.7 refuse it. Both are
+    answers, and CI's tmux gives the second, so this asserts whichever this
+    server gives rather than skipping: a refusal creates nothing, and an
+    admitted one is foreign under the placeholder, never a pane in neither
+    map (round 1 review of #189)."""
+    created = server.run("new-session", "-d", "-s", "")
+    if created.returncode != 0:
+        assert "session" in created.stderr, created.stderr
+        assert server.sessions() == []
+        return
+    panes = adapter(server).panes()
+    assert panes.ours == {}
+    assert list(panes.foreign.values()) == [UNNAMED_SESSION]
 
 
 def test_tmux_escapes_a_newline_in_a_session_name_and_the_map_keeps_it_foreign(
@@ -1137,6 +1173,71 @@ def test_an_agent_that_left_between_the_listing_and_the_call_is_refused_with_not
 
 
 # -- #189: a tmux server on a SECOND private socket --------------------------
+
+
+def test_an_agent_that_outlived_its_pane_under_our_own_server_keeps_end(
+    server: PrivateTmux, machine: Machine
+) -> None:
+    """Round 1 review of #189, on a real server. With `exit-empty off` the
+    server outlives its last session, `list-panes -a` fails on it, and an
+    agent that ignored the hangup when its pane died is still the server's
+    child: our own server above an orphan, with no pane map to name it by.
+    The pid comes from `display-message -p` instead, so the row says
+    detached with no server named, and End works."""
+    name = f"{DEFAULT_LABEL}~{machine.project}"
+    agent = Path(server._dir) / "hup-proof-agent"
+    agent.write_text("#!/bin/sh\ntrap '' HUP\nsleep 30 &\nwait\n")
+    agent.chmod(0o755)
+    session = f"{PREFIX}{sanitize(name)}"
+    server.run(
+        "new-session",
+        "-d",
+        "-s",
+        session,
+        "-c",
+        str(machine.config.roots[0].path / machine.project),
+        *launch_argv(str(agent), name),
+    )
+    server.created.append(session)
+    engine = Engine(
+        config=machine.config,
+        tmux=machine.adapter,
+        meminfo_fn=lambda: PLENTY,
+        cwd_of=REAL_CWD_OF,
+    )
+    deadline = time.monotonic() + 5
+    while engine.get(name).state is not State.RUNNING and time.monotonic() < deadline:
+        time.sleep(0.1)
+    running = engine.get(name)
+    assert running.state is State.RUNNING and running.pid is not None, running
+    server_pid = int(server.run("display-message", "-p", "#{pid}").stdout)
+
+    assert server.run("set-option", "-g", "exit-empty", "off").returncode == 0
+    try:
+        assert server.run("kill-session", "-t", f"={session}").returncode == 0
+        server.created.remove(session)
+        deadline = time.monotonic() + 5
+        while engine.get(name).state is not State.DETACHED and time.monotonic() < deadline:
+            time.sleep(0.1)
+        row = engine.get(name)
+        assert row.state is State.DETACHED and row.pid == running.pid, row
+        assert server.run("list-panes", "-a").returncode != 0, "the premise: no pane to list"
+        assert snapshot().by_pid[row.pid].ppid == server_pid, (
+            "the agent is not the server's child"
+        )
+        assert row.foreign_server_pid is None, "our own server was named as another tool's"
+        engine.signal_detached(name)
+        deadline = time.monotonic() + 5
+        while Path(f"/proc/{row.pid}").exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not Path(f"/proc/{row.pid}").exists(), "End did not end it"
+    finally:
+        # Back on, so the session-less server exits on its next loop and the
+        # fixture's leak check finds a dead socket rather than a live server.
+        server.run("set-option", "-g", "exit-empty", "on")
+        deadline = time.monotonic() + 5
+        while Path(server.socket).exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
 
 
 def test_an_agent_under_a_tmux_on_another_socket_is_named_by_its_server(

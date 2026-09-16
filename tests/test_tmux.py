@@ -25,7 +25,7 @@ from hitchrail.tmux import (
     _scrub_flags,
 )
 from hitchrail.tmux import _default_runner as tmux_runner
-from hitchrail.tmuxnames import sanitize
+from hitchrail.tmuxnames import UNNAMED_SESSION, sanitize
 
 # -- sanitize --------------------------------------------------------------
 
@@ -100,6 +100,7 @@ _VERBS = {
     "kill-session",
     "capture-pane",
     "send-keys",
+    "display-message",
 }
 
 
@@ -243,10 +244,31 @@ def test_a_foreign_session_name_is_escaped_on_the_way_in() -> None:
 
 def test_a_failed_list_panes_is_an_empty_map_not_an_exception() -> None:
     """No tmux server running is the normal state, not an error."""
-    runner = FakeRunner(rc={"list-panes": 1})
+    runner = FakeRunner(rc={"list-panes": 1, "display-message": 1})
     panes = Tmux(prefix="hr-", run=runner).panes()
     assert panes.ours == {}
     assert panes.foreign == {}
+    assert panes.server_pid is None
+
+
+def test_a_server_with_no_session_still_names_its_pid() -> None:
+    """`exit-empty off` keeps a server alive with no session, `list-panes -a`
+    fails on it, and an agent that ignored the hangup when its pane died is
+    still that server's child (round 1 review of #189). The pid comes from
+    `display-message -p`, one more call in this state only, so `derive` can
+    tell our own server from another one and keep End on the row."""
+    runner = FakeRunner(rc={"list-panes": 1}, stdout={"display-message": "4321\n"})
+    panes = Tmux(prefix="hr-", run=runner).panes()
+    assert panes == Panes(ours={}, foreign={}, server_pid=4321)
+    assert runner.calls[-1] == ["tmux", "display-message", "-p", "#{pid}"]
+    assert (
+        Tmux(
+            prefix="hr-", run=FakeRunner(rc={"list-panes": 1}, stdout={"display-message": "x"})
+        )
+        .panes()
+        .server_pid
+        is None
+    )
 
 
 def test_a_malformed_pane_line_is_skipped_and_the_rest_survive() -> None:
@@ -677,27 +699,26 @@ def test_nothing_is_scrubbed_when_nothing_is_named() -> None:
     assert "env" not in spawn
 
 
-def test_a_line_with_no_name_is_dropped_rather_than_named_empty_string() -> None:
-    """#175. `docs/api.md` promises a name or null, and `""` is neither.
+def test_an_unnamed_session_is_foreign_under_a_placeholder() -> None:
+    """#175, and the round 1 review of #189. `docs/api.md` promises a name
+    or null, and `""` is neither: `app.js` reads it as falsy and says "no
+    session Hitchrail can address".
 
-    `rpartition(" ")` on a line with no space returns an empty name and the
-    whole line as the pid, so `1234` alone became `foreign = {1234: ""}`. This
-    interface degrades correctly because `app.js` treats it as falsy; a client
-    that does not renders "in tmux session " with nothing after it.
-
-    **Not reachable from tmux 3.4**, which refuses an empty session name at
-    creation, verified against a real server on a private socket. The guard
-    stays because a parser should be true of its input rather than of one
-    version's output, and the check costs one comparison.
+    Up to 3.7 tmux refused an empty session name and this record was
+    DROPPED as a guard against a format change. 3.7a admits the empty name
+    (CHANGES "3.7 to 3.7a"), and a dropped record put the pane in neither
+    map: the agent inside it derived as an orphan under our own server and
+    was offered End. It is a session, so it is foreign, under a placeholder.
     """
-    runner = FakeRunner(stdout={"list-panes": "9 1234:\n9 cc-real 5678:\n"})
+    runner = FakeRunner(stdout={"list-panes": "9  1234:\n9 cc-real 5678:\n"})
     panes = Tmux(prefix="hr-", run=runner).panes()
 
-    assert panes.foreign == {5678: "cc-real"}, (
-        f"a line with no name produced {panes.foreign}, and an empty owner name "
-        f"is not what docs/api.md promises. See #175."
+    assert panes.foreign == {1234: UNNAMED_SESSION, 5678: "cc-real"}, (
+        f"an unnamed session produced {panes.foreign}: a pane in neither map "
+        f"leaves its agent looking like an orphan. See #175."
     )
     assert panes.ours == {}
+    assert UNNAMED_SESSION
 
 
 def test_a_foreign_name_holding_a_newline_cannot_hand_the_map_a_pid() -> None:

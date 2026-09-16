@@ -84,7 +84,9 @@ line the pane map read as ours, with the foreign pane's pid: the project
 then derived running or stale from a process that was never its own. Records
 are now ended by a character no tmux stores in a name, so the whole name
 arrives together and is refused. tmux 3.2 and later escape the newline
-themselves; the fix is for the versions that do not.
+themselves; the fix is for the versions that do not. On tmux 3.7a, which
+admits a session with no name, such a session's agent is listed as inside
+`(unnamed)` rather than as an orphan with End on offer.
 
 ## 0.8.0 - 2026-09-16
 
