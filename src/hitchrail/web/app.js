@@ -838,6 +838,26 @@ function renderList() {
   list.replaceChildren(...visible.map(renderRow));
 }
 
+/* #272. `state.signalled` is keyed by `name:pid` and grew for the life of
+   the tab: every row ended in a long session stayed in it forever. Nothing
+   breaks while pids are unique, and on a box with a small `pid_max` a reused
+   pid under the same name would find its key already there and offer Kill as
+   the row's FIRST control, which is the rule #169 exists to keep. Pruned on
+   render against the rows the listing actually carries: a key survives only
+   while its row is still detached at that pid, which is exactly the state the
+   escalation is about. */
+function pruneSignalled() {
+  if (state.signalled.size === 0) return;
+  const live = new Set(
+    state.projects
+      .filter((project) => project.state === "detached" && project.pid)
+      .map((project) => `${project.name}:${project.pid}`),
+  );
+  for (const key of state.signalled) {
+    if (!live.has(key)) state.signalled.delete(key);
+  }
+}
+
 function announce(message) {
   const region = $("[data-list-status]");
   if (!region || region.textContent === message) return;
@@ -929,6 +949,7 @@ function formatAgo(seconds) {
 }
 
 export function render() {
+  pruneSignalled();
   renderTabs();
   renderChips();
   renderStopAll();

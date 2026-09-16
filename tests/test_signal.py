@@ -265,6 +265,34 @@ def test_no_pidfd_support_refuses_rather_than_falling_back(
     assert fake.signals == []
 
 
+def test_eperm_at_the_open_is_not_an_ownership_refusal(root: Path) -> None:
+    """#272. `pidfd_open(2)` documents EINVAL, EMFILE, ENFILE, ENODEV,
+    ENOMEM and ESRCH, and no EPERM: it does not refuse a handle on
+    ownership grounds. So an EPERM there is seccomp or an LSM denying the
+    syscall to US, and calling it `not_ours` sent the operator looking at
+    the wrong process. It is the same answer as a kernel without the call,
+    and the route still refuses rather than falling back to a bare pid.
+
+    At the SEND, EPERM keeps its ownership meaning, which is what
+    `pidfd_send_signal(2)` documents and what refuses another user's
+    process under a non root Hitchrail. The two are asserted together
+    because the pair is the claim.
+    """
+    denied = FakePidfd(fail_open=OSError(errno.EPERM, "Operation not permitted"))
+    engine = _engine(root, Watched(denied, DETACHED), denied)
+    with pytest.raises(PidfdUnavailable, match="seccomp filter or an LSM"):
+        engine.signal_detached(proj("vessel"))
+    assert denied.signals == []
+    assert not denied.leaked
+
+    refused = FakePidfd(fail_send=OSError(errno.EPERM, "Operation not permitted"))
+    refused.runs_in(root / "vessel")
+    engine = _engine(root, Watched(refused, DETACHED), refused)
+    with pytest.raises(NotOurs, match="not ours to signal"):
+        engine.signal_detached(proj("vessel"))
+    assert not refused.leaked
+
+
 def test_a_handle_the_machine_cannot_spare_is_the_machine_not_the_process(root: Path) -> None:
     fake = FakePidfd(fail_open=OSError(errno.EMFILE, "Too many open files"))
     engine = _engine(root, Watched(fake, DETACHED), fake)

@@ -1100,7 +1100,11 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # directory is read after the handle, the one fact argv does not carry.
         # 1479 for #189: the refusals read `held_elsewhere`, a session name
         # or a server pid, rather than the session name alone.
-        "engine.py": 1479,
+        # 1516 for #272: EPERM at the handle told apart from EPERM at the
+        # send, with the man page's error list as the reason, and the
+        # paragraph saying which of this route's ownership checks is the
+        # property and which is advisory. Phase 18 carries the split.
+        "engine.py": 1516,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon

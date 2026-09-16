@@ -324,7 +324,7 @@ than by position.
 | `owned_elsewhere` | 409 | a tmux Hitchrail can see holds the agent: `session` names it when the pane map saw it, else `server_pid` names a server on another socket found in the process tree |
 | `gone` | 409 | the process left between the listing and the call; nothing was signalled |
 | `not_ours` | 409 | the pid is not the agent derivation identified: reused, another user's, or refused by the kernel; nothing was signalled |
-| `pidfd_unavailable` | 501 | this machine cannot signal through a race free handle, and Hitchrail will not signal a bare pid |
+| `pidfd_unavailable` | 501 | this machine cannot signal through a race free handle, and Hitchrail will not signal a bare pid; also what an EPERM at the handle is, since `pidfd_open` never refuses on ownership and a denial there is seccomp or an LSM |
 | `ram_soft` | 409 | memory is tight; retry with acknowledgement to start anyway |
 | `stop_unsafe` | 409 | the pane is not in a state where a stop can be requested safely |
 | `url_pending` | 409 | the session has no link yet; ask again |

@@ -84,12 +84,31 @@ _NO_PIDFD = (
 )
 
 
-def _refusal_for(exc: OSError, pid: int, verb: str) -> EngineError:
-    """Which refusal an errno is, at the open and at the send alike (#107)."""
+def _refusal_for(exc: OSError, pid: int, verb: str, *, opening: bool = False) -> EngineError:
+    """Which refusal an errno is (#107).
+
+    EPERM means different things at the two calls, which is why `opening`
+    exists (#272). `pidfd_send_signal(2)` documents EPERM as "does not have
+    permission to send the signal to the target process", the kernel's own
+    ownership refusal and the backstop the uid check only anticipates.
+    `pidfd_open(2)` documents no EPERM at all: EINVAL, EMFILE, ENFILE,
+    ENODEV, ENOMEM and ESRCH, and nothing else. So an EPERM there is not
+    about the target: it is seccomp or an LSM refusing the syscall to US,
+    and reporting that as "not ours to signal" sends the operator looking at
+    the wrong process. `pidfd_unavailable` is what that is, the same answer
+    as a kernel without the syscall, and the route already refuses rather
+    than falling back to a bare pid.
+    """
     if exc.errno == errno.ESRCH:
         return Gone(f"pid {pid} is gone, so there is nothing to {verb}")
-    if exc.errno == errno.EPERM:
+    if exc.errno == errno.EPERM and not opening:
         return NotOurs(f"the kernel refused to {verb} pid {pid}: it is not ours to signal")
+    if exc.errno == errno.EPERM:
+        return PidfdUnavailable(
+            f"the kernel refused a handle to pid {pid} (EPERM), which pidfd_open does not "
+            f"return for ownership: something on this machine, a seccomp filter or an LSM, "
+            f"denies the syscall. " + _NO_PIDFD
+        )
     if exc.errno in (errno.ENOSYS, errno.EINVAL, errno.EOPNOTSUPP):
         return PidfdUnavailable(_NO_PIDFD)
     # EMFILE, ENFILE, ENOMEM: the machine, not the process.
@@ -930,6 +949,17 @@ class Engine:
         owner Hitchrail can SEE (attach there instead), and another user's
         process. Nothing here ever falls back to `os.kill`.
 
+        **The uid check before the open is advisory, and the refusals after
+        the handle are the property** (#272). `owner_uid` stats
+        `/proc/<pid>` before there is a handle, so a pid reused by another
+        user's process in that window passes it; what actually refuses that
+        process is the readlink of its working directory, which is not
+        readable to us and raises `NotOurs` below, and under a non root
+        Hitchrail the kernel's own EPERM at `pidfd_send_signal`. Running
+        Hitchrail as root removes the second of those, which is one more
+        reason the unit does not. The early check stays because it answers
+        in the right words a moment sooner and costs one `stat`.
+
         `force` is SIGKILL, and it is a second explicit request on its own
         route, never the default: #169's rule that a kill is always available
         and never what happens first.
@@ -972,15 +1002,22 @@ class Engine:
         except AttributeError as exc:
             raise PidfdUnavailable(_NO_PIDFD) from exc
         except OSError as exc:
-            raise _refusal_for(exc, pid, "open a handle to") from exc
+            raise _refusal_for(exc, pid, "open a handle to", opening=True) from exc
         try:
             # AFTER the handle: what the machine says now is what is signalled.
-            verified = self.get(name)
+            # ONE look, and the classification below reads the same table the
+            # row was derived from (#272). It used to take a fresh `ps` on the
+            # error path, so a pid that changed identity and then exited
+            # between the two reads was reported as `gone` when the row that
+            # refused it had seen it alive under another identity: two
+            # refusals for one instant, chosen by which read happened to win.
+            machine = self._look()
+            verified = self._derive(name, machine)
             if verified.state is not State.DETACHED or verified.pid != pid:
                 # Two answers, told apart on the error path only: the pid is
                 # gone from the table, or it is there under another identity.
                 # A table that could not be read says neither.
-                table = self._procs_fn()
+                table = machine.table
                 if not table.ok:
                     raise MachineUnreadable(
                         "the process table could not be read after the handle"

@@ -160,8 +160,22 @@ class Orphan:
         self._send(signal.SIGKILL)
 
     def close(self) -> None:
-        """End it if it is still there, and release the descriptor."""
+        """End it if it is still there, and release the descriptor.
+
+        SIGTERM first, SIGKILL only if that is ignored (#272). A test agent
+        traps SIGTERM to end the background `sleep` it is waiting on, and
+        SIGKILL cannot be trapped: closing with it left one orphaned `sleep`
+        per test on the machine for the rest of its thirty seconds.
+        """
+        if self._fd < 0:
+            # Called twice: once where the test ends the process on purpose,
+            # once from its `finally`. Closing a descriptor twice can close
+            # somebody else's, so the second call does nothing.
+            return
         if not self._exited(0):
-            self.kill()
-            self._exited(5)
+            self.terminate()
+            if not self._exited(2):
+                self.kill()
+                self._exited(5)
         os.close(self._fd)
+        self._fd = -1

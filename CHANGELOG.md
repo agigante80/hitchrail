@@ -81,6 +81,18 @@ of "no session Hitchrail can address"; the signal route refuses it as
 carries it as `foreign_server_pid`. An agent that outlived its pane under
 Hitchrail's own server is still detached and can still be ended.
 
+**A handle the kernel refuses is no longer reported as somebody else's
+process.** `pidfd_open` does not refuse on ownership grounds, so an EPERM
+there is a seccomp filter or an LSM denying the syscall; the route now says
+so (`pidfd_unavailable`) instead of "not ours to signal", which sent an
+operator looking at the wrong process. EPERM at the send keeps its
+ownership meaning, which is what it means there.
+
+**The page's memory of what it has ended no longer grows for the life of
+the tab.** It is pruned to the rows the listing still carries as detached
+at that pid, so on a machine with a small pid ceiling a reused pid under
+the same name is offered End before Kill, as any row is.
+
 **The session cookie is `Secure` behind a TLS terminating proxy.** It was
 `Secure` only when Hitchrail itself held the certificate, so in the proxy
 deployment (`--allow-origin https://box.lan`, no `--tls-cert`) the browser

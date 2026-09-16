@@ -139,7 +139,7 @@ phase's objective admits.
       limit rather than closed, one operator command in the guide, and
       `expect_gateway_mac` on the config view with a test.
 
-- [ ] **Task 99, #272.** The signal route's smaller refusals: EPERM at the
+- [x] **Task 99, #272.** The signal route's smaller refusals: EPERM at the
       open as `pidfd_unavailable`, the uid window written down as advisory
       with the kernel's refusal named as the property, `state.signalled`
       pruned on render, one `Machine` behind the gone-versus-reused split, and

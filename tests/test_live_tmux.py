@@ -1079,10 +1079,14 @@ def test_tmux_stores_a_session_name_with_a_space_unchanged(server: PrivateTmux) 
 
 # Writes which signal ended it, since nobody can `wait` on a process that is
 # not their child. `sleep` in the background and `wait`, so the trap runs
-# while the script is waiting rather than after `sleep` returns.
+# while the script is waiting rather than after `sleep` returns, and the
+# trap ENDS that sleep before exiting (#272): a shell leaving on SIGTERM
+# orphans its background child, which then sits on the machine for the rest
+# of its thirty seconds, once per test that signals.
 _TRAPPING_AGENT = """#!/bin/sh
-trap 'echo TERM > "$HR_ENDED_BY"; exit 0' TERM
+trap 'echo TERM > "$HR_ENDED_BY"; kill $waiting 2>/dev/null; exit 0' TERM
 sleep 30 &
+waiting=$!
 wait
 """
 
@@ -1152,23 +1156,28 @@ def test_an_agent_that_left_between_the_listing_and_the_call_is_refused_with_not
     while engine.get(name).state is not State.DETACHED and time.monotonic() < deadline:
         time.sleep(0.1)
     assert engine.get(name).pid == orphan.pid
-    orphan.close()
-    # Reaped by init, not by us: gone from the table once `/proc` drops it.
-    deadline = time.monotonic() + 5
-    while Path(f"/proc/{orphan.pid}").exists() and time.monotonic() < deadline:
-        time.sleep(0.05)
     sent: list[tuple[int, int]] = []
     original = os.kill
 
     def record(pid: int, sig: int) -> None:
         sent.append((pid, sig))
 
-    os.kill = record
+    # `close` inside the try, not before it (#272): the agent this test ends
+    # is a shell holding a background `sleep`, and an assertion failing
+    # before the cleanup left it running for the rest of its thirty seconds
+    # with an argv that the next test's derivation matches.
     try:
+        orphan.close()
+        # Reaped by init, not by us: gone from the table once `/proc` drops it.
+        deadline = time.monotonic() + 5
+        while Path(f"/proc/{orphan.pid}").exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        os.kill = record
         with pytest.raises((NotDetached, Gone)):
             engine.signal_detached(name)
     finally:
         os.kill = original
+        orphan.close()
     assert sent == []
 
 
@@ -1186,7 +1195,17 @@ def test_an_agent_that_outlived_its_pane_under_our_own_server_keeps_end(
     detached with no server named, and End works."""
     name = f"{DEFAULT_LABEL}~{machine.project}"
     agent = Path(server._dir) / "hup-proof-agent"
-    agent.write_text("#!/bin/sh\ntrap '' HUP\nsleep 30 &\nwait\n")
+    # Ignores the hangup its pane's death sends, so it outlives the pane;
+    # ends its own background sleep on the SIGTERM the test then sends, so
+    # nothing is left running on the machine afterwards (#272).
+    agent.write_text(
+        "#!/bin/sh\n"
+        "trap '' HUP\n"
+        "trap 'kill $waiting 2>/dev/null; exit 0' TERM\n"
+        "sleep 30 &\n"
+        "waiting=$!\n"
+        "wait\n"
+    )
     agent.chmod(0o755)
     session = f"{PREFIX}{sanitize(name)}"
     server.run(
