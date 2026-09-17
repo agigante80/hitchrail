@@ -118,6 +118,11 @@ def _is_tmux_binary(name: str) -> bool:
 FOREIGN_NAME_MAX = 64
 
 
+# What a foreign session with no name is called on the row. A real session
+# could be named this too, and both are foreign, so nothing turns on it.
+UNNAMED_SESSION = "(unnamed)"
+
+
 def foreign_name(name: str) -> str:
     """A session name we did not create, made safe to put in a row (#85).
 
@@ -139,6 +144,13 @@ def foreign_name(name: str) -> str:
     with that job is how a later refactor moves the sink to `innerHTML`
     believing it is covered.
     """
+    if not name:
+        # tmux 3.7a admits an empty session name. `docs/api.md` promises a
+        # name or null, and `""` is neither: `app.js` reads it as falsy and
+        # renders "no session Hitchrail can address", the claim this field
+        # exists to prevent, and a client that does not renders "in tmux
+        # session " with nothing after it. A placeholder is a name.
+        return UNNAMED_SESSION
     shown = display_name(name)
     if len(shown) <= FOREIGN_NAME_MAX:
         return shown

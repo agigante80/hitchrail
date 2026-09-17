@@ -108,6 +108,53 @@ async def test_a_later_agent_under_the_same_name_starts_from_end_again(
     assert await row.get_by_role("button", name="Kill").count() == 0
 
 
+async def test_the_memory_of_what_was_sent_does_not_grow_for_the_life_of_the_tab(
+    page: Page, server: Harness
+) -> None:
+    """#272. `state.signalled` is keyed `name:pid` and was never pruned, so
+    a page left open for a day held a key per row it had ever ended. On a
+    box with a small `pid_max` a reused pid under the same name would find
+    its key already there and be offered Kill as its FIRST control, which is
+    the escalation rule inverted. A key now survives only while its row is
+    still detached at that pid, which is the state the escalation is about.
+    """
+    server.seed(detached=["forge-kit"])
+    await page.goto(server.base)
+    name = server.project("forge-kit")
+    row = page.locator(f'[data-project="{name}"]')
+    await expect(row).to_have_attribute("data-state", "detached")
+
+    # Driven through the page's own state rather than by ending a row,
+    # because the fake agent exits on the SIGTERM and its row is stopped by
+    # the next listing: the key is then correctly gone, which proves the
+    # pruning and not that a LIVE row keeps its escalation. Both directions
+    # in one render: a key for the row on screen, and one for a row the
+    # listing does not carry.
+    kept = await page.evaluate(
+        """() => {
+          const hr = window.__hitchrail;
+          const live = hr.state.projects.find((p) => p.state === "detached");
+          hr.state.signalled.add(`${live.name}:${live.pid}`);
+          hr.state.signalled.add(`${live.name}:999999`);
+          hr.state.signalled.add("main~a-name-no-listing-carries:4242");
+          hr.render();
+          return [...hr.state.signalled];
+        }"""
+    )
+    pid = await page.evaluate(
+        """(n) => window.__hitchrail.state.projects.find((p) => p.name === n).pid""", name
+    )
+    assert kept == [f"{name}:{pid}"], kept
+    # And the row still offers the escalation its surviving key is about.
+    await expect(row.get_by_role("button", name="Kill")).to_be_visible()
+
+    await row.get_by_role("button", name="Kill").click()
+    await page.locator("[data-dialog]").get_by_role("button", name="Kill it").click()
+    assert server.orphans_exited()
+    await expect(row).to_have_attribute("data-state", "stopped", timeout=15_000)
+    assert await page.evaluate("() => window.__hitchrail.state.signalled.size") == 0
+
+
 async def test_an_agent_gone_before_the_tap_is_a_refusal_with_a_next_step(
     page: Page, server: Harness
 ) -> None:

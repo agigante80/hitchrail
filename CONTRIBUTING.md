@@ -129,6 +129,9 @@ says what is in scope and where to send it.
 
 ## Agents
 
-[`.claude/CLAUDE.md`](.claude/CLAUDE.md) holds the architecture, the non negotiables and the
-footguns that cost real debugging to find. It is worth reading whether or not
-you are one.
+The architecture, the non negotiables and the footguns that cost real
+debugging to find live in [`docs/tech-guidelines.md`](docs/tech-guidelines.md)
+and in the design under
+[`docs/superpowers/specs/`](docs/superpowers/specs/), which are published and
+worth reading whether or not you are one. Assistant instruction files are
+local working state here and are not part of the repository.

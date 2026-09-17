@@ -198,9 +198,20 @@ before `Config` does.
       states what constrains it; section 5's control count and the two
       documents that count it agree (#174 is Phase 17 and must not be made
       worse here).
-- [ ] The roadmap's Phase 14 block says `state: done`, the milestone is closed,
+- [x] The roadmap's Phase 14 block says `state: done`, the milestone is closed,
       `scripts/check-phases.sh` is clean, and this plan has no unticked box
       without a marker.
+
+## How it closed
+
+Done, 2026-09-16, shipped as 0.8.0 on the morning after the last batch. The
+review loops: batch 1 stopped after round 2 (round 2 found two mediums in
+round 1's fixes, under the trip wire); batch 2 after round 1 with nothing to
+fix; batch 3 after round 2 (one medium in round 1's fix); batch 4 after round
+2 with nothing in the fixes. Every low became a ticket, and those tickets,
+split one concern each, are Phase 20, placed directly after this phase in the
+roadmap with the argument for its position. The six that sat in this
+milestone at the close moved there before the milestone was closed.
 
 ## Fails if
 

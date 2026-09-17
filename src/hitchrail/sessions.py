@@ -67,9 +67,17 @@ class OwnedElsewhere(EngineError):
     "attach there", named, not a signal: a courtesy refusal, and the safety
     property is the handle, not this."""
 
-    def __init__(self, name: str, session: str) -> None:
-        super().__init__(f"{name} is running in the tmux session {session!r}; attach there")
+    def __init__(self, name: str, session: str | None, server_pid: int | None) -> None:
+        where = (
+            f"the tmux session {session!r}"
+            if session is not None
+            else f"a tmux server Hitchrail is not configured for (pid {server_pid})"
+        )
+        super().__init__(f"{name} is running in {where}; attach there")
+        # Both on the response, the one that applies filled: a name the
+        # pane map saw, or a server pid the process tree gave (#189).
         self.session = session
+        self.server_pid = server_pid
 
 
 class Gone(EngineError):
@@ -295,6 +303,24 @@ class Session:
     # rendering this has to say "no session Hitchrail can address" rather than
     # "no tmux session", which is what the row used to claim and could not know.
     foreign_session: str | None = None
+    # #189. A tmux server that holds the agent and is not the one Hitchrail
+    # talks to, found by walking the process tree: the server's pid, since
+    # the session's name lives on a socket we never open. `None` here and in
+    # `foreign_session` still means no owner was SEEN, not that there is
+    # none: screen and a plain terminal leave no tmux above the agent.
+    foreign_server_pid: int | None = None
+
+    @property
+    def held_elsewhere(self) -> str | None:
+        """Where the agent is, when Hitchrail can see that it is somewhere:
+        a session name, or a server it cannot address, or None."""
+        if self.foreign_session is not None:
+            return f"the tmux session {self.foreign_session!r}"
+        if self.foreign_server_pid is not None:
+            return (
+                f"a tmux server Hitchrail is not configured for (pid {self.foreign_server_pid})"
+            )
+        return None
 
     def as_dict(self) -> dict[str, object]:
         """Serialising a session is not HTTP knowledge.
@@ -316,4 +342,5 @@ class Session:
             "awaiting_trust": self.awaiting_trust,
             "awaiting_input": self.awaiting_input,
             "foreign_session": self.foreign_session,
+            "foreign_server_pid": self.foreign_server_pid,
         }

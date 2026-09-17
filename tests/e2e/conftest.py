@@ -63,6 +63,7 @@ import pytest
 import uvicorn
 from playwright.async_api import Page, async_playwright
 
+from conftest import REAL_CWD_OF
 from hitchrail import claude_ipc, discovery
 from hitchrail.config import Config
 from hitchrail.engine import Engine
@@ -71,7 +72,7 @@ from hitchrail.roots import Root
 from hitchrail.server import create_app
 from hitchrail.tmux import Tmux
 from hitchrail.tmuxnames import is_tmux_argv
-from support import DEFAULT_LABEL, make_config
+from support import DEFAULT_LABEL, Orphan, make_config
 
 pytestmark = pytest.mark.e2e
 
@@ -398,7 +399,7 @@ class Harness:
         self.bus = EventBus()
         self.engine: Engine | None = None
         self._config: Config | None = None
-        self._orphans: list[subprocess.Popen[bytes]] = []
+        self._orphans: list[Orphan] = []
         # OUTSIDE the project root. `discovery.scan` lists every direct
         # subfolder, so a `bin/` beside the projects becomes a project: the
         # tab counts read one too high and every count assertion is off by the
@@ -464,6 +465,7 @@ class Harness:
         ceiling_mb: int | None = None,
         state_path: Path | None = None,
         pinned_stop_timeout: bool = False,
+        disabled_roots: list[str] | None = None,
     ) -> None:
         """Set the world up BEFORE the page loads.
 
@@ -483,6 +485,13 @@ class Harness:
         what the two root tests use. The folders are created under a sibling
         directory named for the label, so the roots are genuinely disjoint and
         the overlap refusal is not what is under test.
+
+        `disabled_roots` names labels the OPERATOR'S file disables, which is
+        a different thing from a root hidden through the settings page and
+        the distinction #256 is about: no request can bring one back, so the
+        page must not offer a checkbox for it or send somebody looking for
+        one. Labels here must also appear in `also_in` or `stopped_in`,
+        since only those create a root to disable.
         """
         # `stopped_in` is `also_in` without the start: the root is registered
         # and the folders exist, and no shim runs in them. The fifty row
@@ -593,11 +602,16 @@ class Harness:
 
         def build(protect: str | None) -> Config:
             if self.extra_roots:
+                off = set(disabled_roots or ())
                 return Config(
                     roots=(
-                        Root(label=DEFAULT_LABEL, path=self.root.resolve()),
+                        Root(
+                            label=DEFAULT_LABEL,
+                            path=self.root.resolve(),
+                            enabled=DEFAULT_LABEL not in off,
+                        ),
                         *(
-                            Root(label=label, path=path.resolve())
+                            Root(label=label, path=path.resolve(), enabled=label not in off)
                             for label, path in self.extra_roots.items()
                         ),
                     ),
@@ -653,14 +667,14 @@ class Harness:
         # kills the pane's process group with it, which leaves `stopped` and
         # not `detached`: the state a naive tool gets wrong cannot be faked by
         # breaking the tmux half.
+        #
+        # `Orphan`, not `Popen` (#189): reparented to init, so no tmux the
+        # suite itself runs inside sits above it. `support.py` says why.
         for name in detached or []:
             self._orphans.append(
-                subprocess.Popen(
+                Orphan(
                     claude_ipc.launch_argv(str(self._agent), e2e_id(name)),
                     cwd=self.root / e2e_name(name),
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
                 )
             )
         if detached:
@@ -753,6 +767,9 @@ class Harness:
             config=self._config,
             meminfo_fn=lambda: self._meminfo,
             ceiling_fn=lambda pid: self._ceiling_mb,
+            # The real `/proc/<pid>/cwd` reader: the detached agents this
+            # harness seeds are real children in real folders (#264).
+            cwd_of=REAL_CWD_OF,
         )
 
     def restart(self) -> None:
@@ -850,12 +867,9 @@ class Harness:
         """A new agent outside tmux under a name that already had one (#107):
         the same shape `seed(detached=...)` spawns, after the first left."""
         self._orphans.append(
-            subprocess.Popen(
+            Orphan(
                 claude_ipc.launch_argv(str(self._agent), e2e_id(name)),
                 cwd=self.root / e2e_name(name),
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
             )
         )
 
@@ -889,6 +903,7 @@ class Harness:
                 orphan.wait(timeout=5)
             except subprocess.TimeoutExpired:  # pragma: no cover - a stuck fake
                 orphan.kill()
+            orphan.close()
         self._orphans.clear()
 
     def _abort_connections(self) -> int:

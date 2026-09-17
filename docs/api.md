@@ -20,8 +20,15 @@ The cookie exists because `EventSource` cannot set request headers, so a token
 living only in `Authorization` would authenticate every route except the live
 update stream, which is the one the interface depends on. `POST /api/grant`
 trades a token for the cookie: `HttpOnly`, `SameSite=Lax`, `Path=/`, and
-`Secure` exactly when the server terminates TLS itself (`--tls-cert`), never
-behind a proxy that does, where the server still speaks HTTP.
+`Secure` when the server terminates TLS itself (`--tls-cert`), and also when
+it does not but the bind is LOOPBACK and every non loopback `--allow-origin`
+is `https`, which is the TLS terminating proxy deployment: the browser
+reaches the proxy over HTTPS, so the flag costs nothing there and without it
+the cookie is offered to `http://` on the same host at any port, since
+cookies are not port scoped. Not `Secure` on a plain HTTP deployment, where
+the browser would never send it back, and not on a LAN bind even beside an
+https origin, because a browser can still reach that server in the clear and
+would throw the cookie away. Loopback origins do not count either way.
 
 **A token is demanded whenever anything outside the machine can reach the
 server**: a non loopback bind, or a non loopback name passed to `--allow-host`
@@ -104,6 +111,7 @@ in both directions by the suite:
 | `memory` | the machine's `available_mb` and `total_mb`, null when unreadable |
 | `roots` | every root the interface shows as `{label, path}`, one root still a list |
 | `hidden_roots` | the labels of configured roots absent from the listing today, disabled in the config file or hidden by a request; an empty page says "hidden" rather than "no projects" |
+| `hidden_roots_editable` | of those, the ones a request can bring back: the config file's own `enabled = false` is not one, so an empty page can say where the choice lives |
 | `server` | this server, as distinct from this machine |
 | `server.version` | the version the installed distribution carries, the string `hitchrail --version` prints; null from a bare checkout |
 | `server.user` | the account this server runs as, which is the account every session it starts runs as; the numeric uid when the account has no passwd entry |
@@ -128,7 +136,8 @@ One project, as `projects` lists it, as `POST` and `DELETE` on
 | `protected` | the self project; refuses every mutating route |
 | `awaiting_trust` | the agent is sitting on its trust prompt |
 | `awaiting_input` | the agent is sitting on a question only a person can answer |
-| `foreign_session` | the tmux session another tool runs the agent under, when one is visible; null otherwise |
+| `foreign_session` | the tmux session another tool runs the agent under, when one is visible, or `(unnamed)` when that session has no name (tmux 3.7a admits one); null otherwise |
+| `foreign_server_pid` | the pid of a tmux server above the agent that Hitchrail is not configured for, found by walking the process tree; null when none is, which still means none was seen |
 
 ### `POST /api/sessions/{name}/answer`
 
@@ -181,11 +190,20 @@ the call is a different process the handle does not refer to (`not_ours`);
 one that exited is `gone`; nothing is ever signalled by `os.kill`, and a
 machine that cannot open a pidfd is told so (`pidfd_unavailable`, 501).
 
-Refused before any handle is opened: the self project (`self_protected`), a
-pid in the process tree this server runs in (also `self_protected`), a row
-that is not detached (`not_detached`), a row a visible tmux session owns
-(`owned_elsewhere`, with the session in a `session` field: attach there), and
-another user's process (`not_ours`).
+Refused before any handle is opened: the self project (`self_protected`),
+a pid in the process tree this server runs in (also `self_protected`), a row
+that is not detached (`not_detached`), a row a tmux Hitchrail can see holds
+(`owned_elsewhere`, with the session in a `session` field, or the server's
+pid in `server_pid` when it is one on another socket: attach there),
+and another user's process (`not_ours`). Refused after the handle, on the
+process the handle refers to: a pid that changed identity or left (`not_ours`,
+`gone`), and a process whose working directory is not under this
+instance's root for that label as configured, at any depth, since an agent
+in a worktree runs below its project (`not_ours`: another instance's agent,
+or a root that moved since the agent started), because the argv this
+route matches on is what a second instance as the same user writes too and
+only the directory tells the two apart. A folder deleted under a running
+agent still reads as under the root, so that agent can still be ended.
 
 ### `GET /api/config`
 
@@ -193,8 +211,9 @@ The effective configuration, for a person on a phone asking "what is this
 instance pointed at" without SSH. Every value is `{value, source}` where
 `source` is `flag`, `file`, `env` or `default`: `host`, `port`,
 `allow_hosts`, `allow_origins`, `self_project`, `agent_binary`,
-`session_prefix`, `tls` (the certificate's path, or null), the three memory
-figures, `config_file` and `state_file`.
+`session_prefix`, `tls` (the certificate's path, or null),
+`expect_gateway_mac` (the flag's value, normalised, or null), the three
+memory figures, `config_file` and `state_file`.
 `roots` is every configured root as `{label, path, enabled, editable,
 source}`, hidden ones included, with `hidden_roots` beside it; `stop_timeout`
 is `{value, source, editable}`, its source `state` when the interface set it.
@@ -232,8 +251,9 @@ logs still resolve the name, so an agent already there can be ended.
 
 `stop_timeout` is the one policy value: a longer wait lets a request do
 nothing it could not already do. It passes the refusal `--stop-timeout`
-passes (`invalid_value`, 400), persists in `state.toml`, and is read by the
-engine and reported on the listing's `server` object from the next request.
+passes (`invalid_value`, 400: a whole number of seconds, 1 to 3600), persists
+in `state.toml`, and is read by the engine and reported on the listing's
+`server` object from the next request.
 A `--stop-timeout` flag pins it: the value shows `source: "flag"`,
 `editable: false`, and a request to change it is `operator_pinned` (409)
 rather than a write the next restart would ignore.
@@ -304,10 +324,10 @@ than by position.
 | `not_asking` | 409 | a key was sent but the screen is not showing a question to answer |
 | `not_running` | 409 | a stop or kill was asked for something that is not running |
 | `not_detached` | 409 | the signal route was asked for a row that is running, stale or stopped |
-| `owned_elsewhere` | 409 | a tmux session Hitchrail can see owns the agent; the `session` field names it |
+| `owned_elsewhere` | 409 | a tmux Hitchrail can see holds the agent: `session` names it when the pane map saw it, else `server_pid` names a server on another socket found in the process tree |
 | `gone` | 409 | the process left between the listing and the call; nothing was signalled |
 | `not_ours` | 409 | the pid is not the agent derivation identified: reused, another user's, or refused by the kernel; nothing was signalled |
-| `pidfd_unavailable` | 501 | this machine cannot signal through a race free handle, and Hitchrail will not signal a bare pid |
+| `pidfd_unavailable` | 501 | this machine cannot signal through a race free handle, and Hitchrail will not signal a bare pid; also what an EPERM at the handle is, since `pidfd_open` never refuses on ownership and a denial there is seccomp or an LSM |
 | `ram_soft` | 409 | memory is tight; retry with acknowledgement to start anyway |
 | `stop_unsafe` | 409 | the pane is not in a state where a stop can be requested safely |
 | `url_pending` | 409 | the session has no link yet; ask again |

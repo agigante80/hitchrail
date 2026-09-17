@@ -39,6 +39,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import replace
+from pathlib import Path
 
 from hitchrail import attention, claude_ipc, derive, discovery, procs, ram, settings
 from hitchrail.config import TOKEN_ENV, Config
@@ -83,12 +84,31 @@ _NO_PIDFD = (
 )
 
 
-def _refusal_for(exc: OSError, pid: int, verb: str) -> EngineError:
-    """Which refusal an errno is, at the open and at the send alike (#107)."""
+def _refusal_for(exc: OSError, pid: int, verb: str, *, opening: bool = False) -> EngineError:
+    """Which refusal an errno is (#107).
+
+    EPERM means different things at the two calls, which is why `opening`
+    exists (#272). `pidfd_send_signal(2)` documents EPERM as "does not have
+    permission to send the signal to the target process", the kernel's own
+    ownership refusal and the backstop the uid check only anticipates.
+    `pidfd_open(2)` documents no EPERM at all: EINVAL, EMFILE, ENFILE,
+    ENODEV, ENOMEM and ESRCH, and nothing else. So an EPERM there is not
+    about the target: it is seccomp or an LSM refusing the syscall to US,
+    and reporting that as "not ours to signal" sends the operator looking at
+    the wrong process. `pidfd_unavailable` is what that is, the same answer
+    as a kernel without the syscall, and the route already refuses rather
+    than falling back to a bare pid.
+    """
     if exc.errno == errno.ESRCH:
         return Gone(f"pid {pid} is gone, so there is nothing to {verb}")
-    if exc.errno == errno.EPERM:
+    if exc.errno == errno.EPERM and not opening:
         return NotOurs(f"the kernel refused to {verb} pid {pid}: it is not ours to signal")
+    if exc.errno == errno.EPERM:
+        return PidfdUnavailable(
+            f"the kernel refused a handle to pid {pid} (EPERM), which pidfd_open does not "
+            f"return for ownership: something on this machine, a seccomp filter or an LSM, "
+            f"denies the syscall. " + _NO_PIDFD
+        )
     if exc.errno in (errno.ENOSYS, errno.EINVAL, errno.EOPNOTSUPP):
         return PidfdUnavailable(_NO_PIDFD)
     # EMFILE, ENFILE, ENOMEM: the machine, not the process.
@@ -111,12 +131,11 @@ def _no_session_here(session: Session, consequence: str) -> str:
     of step with the row's copy by being edited separately, which is the whole
     shape of this defect.
     """
-    if session.foreign_session is not None:
+    if session.held_elsewhere is not None:
         return (
-            f"the agent for {session.name} is in the tmux session "
-            f"{session.foreign_session}, which Hitchrail did not create, so "
-            f"there is {consequence} here; attach to that session, or end its "
-            f"process, {session.pid}, directly"
+            f"the agent for {session.name} is in {session.held_elsewhere}, which "
+            f"Hitchrail did not create, so there is {consequence} here; attach "
+            f"there, or end its process, {session.pid}, directly"
         )
     return (
         f"the agent for {session.name} is in no tmux session Hitchrail can "
@@ -149,6 +168,7 @@ class Engine:
         send_signal: Callable[[int, int], None] | None = None,
         close_pidfd: Callable[[int], None] | None = None,
         owner_uid: Callable[[int], int] | None = None,
+        cwd_of: Callable[[int], Path] | None = None,
     ) -> None:
         self.config = config
         # #113. Named here rather than inside `Tmux`, because which variable
@@ -167,6 +187,7 @@ class Engine:
         self._send_signal = send_signal or procs.send_signal
         self._close_pidfd = close_pidfd or procs.close_pidfd
         self._owner_uid = owner_uid or procs.owner_uid
+        self._cwd_of = cwd_of or procs.cwd_of
         self._meminfo_fn = meminfo_fn or ram.read_meminfo
         # #243. Cached per pid for `ram.CEILING_TTL_S`, because the reader is
         # ten sysfs reads and the listing route asks once per running row on
@@ -928,18 +949,32 @@ class Engine:
         owner Hitchrail can SEE (attach there instead), and another user's
         process. Nothing here ever falls back to `os.kill`.
 
+        **The uid check before the open is advisory, and the refusals after
+        the handle are the property** (#272). `owner_uid` stats
+        `/proc/<pid>` before there is a handle, so a pid reused by another
+        user's process in that window passes it; what actually refuses that
+        process is the readlink of its working directory, which is not
+        readable to us and raises `NotOurs` below, and under a non root
+        Hitchrail the kernel's own EPERM at `pidfd_send_signal`. Running
+        Hitchrail as root removes the second of those, which is one more
+        reason the unit does not. The early check stays because it answers
+        in the right words a moment sooner and costs one `stat`.
+
         `force` is SIGKILL, and it is a second explicit request on its own
         route, never the default: #169's rule that a kill is always available
         and never what happens first.
         """
         self._require_addressable(name)
-        # The LABEL too, here and not in `_require_addressable`: an
-        # identifier under a label no root carries would still derive, and a
-        # second instance's agent with that identifier in its argv would
-        # match, a pid looked up for a project that cannot exist here. The
-        # tmux routes are prefix scoped and keep #42's reachability instead.
+        # The label names the root whose child the process must be running
+        # in, checked after the handle below (#264). Not the listing: the
+        # review's first version refused a folder the root no longer listed,
+        # which made a detached agent in a renamed folder unreachable on the
+        # one route that reaches past tmux, and scanned every root, so an
+        # unplugged spare root refused every project. The tmux routes are
+        # prefix scoped and never needed either.
         label, _ = split_identifier(name)
-        if not any(r.label == label for r in self.config.roots):
+        root = next((r for r in self.config.roots if r.label == label), None)
+        if root is None:
             raise UnknownProject(name)
         session = self.get(name)
         if session.protected:
@@ -952,8 +987,8 @@ class Engine:
                 f"{name} is {session.state.value}, and this route is for an agent "
                 "no session owns; use stop or kill for a session"
             )
-        if session.foreign_session is not None:
-            raise OwnedElsewhere(name, session.foreign_session)
+        if session.held_elsewhere is not None:
+            raise OwnedElsewhere(name, session.foreign_session, session.foreign_server_pid)
         pid = session.pid
         self._refuse_our_own_tree(pid)
         try:
@@ -967,15 +1002,22 @@ class Engine:
         except AttributeError as exc:
             raise PidfdUnavailable(_NO_PIDFD) from exc
         except OSError as exc:
-            raise _refusal_for(exc, pid, "open a handle to") from exc
+            raise _refusal_for(exc, pid, "open a handle to", opening=True) from exc
         try:
             # AFTER the handle: what the machine says now is what is signalled.
-            verified = self.get(name)
+            # ONE look, and the classification below reads the same table the
+            # row was derived from (#272). It used to take a fresh `ps` on the
+            # error path, so a pid that changed identity and then exited
+            # between the two reads was reported as `gone` when the row that
+            # refused it had seen it alive under another identity: two
+            # refusals for one instant, chosen by which read happened to win.
+            machine = self._look()
+            verified = self._derive(name, machine)
             if verified.state is not State.DETACHED or verified.pid != pid:
                 # Two answers, told apart on the error path only: the pid is
                 # gone from the table, or it is there under another identity.
                 # A table that could not be read says neither.
-                table = self._procs_fn()
+                table = machine.table
                 if not table.ok:
                     raise MachineUnreadable(
                         "the process table could not be read after the handle"
@@ -986,8 +1028,39 @@ class Engine:
                     f"pid {pid} is no longer the agent for {name}: it changed identity "
                     "between the listing and this request, so nothing was signalled"
                 )
-            if verified.foreign_session is not None:
-                raise OwnedElsewhere(name, verified.foreign_session)
+            if verified.held_elsewhere is not None:
+                raise OwnedElsewhere(
+                    name, verified.foreign_session, verified.foreign_server_pid
+                )
+            # The DIRECTORY, which the argv does not carry (#264). Two
+            # instances as the same user, both labelled `main` as the README
+            # suggests, roots `/a` and `/b` both holding `foo`: B's agent
+            # carries `main~foo` in its argv and matches A's derivation
+            # exactly, and nothing in a snapshot tells the two apart. Where
+            # the process actually runs does. Read after the handle, so it is
+            # the process the handle refers to that is judged; the kernel
+            # reports a renamed folder by its new name, which is why such an
+            # agent can still be ended here.
+            try:
+                cwd = self._cwd_of(pid)
+            except PermissionError as exc:
+                # Readable for our own processes; another user's, reached
+                # through a pid reused between the uid check and the handle,
+                # is refused here in the right words.
+                raise NotOurs(f"pid {pid} is another user's process: {exc}") from exc
+            except OSError as exc:
+                raise Gone(f"pid {pid} is gone: {exc}") from exc
+            # UNDER the root, at any depth, not a direct child: the agent
+            # binary moves into `<project>/.claude/worktrees/<name>` for a
+            # worktree session (review round 2), and a parent equality
+            # refused that agent as another instance's. Roots cannot nest,
+            # so "under this root" is exactly "not under another instance's".
+            if not cwd.is_relative_to(root.path):
+                raise NotOurs(
+                    f"pid {pid} runs in {cwd}, which is not under root {root.label!r} as "
+                    f"configured ({root.path}): another instance's agent, or a root that "
+                    "moved since it started. Nothing was signalled"
+                )
             try:
                 self._send_signal(pidfd, signal.SIGKILL if force else signal.SIGTERM)
             except AttributeError as exc:

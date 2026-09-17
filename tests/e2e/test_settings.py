@@ -113,6 +113,67 @@ async def test_every_root_hidden_says_so_rather_than_no_folder(
     )
 
 
+async def test_a_visible_empty_root_beside_a_hidden_one_is_not_every_root_hidden(
+    page: Page, server: Harness
+) -> None:
+    """#256. The sentence fired on zero PROJECTS, so a root that is merely
+    empty beside a hidden one read as "every root is hidden", which is a
+    claim about the configuration made from the contents of a folder. The
+    question is whether any root is being listed at all."""
+    # A label of its own, not `personal`: the root directories are named for
+    # the label under one parent, so a label another test in this module has
+    # already filled would arrive here holding that test's folders.
+    server.seed(stopped_in={"vacant": []})
+    await page.goto(f"{server.base}/settings")
+    await page.locator('[data-root-toggle="main"]').click()
+    await expect(page.locator('[data-root-toggle="main"]')).not_to_be_checked()
+    await page.goto(server.base)
+    reason = page.locator("[data-empty-reason]")
+    await expect(reason).to_contain_text("No folder here.")
+    assert "Every root is hidden" not in (await reason.text_content() or "")
+
+
+async def test_a_root_the_operator_disabled_is_not_something_to_show_in_settings(
+    page: Page, server: Harness
+) -> None:
+    """#256. It told somebody to show a root in settings that the config
+    file disables, where the checkbox is greyed out because no request can
+    bring it back. The empty state names the file instead."""
+    server.seed(stopped_in={"vacant": []}, disabled_roots=["main", "vacant"])
+    await page.goto(server.base)
+    reason = page.locator("[data-empty-reason]")
+    await expect(reason).to_contain_text("by the config file")
+    await expect(reason).to_contain_text("Enable one there")
+
+
+async def test_a_refused_toggle_keeps_its_reason_through_the_repaint(
+    page: Page, server: Harness, tmp_path: Path
+) -> None:
+    """#256. On a refusal the page repaints from a GET so the checkbox goes
+    back where the truth is, and that GET cleared the note: the person saw a
+    checkbox that would not stay checked and no sentence saying why. Here
+    the state directory cannot be written, which is the 503 the ticket
+    names, and the message survives the repaint."""
+    state = tmp_path / "unwritable"
+    state.mkdir()
+    server.seed(running=["vessel"], also_in=TWO_ROOTS, state_path=state / "state.toml")
+    state.chmod(0o500)
+    try:
+        await page.goto(f"{server.base}/settings")
+        box = page.locator('[data-root-toggle="personal"]')
+        await expect(box).to_be_checked()
+        await box.click()
+        note = page.locator("[data-note]")
+        await expect(note).to_contain_text("Not changed.")
+        # The checkbox is back where the server's answer says it is, and the
+        # sentence explaining that is still on screen.
+        await expect(box).to_be_checked()
+        await expect(note).to_be_visible()
+        await expect(note).to_contain_text("Not changed.")
+    finally:
+        state.chmod(0o700)
+
+
 async def test_the_wait_dialog_keeps_the_servers_stop_timeout(
     page: Page, server: Harness
 ) -> None:

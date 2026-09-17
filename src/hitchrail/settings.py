@@ -30,13 +30,15 @@ import grp
 import os
 import pwd
 import stat
+import tempfile
 import threading
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from hitchrail.config import Config
+from hitchrail.config import MAX_STOP_TIMEOUT_S, Config
+from hitchrail.projectnames import explain_name
 from hitchrail.roots import Root, RootError, parse_root_argument
 from hitchrail.sessions import (
     InvalidValue,
@@ -78,28 +80,48 @@ def _read_private(path: Path) -> str:
     from the same inode rather than a file swapped in between a `stat` and a
     `read_text`.
     """
+    # The DIRECTORY first, by the same rule (#270). A parent others can
+    # write to is a parent others can `mv` a fresh 644 file into, over this
+    # one, so a private file in a shared directory is private until the
+    # next rename. ssh's `StrictModes` refuses a writable parent for the
+    # same reason. Not `fstat` of the open file's directory: there is no
+    # descriptor for "the directory this name resolved through", and the
+    # window between the two stats is the same one the rename needs anyway.
+    _refuse_if_shared(path.parent, path.parent.stat(), "the directory holding it")
     fd = os.open(path, os.O_RDONLY)
     try:
         info = os.fstat(fd)
-        mode = stat.S_IMODE(info.st_mode)
-        if info.st_uid not in (os.geteuid(), 0):
-            raise SettingsError(
-                f"{path}: is owned by uid {info.st_uid}, not by the user running "
-                f"hitchrail; whoever owns it chooses where an agent may run"
-            )
-        if mode & stat.S_IWOTH or (
-            mode & stat.S_IWGRP and not _group_is_private(info.st_gid, info.st_uid)
-        ):
-            raise SettingsError(
-                f"{path}: is writable by group or others (mode {mode:04o}); anybody who "
-                f"can edit it chooses where an agent may run. chmod 644 it."
-            )
+        _refuse_if_shared(path, info, "it")
         chunks = []
         while chunk := os.read(fd, 65536):
             chunks.append(chunk)
     finally:
         os.close(fd)
-    return b"".join(chunks).decode()
+    try:
+        return b"".join(chunks).decode()
+    except UnicodeDecodeError as exc:
+        # A `ValueError`, so neither the `OSError` nor the `TOMLDecodeError`
+        # arm in the caller catches it, and it was a traceback (#270).
+        raise SettingsError(f"{path}: is not UTF-8 ({exc}); a config file is text") from exc
+
+
+def _refuse_if_shared(path: Path, info: os.stat_result, what: str) -> None:
+    """The one rule, for the file and for its directory: owned by the user
+    running this (or root), and writable by nobody else."""
+    mode = stat.S_IMODE(info.st_mode)
+    if info.st_uid not in (os.geteuid(), 0):
+        raise SettingsError(
+            f"{path}: is owned by uid {info.st_uid}, not by the user running "
+            f"hitchrail; whoever owns {what} chooses where an agent may run"
+        )
+    if mode & stat.S_IWOTH or (
+        mode & stat.S_IWGRP and not _group_is_private(info.st_gid, info.st_uid)
+    ):
+        raise SettingsError(
+            f"{path}: is writable by group or others (mode {mode:04o}); anybody who "
+            f"can edit {what} chooses where an agent may run. chmod 644 the file "
+            f"and 755 the directory."
+        )
 
 
 def _group_is_private(gid: int, uid: int) -> bool:
@@ -196,6 +218,17 @@ def read_config_file(path: Path) -> FileSettings:
         # label, an empty path and a label the allowlist refuses are refused
         # here in the flag's own words, and the directory, duplicate and
         # nesting refusals happen later in `Config`, once, for both doors.
+        #
+        # Except one character. The flag splits on the first `=`, so a label
+        # `a=b` composed into `a=b=/x` parsed as label `a` at `<cwd>/b=/x`
+        # (#270): the allowlist refuses `=` and never got to see it. The
+        # same validator, asked first, so it is still one; an EMPTY label
+        # is left to the parser, whose words for it the tests pin.
+        complaint = explain_name(label) if label else None
+        if complaint is not None:
+            raise SettingsError(
+                f"{path}: roots entry {index}: root label {label!r} is not usable: {complaint}"
+            )
         try:
             root = parse_root_argument(f"{label}={folder}")
         except RootError as exc:
@@ -238,7 +271,14 @@ def read_state(path: Path) -> State:
     )
     timeout = data.get("stop_timeout")
     # `bool` is an `int` in Python, and `stop_timeout = true` is not a wait.
-    if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
+    # The ceiling applies here too (#265): a state file written before it
+    # existed, or by hand, is not a way past the one validator.
+    if (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, int)
+        or timeout <= 0
+        or timeout > MAX_STOP_TIMEOUT_S
+    ):
         timeout = None
     return State(hidden=hidden, stop_timeout=timeout)
 
@@ -252,12 +292,23 @@ def write_state(path: Path, state: State, configured: set[str]) -> None:
     if state.stop_timeout is not None:
         body += f"stop_timeout = {state.stop_timeout}\n"
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
     header = (
         "# Written by hitchrail: what the interface has chosen. The config file is yours.\n"
     )
-    tmp.write_text(header + body)
-    tmp.replace(path)
+    # A FRESH name, never a fixed `state.tmp` (#270): `write_text` on a
+    # fixed name follows a symlink somebody left there, so with a writable
+    # state directory `state.tmp -> ~/.ssh/authorized_keys` was truncated
+    # and written through on the next toggle. `mkstemp` opens with
+    # `O_CREAT | O_EXCL`, which cannot follow anything, and the rename onto
+    # `state.toml` replaces the name, not the target of whatever it was.
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix="state.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(header + body)
+        Path(tmp).replace(path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 @dataclass(frozen=True, slots=True)
@@ -308,6 +359,18 @@ class Preferences:
         "hidden" rather than "no projects"."""
         shown = {r.label for r in self.active_roots()}
         return tuple(r.label for r in self._roots if r.label not in shown)
+
+    def hidden_roots_a_request_can_show(self) -> tuple[str, ...]:
+        """Of those, the ones the settings page has a checkbox for (#256).
+
+        A root the OPERATOR'S file disables is not one of them: it is hidden
+        and no request can bring it back, so telling somebody to "show one in
+        settings" sends them to a page where it is greyed out. The same
+        `enabled` that `root_views` reports as `editable`, asked here so the
+        listing can carry the distinction the empty state needs.
+        """
+        shown = {r.label for r in self.active_roots()}
+        return tuple(r.label for r in self._roots if r.label not in shown and r.enabled)
 
     def root_views(self) -> list[RootView]:
         hidden = self._state.hidden
@@ -372,7 +435,7 @@ class Preferences:
                     "stop_timeout is set on the command line, which a request cannot override"
                 )
             try:
-                replace(self._config, stop_timeout=stop_timeout)
+                Config.check_stop_timeout(stop_timeout)
             except ValueError as exc:
                 raise InvalidValue(str(exc)) from exc
         with self._guard:

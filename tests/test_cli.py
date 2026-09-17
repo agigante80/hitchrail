@@ -219,7 +219,7 @@ def test_a_loopback_bind_still_offers_both_loopback_spellings(tmp_path: Path) ->
 def test_the_token_is_printed_once_on_a_network_bind(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("hitchrail.cli._serve", lambda app, cfg: 0)
+    monkeypatch.setattr("hitchrail.cli._serve", lambda app, cfg, tls: 0)
     main(["--root", f"main={tmp_path}", "--host", "0.0.0.0"])
     out = capsys.readouterr().out
     assert "token" in out.lower()
@@ -228,7 +228,7 @@ def test_the_token_is_printed_once_on_a_network_bind(
 def test_no_token_banner_on_loopback(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("hitchrail.cli._serve", lambda app, cfg: 0)
+    monkeypatch.setattr("hitchrail.cli._serve", lambda app, cfg, tls: 0)
     main(["--root", f"main={tmp_path}"])
     assert "token" not in capsys.readouterr().out.lower()
 

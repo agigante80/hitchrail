@@ -12,6 +12,12 @@ thing being asserted.
 
 from __future__ import annotations
 
+import contextlib
+import os
+import select
+import signal
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +39,45 @@ def make_config(root: Path, **kw: Any) -> Config:
     if "roots" in kw:
         raise TypeError("pass roots= to Config directly, not through make_config")
     return Config(roots=(Root(label=DEFAULT_LABEL, path=root.resolve()),), **kw)
+
+
+# Not a secret: it protects a certificate minted for one test and thrown
+# away with the temporary directory. Named rather than defaulted, so the
+# linter's hardcoded-password rule is not silenced on a real one later.
+THROWAWAY_PASSPHRASE = "x"
+
+
+def make_encrypted_certificate(directory: Path) -> tuple[Path, Path]:
+    """A pair whose key carries a passphrase, which is what `openssl req`
+    writes WITHOUT `-nodes` and what #258 is about. Its own directory, so it
+    cannot be confused with the usable pair beside it."""
+    cert = directory / "encrypted-cert.pem"
+    key = directory / "encrypted-key.pem"
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "ec",
+            "-pkeyopt",
+            "ec_paramgen_curve:prime256v1",
+            "-keyout",
+            str(key),
+            "-out",
+            str(cert),
+            "-days",
+            "2",
+            "-subj",
+            "/CN=localhost",
+            "-passout",
+            f"pass:{THROWAWAY_PASSPHRASE}",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    assert "ENCRYPTED" in key.read_text().splitlines()[0], key.read_text().splitlines()[0]
+    return cert, key
 
 
 def make_certificate(directory: Path) -> tuple[Path, Path]:
@@ -81,3 +126,95 @@ def make_certificate(directory: Path) -> tuple[Path, Path]:
         capture_output=True,
     )
     return cert, key
+
+
+# -- a real orphan, for the tiers that spawn a detached agent -----------------
+#
+# Forks twice and exits, so the agent is reparented to init the way a real
+# detached agent is when its tmux session dies. A plain `Popen` child stays
+# the SUITE's child, and the suite is often run from inside a tmux (the
+# CLAUDE.md warning about `$TMUX` exists because it is), so the developer's
+# own tmux server sat above every seeded "orphan" and #189's ancestry walk,
+# correctly, named it: the row said "in a tmux server Hitchrail is not
+# configured for" and the End control was gone. The grandchild's pid is
+# printed for the caller; nothing else is.
+_DETACH = """
+import os, sys
+if os.fork():
+    os._exit(0)
+os.setsid()
+if (pid := os.fork()):
+    print(pid, flush=True)
+    os._exit(0)
+null = os.open(os.devnull, os.O_RDWR)
+for fd in (0, 1, 2):
+    os.dup2(null, fd)
+os.execv(sys.argv[1], sys.argv[1:])
+"""
+
+
+class Orphan:
+    """A process reparented to init, watched through a pidfd.
+
+    The `Popen` surface the harnesses already used (`pid`, `poll`, `wait`,
+    `terminate`, `kill`), minus the exit status: nobody can `wait(2)` on a
+    process that is not their child, and a pidfd is readable once its
+    process has exited, which is the one fact the callers read.
+    """
+
+    def __init__(self, argv: list[str], cwd: Path, env: dict[str, str] | None = None) -> None:
+        launched = subprocess.run(
+            [sys.executable, "-c", _DETACH, *argv],
+            cwd=cwd,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+        self.pid = int(launched.stdout)
+        self._fd = os.pidfd_open(self.pid)
+
+    def _exited(self, timeout: float) -> bool:
+        return bool(select.select([self._fd], [], [], timeout)[0])
+
+    def poll(self) -> int | None:
+        """0 once the process has exited, else None; the status itself is
+        init's to reap."""
+        return 0 if self._exited(0) else None
+
+    def wait(self, timeout: float) -> int:
+        if not self._exited(timeout):
+            raise subprocess.TimeoutExpired(cmd=str(self.pid), timeout=timeout)
+        return 0
+
+    def _send(self, sig: signal.Signals) -> None:
+        with contextlib.suppress(ProcessLookupError):
+            signal.pidfd_send_signal(self._fd, sig)
+
+    def terminate(self) -> None:
+        self._send(signal.SIGTERM)
+
+    def kill(self) -> None:
+        self._send(signal.SIGKILL)
+
+    def close(self) -> None:
+        """End it if it is still there, and release the descriptor.
+
+        SIGTERM first, SIGKILL only if that is ignored (#272). A test agent
+        traps SIGTERM to end the background `sleep` it is waiting on, and
+        SIGKILL cannot be trapped: closing with it left one orphaned `sleep`
+        per test on the machine for the rest of its thirty seconds.
+        """
+        if self._fd < 0:
+            # Called twice: once where the test ends the process on purpose,
+            # once from its `finally`. Closing a descriptor twice can close
+            # somebody else's, so the second call does nothing.
+            return
+        if not self._exited(0):
+            self.terminate()
+            if not self._exited(2):
+                self.kill()
+                self._exited(5)
+        os.close(self._fd)
+        self._fd = -1

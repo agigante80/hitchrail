@@ -406,6 +406,16 @@ def test_a_prefix_that_would_make_the_kill_guard_vacuous_is_refused(
         Config(roots=_r(tmp_path), session_prefix=prefix)
 
 
+def test_a_stop_timeout_past_the_ceiling_is_refused_and_the_ceiling_is_named(
+    tmp_path: Path,
+) -> None:
+    """#265. Above 2^31-1 ms a browser's `setTimeout` fires at once, so the
+    page said "it has not finished" while the engine waited forever."""
+    with pytest.raises(ConfigError, match="at most 3600 seconds"):
+        Config(roots=_r(tmp_path), stop_timeout=3601)
+    assert Config(roots=_r(tmp_path), stop_timeout=3600).stop_timeout == 3600
+
+
 @pytest.mark.parametrize("binary", ["", "  ", "-rf", "--dangerously-skip-permissions"])
 def test_a_flag_shaped_agent_binary_is_refused(tmp_path: Path, binary: str) -> None:
     # argv[0] starting with a hyphen is read as an option by whatever parses it,
@@ -1086,7 +1096,15 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # And to 1441 after round 1 of its review: the label check moved here
         # from `_require_addressable`, and two guards that read the table
         # refuse when it could not be read.
-        "engine.py": 1443,
+        # 1468 after Phase 20 batch 1's review: the process's working
+        # directory is read after the handle, the one fact argv does not carry.
+        # 1479 for #189: the refusals read `held_elsewhere`, a session name
+        # or a server pid, rather than the session name alone.
+        # 1516 for #272: EPERM at the handle told apart from EPERM at the
+        # send, with the man page's error list as the reason, and the
+        # paragraph saying which of this route's ownership checks is the
+        # property and which is advisory. Phase 18 carries the split.
+        "engine.py": 1516,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -1162,7 +1180,15 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 3.4, so nobody goes looking for a bug that is not there.
         # 553 to 556 for #173: the pane map asks `could_be_ours` rather than
         # "has a space", and the comment says why the question changed.
-        "tmux.py": 556,
+        # 595 for #175 and #189: records end at a terminator no tmux stores
+        # in a name, with the note on which tmux versions store a newline,
+        # and the server's pid rides in the same call so `derive` can tell
+        # our own server from another one.
+        # 619 after round 1 of that review: the invariant restated as it
+        # holds on 3.7a, the unnamed session kept rather than dropped, and
+        # the server's pid asked for on its own when there is no pane to
+        # list it from (`exit-empty off`).
+        "tmux.py": 619,
         # 413, and thirteen lines over the guideline is not a second job. #18
         # already took the host vocabulary out of this file, and what is left
         # is one dataclass and its startup refusals, which is one thing. The
@@ -1194,7 +1220,19 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # a certificate that cannot be read refuses BEFORE the bind, with
         # the paragraph on why that is exit 2 and not uvicorn's retried 1.
         # 575 to 594 for #207: the expected gateway MAC, normalised once.
-        "config.py": 594,
+        # 608 for #265: the ceiling, and the sentence on why a browser fires
+        # a timeout above 2^31-1 ms at once.
+        # And to 627 for #268: TLS on beside a plain http origin refuses.
+        # 674 for #269: `cookie_is_secure`, the rule the operator decided
+        # (our own TLS, or a proxy deployment whose every non loopback origin
+        # is https) with the two failures it sits between written down.
+        # 686 after round 1 of that batch's review: the bind is the third
+        # thing the rule asks about, and the paragraph says why the origins
+        # alone were not enough.
+        # 690 after round 2: that paragraph claimed nothing off the machine
+        # can reach a loopback bind, which `remote_reach` twenty lines above
+        # calls false for the same question.
+        "config.py": 690,
         # 460 for #123, #154 and #238: `--config`, `--session-prefix` and the
         # source tagging the settings page shows, which is one function
         # reading the flags back out of argv. Nothing here parses a value
@@ -1208,7 +1246,12 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # own function with two exit codes, mismatch and not yet.
         # 556 after 8601915: the pinned entry's own exit code, and the words
         # for it. Bumped a commit late, which #261 notes.
-        "cli.py": 556,
+        # #267 moved the certificate load here from `Config`, one read into
+        # the context uvicorn serves with; `config.py` shrank by as much.
+        # 616 for #258: the callback that makes OpenSSL's tty prompt
+        # unreachable, and the refusal naming the key and the command that
+        # decrypts it.
+        "cli.py": 616,
         # 409, nine lines over, down from 542. #115 deleted the `?token=`
         # carrier: 135 lines once the two blocks inside `TokenMiddleware`
         # that only served it are counted.
@@ -1239,7 +1282,24 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # for it, which the rule beside the exemption requires of every entry.
         # 436 to 440 for #152: the cookie's `Secure` flag is `Config.tls`,
         # and the paragraph on why not behind a proxy.
-        "security.py": 440,
+        # 449 for #269: the cookie's rule and the two deployments it sits
+        # between, written where the cookie is set rather than in a ticket.
+        # 453 after round 2 of that batch's review: the bind clause, which
+        # arrived a day after the rule, said where the rule is read.
+        "security.py": 453,
+        # #154, #238: the operator's file and Hitchrail's state file, one
+        # module because the split between them IS the security argument in
+        # its docstring; over by the ceiling's four lines (#265).
+        # 448 for #270: the directory checked by the file's rule, the
+        # decode refusal in words, the label asked of the allowlist before
+        # it is composed into `label=path`, and the state file written
+        # through a fresh `O_EXCL` name. Every line is a refusal or its
+        # reason, and the seam that would split this module is the one its
+        # docstring says must not be split.
+        # 460 for #256: `hidden_roots_a_request_can_show`, the operator's
+        # `enabled` asked where the listing needs it rather than only where
+        # the settings page does.
+        "settings.py": 460,
         # rather than one. A refusal handler is the shape this file is made of.
         # 513 to 517 for #120. The listing payload reports every configured
         # root as a labelled list rather than one path string, and the comment
@@ -1278,7 +1338,12 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 844 after round 1 of the Phase 14 review: the null refusal and the
         # one call that applies both halves of a settings body together.
         # +40 for #107: two routes and every refusal's code.
-        "server.py": 887,
+        # 894 for #263: the root_unavailable arm on three more routes.
+        # 900 for #189: the `server_pid` field on the owned_elsewhere refusal.
+        # 904 for #256: the listing says which hidden roots a request can
+        # bring back, so the empty page stops sending somebody to a checkbox
+        # that is not there.
+        "server.py": 904,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"
@@ -1866,10 +1931,12 @@ def test_every_mutated_module_loads_the_security_rules_when_it_is_edited() -> No
     **It skips rather than fails without `.claude/rules/`**, which is
     gitignored, so this is not a gate: it runs on the machine where the list is
     edited and on no CI leg. That is the honest cost of deriving the check from
-    a file the repository does not carry. The directory asked about is `rules/`
-    and not `.claude/` itself: `.claude/CLAUDE.md` is tracked since 2026-09-11,
-    so `.claude/` exists in every clone, and asking about it would have turned
-    this skip into a failure on every CI leg.
+    a file the repository does not carry. The directory asked about is
+    `rules/` rather than `.claude/` itself, which used to matter because
+    `.claude/CLAUDE.md` was tracked and the parent therefore existed in every
+    clone. Since 2026-09-16 nothing under `.claude/` is published, so both
+    spellings skip everywhere but a working checkout; `rules/` is kept
+    because it is the directory this check is actually about.
 
     **It is deliberately NOT in `[tool.mutmut] pytest_add_cli_args`, against the
     ticket's own instruction.** #198 required a `--deselect` entry beside the

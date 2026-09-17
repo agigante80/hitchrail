@@ -191,13 +191,50 @@ def test_group_writable_is_refused_unless_the_group_is_the_owners_own(
     (tmp_path / "work").mkdir()
     path = _write(tmp_path, ROOTS_TOML.format(label="work", path=tmp_path / "work"))
     path.chmod(0o664)
-    monkeypatch.setattr(settings, "_group_is_private", lambda gid, uid: True)
+    asked: list[tuple[int, int]] = []
+
+    def private(gid: int, uid: int) -> bool:
+        asked.append((gid, uid))
+        return True
+
+    monkeypatch.setattr(settings, "_group_is_private", private)
     assert [r.label for r in build_config(parse_args(["--config", str(path)])).roots] == [
         "work"
     ]
+    # The FILE's group and owner, not a constant: a mutant that passed None
+    # for either survived a predicate that ignored its arguments.
+    info = path.stat()
+    assert asked == [(info.st_gid, info.st_uid)]
     monkeypatch.setattr(settings, "_group_is_private", lambda gid, uid: False)
     with pytest.raises(ConfigError, match=r"mode 0664"):
         build_config(parse_args(["--config", str(path)]))
+    # And a 644 file is accepted whatever the group says: the group is only
+    # consulted when the group can write. A mutant that always consulted it
+    # refused every file on a shared group.
+    path.chmod(0o644)
+    assert [r.label for r in build_config(parse_args(["--config", str(path)])).roots] == [
+        "work"
+    ]
+
+
+def test_a_root_owned_file_is_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Root can edit anything regardless, so a root owned config is not a
+    widening; the exception is uid 0 exactly, which a mutant made uid 1."""
+    (tmp_path / "work").mkdir()
+    path = _write(tmp_path, ROOTS_TOML.format(label="work", path=tmp_path / "work"))
+    real = os.fstat
+
+    def as_root(fd: int) -> os.stat_result:
+        info = real(fd)
+        fields = list(info)
+        fields[4] = 0  # st_uid
+        fields[5] = 0  # st_gid
+        return os.stat_result(tuple(fields))
+
+    monkeypatch.setattr(os, "fstat", as_root)
+    assert [r.label for r in build_config(parse_args(["--config", str(path)])).roots] == [
+        "work"
+    ]
 
 
 def test_a_file_owned_by_somebody_else_is_refused_whatever_its_mode(
@@ -230,13 +267,24 @@ def test_the_private_group_convention_is_read_from_the_passwd_database(
     def group(name: str, members: list[str] | None = None) -> grp.struct_group:
         return grp.struct_group((name, "x", 0, members or []))
 
-    monkeypatch.setattr(pwd, "getpwuid", lambda uid: user("alice", 1000))
-    monkeypatch.setattr(grp, "getgrgid", lambda gid: group("alice"))
+    # The fakes check what they are asked for: a mutant that looked up
+    # `None` survived fakes that ignored their argument.
+    def getpwuid(uid: int) -> pwd.struct_passwd:
+        assert uid == 1000, uid
+        return user("alice", 1000)
+
+    def getgrgid_alice(gid: int) -> grp.struct_group:
+        assert gid == 1000, gid
+        return group("alice")
+
+    monkeypatch.setattr(pwd, "getpwuid", getpwuid)
+    monkeypatch.setattr(grp, "getgrgid", getgrgid_alice)
     assert settings._group_is_private(1000, 1000)
     monkeypatch.setattr(grp, "getgrgid", lambda gid: group("users"))
     assert not settings._group_is_private(1000, 1000)
     monkeypatch.setattr(grp, "getgrgid", lambda gid: group("alice"))
     assert not settings._group_is_private(1001, 1000)
+    monkeypatch.setattr(grp, "getgrgid", getgrgid_alice)
     # `usermod -aG alice bob`: private in name only, and the audit's case.
     monkeypatch.setattr(grp, "getgrgid", lambda gid: group("alice", ["bob"]))
     assert not settings._group_is_private(1000, 1000)
@@ -407,9 +455,15 @@ def test_a_stop_timeout_persists_and_a_flag_pins_it(tmp_path: Path) -> None:
         pinned.set_stop_timeout(45)
 
 
-def test_a_bad_timeout_in_the_state_file_loses_nothing_beside_it(tmp_path: Path) -> None:
+@pytest.mark.parametrize("bad", ["true", "0", "-5", "3601", "9999999", '"45"'])
+def test_a_bad_timeout_in_the_state_file_loses_nothing_beside_it(
+    tmp_path: Path, bad: str
+) -> None:
+    """Including one past the ceiling (#265, review round 1): a state file
+    written by 0.8.0's page, which accepted any positive number, or by
+    hand, is not a way past the one validator."""
     state = tmp_path / "state.toml"
-    state.write_text('disabled = ["home"]\nstop_timeout = true\n')
+    state.write_text(f'disabled = ["home"]\nstop_timeout = {bad}\n')
     read = settings.read_state(state)
     assert read.hidden == {"home"}
     assert read.stop_timeout is None
@@ -468,3 +522,213 @@ def test_a_prefix_in_the_file_earns_the_same_refusal_as_the_flag(tmp_path: Path)
     )
     with pytest.raises(ConfigError, match="non blank and unpadded"):
         build_config(parse_args(["--config", str(path)]))
+
+
+# -- #273: the survivors in the file reader, read and killed ------------------
+
+
+def test_the_default_path_is_xdg_then_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Never exercised until the sweep: every test passed `--config` or the
+    autouse XDG stub, so the two halves of the default were free to drift."""
+    monkeypatch.setenv(settings.CONFIG_HOME_ENV, str(tmp_path / "xdg"))
+    assert settings.default_config_path() == tmp_path / "xdg" / "hitchrail" / "config.toml"
+    monkeypatch.delenv(settings.CONFIG_HOME_ENV)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    expected = tmp_path / "home" / ".config" / "hitchrail" / "config.toml"
+    assert settings.default_config_path() == expected
+
+
+def test_a_missing_file_is_no_roots_as_a_tuple(tmp_path: Path) -> None:
+    assert settings.read_config_file(tmp_path / "absent.toml") == settings.FileSettings(
+        roots=()
+    )
+
+
+@pytest.mark.parametrize(
+    ("text", "fragment"),
+    [
+        ('roots = "not a list"\n', "must be a list of tables"),
+        ("roots = [1]\n", "entry 1 is not a table"),
+        ('[[roots]]\npath = "{d}"\n', "has an empty label"),
+        ('[[roots]]\nlabel = "work"\n', "has an empty path"),
+        ('[[roots]]\nlabel = 1\npath = "{d}"\n', "label and path must be strings"),
+        ('[[roots]]\nlabel = "work"\npath = 1\n', "label and path must be strings"),
+        ('[[roots]]\nlabel = "work"\npath = "{d}"\nenabled = "yes"\n', "must be true or false"),
+        ('wat = 1\n[[roots]]\nlabel = "work"\npath = "{d}"\n', "unknown key 'wat'"),
+    ],
+)
+def test_every_shape_the_file_refuses_says_so(tmp_path: Path, text: str, fragment: str) -> None:
+    """Each refusal in its own words, asserted on the words: a mutant that
+    raised with no message, accepted an unknown top level key, or defaulted
+    a missing label to something the allowlist admits survived tests that
+    checked only that something was refused."""
+    (tmp_path / "work").mkdir()
+    path = _write(tmp_path, text.format(d=tmp_path / "work"))
+    with pytest.raises(ConfigError, match=fragment):
+        build_config(parse_args(["--config", str(path)]))
+
+
+def test_a_refusal_names_the_entry_by_its_position(tmp_path: Path) -> None:
+    (tmp_path / "work").mkdir()
+    path = _write(
+        tmp_path,
+        ROOTS_TOML.format(label="work", path=tmp_path / "work") + "[[roots]]\nlabel = 2\n",
+    )
+    with pytest.raises(ConfigError, match="roots entry 2:"):
+        build_config(parse_args(["--config", str(path)]))
+
+
+def test_the_state_files_boundaries_are_honoured(tmp_path: Path) -> None:
+    """1 and 3600 are waits; 0 and 3601 are not. The sweep flipped each
+    boundary by one and nothing noticed."""
+    state = tmp_path / "state.toml"
+    for value in (1, 3600):
+        state.write_text(f"stop_timeout = {value}\n")
+        assert settings.read_state(state).stop_timeout == value
+
+
+def test_two_hidden_labels_and_a_timeout_survive_a_round_trip(tmp_path: Path) -> None:
+    """Two labels, so the separator is real TOML; both fields, so writing
+    the second does not lose the first."""
+    state = tmp_path / "state.toml"
+    settings.write_state(
+        state,
+        settings.State(hidden=frozenset({"home", "work"}), stop_timeout=45),
+        configured={"work", "home"},
+    )
+    read = settings.read_state(state)
+    assert read.hidden == {"home", "work"}
+    assert read.stop_timeout == 45
+
+
+def test_a_file_that_cannot_be_opened_says_so(tmp_path: Path) -> None:
+    (tmp_path / "work").mkdir()
+    path = _write(tmp_path, ROOTS_TOML.format(label="work", path=tmp_path / "work"))
+    path.chmod(0o000)
+    try:
+        with pytest.raises(ConfigError, match="cannot be read"):
+            build_config(parse_args(["--config", str(path)]))
+    finally:
+        path.chmod(0o644)
+
+
+def test_a_file_with_only_a_prefix_configures_no_roots(tmp_path: Path) -> None:
+    """`roots` absent is no roots, not a refusal: the flags are the other
+    door. A mutant that defaulted the key to `None` refused the file."""
+    path = _write(tmp_path, 'session_prefix = "work-"\n')
+    read = settings.read_config_file(path)
+    assert read.roots == ()
+    assert read.session_prefix == "work-"
+
+
+def test_the_state_file_is_written_two_levels_deep(tmp_path: Path) -> None:
+    """`--config` can name a file in a directory that does not exist yet,
+    and the state file sits beside it."""
+    state = tmp_path / "a" / "b" / "state.toml"
+    settings.write_state(state, settings.State(hidden=frozenset({"work"})), configured={"work"})
+    assert settings.read_state(state).hidden == {"work"}
+
+
+# -- #270: the file's remaining refusals, in words ----------------------------
+
+
+def test_a_label_holding_an_equals_sign_is_refused_as_a_label(tmp_path: Path) -> None:
+    """The flag splits on the first `=`, so `a=b` composed into `a=b=/x` used
+    to parse as label `a` at `<cwd>/b=/x`, and the allowlist that refuses
+    `=` never saw it. Asked first now; one validator, still."""
+    (tmp_path / "work").mkdir()
+    path = _write(tmp_path, ROOTS_TOML.format(label="a=b", path=tmp_path / "work"))
+    with pytest.raises(ConfigError, match=r"roots entry 1: root label 'a=b' is not usable"):
+        build_config(parse_args(["--config", str(path)]))
+
+
+def test_a_nul_in_a_path_refuses_with_exit_2_rather_than_a_traceback(tmp_path: Path) -> None:
+    """argv cannot carry a NUL; a TOML escape can, and `resolve` raised a
+    bare `ValueError` through `build_config`."""
+    path = _write(tmp_path, '[[roots]]\nlabel = "work"\npath = "/tmp/a\\u0000b"\n')
+    with pytest.raises(ConfigError, match=r"root 'work' has an unusable path"):
+        build_config(parse_args(["--config", str(path)]))
+    assert main(["--config", str(path)]) == 2
+
+
+def test_a_file_that_is_not_utf8_is_refused_naming_the_file(tmp_path: Path) -> None:
+    """`UnicodeDecodeError` is a `ValueError`, which neither the `OSError`
+    nor the `TOMLDecodeError` arm caught."""
+    path = tmp_path / "config.toml"
+    path.write_bytes(b'[[roots]]\nlabel = "w\xff"\npath = "/x"\n')
+    path.chmod(0o644)
+    with pytest.raises(ConfigError, match=r"config\.toml: is not UTF-8"):
+        build_config(parse_args(["--config", str(path)]))
+    assert main(["--config", str(path)]) == 2
+
+
+def test_a_directory_others_can_write_is_refused_naming_the_directory(tmp_path: Path) -> None:
+    """A writable parent lets others `mv` a fresh 644 file over a private
+    one, so the file's own mode proved nothing; ssh's `StrictModes` refuses
+    the parent for the same reason."""
+    (tmp_path / "work").mkdir()
+    shared = tmp_path / "etc"
+    shared.mkdir()
+    path = shared / "config.toml"
+    path.write_text(ROOTS_TOML.format(label="work", path=tmp_path / "work"))
+    path.chmod(0o644)
+    shared.chmod(0o777)
+    try:
+        with pytest.raises(
+            ConfigError, match=r"etc: is writable by group or others \(mode 0777\)"
+        ):
+            build_config(parse_args(["--config", str(path)]))
+    finally:
+        shared.chmod(0o755)
+    assert [r.label for r in build_config(parse_args(["--config", str(path)])).roots] == [
+        "work"
+    ]
+
+
+def test_the_directory_is_checked_before_the_file_is_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The order is the point: a file in a shared directory is not read at
+    all, not read and then refused."""
+    (tmp_path / "work").mkdir()
+    shared = tmp_path / "etc"
+    shared.mkdir()
+    path = _write(shared, ROOTS_TOML.format(label="work", path=tmp_path / "work"))
+    shared.chmod(0o777)
+    opened: list[str] = []
+    real_open = os.open
+
+    def recording_open(name: object, *args: object, **kwargs: object) -> int:
+        opened.append(str(name))
+        return real_open(name, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(os, "open", recording_open)
+    try:
+        with pytest.raises(ConfigError, match="writable by group or others"):
+            build_config(parse_args(["--config", str(path)]))
+    finally:
+        shared.chmod(0o755)
+    assert str(path) not in opened
+
+
+def test_a_symlink_left_at_the_state_files_tmp_name_is_not_written_through(
+    tmp_path: Path,
+) -> None:
+    """With a writable state directory, `state.tmp -> ~/.ssh/authorized_keys`
+    was truncated and written through on the next toggle. The write goes
+    through a fresh `O_EXCL` name now, which cannot follow anything, and the
+    rename replaces the name rather than the target."""
+    victim = tmp_path / "authorized_keys"
+    victim.write_text("ssh-ed25519 AAAA somebody\n")
+    state = tmp_path / "state.toml"
+    (tmp_path / "state.tmp").symlink_to(victim)
+    settings.write_state(state, settings.State(hidden=frozenset({"work"})), configured={"work"})
+    assert victim.read_text() == "ssh-ed25519 AAAA somebody\n"
+    assert settings.read_state(state).hidden == frozenset({"work"})
+    assert (tmp_path / "state.tmp").is_symlink(), "the leftover was touched"
+    assert sorted(p.name for p in tmp_path.iterdir() if p.name.startswith("state.")) == [
+        "state.tmp",
+        "state.toml",
+    ], "a temporary name was left behind"

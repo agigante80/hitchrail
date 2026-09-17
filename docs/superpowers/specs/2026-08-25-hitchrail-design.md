@@ -602,7 +602,17 @@ cannot be reused.** The five constraints:
    stop then kill escalation.
 5. The protected project is refused before any handle is opened, and so is
    the process tree this server runs in, walked by ppid; another user's
-   process is refused by uid before the open and by the kernel at the send.
+   process is refused by uid before the open, by the unreadable link to its
+   working directory after the handle, and by the kernel at the send.
+
+   **The uid read is advisory and the later two are the property** (#272).
+   It stats `/proc/<pid>` before there is a handle, so a pid reused by
+   another user's process in that window passes it, and what refuses that
+   process is the readlink of its working directory, which is not ours to
+   read, and the kernel's EPERM at `pidfd_send_signal`. A Hitchrail running
+   as root loses the second of those, which is one more reason the unit
+   does not run as root. The early check stays because it answers in the
+   right words a moment sooner and costs one `stat`.
 
 What the handle buys, exactly: a stranger is never signalled. What it does not
 buy is "the process derivation identified" in the strong sense: the anchor is

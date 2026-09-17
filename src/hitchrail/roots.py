@@ -92,9 +92,23 @@ def parse_root_argument(raw: str) -> Root:
     # #173 admitted a space in a FOLDER name. A label is typed on a command
     # line, in a URL and as a key in state.toml, and it is the half of the
     # identifier the operator chose rather than inherited, so it stays plain.
+    #
+    # And one reason that is not about typing (#271): `ps` joins argv with
+    # spaces, so `main~my app` in one slot is byte identical to `main~my`
+    # and `app` in two, and `derive.find_detached` matches an agent by the
+    # space joined suffix of its argv. That match tells two identifiers
+    # apart only because the label before `~` holds no space: admit one and
+    # `x~y` is a suffix of `a x~y`. `tests/test_properties.py` pins it.
     if " " in label:
         raise RootError(f"root label {label!r} is not usable: contains a space; use a hyphen")
-    return Root(label=label, path=Path(path).expanduser().resolve())
+    try:
+        resolved = Path(path).expanduser().resolve()
+    except ValueError as exc:
+        # A NUL byte, which the file door can spell as a TOML escape and
+        # argv cannot carry: `resolve` raised a bare `ValueError` that no
+        # caller caught, so a traceback instead of exit 2 (#270).
+        raise RootError(f"root {label!r} has an unusable path {path!r}: {exc}") from exc
+    return Root(label=label, path=resolved)
 
 
 def qualify(label: str, folder: str) -> str:
@@ -140,6 +154,17 @@ def check_roots(roots: tuple[Root, ...]) -> None:
         raise RootError("no roots configured. Give at least one --root label=path")
 
     problems: list[str] = []
+
+    # The label's shape, again (#271). Both parsers refuse a bad label, and
+    # a `Root` built in code bypasses both: its sessions then classify as
+    # foreign in the pane map, since `could_be_ours` asks the same
+    # allowlist. One line of belt to those braces.
+    for root in roots:
+        complaint = explain_name(root.label)
+        if complaint is not None or " " in root.label:
+            problems.append(
+                f"root label {root.label!r} is not usable: {complaint or 'contains a space'}"
+            )
 
     seen_labels: dict[str, Root] = {}
     for root in roots:

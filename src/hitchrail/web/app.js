@@ -160,6 +160,9 @@ const state = {
   // #154. Labels of configured roots absent from the listing today, so the
   // empty state can say "hidden" rather than "no folder".
   hiddenRoots: [],
+  // #256. Of those, the ones a request can bring back, so the empty state
+  // does not send somebody to a page with no checkbox on it.
+  hiddenRootsEditable: [],
   // #107. `name:pid` pairs this page has already sent SIGTERM to, so the
   // row offers the escalation and not the same request again. Per page:
   // another client's SIGTERM is not this person's decision to escalate.
@@ -380,8 +383,20 @@ function emptyReason() {
   // #154. Every root hidden is not "no folder": the honest empty state
   // names the roots that are not being listed, and settings is where they
   // come back.
-  if (state.projects.length === 0 && state.hiddenRoots.length > 0) {
-    return `Every root is hidden (${state.hiddenRoots.join(", ")}). Show one in settings.`;
+  //
+  // Two corrections from #256, both about saying something that is not
+  // true. It used to fire on zero PROJECTS, so a visible root that is
+  // merely empty beside a hidden one read as "every root is hidden"; the
+  // question is whether any root is being listed at all, which is
+  // `state.roots`. And it said "show one in settings" for roots the
+  // operator's file disables, where the settings page has no checkbox:
+  // `hidden_roots_editable` is the ones a request can bring back, and
+  // when there are none the sentence names the file instead.
+  if ((state.roots ?? []).length === 0 && state.hiddenRoots.length > 0) {
+    const named = state.hiddenRoots.join(", ");
+    return state.hiddenRootsEditable.length > 0
+      ? `Every root is hidden (${named}). Show one in settings.`
+      : `Every root is hidden (${named}), by the config file. Enable one there.`;
   }
   return `No folder${where}.`;
 }
@@ -466,6 +481,11 @@ function metaFor(project) {
     // destructive one.
     if (project.foreign_session) {
       return `pid ${project.pid}  ·  in tmux session ${project.foreign_session}`;
+    }
+    // #189. A tmux server above the agent that is not the one Hitchrail
+    // talks to: the row can say a tmux holds it, and cannot name the session.
+    if (project.foreign_server_pid) {
+      return `pid ${project.pid}  ·  in a tmux server Hitchrail is not configured for (pid ${project.foreign_server_pid})`;
     }
     return `pid ${project.pid}  ·  no session Hitchrail can address`;
   }
@@ -751,7 +771,12 @@ function buildActions(project, actions) {
   // row once the first has been sent: #169's rule that a kill is always
   // available and never the default, kept by rendering the escalation only
   // after the request that precedes it.
-  if (!project.protected && project.state === "detached" && !project.foreign_session) {
+  if (
+    !project.protected
+    && project.state === "detached"
+    && !project.foreign_session
+    && !project.foreign_server_pid
+  ) {
     // Keyed by name AND pid (review round 1): keyed by name alone, a later
     // agent under the same name on a page left open got Kill as its first
     // control, SIGKILL before SIGTERM, the rule this exists to keep.
@@ -826,6 +851,26 @@ function renderList() {
     return;
   }
   list.replaceChildren(...visible.map(renderRow));
+}
+
+/* #272. `state.signalled` is keyed by `name:pid` and grew for the life of
+   the tab: every row ended in a long session stayed in it forever. Nothing
+   breaks while pids are unique, and on a box with a small `pid_max` a reused
+   pid under the same name would find its key already there and offer Kill as
+   the row's FIRST control, which is the rule #169 exists to keep. Pruned on
+   render against the rows the listing actually carries: a key survives only
+   while its row is still detached at that pid, which is exactly the state the
+   escalation is about. */
+function pruneSignalled() {
+  if (state.signalled.size === 0) return;
+  const live = new Set(
+    state.projects
+      .filter((project) => project.state === "detached" && project.pid)
+      .map((project) => `${project.name}:${project.pid}`),
+  );
+  for (const key of state.signalled) {
+    if (!live.has(key)) state.signalled.delete(key);
+  }
 }
 
 function announce(message) {
@@ -919,6 +964,7 @@ function formatAgo(seconds) {
 }
 
 export function render() {
+  pruneSignalled();
   renderTabs();
   renderChips();
   renderStopAll();
@@ -2327,6 +2373,7 @@ async function refresh() {
     roots.length > 1 ? [...state.rootFilter, ...storedRoots()].filter((l) => present.has(l)) : [],
   );
   state.hiddenRoots = result.body.hidden_roots ?? [];
+  state.hiddenRootsEditable = result.body.hidden_roots_editable ?? [];
   state.memory = result.body.memory;
   state.server = result.body.server ?? state.server;
   render();

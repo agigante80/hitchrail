@@ -32,6 +32,128 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+## 0.9.0 - 2026-09-17
+
+Phase 20: the perimeter, hardened. Upgrading is safe with no action unless
+one of five refusals now names your configuration: a `--stop-timeout` above
+3600 seconds; `--tls-cert` beside a plain `http://` `--allow-origin` off
+loopback, which never worked (the `Secure` cookie was never sent back on that
+origin) and now says so at startup; a config file whose DIRECTORY others can
+write to, refused like the file itself; an `--expect-gateway-mac` that is
+not one of the four spellings of a MAC (`aa:bb:cc:dd:ee:ff`,
+`aa-bb-cc-dd-ee-ff`, `aabb.ccdd.eeff`, `aabbccddeeff`), which the check used
+to accept with stray characters around it; or a `--tls-key` with a
+passphrase, which used to reach a prompt no unit can answer.
+
+Still not protected, and stated so it is read rather than discovered:
+Hitchrail does not sandbox the sessions it starts, and over plain HTTP on a
+LAN the token crosses the network in cleartext, which `--tls-cert` or a TLS
+terminating proxy ends.
+
+### Fixed
+
+**A settings write no longer re-reads the TLS private key.** Changing the
+stop wait from the settings page rebuilt the configuration to validate it,
+which loaded the certificate pair again; a key rotated or removed after
+start answered "cannot be loaded, so nothing will be served on this port"
+while the server was serving the reply. The pair is loaded once, by the
+command line, into the context the server serves with, and TLS 1.2 is the
+floor, set rather than inherited.
+
+**Five session routes answered a bare 500 when a root was unmounted.**
+Stop, kill, answer, the session link and the signal route on a stopped name
+now answer 503 `root_unavailable` in the envelope, as the listing and logs
+did.
+
+**The signal route could reach past this instance's root.** Two instances as
+the same user, both labelled `main`, each with a folder of the same name: one
+could end the other's agent, because the pid route matched the process by
+its command line and a command line does not say where the process runs.
+It reads the process's working directory after taking the handle and refuses
+one outside this instance's root. The tmux routes are unchanged, and a
+detached agent whose folder was renamed can still be ended.
+
+**The stop wait has a ceiling, 3600 seconds**, on the flag, the settings
+page and the state file alike: a wait past an hour is not one anybody is
+watching, and the settings page accepted any number. A `state.toml` holding
+a larger value from 0.8.0's page falls back to the default rather than being
+honoured, and a `--stop-timeout` above the ceiling refuses at startup.
+
+**An agent inside a tmux Hitchrail is not configured for is no longer
+offered End.** A tmux server on another socket, or the one your own terminal
+runs in, holds the agent, and the pane map cannot see it because Hitchrail
+only asks its own server. The row now finds that server in the process tree
+and says "in a tmux server Hitchrail is not configured for (pid N)" instead
+of "no session Hitchrail can address"; the signal route refuses it as
+`owned_elsewhere` with the pid in a `server_pid` field, and the listing
+carries it as `foreign_server_pid`. An agent that outlived its pane under
+Hitchrail's own server is still detached and can still be ended.
+
+**A refused toggle on the settings page no longer loses its reason.** With
+a state directory that cannot be written, the checkbox snapped back and the
+strip went blank, so the person saw a control that would not stay set and no
+sentence saying why. The refusal's words survive the repaint that follows it.
+
+**The empty list stops claiming every root is hidden when one is merely
+empty**, and stops sending somebody to the settings page for a root the
+config file disables, where there is no checkbox to find. It names the file
+instead. The listing carries `hidden_roots_editable` for that distinction.
+
+**A TLS key with a passphrase refuses instead of asking for one.** It used
+to reach OpenSSL's terminal prompt: interactively that was two prompts, one
+at the configuration check and one inside the server, and under the systemd
+unit, where there is no terminal, the start failed saying nothing useful.
+It now stops at startup naming the key and the command that decrypts it.
+
+**A handle the kernel refuses is no longer reported as somebody else's
+process.** `pidfd_open` does not refuse on ownership grounds, so an EPERM
+there is a seccomp filter or an LSM denying the syscall; the route now says
+so (`pidfd_unavailable`) instead of "not ours to signal", which sent an
+operator looking at the wrong process. EPERM at the send keeps its
+ownership meaning, which is what it means there.
+
+**The page's memory of what it has ended no longer grows for the life of
+the tab.** It is pruned to the rows the listing still carries as detached
+at that pid, so on a machine with a small pid ceiling a reused pid under
+the same name is offered End before Kill, as any row is.
+
+**The session cookie is `Secure` behind a TLS terminating proxy.** It was
+`Secure` only when Hitchrail itself held the certificate, so in the proxy
+deployment (bound to loopback, `--allow-origin https://box.lan`, no
+`--tls-cert`) the browser also offered the cookie to `http://box.lan`, on
+any port, because cookies are not port scoped. It is `Secure` now when the
+bind is loopback and every non loopback allowed origin is https, which is
+exactly that deployment and costs nothing there. Everything else is
+unchanged, including a proxy origin beside a LAN bind: something can still
+reach that server in the clear, and a `Secure` cookie on a browser doing so
+is never sent back. Loopback origins count for neither.
+
+**The config file's remaining refusals are in words.** A label holding
+`=` refuses as a label rather than parsing as a different one; a NUL escape
+in a path and a file that is not UTF-8 refuse with exit 2 naming the file
+rather than a traceback; a config directory writable by others refuses
+naming the directory, since a private file in a shared directory is private
+until the next rename; and the state file is written through a fresh
+temporary name, so a symlink left at `state.tmp` in a writable state
+directory is no longer written through.
+
+**The network guard reads the gateway's entry on the route's interface.**
+With ethernet and wifi on one LAN the ARP table holds two entries for the
+gateway address, and the guard compared whichever the table listed first.
+It matches the interface the default route names now, and a table holding
+an interface name that is not UTF-8 is read rather than a traceback.
+
+**A foreign session name holding a newline could put somebody else's pane
+into your listing.** tmux 3.1 and earlier store a newline in a session name
+verbatim, so a session called `innocent<newline>hr-main~vessel` printed a
+line the pane map read as ours, with the foreign pane's pid: the project
+then derived running or stale from a process that was never its own. Records
+are now ended by a character no tmux stores in a name, so the whole name
+arrives together and is refused. tmux 3.2 and later escape the newline
+themselves; the fix is for the versions that do not. On tmux 3.7a, which
+admits a session with no name, such a session's agent is listed as inside
+`(unnamed)` rather than as an orphan with End on offer.
+
 ## 0.8.0 - 2026-09-16
 
 Phase 14: the perimeter, chosen rather than assumed. Upgrading is safe with

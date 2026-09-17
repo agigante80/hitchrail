@@ -279,3 +279,21 @@ def test_detached_and_stale_are_different_shapes() -> None:
     assert paths("detached") != paths("stale")
     for name in _badge_words():
         assert "<path" in paths(name), f"{name} has no drawing"
+
+
+GRANT = APP_JS.parent / "grant.html"
+
+
+def test_the_key_field_hints_a_password_manager_and_has_no_name() -> None:
+    """#171's two decisions on the grant page, pinned (#260 item 7). The
+    `autocomplete` value is what lets a password manager offer the entry it
+    holds for this address; `off` would make every enrolment a retype. The
+    ABSENCE of `name` is what keeps a native submit from becoming
+    `GET /grant?token=<key>`: only a named field joins a form submission, and
+    the script reads the field through `data-key` instead."""
+    html = GRANT.read_text(encoding="utf-8")
+    start = html.index('<input id="key"')
+    field = html[start : html.index(">", start) + 1]
+    assert 'autocomplete="current-password"' in field, field
+    assert 'type="password"' in field, field
+    assert " name=" not in field and "data-key" in field, field

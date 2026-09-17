@@ -1,6 +1,6 @@
 [project]
 name = "hitchrail"
-version = "0.8.0"
+version = "0.9.0"
 description = "Start and stop headless Claude Code sessions across a folder of projects, from your phone."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -232,6 +232,14 @@ source_paths = [
   # import it, so the assembled tree could not import and `mutmut run` died
   # before scoring a mutant. #131 is the guard that now catches this.
   "src/hitchrail/roots.py",
+  # #273. Both arrived in Phase 14 and met neither list. `settings.py` reads
+  # the file that draws the root boundary and writes the state file, and
+  # its mode check is three clauses a mutant can flip one at a time;
+  # `gateway.py` decides whether the unit starts at all from two `/proc`
+  # tables, byte order and a flag test included. Between a web page and a
+  # shell in the sense that matters: what runs, and where.
+  "src/hitchrail/settings.py",
+  "src/hitchrail/gateway.py",
   # #130 asked whether this belongs here and required the answer with a
   # number. **Measured on 2026-09-05: adding it takes the sweep from 829
   # mutants to 1133, and from 91 seconds to 104.** Thirteen seconds, which is
@@ -262,10 +270,6 @@ source_paths = [
 # themselves and make every run report zero mutants killed.
 also_copy = [
   "src/hitchrail/__init__.py",
-  # #154. `cli.py` imports it; copied for the same reason as `__init__.py`.
-  "src/hitchrail/settings.py",
-  # #207. `config.py` and `cli.py` import it.
-  "src/hitchrail/gateway.py",
   # #221. Copied rather than mutated, and its ABSENCE was not a gap but a
   # break: `engine.py` imports it, so the assembled tree had the importer and
   # not the module, `tests/conftest.py` failed to import, and pytest exited 4.
@@ -291,6 +295,11 @@ also_copy = [
   # parent directories, so naming the file alone fails on a clean `mutants/`
   # and only appeared to work while a previous run had left the tree behind.
   "tests",
+  # `tests/test_api.py` reads `docs/api.md` to hold the payload tables to the
+  # server both ways, and the mutants tree had no docs at all, so the run
+  # died on the first mutant of anything (#273 found it; it predates it).
+  # The directory, for the reason `tests` is the directory.
+  "docs",
 ]
 # **The repo shape guards have to come out, and the reason is instructive.**
 # mutmut copies the tree and writes every mutant of a module into one file, so
@@ -314,7 +323,11 @@ also_copy = [
 # mutmut reports as "Failed to run pytest with args" and which cost a day of
 # reading a valid command as a malformed one.
 # `test_every_test_the_sweep_deselects_still_exists` is why it cannot.
+# **#273 added the sixth**, and it reads the source too: it parses every
+# `os.environ.get(X)` in `src/` for X, and a mutant of `settings.py` carries
+# `os.environ.get(None)` beside the real call, which no scrub list names.
 pytest_add_cli_args = [
+  "--deselect=tests/test_config.py::test_every_environment_variable_the_product_reads_is_scrubbed",
   "--deselect=tests/test_config.py::test_every_module_is_under_the_size_guideline",
   "--deselect=tests/test_config.py::test_the_import_contract_covers_every_engine_layer_module",
   "--deselect=tests/test_config.py::test_projectnames_does_not_import_config",
@@ -347,4 +360,9 @@ pytest_add_cli_args_test_selection = [
   # leak a process group.
   "tests/test_tmux.py",
   "tests/test_tmuxnames.py",
+  # #273. The suites that reach `settings.py` and `gateway.py`, both
+  # hermetic: tables and files a test wrote, the nudge a recorder.
+  "tests/test_settings_file.py",
+  "tests/test_settings_route.py",
+  "tests/test_gateway.py",
 ]

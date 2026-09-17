@@ -13,7 +13,8 @@ from __future__ import annotations
 import ast
 import pathlib
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
+from dataclasses import replace
 from typing import Any
 
 import httpx
@@ -90,6 +91,9 @@ async def test_the_listing_shows_the_active_roots_and_names_the_hidden(
     body = await _listing(client)
     assert [r["label"] for r in body["roots"]] == ["work", "home"]
     assert body["hidden_roots"] == ["vault"]
+    # And which of those a request could bring back (#256): `vault` is
+    # disabled by the operator's file, so the page must not offer it.
+    assert body["hidden_roots_editable"] == []
     # The listing sorts by folder, which is the name a person reads.
     assert [p["name"] for p in body["projects"]] == ["work~vessel", "home~attic"]
 
@@ -114,6 +118,9 @@ async def test_hiding_a_root_removes_its_projects_and_keeps_its_session(
     body = await _listing(client)
     assert [x["label"] for x in body["roots"]] == ["home"]
     assert body["hidden_roots"] == ["work", "vault"]
+    # `work` was hidden by this request and can be shown again; `vault` is
+    # the operator's and cannot (#256).
+    assert body["hidden_roots_editable"] == ["work"]
     assert [p["name"] for p in body["projects"]] == ["home~attic"]
     assert tmux.killed == []
     # Still a session: the graceful stop is accepted, not "unknown project".
@@ -258,6 +265,7 @@ async def test_a_request_cannot_enable_what_the_operator_disabled(
         ({"stop_timeout": "45"}, "invalid_value", "whole number"),
         ({"stop_timeout": 0}, "invalid_value", "positive"),
         ({"stop_timeout": True}, "invalid_value", "whole number"),
+        ({"stop_timeout": 3601}, "invalid_value", "at most 3600"),
         ({"stop_timeout": None}, "invalid_value", "whole number"),
         # Malformed shapes, all 400 and none of them a state change.
         ({"roots": {"work": {"enabled": "false"}}}, "invalid_body", "boolean"),
@@ -296,9 +304,25 @@ async def test_get_config_shows_every_value_with_its_source_and_never_the_token(
     ]
     assert body["hidden_roots"] == ["vault"]
     assert body["state_file"] == {"value": str(config.state_path)}
+    # The network guard, unset here: null with its source (#260 item 6, which
+    # found the field on the page and in nobody's test).
+    assert body["expect_gateway_mac"] == {"value": None, "source": "default"}
     # Everything a flag can set is on the page, by the name the flag uses.
     for name in ("port", "allow_hosts", "allow_origins", "self_project", "agent_binary"):
         assert set(body[name]) == {"value", "source"}, name
+
+
+async def test_the_expected_gateway_is_shown_normalised(
+    tmp_path: pathlib.Path, config: Config, engine: Engine
+) -> None:
+    """The value as `Config` keeps it, lower case with colons, whatever
+    spelling the flag was given, so the page and the refusal agree."""
+    guarded = replace(config, expect_gateway_mac="A4-2B-B0-11-22-33")
+    app = create_app(engine=engine, config=guarded, bus=EventBus())
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as c:
+        r = await c.get("/api/config", headers=HEADERS)
+    assert r.json()["expect_gateway_mac"]["value"] == "a4:2b:b0:11:22:33"
 
 
 async def test_the_sources_the_cli_computes_reach_the_page(tmp_path: pathlib.Path) -> None:
@@ -406,6 +430,55 @@ async def test_the_config_file_shown_is_the_one_that_was_read(tmp_path: pathlib.
         body = (await c.get("/api/config", headers=HEADERS)).json()
     assert body["config_file"] == {"value": str(custom), "source": "flag"}
     assert body["state_file"] == {"value": str(tmp_path / "state.toml")}
+
+
+def test_the_pages_ceiling_is_the_validators() -> None:
+    """One number, two places: the field's `max` and `MAX_STOP_TIMEOUT_S`.
+    Asserted so the page cannot promise a wait the server refuses."""
+    from hitchrail import pages
+    from hitchrail.config import MAX_STOP_TIMEOUT_S
+
+    html = (pathlib.Path(pages.WEB) / "settings.html").read_text()
+    assert f'max="{MAX_STOP_TIMEOUT_S}"' in html
+
+
+async def test_a_settings_write_succeeds_after_the_key_file_is_gone(
+    tmp_path: pathlib.Path,
+) -> None:
+    """#267. `Preferences.apply` validated the wait by rebuilding a Config,
+    which re-read the private key: rotate or remove it after start and the
+    settings write answered "cannot be loaded, so nothing will be served"
+    while serving the response. The key is read once, by the CLI."""
+    from support import make_certificate
+
+    cert, key = make_certificate(tmp_path)
+    (tmp_path / "root").mkdir()
+    config = Config(
+        roots=(Root(label="main", path=(tmp_path / "root").resolve()),),
+        token="s3cret-token-value",
+        tls_cert=cert,
+        tls_key=key,
+        state_path=tmp_path / "state" / "state.toml",
+        sessions_dir=tmp_path / ".sessions",
+        agent_config_path=NO_AGENT_CONFIG,
+    )
+    engine = make_engine(config, FakeTmux(), procs_from(""), PLENTY)
+    app = create_app(engine=engine, config=config, bus=EventBus())
+    key.unlink()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://localhost"
+    ) as c:
+        r = await c.patch(
+            "/api/config",
+            json={"stop_timeout": 45},
+            headers={
+                "host": "localhost",
+                "origin": "https://localhost:8787",
+                "authorization": "Bearer s3cret-token-value",
+            },
+        )
+    assert r.status_code == 200, r.text
+    assert r.json()["stop_timeout"]["value"] == 45
 
 
 async def test_a_body_that_is_not_json_is_invalid_body(client: httpx.AsyncClient) -> None:
@@ -552,49 +625,173 @@ def test_the_editable_subset_is_exactly_the_literal() -> None:
 BODY_KEYS = frozenset({"name", "key", "token", "roots", "enabled", "stop_timeout"})
 
 
+class RouteSurfaces:
+    """Everything a request could carry into `server.py`, read from the route
+    table and the source (#154, sturdier since #266).
+
+    Three surfaces: template parameters (name and converter), keys read out
+    of a parsed body, and keys read out of the query string. The body walk
+    follows every name bound from `await request.json()` rather than a fixed
+    pair, and every read shape rather than only `.get`, because the first
+    version watched `body` and `payload` and `.get`, and a route that wrote
+    `data = await request.json()` then `data["path"]` was invisible to it.
+    """
+
+    def __init__(self, routes: Sequence[object], source: str) -> None:
+        self.params: set[str] = set()
+        self.converters: set[str] = set()
+        for route in routes:
+            assert isinstance(route, Route)
+            for name, converter in re.findall(r"\{(\w+)(?::(\w+))?\}", route.path):
+                self.params.add(name)
+                if converter:
+                    self.converters.add(f"{name}:{converter}")
+        tree = ast.parse(source)
+        # Every name bound to a parsed body, by any binding and any parser:
+        # `body = await request.json()`, `data: dict = await request.json()`,
+        # `(data := await request.json())`, `json.loads(await request.body())`,
+        # `await request.form()`. Bound names are collected first so a read
+        # anywhere in the file resolves, and an inline `(await
+        # request.json())["path"]` is a read whose owner IS the parse.
+        bodies: set[str] = set()
+        for node in ast.walk(tree):
+            targets: list[ast.expr] = []
+            value: ast.expr | None = None
+            if isinstance(node, ast.Assign):
+                targets, value = node.targets, node.value
+            elif isinstance(node, ast.AnnAssign | ast.NamedExpr):
+                targets, value = [node.target], node.value
+            if value is not None and _parses_a_request(value):
+                bodies.update(t.id for t in targets if isinstance(t, ast.Name))
+        assert bodies, "no parsed body found, so the walk has stopped matching"
+        self.bodies = bodies
+
+        def is_body(owner: ast.expr) -> bool:
+            return (isinstance(owner, ast.Name) and owner.id in bodies) or _parses_a_request(
+                owner
+            )
+
+        self.body_keys: set[str] = set()
+        self.query_keys: set[str] = set()
+        for node in ast.walk(tree):
+            # x["key"], for x a body or the query string
+            if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant):
+                if is_body(node.value):
+                    self.body_keys.add(str(node.slice.value))
+                if ast.unparse(node.value) == "request.query_params":
+                    self.query_keys.add(str(node.slice.value))
+            # x.get("key"), same owners
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "get"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+            ):
+                if is_body(node.func.value):
+                    self.body_keys.add(str(node.args[0].value))
+                if ast.unparse(node.func.value) == "request.query_params":
+                    self.query_keys.add(str(node.args[0].value))
+
+
+_REQUEST_PARSERS = ("request.json()", "request.body()", "request.form()")
+
+
+def _parses_a_request(expr: ast.expr) -> bool:
+    """Whether an expression contains a call that parses the request body,
+    awaited or not, wrapped or not."""
+    text = ast.unparse(expr)
+    return any(parser in text for parser in _REQUEST_PARSERS)
+
+
+def _surfaces(engine: Engine, config: Config, source: str | None = None) -> RouteSurfaces:
+    app = create_app(engine=engine, config=config, bus=EventBus())
+    return RouteSurfaces(list(app.routes), source or pathlib.Path(server.__file__).read_text())
+
+
 def test_no_route_accepts_a_path(engine: Engine, config: Config) -> None:
     """#154's standing assertion, read from the REAL route table and the
     request bodies the routes parse, so the next route cannot take one by
-    accident.
-
-    Three surfaces a path could arrive through, each closed: a template
-    parameter (only `{name}`, a project identifier), a body key (the
-    literal above), and the query string (only `acknowledged` and `lines`).
-    An AST walk rather than a grep, because a grep for "path" matches the
-    comments explaining why there is none.
-    """
-    app = create_app(engine=engine, config=config, bus=EventBus())
-    params: set[str] = set()
-    for route in app.routes:
-        assert isinstance(route, Route)
-        params.update(re.findall(r"\{(\w+)(?::\w+)?\}", route.path))
-    assert params == {"name"}, params
-
-    source = pathlib.Path(server.__file__).read_text()
-    tree = ast.parse(source)
-    body_keys: set[str] = set()
-    query_keys: set[str] = set()
-    for node in ast.walk(tree):
-        # body["key"] and payload["name"]
-        if (
-            isinstance(node, ast.Subscript)
-            and isinstance(node.value, ast.Name)
-            and node.value.id in {"body", "payload"}
-            and isinstance(node.slice, ast.Constant)
-        ):
-            body_keys.add(str(node.slice.value))
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-            owner = ast.unparse(node.func.value)
-            if node.func.attr == "get" and node.args and isinstance(node.args[0], ast.Constant):
-                # body.get("roots") and request.query_params.get("lines")
-                if owner in {"body", "payload"}:
-                    body_keys.add(str(node.args[0].value))
-                if owner == "request.query_params":
-                    query_keys.add(str(node.args[0].value))
-    assert body_keys, "the walk found no body reads, so it has stopped matching"
-    assert body_keys <= BODY_KEYS, body_keys - BODY_KEYS
-    assert query_keys == {"acknowledged", "lines"}, query_keys
+    accident. An AST walk rather than a grep, because a grep for "path"
+    matches the comments explaining why there is none."""
+    found = _surfaces(engine, config)
+    assert found.params == {"name"}, found.params
+    # No converter at all: `{name:path}` matches slashes, which is the one
+    # template change that turns an identifier into a path.
+    assert found.converters == set(), found.converters
+    assert found.body_keys, "the walk found no body reads, so it has stopped matching"
+    assert found.body_keys <= BODY_KEYS, found.body_keys - BODY_KEYS
+    assert found.query_keys == {"acknowledged", "lines"}, found.query_keys
     # The one body whose keys are data rather than literals: the PATCH walks
     # `roots` by label and the fields under each label by the literal set.
     assert "path" not in server.EDITABLE_ROOT_FIELDS
     assert "path" not in BODY_KEYS
+
+
+# The guard's guard (#266): each bypass the review named, applied to a copy of
+# the source, and the walk shown to see it. A guard that a plausible edit
+# walks around is a guard that reads as configured.
+_ANCHOR = '        name = request.path_params["name"]\n        try:\n            lines = int('
+_HEAD = '        name = request.path_params["name"]\n'
+_TAIL = "        try:\n            lines = int("
+_BYPASSES = {
+    "a-third-body-name": (
+        _ANCHOR,
+        _HEAD + '        data = await request.json()\n        _ = data["path"]\n' + _TAIL,
+    ),
+    "an-annotated-binding": (
+        _ANCHOR,
+        _HEAD + '        data: dict = await request.json()\n        _ = data["path"]\n' + _TAIL,
+    ),
+    "a-walrus": (
+        _ANCHOR,
+        _HEAD + '        _ = (data := await request.json())["path"]\n' + _TAIL,
+    ),
+    "an-inline-await": (
+        _ANCHOR,
+        _HEAD + '        _ = (await request.json())["path"]\n' + _TAIL,
+    ),
+    "a-form-body": (
+        _ANCHOR,
+        _HEAD + '        form = await request.form()\n        _ = form.get("path")\n' + _TAIL,
+    ),
+    "raw-bytes-loaded": (
+        _ANCHOR,
+        _HEAD
+        + '        data = json.loads(await request.body())\n        _ = data["path"]\n'
+        + _TAIL,
+    ),
+    "query-by-subscript": (
+        '            lines = int(request.query_params.get("lines", 40))',
+        '            lines = int(request.query_params["path"])',
+    ),
+}
+
+
+@pytest.mark.parametrize("bypass", sorted(_BYPASSES))
+def test_the_guard_sees_each_bypass_in_the_source(
+    engine: Engine, config: Config, bypass: str
+) -> None:
+    before, after = _BYPASSES[bypass]
+    source = pathlib.Path(server.__file__).read_text()
+    assert source.count(before) == 1, f"the anchor for {bypass} moved; re-aim it"
+    found = _surfaces(engine, config, source.replace(before, after))
+    if bypass == "query-by-subscript":
+        assert "path" in found.query_keys
+    else:
+        assert "path" in found.body_keys and not found.body_keys <= BODY_KEYS
+
+
+def test_the_guard_sees_a_path_converter(engine: Engine, config: Config) -> None:
+    """The template half, against a route table with the converter added."""
+    app = create_app(engine=engine, config=config, bus=EventBus())
+    widened = [
+        Route(
+            r.path.replace("{name}", "{name:path}"), r.endpoint, methods=list(r.methods or [])
+        )
+        if isinstance(r, Route) and "{name}" in r.path
+        else r
+        for r in app.routes
+    ]
+    found = RouteSurfaces(widened, pathlib.Path(server.__file__).read_text())
+    assert found.converters == {"name:path"}

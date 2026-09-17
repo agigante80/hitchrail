@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from conftest import FakePidfd, FakeTmux, ScriptedProcs, ps_row
+from hitchrail.config import Config
 from hitchrail.engine import (
     Engine,
     Gone,
@@ -61,6 +62,10 @@ def _engine(
         agent_config_path=root / "no-agent-config.json",
         self_project=self_project,
     )
+    # Where the process runs, unless the test said otherwise: the folder the
+    # row names, under this root.
+    if fake.cwd is None:
+        fake.runs_in(root / "vessel")
     return Engine(
         config,
         tmux=FakeTmux(sessions=sessions, foreign=foreign),
@@ -71,6 +76,7 @@ def _engine(
         send_signal=fake.send,
         close_pidfd=fake.close,
         owner_uid=fake.owner,
+        cwd_of=fake.cwd_of,
     )
 
 
@@ -167,7 +173,27 @@ def test_a_foreign_owned_agent_is_refused_and_the_session_is_named(root: Path) -
     with pytest.raises(OwnedElsewhere, match="'cc-vessel'") as caught:
         engine.signal_detached(proj("vessel"))
     assert caught.value.session == "cc-vessel"
-    assert [k for k, _ in fake.events if k in ("open", "send")] == []
+    assert [k for k, _ in fake.events if k in ("open", "send", "cwd")] == []
+
+
+def test_an_agent_under_a_tmux_on_another_socket_is_refused_and_the_server_is_named(
+    root: Path,
+) -> None:
+    """#189 at the pid route: an owner the pane map could not see but the
+    process tree can. A courtesy refusal, and the control is withheld on the
+    row; the safety property is still the handle."""
+    fake = FakePidfd()
+    table = (
+        ps_row(800, 1, args="tmux -S /tmp/other/s")
+        + ps_row(801, 800, args="bash")
+        + ps_row(ORPHAN, 801, project=proj("vessel"))
+    )
+    engine = _engine(root, Watched(fake, table), fake)
+    with pytest.raises(OwnedElsewhere, match=r"not configured for \(pid 800\)") as caught:
+        engine.signal_detached(proj("vessel"))
+    assert caught.value.session is None
+    assert caught.value.server_pid == 800
+    assert [k for k, _ in fake.events if k in ("open", "send", "cwd")] == []
 
 
 def test_a_row_that_is_not_detached_is_refused_before_any_handle(root: Path) -> None:
@@ -178,7 +204,7 @@ def test_a_row_that_is_not_detached_is_refused_before_any_handle(root: Path) -> 
         engine.signal_detached(proj("vessel"))
     with pytest.raises(NotDetached, match="stopped"):
         engine.signal_detached(proj("network"))
-    assert [k for k, _ in fake.events if k in ("open", "send", "owner")] == []
+    assert [k for k, _ in fake.events if k in ("open", "send", "owner", "cwd")] == []
 
 
 def test_the_protected_project_is_refused_before_any_handle_is_opened(root: Path) -> None:
@@ -187,7 +213,7 @@ def test_the_protected_project_is_refused_before_any_handle_is_opened(root: Path
     engine = _engine(root, Watched(fake, detached), fake, self_project=proj("hitchrail"))
     with pytest.raises(Protected):
         engine.signal_detached(proj("hitchrail"))
-    assert [k for k, _ in fake.events if k in ("open", "send", "owner")] == []
+    assert [k for k, _ in fake.events if k in ("open", "send", "owner", "cwd")] == []
 
 
 def test_this_servers_own_ancestry_is_refused(root: Path) -> None:
@@ -200,7 +226,7 @@ def test_this_servers_own_ancestry_is_refused(root: Path) -> None:
     engine = _engine(root, Watched(fake, table), fake)
     with pytest.raises(Protected, match="process tree this server runs in"):
         engine.signal_detached(proj("vessel"))
-    assert [k for k, _ in fake.events if k in ("open", "send")] == []
+    assert [k for k, _ in fake.events if k in ("open", "send", "cwd")] == []
 
 
 def test_another_users_process_is_refused_before_any_handle(root: Path) -> None:
@@ -208,7 +234,7 @@ def test_another_users_process_is_refused_before_any_handle(root: Path) -> None:
     engine = _engine(root, Watched(fake, DETACHED), fake)
     with pytest.raises(NotOurs, match="another user"):
         engine.signal_detached(proj("vessel"))
-    assert [k for k, _ in fake.events if k in ("open", "send")] == []
+    assert [k for k, _ in fake.events if k in ("open", "send", "cwd")] == []
 
 
 def test_a_kernel_refusal_at_the_send_is_not_ours_and_the_handle_is_closed(root: Path) -> None:
@@ -237,6 +263,34 @@ def test_no_pidfd_support_refuses_rather_than_falling_back(
         engine.signal_detached(proj("vessel"))
     assert killed == []
     assert fake.signals == []
+
+
+def test_eperm_at_the_open_is_not_an_ownership_refusal(root: Path) -> None:
+    """#272. `pidfd_open(2)` documents EINVAL, EMFILE, ENFILE, ENODEV,
+    ENOMEM and ESRCH, and no EPERM: it does not refuse a handle on
+    ownership grounds. So an EPERM there is seccomp or an LSM denying the
+    syscall to US, and calling it `not_ours` sent the operator looking at
+    the wrong process. It is the same answer as a kernel without the call,
+    and the route still refuses rather than falling back to a bare pid.
+
+    At the SEND, EPERM keeps its ownership meaning, which is what
+    `pidfd_send_signal(2)` documents and what refuses another user's
+    process under a non root Hitchrail. The two are asserted together
+    because the pair is the claim.
+    """
+    denied = FakePidfd(fail_open=OSError(errno.EPERM, "Operation not permitted"))
+    engine = _engine(root, Watched(denied, DETACHED), denied)
+    with pytest.raises(PidfdUnavailable, match="seccomp filter or an LSM"):
+        engine.signal_detached(proj("vessel"))
+    assert denied.signals == []
+    assert not denied.leaked
+
+    refused = FakePidfd(fail_send=OSError(errno.EPERM, "Operation not permitted"))
+    refused.runs_in(root / "vessel")
+    engine = _engine(root, Watched(refused, DETACHED), refused)
+    with pytest.raises(NotOurs, match="not ours to signal"):
+        engine.signal_detached(proj("vessel"))
+    assert not refused.leaked
 
 
 def test_a_handle_the_machine_cannot_spare_is_the_machine_not_the_process(root: Path) -> None:
@@ -278,7 +332,149 @@ def test_an_unknown_root_label_is_refused_before_any_pid_is_looked_up(root: Path
     engine = _engine(root, Watched(fake, other), fake)
     with pytest.raises(UnknownProject):
         engine.signal_detached("other~vessel")
-    assert [k for k, _ in fake.events if k in ("open", "send", "owner")] == []
+    assert [k for k, _ in fake.events if k in ("open", "send", "owner", "cwd")] == []
+
+
+def test_another_instances_agent_under_the_same_label_is_refused_by_where_it_runs(
+    root: Path, tmp_path: Path
+) -> None:
+    """#264. Two instances as the same user, both labelled `main` as the
+    README suggests, roots `/a` and `/b` both holding `foo`: B's agent
+    carries `main~foo` in its argv and matches A's derivation exactly, and
+    no snapshot tells the two apart. Where the process runs does. Read
+    after the handle, so the process the handle refers to is the one
+    judged; nothing is signalled and the handle is closed."""
+    fake = FakePidfd()
+    # A sibling of this test's root, not a child: roots cannot nest, and the
+    # check is "under this root at any depth", so the other instance's root
+    # has to be genuinely elsewhere.
+    other_root = tmp_path.parent / f"{tmp_path.name}-other-instance"
+    (other_root / "vessel").mkdir(parents=True)
+    fake.runs_in(other_root / "vessel")
+    engine = _engine(root, Watched(fake, DETACHED), fake)
+    with pytest.raises(NotOurs, match="another instance's agent"):
+        engine.signal_detached(proj("vessel"))
+    assert fake.signals == []
+    kinds = [k for k, _ in fake.events]
+    assert kinds.index("open") < kinds.index("cwd"), "the directory was read before the handle"
+    assert not fake.leaked
+
+
+def test_a_detached_agent_in_a_renamed_folder_can_still_be_ended(root: Path) -> None:
+    """Premortem 2 of the Phase 20 plan, on the case that broke: the review's
+    first version checked the listing and made a detached agent whose folder
+    had been renamed unreachable on the one route that reaches past tmux,
+    while logs still reported its pid. The kernel reports the renamed folder
+    by its new name, which is still under this root, so it can be ended."""
+    fake = FakePidfd()
+    (root / "vessel").rename(root / "vessel-renamed")
+    fake.runs_in(root / "vessel-renamed")
+    engine = _engine(root, Watched(fake, DETACHED), fake)
+    assert engine.get(proj("vessel")).state is State.DETACHED
+    engine.signal_detached(proj("vessel"))
+    assert fake.signals == [signal.SIGTERM]
+
+
+def test_a_detached_agent_whose_folder_was_deleted_can_still_be_ended(root: Path) -> None:
+    """Review round 2: `rm -rf` under a running agent leaves it holding the
+    inode, and the kernel reports its directory as `foo (deleted)`. A read
+    that checked existence called the live process gone and left it
+    unendable on the one route that reaches it. The suffix sits on the last
+    component, so the parent is still this root."""
+    fake = FakePidfd()
+    fake.runs_in(root / "vessel (deleted)")
+    engine = _engine(root, Watched(fake, DETACHED), fake)
+    engine.signal_detached(proj("vessel"))
+    assert fake.signals == [signal.SIGTERM]
+
+
+def test_an_agent_in_a_worktree_under_its_project_is_still_ours(root: Path) -> None:
+    """Review round 2: the agent binary moves into
+    `<project>/.claude/worktrees/<name>` for a worktree session, so a direct
+    child test refused it. Under this root at any depth is the property,
+    because roots cannot nest, so under this root is never under another
+    instance's."""
+    fake = FakePidfd()
+    fake.runs_in(root / "vessel" / ".claude" / "worktrees" / "feature")
+    engine = _engine(root, Watched(fake, DETACHED), fake)
+    engine.signal_detached(proj("vessel"))
+    assert fake.signals == [signal.SIGTERM]
+
+
+def test_another_users_process_at_the_cwd_read_is_not_ours(root: Path) -> None:
+    """The uid check runs before the handle; a pid reused by another user's
+    process between the two reaches the directory read, which the kernel
+    refuses. `not_ours`, in those words, nothing sent, handle closed."""
+
+    class Refusing(FakePidfd):
+        def cwd_of(self, pid: int) -> Path:
+            self.events.append(("cwd", pid))
+            raise PermissionError(13, "Permission denied")
+
+    fake = Refusing()
+    fake.runs_in(root / "vessel")
+    engine = _engine(root, Watched(fake, DETACHED), fake)
+    with pytest.raises(NotOurs, match="another user's process"):
+        engine.signal_detached(proj("vessel"))
+    assert fake.signals == []
+    assert not fake.leaked
+
+
+def test_the_real_reader_reports_a_deleted_folder_under_its_root(tmp_path: Path) -> None:
+    """`procs.cwd_of` against a real child: a folder deleted under it reads
+    with the kernel's suffix and its parent is still the root."""
+    import subprocess
+
+    from conftest import REAL_CWD_OF
+
+    folder = tmp_path / "vessel"
+    folder.mkdir()
+    child = subprocess.Popen(["sleep", "30"], cwd=folder)
+    try:
+        assert REAL_CWD_OF(child.pid) == folder
+        folder.rmdir()
+        seen = REAL_CWD_OF(child.pid)
+        assert seen.parent == tmp_path
+        assert seen.name.startswith("vessel")
+    finally:
+        child.kill()
+        child.wait(timeout=5)
+
+
+def test_an_unplugged_spare_root_does_not_block_the_pid_route(
+    root: Path, tmp_path: Path
+) -> None:
+    """The review's third finding on the listing check: it scanned every
+    root, so a disabled root on an unplugged drive refused every project.
+    Only the root the label names is consulted now."""
+    from hitchrail.roots import Root
+
+    fake = FakePidfd()
+    main = tmp_path / "a"
+    (main / "vessel").mkdir(parents=True)
+    gone = tmp_path / "usb"
+    gone.mkdir()
+    config = Config(
+        roots=(Root(label="main", path=main), Root(label="usb", path=gone, enabled=False)),
+        sessions_dir=tmp_path / ".sessions",
+        agent_config_path=tmp_path / "no-agent-config.json",
+    )
+    gone.rmdir()
+    fake.runs_in(main / "vessel")
+    engine = Engine(
+        config,
+        tmux=FakeTmux(),
+        procs_fn=Watched(fake, DETACHED),
+        meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
+        ceiling_fn=lambda pid: None,
+        open_pidfd=fake.open,
+        send_signal=fake.send,
+        close_pidfd=fake.close,
+        owner_uid=fake.owner,
+        cwd_of=fake.cwd_of,
+    )
+    engine.signal_detached(proj("vessel"))
+    assert fake.signals == [signal.SIGTERM]
 
 
 # -- round 1 of the review, pinned -----------------------------------------
@@ -311,7 +507,7 @@ def test_an_unreadable_table_fails_the_ancestry_walk_closed(root: Path) -> None:
     engine = _engine(root, procs, fake)
     with pytest.raises(MachineUnreadable, match="process table"):
         engine.signal_detached(proj("vessel"))
-    assert [k for k, _ in fake.events if k in ("open", "send")] == []
+    assert [k for k, _ in fake.events if k in ("open", "send", "cwd")] == []
 
 
 def test_a_process_that_left_after_the_handle_is_gone_not_reused(root: Path) -> None:

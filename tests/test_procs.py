@@ -245,3 +245,21 @@ def test_the_documented_invocation_matches_the_one_used() -> None:
     assert documented in (module.__doc__ or ""), (
         f"the module docstring does not name {documented!r}"
     )
+
+
+# -- #189: ancestry -----------------------------------------------------------
+
+
+def test_ancestors_walk_up_to_init_nearest_first() -> None:
+    table = ProcTable(parse_ps("1 0 1 1 init\n10 1 1 1 tmux\n20 10 1 1 sh\n30 20 1 1 agent\n"))
+    assert [p.pid for p in table.ancestors(30)] == [20, 10]
+    assert table.ancestors(1) == []
+    assert table.ancestors(99) == []
+
+
+def test_ancestors_stop_at_a_cycle() -> None:
+    """Pid reuse in a moving table can make a ppid point back down; the
+    walk must end, the way `descendants` ends."""
+    table = ProcTable(parse_ps("10 30 1 1 a\n20 10 1 1 b\n30 20 1 1 c\n"))
+    found = [p.pid for p in table.ancestors(30)]
+    assert found == [20, 10]

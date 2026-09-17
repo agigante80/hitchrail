@@ -136,7 +136,7 @@ The candidates in this repository, and what each one owns:
 | `docs/roadmap.md` | which phases exist, the state of each, and why each sits where it does; the plan under `docs/superpowers/plans/` owns the exit criteria, and the closing outcome is one line in the roadmap block |
 | `docs/tech-guidelines.md` | a rule that generalises beyond this ticket |
 | `.claude/rules/*.md` | the same rule, where it loads automatically for the files it governs |
-| `.claude/CLAUDE.md` | project shape, commands, architecture, and the non negotiables. Tracked, the one file `.gitignore` re-admits from `.claude/`, and the canonical copy since 2026-09-11; it was `AGENTS.md` from #60 until then |
+| `.claude/CLAUDE.md` | project shape, commands, architecture, and the non negotiables, for whoever works in this checkout. NOT published since 2026-09-16: assistant instruction files are local working state, so anything a contributor or a CI leg has to read belongs in `docs/` instead |
 | `docs/versioning.md` | anything that changes the operator contract |
 
 Three cases where this section may **not** be N/A, because these are the ones that were

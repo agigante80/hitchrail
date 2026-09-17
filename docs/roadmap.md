@@ -29,10 +29,11 @@ every unfinished ticket somewhere explicit.
 
 Phases appear in the order they are meant to run. Three rules decide that
 order: dependency first, then risk where dependency allows a choice, then cost
-of delay, which has been invoked once, when Phase 12 jumped ahead of 9, 10 and
+of delay, which has been invoked twice: when Phase 12 jumped ahead of 9, 10 and
 11 because the wire format it changed was free to break that week and more
-expensive every week after. The next candidate for jumping the queue is argued
-against that one.
+expensive every week after, and when Phase 19 moved ahead of 16, 17 and 18 on
+2026-09-16 because every stop until then loses the wrap up. The next candidate
+for jumping the queue is argued against those two.
 
 **Phases 1 to 10 and 12 closed before this format was adopted on 2026-09-11
 and are not written into it.** Rewriting finished work to look planned in a
@@ -119,8 +120,14 @@ design section 7's rule holds for the list as for the row, and the bulk kill
 lives inside Stop all's wait as its escalation.
 
 ## Phase: Phase 14: The perimeter, chosen rather than assumed
-state: open
+state: done
 plan: docs/superpowers/plans/2026-09-14-hitchrail-phase-14-perimeter.md
+
+**Done, 2026-09-16, shipped as 0.8.0.** Every task landed. Each of the four
+batches went through the bounded review loop with the security lens; every
+loop stopped by its own rule and none on the trip wire, and every finding
+below high or medium became a ticket rather than a fix. Those tickets are the
+whole of the next phase, which is why it sits directly after this one.
 
 The operator chooses how this is reached and how it is proved, instead of
 being handed one answer. Every ticket here touches a security control, so each
@@ -153,6 +160,58 @@ Done when a LAN deployment can be HTTPS without a second daemon, a person
 holding a token can get in without a saved link, and adding a folder does not
 mean editing a systemd unit.
 
+## Phase: Phase 20: The perimeter, hardened
+state: done
+plan: docs/superpowers/plans/2026-09-16-hitchrail-phase-20-hardened.md
+
+**Done, 2026-09-17, shipped as 0.9.0.** Every ticket closed: fifteen built
+and one declined in writing (the ARP cache's STALE window, which needs
+netlink and does not answer the question this guard is for). Four batches,
+each through the bounded review loop with the security lens, and the loops
+found two things worth naming. The pane map's record terminator rested on a
+premise about tmux that release 3.7a had already falsified, which is the
+"verify, do not recall" rule catching a verification that had gone stale
+rather than one that was never done. And #189's first shape named Hitchrail's
+own tmux server as somebody else's and withheld End from the process End
+exists for, found because the live tier runs from inside a tmux.
+
+Re-shaped rather than extended in one place: #237, the mutation sweep over
+five modules, went back to Backlog. It is not a perimeter ticket, it is a
+hundred and thirty nine survivors to read, and this plan's own rule about
+absorbing work is what sent it out. Two findings that add rather than sharpen
+were split out to Backlog as #279 and #280.
+
+The second pass over what Phase 14 built, taken while the reasoning is
+fresh. Every ticket here is a finding from the review of that phase's own
+commits, code and security lenses, filed instead of fixed because the loop
+is bounded: a reviewer asked to find problems will find them, eventually in
+the fixes, so the loop stops and the remainder becomes work that is planned
+rather than work that happens to a fix commit.
+
+Ahead of Phase 15 on the second ordering rule, risk, and on the third, cost of
+delay. Risk: these are soft spots in the surfaces 0.8.0 shipped, a config
+file that draws the root boundary, a route that signals a pid, a guard that
+reads the network, and Phase 16 adds more perimeter on top of them. Cost of
+delay: the reviewers' scenarios are on the tickets now, verified against the
+code as it was; every week they age toward the state #153 reached, a ticket
+that asked for what had already shipped.
+
+Two shapes of ticket, and the priority says which. The P2s are things an
+operator can meet: a stop wait the page reports wrongly, a route that answers
+a 500 where the envelope was promised, a TLS deployment that is accepted and
+then silently fails, a settings write that re-reads the private key and lies
+about it, a guard the phase's out of scope rests on that a plausible edit
+walks around, and a pid route that checks the label and not the listing. The
+P3s are defence in depth on the same files, and one of them is a decision
+rather than work, carried as `needs-human`.
+
+Delivers: the perimeter Phase 14 drew, with its own review's findings closed
+or declined in writing.
+
+Done when every ticket the Phase 14 review filed is closed or declined with
+its reason on the ticket, and no refusal on those surfaces can be reached
+that is not in words.
+
 ## Phase: Phase 15: The package as strangers meet it
 state: planned
 
@@ -171,6 +230,49 @@ a timestamp, so that "was the stop request sent" has an answer.
 Done when the PyPI page and the README agree, the licence is one clickable
 statement rather than four scattered ones, and a stranger's bug report can be
 answered from the journal.
+
+## Phase: Phase 19: Stop means wrap up
+state: planned
+
+A session stopped from a phone leaves the same record as one closed by hand.
+Cut out of Phase 11 on 2026-09-11.
+
+Stop today types `C-u`, `Escape`, `/exit`, `Enter` and nothing else: the agent
+is interrupted mid task and asked to exit, and whatever it knew about the work
+in flight leaves with it. The operator's stated model of Stop is "run the
+closing skill, summarise everything, then close the session", and the code did
+none of that. Decided over the concern that a typed instruction on the
+operator's behalf is impersonation: what keeps it relay is that the prompt is
+authored on the machine only, sent only on a tapped Stop, and sent with
+`send-keys -l`.
+
+A phase rather than a ticket for the reason Phase 16 is one: what it changes,
+not how big it is. It changes design section 4.3, the stop sequence, and it
+carries an open sub decision, the order in which the interrupt and the prompt
+are sent, that is the operator's to make.
+
+Moved ahead of 16, 17 and 18 on 2026-09-16, on the third ordering rule, cost
+of delay, invoked for the second time. Every stop tapped from a phone today
+loses the wrap up the operator's own model of Stop says should happen, and
+nothing in 16, 17 or 18 depends on it or is made cheaper by waiting. It sits
+after Phase 15 rather than before it because #167's logging is what makes
+the new stop sequence diagnosable when it is first watched on a real
+session: "was the prompt sent, and did the pane go idle" has to have an
+answer in the journal before the sequence is trusted.
+
+Delivers: a configured prompt sent before the exit sequence, the closing skill
+by default, with a per session wait for the pane to show an idle input box
+under a ceiling; and an opt in, off by default, that lets a stop ending on a
+prompt end the session anyway because the operator said so ahead of time.
+
+Done when a session stopped from the interface has run the closing skill
+before it exits, a stop that ends on a prompt still does nothing on its own
+unless the operator opted in before tapping, and `stop_prompt` cannot be set
+through any HTTP route.
+
+The deferral under "Deliberately later" still binds, and this phase is written
+against it rather than around it: the prompt is configuration on the machine,
+never text from the page, and the page's only verb is still Stop.
 
 ## Phase: Phase 16: What survives a reboot
 state: planned
@@ -263,40 +365,6 @@ file changes. `engine.py` is the other, and most of its length is comments
 recording footguns that cost real debugging to find. A split that moves lines
 without moving responsibility is refused; length is the trigger for looking,
 never the reason for cutting.
-
-## Phase: Phase 19: Stop means wrap up
-state: planned
-
-A session stopped from a phone leaves the same record as one closed by hand.
-Cut out of Phase 11 on 2026-09-11.
-
-Stop today types `C-u`, `Escape`, `/exit`, `Enter` and nothing else: the agent
-is interrupted mid task and asked to exit, and whatever it knew about the work
-in flight leaves with it. The operator's stated model of Stop is "run the
-closing skill, summarise everything, then close the session", and the code did
-none of that. Decided over the concern that a typed instruction on the
-operator's behalf is impersonation: what keeps it relay is that the prompt is
-authored on the machine only, sent only on a tapped Stop, and sent with
-`send-keys -l`.
-
-A phase rather than a ticket for the reason Phase 16 is one: what it changes,
-not how big it is. It changes design section 4.3, the stop sequence, and it
-carries an open sub decision, the order in which the interrupt and the prompt
-are sent, that is the operator's to make.
-
-Delivers: a configured prompt sent before the exit sequence, the closing skill
-by default, with a per session wait for the pane to show an idle input box
-under a ceiling; and an opt in, off by default, that lets a stop ending on a
-prompt end the session anyway because the operator said so ahead of time.
-
-Done when a session stopped from the interface has run the closing skill
-before it exits, a stop that ends on a prompt still does nothing on its own
-unless the operator opted in before tapping, and `stop_prompt` cannot be set
-through any HTTP route.
-
-The deferral under "Deliberately later" still binds, and this phase is written
-against it rather than around it: the prompt is configuration on the machine,
-never text from the page, and the page's only verb is still Stop.
 
 ## Phase: Backlog
 state: backlog

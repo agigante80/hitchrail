@@ -121,6 +121,23 @@ class ProcTable:
     def children(self, pid: int) -> list[Proc]:
         return list(self._by_ppid.get(pid, ()))
 
+    def ancestors(self, pid: int) -> list[Proc]:
+        """The chain above `pid`, nearest first, stopping at init or at a
+        cycle (#189). The mirror of `descendants`, with the same guard: a
+        snapshot of a moving table can hold a ppid that points back down
+        into its own subtree, and an unguarded walk spins on the event loop."""
+        out: list[Proc] = []
+        seen: set[int] = {pid}
+        current = self.by_pid.get(pid)
+        while current is not None and current.ppid > 1 and current.ppid not in seen:
+            parent = self.by_pid.get(current.ppid)
+            if parent is None:
+                break
+            seen.add(parent.pid)
+            out.append(parent)
+            current = parent
+        return out
+
     def descendants(self, pid: int) -> list[Proc]:
         """The subtree below `pid`, guarded against cycles.
 
@@ -240,3 +257,24 @@ def close_pidfd(pidfd: int) -> None:
 def owner_uid(pid: int) -> int:
     """Whose process, from `/proc`. Raises `OSError` when it is already gone."""
     return Path(f"/proc/{pid}").stat().st_uid
+
+
+def cwd_of(pid: int) -> Path:
+    """Where a process is running, from `/proc`, resolved (#264).
+
+    The one fact the argv does not carry. `find_detached` matches an agent
+    by its command line, and the command line is what a second instance as
+    the same user writes too, so two roots both holding `foo` produce two
+    agents with one identifier. The kernel tracks the directory by inode, so
+    a folder renamed under a running agent reads as its new name here, which
+    is what lets that agent still be ended. Raises `OSError` when the
+    process is gone or a zombie (ENOENT) and `PermissionError` when it is
+    another user's.
+
+    `readlink`, never `resolve` (review round 2): the kernel's answer is
+    already canonical, and a folder DELETED under a running agent reads as
+    `/root/foo (deleted)`, a path that does not exist, so a resolve that
+    checked existence reported a live agent as gone and made it unendable.
+    The suffix sits on the last component, so the parent is still the root.
+    """
+    return Path(f"/proc/{pid}/cwd").readlink()

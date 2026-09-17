@@ -3457,3 +3457,82 @@ def test_no_engine_built_with_defaults_reads_the_real_cgroup_tree(root: Path) ->
     assert conftest.STUB_CEILING_CALLS[before:] == [4242], (
         "an engine built with defaults did not reach the stub, so it read the real tree"
     )
+
+
+# -- #189: a tmux server on another socket, found by ancestry ----------------
+
+OTHER_SERVER = 800
+OTHER_SHELL = 801
+OTHER_AGENT = 802
+
+
+def other_socket_machine(project: str, server_args: str = "tmux -S /tmp/other/s") -> str:
+    """An agent under a tmux server Hitchrail does not talk to: NOT in the
+    pane map, since `list-panes -a` runs against our own socket, but a row
+    in the same `ps`, and the agent's ancestor."""
+    return (
+        ps_row(OTHER_SERVER, 1, args=server_args)
+        + ps_row(OTHER_SHELL, OTHER_SERVER, args="bash")
+        + ps_row(OTHER_AGENT, OTHER_SHELL, project=project)
+    )
+
+
+def test_an_agent_under_a_tmux_on_another_socket_names_the_server(root: Path) -> None:
+    """The row can say a tmux holds it, and cannot name the session: the
+    name lives on a socket we never open. State and refusals are unchanged;
+    what changes is the words, and where the End control is offered."""
+    engine, _ = engine_for(root, table=other_socket_machine(proj("vessel")))
+    session = engine.get(proj("vessel"))
+    assert session.state is State.DETACHED
+    assert session.pid == OTHER_AGENT
+    assert session.foreign_session is None
+    assert session.foreign_server_pid == OTHER_SERVER
+    assert session.as_dict()["foreign_server_pid"] == OTHER_SERVER
+    with pytest.raises(NoAgent, match="a tmux server Hitchrail is not configured for"):
+        engine.kill(proj("vessel"))
+    with pytest.raises(NoAgent):
+        engine.stop(proj("vessel"))
+
+
+def test_a_genuine_orphan_still_says_what_it_said(root: Path) -> None:
+    engine, _ = engine_for(root, table=ps_row(ORPHAN, 1, project=proj("vessel")))
+    session = engine.get(proj("vessel"))
+    assert session.state is State.DETACHED
+    assert session.foreign_session is None
+    assert session.foreign_server_pid is None
+    with pytest.raises(NoAgent, match="no tmux session Hitchrail can address"):
+        engine.kill(proj("vessel"))
+
+
+def test_an_agent_that_outlived_its_pane_under_our_own_server_is_detached(root: Path) -> None:
+    """Our own server above an agent no pane of ours owns is not "elsewhere"
+    (#189, found by the live pidfd test run from inside a tmux). The pane
+    map on our socket saw nothing owning it, so it outlived its pane under
+    our server: the detached case End exists for. The fake's `server_pid`
+    is the tmux row in the table, as `#{pid}` would report it."""
+    engine, tmux = engine_for(root, table=other_socket_machine(proj("vessel")))
+    tmux.server_pid = OTHER_SERVER
+    session = engine.get(proj("vessel"))
+    assert session.state is State.DETACHED
+    assert session.foreign_session is None
+    assert session.foreign_server_pid is None, "our own server was reported as another tool's"
+    with pytest.raises(NoAgent, match="no tmux session Hitchrail can address"):
+        engine.kill(proj("vessel"))
+
+
+def test_a_tmuxinator_ancestor_is_not_claimed_as_a_tmux(root: Path) -> None:
+    """`is_tmux_argv`'s existing rule, not relaxed to make this easier:
+    `tmuxinator`, `tmuxp` and `tmuxifier` spawn tmux and are not it."""
+    table = other_socket_machine(proj("vessel"), server_args="tmuxinator start work")
+    engine, _ = engine_for(root, table=table)
+    assert engine.get(proj("vessel")).foreign_server_pid is None
+
+
+def test_a_visible_owner_wins_over_the_ancestry(root: Path) -> None:
+    """When the pane map saw the owner, the session is named and the server
+    walk is not consulted: the name is the better answer."""
+    foreign, table = foreign_machine(proj("vessel"))
+    engine, _ = engine_for(root, foreign=foreign, table=table)
+    session = engine.get(proj("vessel"))
+    assert session.foreign_session == f"cc-{proj('vessel')}"
+    assert session.foreign_server_pid is None

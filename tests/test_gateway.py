@@ -39,7 +39,7 @@ GATEWAY = "a4:2b:b0:11:22:33"
 def test_the_default_gateway_is_read_in_host_byte_order() -> None:
     """`0121A8C0` is 192.168.33.1, little endian, and the bridge line with
     RTF_UP but no RTF_GATEWAY is not a default route."""
-    assert gateway.default_gateway(ROUTE) == "192.168.33.1"
+    assert gateway.default_gateway(ROUTE) == ("enx803f5df75e5f", "192.168.33.1")
     assert gateway.default_gateway(ROUTE.splitlines()[0] + "\n") is None
     assert gateway.default_gateway("") is None
 
@@ -98,6 +98,14 @@ def test_the_arp_table_yields_the_mac_and_treats_all_zeros_as_absent() -> None:
         ("not a mac", None),
         ("", None),
         ("a4:2b:b0:11:22:33:44", None),
+        # #260: the check matches its own message. Stripping every non hex
+        # character before counting admitted all of these.
+        ("zz:a4:2b:b0:11:22:33", None),
+        ("a4:2b:b0:11:22:33 router", None),
+        ("a4:2b-b0:11:22:33", None),
+        ("a4:2b:b0:11:22:3", None),
+        ("a42b.b011.22.33", None),
+        (" a4:2b:b0:11:22:33", None),
     ],
 )
 def test_a_mac_is_one_address_however_it_is_spelled(raw: str, expected: str | None) -> None:
@@ -267,3 +275,110 @@ def test_the_verdict_is_the_exit_code_from_the_command_line(
     # The FAKE's words, so this cannot pass by reading the real machine's
     # tables and happening not to match, which the first version did.
     assert ("de:ad:be:ef:00:01" in err) if found else ("no IPv4 default route" in err)
+
+
+# -- #273: the survivors, read and killed --------------------------------------
+#
+# The mutation sweep over this module left sixteen survivors. Half were prose
+# or a boundary no real table reaches (a line with exactly four fields; `>`
+# against `>=` on a monotonic clock); these are the ones that were real, each
+# a table shape the first fixtures happened not to contain.
+
+# A VPN's default route first, with no gateway (RTF_UP only), then a static
+# route THROUGH a gateway that is not the default, then the LAN default. The
+# first fixture had the default route first, so `continue` and `break` were
+# the same, an `and` for the `or` was the same, and any flag test that let
+# `0x1` through was the same.
+ROUTE_MIXED = """\
+Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT
+tun0\t00000000\t00000000\t0001\t0\t0\t50\t00000000\t0\t0\t0
+enx803f5df75e5f\t0A0A0A0A\t0221A8C0\t0007\t0\t0\t100\tFFFFFFFF\t0\t0\t0
+short line
+weird0\t00000000\tNOTHEX00\t0003\t0\t0\t100\t00000000\t0\t0\t0
+enx803f5df75e5f\t00000000\t0121A8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0
+"""
+
+
+def test_a_vpn_default_and_a_static_route_before_the_lan_default_are_skipped() -> None:
+    """The tun default has no gateway (flags 0x1), the static route has a
+    gateway but a destination, the short line and the one whose gateway is
+    not hex are malformed: every one is passed over and the LAN default is
+    the answer."""
+    assert gateway.default_gateway(ROUTE_MIXED) == ("enx803f5df75e5f", "192.168.33.1")
+
+
+def test_only_a_vpn_default_is_no_default_at_all() -> None:
+    only_tun = "\n".join(ROUTE_MIXED.splitlines()[:2]) + "\n"
+    assert gateway.default_gateway(only_tun) is None
+
+
+# Two interfaces on one prefix, ethernet and wifi both on 192.168.33.0/24,
+# and two routers on it answering the same address: the ARP table holds one
+# entry per device (#260).
+ARP_TWO_DEVICES = """\
+IP address       HW type     Flags       HW address            Mask     Device
+192.168.33.1     0x1         0x2         DE:AD:BE:EF:00:01     *        wlp2s0
+192.168.33.1     0x1         0x2         A4:2B:B0:11:22:33     *        enx803f5df75e5f
+"""
+
+
+def test_the_arp_entry_is_matched_by_device_as_well_as_address(tmp_path: Path) -> None:
+    """By address alone the answer was whichever line the file listed
+    first, which is hash order. The route names the interface, and the
+    entry on THAT interface is the gateway's."""
+    assert gateway.mac_for("192.168.33.1", ARP_TWO_DEVICES, "enx803f5df75e5f") == GATEWAY
+    assert gateway.mac_for("192.168.33.1", ARP_TWO_DEVICES, "wlp2s0") == "de:ad:be:ef:00:01"
+    assert gateway.mac_for("192.168.33.1", ARP_TWO_DEVICES, "eth9") is None
+    route, arp = _tables(tmp_path, arp=ARP_TWO_DEVICES)
+    assert gateway.gateway_mac(route, arp, nudge=lambda ip: None) == GATEWAY
+    # And the message names the interface whose entry was missing.
+    route, arp = _tables(tmp_path, arp=ARP_TWO_DEVICES.replace("enx803f5df75e5f", "eth9"))
+    clock = FakeClock()
+    with pytest.raises(gateway.GatewayUnknown, match="for enx803f5df75e5f"):
+        gateway.gateway_mac(route, arp, nudge=lambda ip: None, clock=clock, sleep=clock.sleep)
+
+
+def test_a_table_that_is_not_utf8_is_read_rather_than_a_traceback(tmp_path: Path) -> None:
+    """An interface name is any bytes but `/` and whitespace; `read_text`
+    raised `ValueError` on one that is not UTF-8 (#260)."""
+    (tmp_path / "route").write_bytes(
+        ROUTE.encode("utf-8").replace(b"enx803f5df75e5f", b"enx\xff\xfe")
+    )
+    (tmp_path / "arp").write_bytes(
+        ARP.encode("utf-8").replace(b"enx803f5df75e5f", b"enx\xff\xfe")
+    )
+    assert (
+        gateway.gateway_mac(tmp_path / "route", tmp_path / "arp", nudge=lambda ip: None)
+        == GATEWAY
+    )
+
+
+def test_the_gateways_arp_line_can_be_the_first_line() -> None:
+    """The first fixture had the gateway on the second data line, so a walk
+    that skipped one line too many still found it."""
+    first = "\n".join([ARP.splitlines()[0], ARP.splitlines()[2], ARP.splitlines()[1]]) + "\n"
+    assert gateway.mac_for("192.168.33.1", first) == GATEWAY
+
+
+def test_the_wait_after_the_nudge_is_a_real_wait(tmp_path: Path) -> None:
+    """The table fills some time AFTER the datagram, not inside the nudge:
+    a deadline computed as `clock() - RESOLVE_WAIT_S` refuses on the first
+    re-read, and a fixture whose nudge filled the table synchronously could
+    not tell."""
+    route, arp = _tables(tmp_path, arp=ARP.replace(GATEWAY.upper(), "00:00:00:00:00:00"))
+    clock = FakeClock()
+    nudged_at: list[float] = []
+
+    def nudge(ip: str) -> None:
+        nudged_at.append(clock())
+
+    def sleep(seconds: float) -> None:
+        clock.sleep(seconds)
+        # Resolved half a second after the nudge, as a real ARP exchange is
+        # milliseconds and a slow one is not.
+        if clock() - nudged_at[0] >= 0.5:
+            arp.write_text(ARP)
+
+    started = clock()
+    assert gateway.gateway_mac(route, arp, nudge=nudge, clock=clock, sleep=sleep) == GATEWAY
+    assert 0.5 <= clock() - started < gateway.RESOLVE_WAIT_S

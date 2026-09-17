@@ -242,6 +242,10 @@ def create_app(
                     {"label": r.label, "path": str(r.path)} for r in engine.prefs.active_roots()
                 ],
                 "hidden_roots": list(engine.prefs.hidden_roots()),
+                # Of those, the ones a request can bring back (#256): the
+                # empty state told somebody to show a root in settings that
+                # the operator's file disables, where there is no checkbox.
+                "hidden_roots_editable": list(engine.prefs.hidden_roots_a_request_can_show()),
                 # This server rather than this machine: what a person holding
                 # a phone needs before trusting the rest of the page (#147).
                 "server": facts(),
@@ -426,7 +430,7 @@ def create_app(
             # be.
             return _error(401, "unauthorized", "a valid token is required")
         response = JSONResponse({"ok": True})
-        sec.set_token_cookie(response, config.token, secure=config.tls)
+        sec.set_token_cookie(response, config.token, secure=config.cookie_is_secure)
         return response
 
     async def start(request: Request) -> Response:
@@ -507,6 +511,9 @@ def create_app(
             return _error(409, "stop_unsafe", str(exc))
         except eng.MachineUnreadable as exc:
             return _error(503, "machine_unreadable", str(exc))
+        except discovery.RootUnavailable as exc:
+            # #263. The stopped name's ladder lists the root, as on logs.
+            return _error(503, "root_unavailable", str(exc))
         return JSONResponse(session.as_dict(), status_code=202)
 
     async def answer(request: Request) -> Response:
@@ -556,6 +563,8 @@ def create_app(
             return _error(409, "not_asking", str(exc))
         except eng.MachineUnreadable as exc:
             return _error(503, "machine_unreadable", str(exc))
+        except discovery.RootUnavailable as exc:
+            return _error(503, "root_unavailable", str(exc))  # #263, the fourth route
         return JSONResponse(session.as_dict(), status_code=200)
 
     async def kill(request: Request) -> Response:
@@ -587,6 +596,8 @@ def create_app(
             return _error(409, "no_agent", str(exc))
         except eng.MachineUnreadable as exc:
             return _error(503, "machine_unreadable", str(exc))
+        except discovery.RootUnavailable as exc:
+            return _error(503, "root_unavailable", str(exc))  # #263, as on logs
         return JSONResponse(session.as_dict(), status_code=200)
 
     async def signal_detached(request: Request) -> Response:
@@ -616,7 +627,9 @@ def create_app(
         except eng.NotDetached as exc:
             return _error(409, "not_detached", str(exc))
         except eng.OwnedElsewhere as exc:
-            return _error(409, "owned_elsewhere", str(exc), session=exc.session)
+            return _error(
+                409, "owned_elsewhere", str(exc), session=exc.session, server_pid=exc.server_pid
+            )
         except eng.Gone as exc:
             return _error(409, "gone", str(exc))
         except eng.NotOurs as exc:
@@ -625,6 +638,8 @@ def create_app(
             return _error(501, "pidfd_unavailable", str(exc))
         except eng.MachineUnreadable as exc:
             return _error(503, "machine_unreadable", str(exc))
+        except discovery.RootUnavailable as exc:
+            return _error(503, "root_unavailable", str(exc))  # #263, as on logs
         return JSONResponse(session.as_dict(), status_code=202)
 
     async def logs(request: Request) -> Response:
@@ -689,6 +704,8 @@ def create_app(
             return _error(409, "not_running", str(exc))
         except eng.MachineUnreadable as exc:
             return _error(503, "machine_unreadable", str(exc))
+        except discovery.RootUnavailable as exc:
+            return _error(503, "root_unavailable", str(exc))  # #263, the fifth route
         # No `Protected` arm here either, for the same reason as `logs`:
         # `engine.session_url` gates on the name only, so it cannot fire.
         if found is None:

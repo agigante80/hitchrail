@@ -8,7 +8,6 @@ and the derived allowlists; that one owns what a valid host or origin IS.
 from __future__ import annotations
 
 import contextlib
-import ssl
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -51,6 +50,13 @@ __all__ = [
     "normalise_origin",
     "origin_forms",
 ]
+
+
+# #265. The ceiling on `stop_timeout`, one hour, in the one validator so the
+# flag and the settings route refuse alike. The settings page's field carries
+# the same number as its `max`, and `tests/test_settings_route.py` asserts
+# the two agree.
+MAX_STOP_TIMEOUT_S = 3600
 
 
 class ConfigError(ValueError):
@@ -104,6 +110,19 @@ def remote_reach(
         if hostname and not is_loopback_host(hostname):
             return f"--allow-origin {entry} says something outside this machine can reach it"
     return None
+
+
+def _origin_parts(entry: str) -> tuple[str, str] | None:
+    """An allowed origin as `(scheme, host)`, or None when it is loopback or
+    unparseable. One reader for both, so the cookie rule and the TLS refusal
+    agree about what counts as somebody else's browser (#269)."""
+    try:
+        parts = urlsplit(entry.strip().rstrip("/").lower())
+    except ValueError:
+        return None
+    if not parts.hostname or is_loopback_host(parts.hostname):
+        return None
+    return parts.scheme, parts.hostname
 
 
 # The one setting that may arrive in the environment, and the only one that
@@ -290,14 +309,64 @@ class Config:
     def scheme(self) -> str:
         return "https" if self.tls else "http"
 
+    @property
+    def cookie_is_secure(self) -> bool:
+        """Whether the token cookie carries `Secure` (#269).
+
+        `tls` alone was the rule, and behind a TLS terminating proxy that is
+        too narrow: the operator gives `--allow-origin https://box.lan` and
+        binds plain HTTP on loopback, so the cookie went out without
+        `Secure` and the browser then offered it to `http://box.lan` on ANY
+        port, since cookies are not port scoped.
+
+        The rule is: our own TLS, or a LOOPBACK bind whose every non
+        loopback origin is https. Both halves of that second clause are
+        load bearing, and the bind is the one the first version left out
+        (round 1 review of this phase's batch 4). The origins say what the
+        operator meant; the bind says what a browser can actually do. With
+        `--host 0.0.0.0`, `_derive_allowed_origins` emits
+        `http://box.lan:8787` for every allowed host, because our own scheme
+        is http, so a phone that opens the LAN address directly is a request
+        we accept, answer 200 to, and hand a cookie the browser throws away:
+        every request after it is a 401 and the grant page loops forever
+        with a correct token. Bound to loopback, nothing off the machine
+        connects DIRECTLY, and what arrives through the proxy carries the
+        proxy's scheme, which is the https one the origins name. Not "that
+        path cannot exist": `remote_reach` above says why a bind address is
+        not the whole answer, and a plain http forwarder onto our own port
+        would reach the derived origin. What that costs is the flag, on a
+        path the operator arranged themselves.
+
+        It stays FALSE for a plain HTTP LAN deployment, which is the failure
+        the original rule was avoiding: a `Secure` cookie there is never
+        sent back and the tool silently stops working, and
+        `--allow-origin http://box.lan` is how that deployment is spelled.
+
+        Loopback origins are ignored for the test. `http://localhost` is a
+        secure context in Chrome and Firefox, which send a `Secure` cookie
+        on it, and a developer's own `http://127.0.0.1` beside a proxy
+        origin must not turn the flag off for everybody else. Safari does
+        not, which is why a loopback-only deployment (no proxy origin at
+        all) still gets `False` from the first half of the rule.
+        """
+        if self.tls:
+            return True
+        if not is_loopback_host(self.host):
+            return False
+        proxied = [parts for entry in self.extra_origins if (parts := _origin_parts(entry))]
+        return bool(proxied) and all(scheme == "https" for scheme, _ in proxied)
+
     def _check_tls(self) -> None:
         """One flag without the other is a configuration error, not half a
-        configuration; a certificate that cannot be loaded stops the start.
+        configuration. Both must name a file.
 
-        Loaded here, once, into a throwaway context: uvicorn would load it
-        again at bind time and exit 1 on failure, which the unit RETRIES,
-        and after the retries what is listening is nothing. Refusing here
-        is exit 2, which the unit leaves alone, with the file named.
+        The pair is NOT loaded here (#267). It was, once, so a bad pair
+        refused at construction; but `Preferences.apply` rebuilds a `Config`
+        to validate a settings value, so every settings write re-read the
+        private key from disk and a key rotated after start answered a
+        stop-wait change with "cannot be loaded, so nothing will be served"
+        while serving the response. `cli.build_tls_context` loads it once,
+        before the bind, with the same refusal and exit code.
         """
         if (self.tls_cert is None) != (self.tls_key is None):
             missing = "--tls-key" if self.tls_key is None else "--tls-cert"
@@ -308,14 +377,26 @@ class Config:
         for flag, path in (("--tls-cert", self.tls_cert), ("--tls-key", self.tls_key)):
             if not path.is_file():
                 raise ConfigError(f"{flag} {path}: not a readable file")
-        try:
-            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            context.load_cert_chain(str(self.tls_cert), str(self.tls_key))
-        except (ssl.SSLError, OSError) as exc:
-            raise ConfigError(
-                f"--tls-cert {self.tls_cert} with --tls-key {self.tls_key} cannot be "
-                f"loaded, so nothing will be served on this port: {exc}"
-            ) from exc
+        # #268. A plain `http://` origin off loopback beside our own TLS is a
+        # deployment that cannot work: the cookie is `Secure` and is never
+        # sent back on that origin, so the grant succeeds and every request
+        # after it is refused. A proxy in front of an HTTPS backend speaks
+        # https to the browser; the loopback exception is a developer's own
+        # tools on the same machine, and it holds for Chrome and Firefox,
+        # which treat `http://localhost` as a secure context for cookies,
+        # and not for Safari, which drops a Secure cookie there.
+        for entry in self.extra_origins:
+            parts = urlsplit(entry.strip().rstrip("/").lower())
+            if (
+                parts.scheme == "http"
+                and parts.hostname
+                and not is_loopback_host(parts.hostname)
+            ):
+                raise ConfigError(
+                    f"--allow-origin {entry!r} is plain http and --tls-cert is set: the "
+                    f"session cookie is Secure with TLS on and would never be sent back "
+                    f"on that origin. Give the origin as https, or drop --tls-cert"
+                )
 
     def _check_gateway_mac(self) -> None:
         """Six octets in any of the usual spellings, stored in one."""
@@ -343,8 +424,7 @@ class Config:
     def _check_numbers(self) -> None:
         if not (1 <= self.port <= 65535):
             raise ConfigError(f"port out of range: {self.port}")
-        if self.stop_timeout <= 0:
-            raise ConfigError(f"stop timeout must be positive: {self.stop_timeout}")
+        self.check_stop_timeout(self.stop_timeout)
         for name in ("hard_floor_mb", "soft_floor_mb", "session_mb"):
             value = getattr(self, name)
             if value < 0:
@@ -356,6 +436,22 @@ class Config:
             raise ConfigError(
                 f"soft floor {self.soft_floor_mb} is below hard floor "
                 f"{self.hard_floor_mb}, which makes the confirmation gate unreachable"
+            )
+
+    @staticmethod
+    def check_stop_timeout(seconds: float) -> None:
+        """The one validator for the wait, callable without a Config (#267):
+        `Preferences.apply` used to rebuild the whole dataclass to reach it,
+        which re-ran every check including a file read."""
+        if seconds <= 0:
+            raise ConfigError(f"stop timeout must be positive: {seconds}")
+        if seconds > MAX_STOP_TIMEOUT_S:
+            # #265. A wait past an hour is not one anybody is watching, and
+            # the engine held a `stopping` marker for it; the page polls in
+            # 700 ms ticks against a deadline, so the browser timer overflow
+            # the ticket first blamed is not what it does (review, round 1).
+            raise ConfigError(
+                f"stop timeout must be at most {MAX_STOP_TIMEOUT_S} seconds: {seconds}"
             )
 
     def _check_bind_host(self) -> None:

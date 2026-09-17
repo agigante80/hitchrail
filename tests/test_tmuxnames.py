@@ -19,6 +19,7 @@ import pytest
 from hitchrail.tmuxnames import (
     BINARY,
     FOREIGN_NAME_MAX,
+    UNNAMED_SESSION,
     foreign_name,
     is_tmux_argv,
     sanitize,
@@ -240,6 +241,13 @@ def test_the_binary_constant_is_still_the_stem_everything_matches_on() -> None:
 
 def test_a_short_foreign_name_is_returned_whole() -> None:
     assert foreign_name("cc-vessel") == "cc-vessel"
+
+
+def test_an_empty_foreign_name_is_a_placeholder_not_an_empty_string() -> None:
+    """tmux 3.7a admits an empty session name, and `""` reads as "no
+    session" on the page (round 1 review of #189)."""
+    assert foreign_name("") == UNNAMED_SESSION
+    assert UNNAMED_SESSION
 
 
 def test_a_foreign_name_at_the_cap_is_not_truncated() -> None:

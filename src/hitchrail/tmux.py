@@ -47,6 +47,15 @@ class TmuxUnavailable(OSError):
     """
 
 
+# The one format the pane map reads, and what ends each of its records: the
+# format's `:` plus the newline tmux prints after every pane. `panes` explains
+# why it is not a newline alone (#175). `#{pid}` is the SERVER's pid, the same
+# on every record, and it rides here so that `derive` can tell our own server
+# from another one in the process tree without a second call (#189).
+PANE_FORMAT = "#{pid} #{session_name} #{pane_pid}:"
+RECORD_END = ":\n"
+
+
 @dataclass(frozen=True)
 class Panes:
     """One `list-panes -a`, split by whether the session carries our prefix.
@@ -62,6 +71,11 @@ class Panes:
 
     ours: dict[str, int]
     foreign: dict[int, str]
+    # The pid of the server that answered, or None when none is running
+    # (#189). What `derive` compares an agent's tmux ancestor against: our
+    # own server above an agent no pane of ours owns is an agent that
+    # outlived its pane, which is the detached case, not another tool's.
+    server_pid: int | None = None
 
 
 # How long any single tmux call may take before it is abandoned (#67).
@@ -225,6 +239,18 @@ class Tmux:
                 "existing"
             ) from exc
 
+    def _server_pid(self) -> int | None:
+        """The pid of the server on our socket, or None with none running.
+        `display-message -p` answers without a client and without a session,
+        which `list-panes -a` does not."""
+        result = self._try(self._argv("display-message", "-p", "#{pid}"))
+        if result.returncode != 0:
+            return None
+        try:
+            return int(result.stdout)
+        except ValueError:
+            return None
+
     def has_session(self, project: str) -> bool:
         return (
             self._try(self._argv("has-session", "-t", self.session_target(project))).returncode
@@ -255,15 +281,46 @@ class Tmux:
         the fact that every write path builds its target from `session_name`.
         A test asserts it separately from anything that reads this.
 
-        A non zero return means no server is running, which is the ordinary
-        state of a machine with nothing started, not an error.
+        A non zero return means no session, which is the ordinary state of
+        a machine with nothing started, not an error. Usually it also means
+        no SERVER, and not always: with `exit-empty off` in the operator's
+        tmux.conf the server outlives its last session, and an agent that
+        ignored the hangup when its pane died is still that server's child.
+        So the server's pid is asked for separately then, one more call in
+        the no-session state only, or `derive` names our own server as one
+        Hitchrail is not configured for and withholds End from exactly the
+        process it was built for (round 1 review of #189).
         """
-        result = self._try(self._argv("list-panes", "-a", "-F", "#{session_name} #{pane_pid}"))
+        result = self._try(self._argv("list-panes", "-a", "-F", PANE_FORMAT))
         if result.returncode != 0:
-            return Panes(ours={}, foreign={})
+            return Panes(ours={}, foreign={}, server_pid=self._server_pid())
         ours: dict[str, int] = {}
         foreign: dict[int, str] = {}
-        for line in result.stdout.splitlines():
+        server_pid: int | None = None
+        # Records end in `:` + the newline tmux prints after each one, and
+        # NOT at every newline (#175). A session name can hold a newline on
+        # tmux up to 3.1, which stores `innocent\nhr-main~vessel` verbatim
+        # and prints it over two lines, so `splitlines()` handed the parser a
+        # second line that was exactly a name `could_be_ours` accepts followed
+        # by a FOREIGN pane's pid, which put that pid into `ours`, hid the
+        # agent under it, and derived `stopped` for a folder that has an
+        # agent. 3.2 escapes the newline to the two characters `\n` on the
+        # way in (`session_check_name`, CHANGES "3.1c to 3.2"), so the live
+        # tier cannot reach this and the unit tier carries the raw input.
+        #
+        # The invariant is NOT "a name cannot hold `:`", which the round 1
+        # review found false: 3.7a admits `:`, `.` and the empty name
+        # (CHANGES "3.7 to 3.7a", `clean_name` in `tmux.c`) where 3.2 to
+        # 3.7 rewrote the two characters to `_` and up to 3.1 refused them.
+        # The invariant is that no version stores BOTH a `:` and a raw
+        # newline: `:` is refused exactly on the versions that store the
+        # newline, and the newline is escaped on every version that stores
+        # the `:`. So `:\n` cannot occur inside a name on any of them, a pid
+        # cannot hold either character, and the terminator is unambiguous.
+        for record in result.stdout.split(RECORD_END):
+            if not record:
+                # The empty string after the last terminator, or no output.
+                continue
             # `rpartition`, not `partition`. The pid is the LAST field and
             # cannot contain a space; a session NAME can, and ours cannot only
             # because `NAME_PATTERN` refuses one (#173). Foreign names are not
@@ -271,22 +328,28 @@ class Tmux:
             # `my work 4242` into the pid `work 4242`, dropped the line, and
             # left the agent inside that session looking unowned: the exact
             # defect #85 exists to remove, reached through the parser.
-            name, _, raw_pid = line.rpartition(" ")
+            # The server pid is the FIRST field and cannot contain a space;
+            # the pane pid is the LAST and cannot either; the name is what is
+            # left between them, spaces and all.
+            raw_server, _, rest = record.partition(" ")
+            name, _, raw_pid = rest.rpartition(" ")
             try:
+                server = int(raw_server)
                 pid = int(raw_pid)
             except ValueError:
                 # One malformed line must not lose the well formed ones.
                 continue
-            if not name:
-                # A line with no space. `rpartition` gives it an empty name, and
-                # `docs/api.md` promises a name or `null`: `""` is neither.
-                #
-                # **A guard against a format change, not a defect anybody has
-                # seen (#175).** tmux 3.4 refuses an empty session name at
-                # creation, so this line cannot arrive from it. Kept because a
-                # parser should be true of its input rather than of one
-                # version's output, at the cost of one comparison.
-                continue
+            if server_pid is None:
+                server_pid = server
+            # An EMPTY name is a session, not a malformed record. Up to 3.7
+            # tmux refused one at creation and this branch dropped the
+            # record as a guard against a format change; 3.7a admits the
+            # empty name, and a dropped record put its pane in neither map,
+            # so an agent inside it derived as an orphan under our own
+            # server, said "no session Hitchrail can address" and was
+            # offered End (round 1 review of #189). It cannot be ours, since
+            # ours carry the prefix, so it falls through to the foreign
+            # half, where `foreign_name` gives it a placeholder.
             # **A name we could not have created is not ours, and that is
             # not belt and braces.** `session_name` is `prefix +
             # sanitize(<root-label>~<folder>)`, and `could_be_ours` asks
@@ -322,7 +385,7 @@ class Tmux:
             # A session already seen keeps its FIRST pane: a window split must
             # not change which pid a project reports.
             ours.setdefault(name, pid)
-        return Panes(ours=ours, foreign=foreign)
+        return Panes(ours=ours, foreign=foreign, server_pid=server_pid)
 
     def pane_pid(self, project: str) -> int | None:
         """One session's pane pid. For detail paths; `pane_pids` for lists."""

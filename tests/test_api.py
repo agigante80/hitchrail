@@ -794,6 +794,32 @@ async def test_the_logs_routes_say_the_root_is_unavailable_rather_than_faulting(
     assert r.json()["code"] == "root_unavailable"
 
 
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("DELETE", "/api/sessions/{name}"),
+        ("POST", "/api/sessions/{name}/kill"),
+        ("POST", "/api/sessions/{name}/signal"),
+        ("POST", "/api/sessions/{name}/signal/force"),
+        ("POST", "/api/sessions/{name}/answer"),
+    ],
+)
+async def test_the_session_routes_say_the_root_is_unavailable_rather_than_faulting(
+    config: Config, engine: Engine, method: str, path: str
+) -> None:
+    """#263, the same gap as #249 on the three routes it did not reach. A
+    stopped name's ladder lists the root to tell unknown from not running,
+    the root is gone, and the answer was a bare 500."""
+    shutil.rmtree(config.roots[0].path)
+    body = {"key": "Enter"} if path.endswith("/answer") else None
+    async with client_for(engine, config) as c:
+        r = await c.request(
+            method, path.replace("{name}", proj("network")), headers=HEADERS, json=body
+        )
+    assert r.status_code == 503, r.text
+    assert r.json()["code"] == "root_unavailable"
+
+
 async def test_starting_the_self_project_is_423_not_500(root: pathlib.Path) -> None:
     """The route where the protection matters most: it is the one that would
     put a SECOND agent in the folder Hitchrail is running in."""
@@ -2127,6 +2153,8 @@ async def test_a_scan_still_running_at_shutdown_does_not_hang_the_lifespan(
 
 
 def _signal_engine(config: Config, fake: FakePidfd, table: str = DETACHED_PS) -> Engine:
+    if fake.cwd is None:
+        fake.runs_in(config.roots[0].path / "vessel")
     return Engine(
         config=config,
         tmux=FakeTmux(),
@@ -2137,6 +2165,7 @@ def _signal_engine(config: Config, fake: FakePidfd, table: str = DETACHED_PS) ->
         send_signal=fake.send,
         close_pidfd=fake.close,
         owner_uid=fake.owner,
+        cwd_of=fake.cwd_of,
     )
 
 
@@ -2157,30 +2186,25 @@ async def test_the_force_route_is_the_only_way_to_sigkill(config: Config) -> Non
     assert fake.signals == [signal.SIGKILL]
 
 
+# Keyword arguments for the recorder, not instances: a parametrised
+# instance lives for the whole session, and `_signal_engine` pins where the
+# process runs on first use, so a second run of the same case (the mutation
+# sweep collects the suite from two paths) judged a stale root as another
+# instance's. Built inside the test, once per case, every time.
 @pytest.mark.parametrize(
-    ("table", "fake", "status", "code"),
+    ("table", "fake_kw", "status", "code"),
     [
-        (RUNNING_PS, FakePidfd(), 409, "not_detached"),
-        ("", FakePidfd(), 409, "not_detached"),
-        (DETACHED_PS, FakePidfd(fail_open=OSError(3, "No such process")), 409, "gone"),
-        (DETACHED_PS, FakePidfd(fail_send=OSError(3, "No such process")), 409, "gone"),
+        (RUNNING_PS, {}, 409, "not_detached"),
+        ("", {}, 409, "not_detached"),
+        (DETACHED_PS, {"fail_open": OSError(3, "No such process")}, 409, "gone"),
+        (DETACHED_PS, {"fail_send": OSError(3, "No such process")}, 409, "gone"),
+        (DETACHED_PS, {"fail_send": OSError(1, "Operation not permitted")}, 409, "not_ours"),
+        (DETACHED_PS, {"uid": os.getuid() + 1}, 409, "not_ours"),
+        (DETACHED_PS, {"fail_open": OSError(38, "no")}, 501, "pidfd_unavailable"),
+        (DETACHED_PS, {"fail_open": AttributeError("pidfd_open")}, 501, "pidfd_unavailable"),
         (
             DETACHED_PS,
-            FakePidfd(fail_send=OSError(1, "Operation not permitted")),
-            409,
-            "not_ours",
-        ),
-        (DETACHED_PS, FakePidfd(uid=os.getuid() + 1), 409, "not_ours"),
-        (DETACHED_PS, FakePidfd(fail_open=OSError(38, "no")), 501, "pidfd_unavailable"),
-        (
-            DETACHED_PS,
-            FakePidfd(fail_open=AttributeError("pidfd_open")),
-            501,
-            "pidfd_unavailable",
-        ),
-        (
-            DETACHED_PS,
-            FakePidfd(fail_open=OSError(24, "Too many open files")),
+            {"fail_open": OSError(24, "Too many open files")},
             503,
             "machine_unreadable",
         ),
@@ -2198,8 +2222,9 @@ async def test_the_force_route_is_the_only_way_to_sigkill(config: Config) -> Non
     ],
 )
 async def test_every_signal_refusal_has_its_code_and_signals_nothing(
-    config: Config, table: str, fake: FakePidfd, status: int, code: str
+    config: Config, table: str, fake_kw: dict[str, object], status: int, code: str
 ) -> None:
+    fake = FakePidfd(**fake_kw)  # type: ignore[arg-type]
     engine = _signal_engine(config, fake, table)
     if table == RUNNING_PS:
         engine.tmux = FakeTmux(sessions={proj("vessel"): 500})
@@ -2226,7 +2251,23 @@ async def test_a_foreign_owner_is_named_in_its_own_field(config: Config) -> None
     assert r.status_code == 409
     assert r.json()["code"] == "owned_elsewhere"
     assert r.json()["session"] == "cc-vessel"
+    assert r.json()["server_pid"] is None
     assert fake.events == [] or all(k not in ("open", "send") for k, _ in fake.events)
+
+
+async def test_a_server_on_another_socket_is_named_by_pid(config: Config) -> None:
+    fake = FakePidfd()
+    table = (
+        " 800     1   4096   600 tmux -S /tmp/other/s\n"
+        " 801   800   4096   600 bash\n" + DETACHED_PS.replace(" 900     1", " 900   801")
+    )
+    async with client_for(_signal_engine(config, fake, table), config) as c:
+        r = await c.post(f"/api/sessions/{proj('vessel')}/signal", headers=HEADERS)
+    assert r.status_code == 409
+    assert r.json()["code"] == "owned_elsewhere"
+    assert r.json()["session"] is None
+    assert r.json()["server_pid"] == 800
+    assert fake.signals == []
 
 
 async def test_the_protected_project_is_423_on_the_signal_route(
