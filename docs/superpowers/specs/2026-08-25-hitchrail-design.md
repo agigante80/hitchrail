@@ -644,7 +644,7 @@ there is only one root.** Every `{name}` in the table below is that qualified
 identifier.
 
 ```
-hitchrail --root work=~/work --root personal=~/personal
+hitchrail --root work=~/work --root personal=~/projects
 
   POST /api/sessions/work~vessel
   POST /api/sessions/personal~vessel
@@ -683,7 +683,7 @@ The cost is a one time migration, and it is taken at 0.1.0, published on
   route, the SSE payloads and the client at once, for a distinction the
   qualified name already carries in one segment.
 - **Bare names with duplicates refused at startup.** Cheapest, changes nothing
-  on the wire, and rejected because `~/work/api` alongside `~/personal/api` is
+  on the wire, and rejected because `~/work/api` alongside `~/projects/api` is
   an ordinary arrangement rather than a corner case, and the refusal arrives at
   a restart rather than when the colliding folder was created. A feature that
   refuses the common shape of the problem it solves is not the feature.

@@ -577,7 +577,7 @@ the first time on the pull request that introduced it, correctly refusing itself
   supported; now several are, and a project has to say which root it is in.
 
   ```sh
-  hitchrail --root work=~/work --root personal=~/personal
+  hitchrail --root work=~/work --root personal=~/projects
   ```
 
   **What you must do.** Add a label to `--root`: `--root main=~/projects`
@@ -599,7 +599,7 @@ the first time on the pull request that introduced it, correctly refusing itself
   than the exposure. Before it, two roots were not possible at all, and the
   workaround, running two Hitchrails, was silently destructive: the tmux
   session name came from the folder name alone, so `~/work/vessel` and
-  `~/personal/vessel` both derived `hr-vessel`. The second read as `running` on
+  `~/projects/vessel` both derived `hr-vessel`. The second read as `running` on
   the first one's session, and tapping Stop on it stopped the other one's
   agent. The same collision applied to detached agent detection, which matches
   on the agent's own argument.

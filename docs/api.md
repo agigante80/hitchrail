@@ -52,7 +52,7 @@ is configured. `--root` takes `label=path` and is repeatable, and the label is
 the first half of every identifier below.
 
 ```
-hitchrail --root work=~/work --root personal=~/personal
+hitchrail --root work=~/work --root personal=~/projects
 
 POST /api/sessions/work~vessel
 POST /api/sessions/personal~vessel

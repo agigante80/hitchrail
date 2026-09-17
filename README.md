@@ -214,15 +214,15 @@ path = "~/work"
 
 [[roots]]
 label = "personal"
-path = "~/personal"
+path = "~/projects/personal"
 
 [[roots]]
 label = "homelab"
-path = "~/homelab"
+path = "~/projects/homelab"
 
 [[roots]]
 label = "confidential"
-path = "~/confidential"
+path = "~/projects/confidential"
 enabled = false
 ```
 

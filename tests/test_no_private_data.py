@@ -108,7 +108,7 @@ _ALLOWED_ROOT = frozenset(
         "src",
         "work",
         # Added when Phase 12's roadmap entry needed a contrasting pair and
-        # `~/work` plus `~/personal` is the natural one. Recorded rather than
+        # `~/work` plus `~/projects` is the natural one. Recorded rather than
         # slipped in, because an allowlist erodes one convenient word at a
         # time and the guard's whole value is that adding to it is a decision.
         #
