@@ -1,0 +1,53 @@
+# Things this project has decided it may show. Tracked and public on purpose.
+# Keys: root, prefix, email (public scanner); skip (both).
+# NEVER put a private NAME here — the file is public, and a name would be an index.
+root proj
+# a test fixture value that happens to match a private-name shape
+skip tests/test_api.py
+
+# tests/test_no_private_data.py, tests/test_config.py, tests/test_ram.py, tests/test_docs_are_true.py,
+# packaging/hitchrail.service, src/hitchrail/config.py: this project's own private-data guard's test
+# fixtures and packaging examples, all placeholder/fake addresses
+email user@1000.service
+email pass@box.lan
+email name@instance.suffix
+email getty@tty1.service
+email someone@mail.service.com
+email somebody@realmail.com
+email systemd-nspawn@container.service
+email first.last@company.co.uk
+email user@box.lan
+
+# tests/test_no_private_data.py, tests/test_settings_file.py: placeholder fixture segments
+prefix /home/<somebody>
+prefix /home/someone
+prefix /Users/someone
+prefix /home/you
+prefix /home/x
+prefix /home/|
+
+# tests/e2e/conftest.py, tests/test_claude_ipc.py, tests/test_engine.py: a generic tool config
+# filename, not a person
+root .claude.json
+# tests/test_no_private_data.py: placeholder fixture roots
+root <scheme>
+root foo
+
+# docs/design/Desktop.dc.html:32, docs/design/Main.dc.html:33: an HTML tag immediately follows a
+# home-root reference to the built-in allowed "projects" root, with no whitespace, so the
+# scanner's word-token keeps the opening angle bracket from the next tag; the mangled token is
+# not itself allowed by default.
+root projects<
+
+# NEVER ALLOWED, left blocking: CHANGELOG.md:580,602, README.md:217,221,225, docs/api.md:55,
+# docs/superpowers/specs/2026-08-25-hitchrail-design.md:647,686, and
+# tests/test_no_private_data.py:111 show three home-root segments used as example repo-
+# organisation categories, one of which is named, word for word, in this project's own
+# governance as a real private project this guard cannot protect by name, and another of which
+# is a real root in this very fleet's directory layout. Not classified as safe placeholders. A
+# content decision for the owner, not this allow-file.
+#
+# tests/test_no_private_data.py:88 has a home-root regex fragment (a capturing group after the
+# home-root marker) ending in a close-paren, which the scanner strips as trailing punctuation
+# from the matched text before comparison but not from a stored `root` entry (confirmed by
+# testing the exact fragment as an entry: still reported). Left unallowed regardless.
