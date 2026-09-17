@@ -143,6 +143,22 @@ _SKIP_SUFFIX = {".png", ".jpg", ".jpeg", ".gif", ".ico", ".woff", ".woff2", ".lo
 # what covers that gap, since it reads the staged content instead.
 _SELF = Path(__file__).resolve()
 
+# The leak-guard scanners document the shapes they catch (that's their job), so their
+# source necessarily contains example home paths and addresses that look like the very
+# thing this test forbids. They already skip their own copies for the same reason _SELF
+# does; this test must skip them too. forge-kit#223 will neutralise the examples upstream.
+# .leak-guard-allow is the same story from the other side: it documents shapes the
+# *scanner's own* allowlist has decided are public (root/email/prefix keys), which are
+# necessarily address- and path-shaped too.
+_SCANNERS = frozenset(
+    (ROOT / f).resolve()
+    for f in (
+        "scripts/check-public-leaks.sh",
+        "scripts/check-private-leaks.sh",
+        ".leak-guard-allow",
+    )
+)
+
 
 def _tracked() -> list[Path]:
     out = subprocess.run(
@@ -151,7 +167,9 @@ def _tracked() -> list[Path]:
     return [
         ROOT / f
         for f in out
-        if Path(f).suffix not in _SKIP_SUFFIX and (ROOT / f).resolve() != _SELF
+        if Path(f).suffix not in _SKIP_SUFFIX
+        and (ROOT / f).resolve() != _SELF
+        and (ROOT / f).resolve() not in _SCANNERS
     ]
 
 
