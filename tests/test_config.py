@@ -1229,7 +1229,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 686 after round 1 of that batch's review: the bind is the third
         # thing the rule asks about, and the paragraph says why the origins
         # alone were not enough.
-        "config.py": 686,
+        # 690 after round 2: that paragraph claimed nothing off the machine
+        # can reach a loopback bind, which `remote_reach` twenty lines above
+        # calls false for the same question.
+        "config.py": 690,
         # 460 for #123, #154 and #238: `--config`, `--session-prefix` and the
         # source tagging the settings page shows, which is one function
         # reading the flags back out of argv. Nothing here parses a value
@@ -1281,7 +1284,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # and the paragraph on why not behind a proxy.
         # 449 for #269: the cookie's rule and the two deployments it sits
         # between, written where the cookie is set rather than in a ticket.
-        "security.py": 449,
+        # 453 after round 2 of that batch's review: the bind clause, which
+        # arrived a day after the rule, said where the rule is read.
+        "security.py": 453,
         # #154, #238: the operator's file and Hitchrail's state file, one
         # module because the split between them IS the security argument in
         # its docstring; over by the ceiling's four lines (#265).

@@ -21,12 +21,14 @@ living only in `Authorization` would authenticate every route except the live
 update stream, which is the one the interface depends on. `POST /api/grant`
 trades a token for the cookie: `HttpOnly`, `SameSite=Lax`, `Path=/`, and
 `Secure` when the server terminates TLS itself (`--tls-cert`), and also when
-it does not but every non loopback `--allow-origin` is `https`, which is the
-TLS terminating proxy deployment: the browser reaches the proxy over HTTPS,
-so the flag costs nothing there and without it the cookie is offered to
-`http://` on the same host at any port, since cookies are not port scoped.
-Not `Secure` on a plain HTTP deployment, where the browser would never send
-it back. Loopback origins do not count either way.
+it does not but the bind is LOOPBACK and every non loopback `--allow-origin`
+is `https`, which is the TLS terminating proxy deployment: the browser
+reaches the proxy over HTTPS, so the flag costs nothing there and without it
+the cookie is offered to `http://` on the same host at any port, since
+cookies are not port scoped. Not `Secure` on a plain HTTP deployment, where
+the browser would never send it back, and not on a LAN bind even beside an
+https origin, because a browser can still reach that server in the clear and
+would throw the cookie away. Loopback origins do not count either way.
 
 **A token is demanded whenever anything outside the machine can reach the
 server**: a non loopback bind, or a non loopback name passed to `--allow-host`

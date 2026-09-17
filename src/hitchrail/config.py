@@ -329,9 +329,13 @@ class Config:
         is http, so a phone that opens the LAN address directly is a request
         we accept, answer 200 to, and hand a cookie the browser throws away:
         every request after it is a 401 and the grant page loops forever
-        with a correct token. Bound to loopback that path does not exist,
-        because nothing off the machine can connect at all, and the only way
-        in is the proxy the origins name.
+        with a correct token. Bound to loopback, nothing off the machine
+        connects DIRECTLY, and what arrives through the proxy carries the
+        proxy's scheme, which is the https one the origins name. Not "that
+        path cannot exist": `remote_reach` above says why a bind address is
+        not the whole answer, and a plain http forwarder onto our own port
+        would reach the derived origin. What that costs is the flag, on a
+        path the operator arranged themselves.
 
         It stays FALSE for a plain HTTP LAN deployment, which is the failure
         the original rule was avoiding: a `Secure` cookie there is never
