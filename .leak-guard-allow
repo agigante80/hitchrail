@@ -39,19 +39,6 @@ root foo
 # not itself allowed by default.
 root projects<
 
-# NEVER ALLOWED, left blocking: CHANGELOG.md:580,602, README.md:217,221,225, docs/api.md:55,
-# docs/superpowers/specs/2026-08-25-hitchrail-design.md:647,686, and
-# tests/test_no_private_data.py:111 show three home-root segments used as example repo-
-# organisation categories, one of which is named, word for word, in this project's own
-# governance as a real private project this guard cannot protect by name, and another of which
-# is a real root in this very fleet's directory layout. Not classified as safe placeholders. A
-# content decision for the owner, not this allow-file.
-#
-# tests/test_no_private_data.py:88 has a home-root regex fragment (a capturing group after the
-# home-root marker) ending in a close-paren, which the scanner strips as trailing punctuation
-# from the matched text before comparison but not from a stored `root` entry (confirmed by
-# testing the exact fragment as an entry: still reported). Left unallowed regardless.
-# tests/test_no_private_data.py:88 home-root regex fragment (a capturing group after the
-# marker) cannot be allow-listed as a root: the scanner strips trailing punctuation from the
-# MATCH before comparing but not from a stored root entry, so the close-paren never matches.
+# The three private home-root segments this file once left blocking were removed from the
+# content in commit 8407d2d; no allow entry exists for them by design.
 skip tests/test_no_private_data.py
