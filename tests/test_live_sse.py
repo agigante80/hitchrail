@@ -165,15 +165,17 @@ async def test_a_change_arrives_on_the_stream(live: Fixture) -> None:
 
 async def test_two_readers_both_receive_the_same_change(live: Fixture) -> None:
     """A phone and a laptop must not have to take turns."""
-    async with httpx.AsyncClient(base_url=live.server.base) as c:
-        async with asyncio.timeout(TIMEOUT):
-            async with c.stream("GET", "/api/events", headers=live.headers) as first:
-                async with c.stream("GET", "/api/events", headers=live.headers) as second:
-                    readers = asyncio.gather(_events(first, 1), _events(second, 1))
-                    while live.bus.subscriber_count < 2:
-                        await asyncio.sleep(0.01)
-                    live.engine.stop(proj("vessel"))
-                    (a,), (b,) = await readers
+    async with (
+        httpx.AsyncClient(base_url=live.server.base) as c,
+        asyncio.timeout(TIMEOUT),
+        c.stream("GET", "/api/events", headers=live.headers) as first,
+        c.stream("GET", "/api/events", headers=live.headers) as second,
+    ):
+        readers = asyncio.gather(_events(first, 1), _events(second, 1))
+        while live.bus.subscriber_count < 2:
+            await asyncio.sleep(0.01)
+        live.engine.stop(proj("vessel"))
+        (a,), (b,) = await readers
     assert a["name"] == b["name"] == proj("vessel")
 
 
