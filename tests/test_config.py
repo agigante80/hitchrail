@@ -1360,7 +1360,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 904 for #256: the listing says which hidden roots a request can
         # bring back, so the empty page stops sending somebody to a checkbox
         # that is not there.
-        "server.py": 904,
+        # 948 for #297: two plugin routes and the named event branch in the
+        # stream. The run itself is `plugin_runs.py`, deliberately, so what
+        # grew here is routing and the reason each answer is what it is.
+        "server.py": 948,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

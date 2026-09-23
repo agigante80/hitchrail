@@ -437,6 +437,11 @@ which case nothing is updated rather than the part that could be read.
   shown to you**, because there is no terminal to show it on. When the agent
   reports which command it approved, the line for that plugin names it.
 
+The same update runs from the phone: **Update plugins** on the settings page,
+with each plugin's result appearing as it finishes. One run at a time, for
+the whole machine; a second press while one runs is refused, and a page
+opened in the middle of a run shows where it is.
+
 ### Where the token comes from
 
 In order: `--token`, then `HITCHRAIL_TOKEN` in the environment, then one

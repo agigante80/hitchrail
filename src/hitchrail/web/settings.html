@@ -47,6 +47,18 @@
       <span class="settings-source" data-stop-source></span>
     </label>
   </section>
+  <!-- #297. Machine wide, so here rather than on a row. The record comes
+       from GET /api/plugins/update on load and on every reconnect, then from
+       the stream's named `plugins` event, which the list page never hears. -->
+  <section class="settings-group" data-plugins>
+    <h2>Agent plugins</h2>
+    <p class="settings-help">Refreshes the agent's marketplaces and updates every plugin installed for your user. A plugin installed for one project is listed and left alone. An install command a marketplace declares is approved without being shown to you first.</p>
+    <span class="settings-control">
+      <button type="button" class="accent" data-plugins-update>Update plugins</button>
+    </span>
+    <p class="settings-source" role="status" data-plugins-status></p>
+    <ul class="plugin-outcomes" data-plugins-list></ul>
+  </section>
   <section class="settings-group">
     <h2>This instance</h2>
     <p class="settings-help">Set on the machine, in the config file or on the command line, and shown here so you do not have to go and look.</p>

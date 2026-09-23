@@ -68,6 +68,7 @@ from hitchrail import claude_ipc, discovery
 from hitchrail.config import Config
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
+from hitchrail.plugin_runs import Operation, operation_for
 from hitchrail.roots import Root
 from hitchrail.server import create_app
 from hitchrail.tmux import Tmux
@@ -410,8 +411,49 @@ class Harness:
         self._agent_config = root.parent / f"{root.name}-bin" / "agent-config.json"
         self._agent_config.parent.mkdir(parents=True, exist_ok=True)
         self._agent_config.write_text("{}")
+        # #297. Unset, the server's default applies, which the autouse guard
+        # in `tests/conftest.py` turns into a loud failure: this tier must
+        # never update the developer's own plugins.
+        self._plugin_operation: Operation | None = None
+        self._plugin_control = root.parent / f"{root.name}-plugins"
 
     # -- setup ----------------------------------------------------------
+
+    def seed_plugins(self, listing: object) -> None:
+        """A second fake agent that answers the three plugin subcommands, and
+        the REAL operation pointed at it: argv, runner, escaping and all.
+
+        `listing` is what `plugin list --json` prints, a list or a raw string.
+        Each update waits until the test calls `release_plugin`, so a test
+        can look at the page between two outcomes rather than hoping a sleep
+        was long enough (#297's gate).
+        """
+        control = self._plugin_control
+        control.mkdir(parents=True, exist_ok=True)
+        text = listing if isinstance(listing, str) else json.dumps(listing)
+        (control / "listing.json").write_text(text)
+        shim = control / "plugin-agent"
+        shim.write_text(
+            f"#!{sys.executable}\n"
+            "import pathlib, sys, time\n"
+            f"d = pathlib.Path({str(control)!r})\n"
+            "args = sys.argv[1:]\n"
+            "if args[:2] == ['plugin', 'list']:\n"
+            "    print((d / 'listing.json').read_text())\n"
+            "elif args[:2] == ['plugin', 'update']:\n"
+            "    while not (d / ('release-' + args[2])).exists():\n"
+            "        time.sleep(0.05)\n"
+            "    if (d / ('fail-' + args[2])).exists():\n"
+            "        print(args[2] + ': download failed', file=sys.stderr)\n"
+            "        sys.exit(1)\n"
+        )
+        shim.chmod(0o755)
+        self._plugin_operation = operation_for(str(shim))
+
+    def release_plugin(self, plugin: str, fail: bool = False) -> None:
+        if fail:
+            (self._plugin_control / f"fail-{plugin}").touch()
+        (self._plugin_control / f"release-{plugin}").touch()
 
     def _write_shim(self, body: str) -> None:
         self._agent.parent.mkdir(parents=True, exist_ok=True)
@@ -785,7 +827,12 @@ class Harness:
 
     def start(self) -> None:
         assert self._config is not None and self.engine is not None
-        app = create_app(engine=self.engine, config=self._config, bus=self.bus)
+        app = create_app(
+            engine=self.engine,
+            config=self._config,
+            bus=self.bus,
+            plugin_operation=self._plugin_operation,
+        )
         self._server = uvicorn.Server(
             uvicorn.Config(app, host="127.0.0.1", port=self.port, log_level="warning")
         )

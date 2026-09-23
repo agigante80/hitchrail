@@ -67,7 +67,7 @@ the security rules load for.
 
 ### Batch 1: the operation and the subcommand, #124, tasks 104 and 105
 
-- [ ] **Task 104, #124.** `claude_ipc.update_plugins(binary, run, report)`:
+- [x] **Task 104, #124.** `claude_ipc.update_plugins(binary, run, report)`:
       the marketplace refresh, the listing parsed and validated, each `user`
       scope id updated once with `-s user -y --json` and its own timeout,
       every other row a `skipped` outcome with its scope. `agent_missing`,
@@ -76,14 +76,26 @@ the security rules load for.
       holds every case in the ticket's table, and the quarantine guard reads
       the AST's string constants outside `claude_ipc.py`.
 
-- [ ] **Task 105, #124.** `hitchrail update-plugins [--agent-binary X]`,
+- [x] **Task 105, #124.** `hitchrail update-plugins [--agent-binary X]`,
       dispatched before the server's parser so bare `hitchrail` is unchanged.
       One line per outcome, exit 0, 1 or 2. `tests/test_cli.py` for the
       dispatch and the exit codes; the `cli` tier runs the installed console
       script against a fake agent on PATH. README, SECURITY.md, the design's
       `claude_ipc` section, `docs/tech-guidelines.md` and the changelog.
 
+Round 1 of batch 1's review found two mediums, both fixed in `fdd12e8`, and
+seven lows, filed as #298 to #304. Round 2 reviewed only that fix, found no
+high and two mediums in it, and the loop stopped there by rule: #305, #306.
+One round of two found a defect in the previous round's fix, under the trip
+wire.
+
 ### Batch 2: on the phone, #297, tasks 106 to 108
+
+The gate on #297 changed the shape before any of it was built: the record
+travels as a NAMED `plugins` event, because the list page's `message`
+listener renders every frame as a session; and `GET /api/plugins/update`
+answers a page that joins or reconnects mid run, because the stream does
+not replay. Both are alternative 1 of the gate's three.
 
 - [ ] **Task 106, #297.** The engine side: an in memory in flight marker,
       `update_in_flight` when it is set, the operation run on a worker thread,

@@ -170,6 +170,7 @@ source_modules = [
   "hitchrail.sessions",
   "hitchrail.derive",
   "hitchrail.engine",
+  "hitchrail.plugin_runs",
 ]
 forbidden_modules = [
   "hitchrail.server",
@@ -289,6 +290,7 @@ also_copy = [
   "src/hitchrail/events.py",
   "src/hitchrail/headers.py",
   "src/hitchrail/pages.py",
+  "src/hitchrail/plugin_runs.py",
   "src/hitchrail/procs.py",
   "src/hitchrail/ram.py",
   "src/hitchrail/server.py",

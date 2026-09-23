@@ -658,3 +658,18 @@ dialog[data-dialog]::backdrop { background: rgba(46, 37, 28, 0.55); }
 .bulk-rows li[data-status="not requested"] [data-bulk-status],
 .bulk-rows li[data-status="not finished"] [data-bulk-status] { color: var(--danger-on-tint); }
 
+/* #297. The plugin update's outcomes, one line per plugin. */
+.plugin-outcomes { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.plugin-outcome { display: grid; gap: 2px; }
+.plugin-outcome-head { display: flex; gap: 8px; align-items: baseline; }
+.plugin-result { font-size: 12px; font-weight: 700; min-width: 5.5em; color: var(--muted); }
+/* On its tint, as the detached badge is: `--danger` itself is a surface and
+   fails AA as text on the dark page (1.5 to 2.2:1, measured by the palette
+   test that caught it). */
+.plugin-outcome[data-result="failed"] .plugin-result {
+  background: var(--danger-tint);
+  color: var(--danger-on-tint);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.plugin-outcome .settings-source { overflow-wrap: anywhere; }

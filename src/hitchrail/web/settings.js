@@ -252,5 +252,148 @@ $("[data-stop-timeout]").addEventListener("keydown", (event) => {
   }
 });
 
-window.__settings = { refresh };
+/* #297. The plugin update. Every render is of the WHOLE record, from the GET
+   or from a `plugins` event alike, because the stream does not replay: a page
+   opened mid run, or back from a dropped connection, reads the GET and is
+   then exactly as current as one that watched from the start. */
+const PLUGIN_FAILURES = {
+  agent_missing: "The agent could not be run, so nothing was updated.",
+  marketplace_refresh_failed: "The marketplaces did not refresh, so no plugin was updated.",
+  plugins_unreadable:
+    "The list of installed plugins could not be understood, so nothing was updated.",
+  internal_error: "The update stopped on an error in Hitchrail. The journal has the details.",
+};
+
+let runningSessions = 0;
+
+function outcomeItem(outcome) {
+  const item = document.createElement("li");
+  item.className = "plugin-outcome";
+  item.dataset.result = outcome.result;
+  const head = document.createElement("span");
+  head.className = "plugin-outcome-head";
+  const result = document.createElement("span");
+  result.className = "plugin-result";
+  result.textContent = outcome.result;
+  const name = document.createElement("span");
+  name.className = "settings-value";
+  name.textContent = outcome.plugin;
+  head.append(result, name);
+  item.append(head);
+  // The agent's own words, rendered as text: the server escaped control
+  // characters, and textContent means nothing here is parsed as markup.
+  const lines = [];
+  if (outcome.result === "skipped") lines.push(`${outcome.scope} scope, left alone`);
+  else if (outcome.detail) lines.push(outcome.detail);
+  if (outcome.approved_command) lines.push(`approved: ${outcome.approved_command}`);
+  for (const text of lines) {
+    const line = document.createElement("span");
+    line.className = "settings-source";
+    line.textContent = text;
+    item.append(line);
+  }
+  return item;
+}
+
+function pluginStatus(record) {
+  if (record.state === "idle") return "Not run since this server started.";
+  if (record.state === "running") {
+    const n = record.outcomes.length;
+    return n ? `Updating: ${n} done so far.` : "Refreshing the marketplaces.";
+  }
+  if (record.state === "failed") {
+    // A failure is never a count: `counts` is null, and the sentence says
+    // that nothing, or nothing further, was updated.
+    return PLUGIN_FAILURES[record.code] ?? record.message ?? "The update did not finish.";
+  }
+  const c = record.counts;
+  let text = `${c.updated} updated, ${c.failed} failed, ${c.skipped} left alone.`;
+  if (c.updated && runningSessions) {
+    text += ` ${runningSessions === 1 ? "The running session keeps" : `The ${runningSessions} running sessions keep`} the old versions until restarted.`;
+  }
+  return text;
+}
+
+function renderPlugins(record) {
+  const section = $("[data-plugins]");
+  section.dataset.state = record.state;
+  $("[data-plugins-update]").disabled = record.state === "running";
+  $("[data-plugins-status]").textContent = pluginStatus(record);
+  $("[data-plugins-list]").replaceChildren(...record.outcomes.map(outcomeItem));
+}
+
+async function countRunning() {
+  try {
+    const response = await fetch("/api/projects", { headers: { accept: "application/json" } });
+    if (!response.ok) return;
+    const listing = await response.json();
+    runningSessions = listing.projects.filter((p) => p.state === "running").length;
+  } catch {
+    /* the notice is a courtesy; without the count it is left off */
+  }
+}
+
+async function onPluginRecord(record) {
+  if (record.state === "done" && record.counts.updated) await countRunning();
+  renderPlugins(record);
+}
+
+async function pluginRequest(method) {
+  let response;
+  try {
+    response = await fetch("/api/plugins/update", {
+      method,
+      headers: { accept: "application/json" },
+    });
+  } catch {
+    note("Not connected. Nothing was started.");
+    return null;
+  }
+  if (response.status === 401) {
+    location.assign("/grant");
+    return null;
+  }
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    note(`Not started. ${body?.message ?? "The answer could not be read."}`);
+    return null;
+  }
+  note("");
+  return body;
+}
+
+async function loadPlugins() {
+  const record = await pluginRequest("GET");
+  if (record) await onPluginRecord(record);
+}
+
+async function startPlugins() {
+  $("[data-plugins-update]").disabled = true;
+  const record = await pluginRequest("POST");
+  // Refused or not, repaint from what the server holds.
+  if (record) await onPluginRecord(record);
+  else await loadPlugins();
+}
+
+function watchPlugins() {
+  const stream = new EventSource("/api/events");
+  stream.addEventListener("plugins", (event) => {
+    let record;
+    try {
+      record = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    onPluginRecord(record);
+  });
+  // Every open, the first and each reconnect, reads the GET: what happened
+  // while the stream was down is not replayed.
+  stream.addEventListener("open", loadPlugins);
+}
+
+$("[data-plugins-update]").addEventListener("click", startPlugins);
+
+window.__settings = { refresh, loadPlugins };
 refresh();
+loadPlugins();
+watchPlugins();
