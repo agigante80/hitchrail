@@ -108,10 +108,26 @@ not replay. Both are alternative 1 of the gate's three.
       restart notice when a session is running. The e2e tier at the phone
       viewport with a fake agent.
 
-- [ ] **Task 108.** Watched on a real machine: a run from the phone against
+- [x] **Task 108.** Watched on a real machine: a run from the phone against
       the real agent binary, its per plugin results on screen, and the
       unreadable listing case watched with a shim. The standing rule in the
       roadmap says a phase is not done before this.
+
+      Done 2026-09-23, with the operator's go-ahead, against the development
+      machine's own plugins (Claude Code 2.1.280), from the settings page at
+      390x844 in Chromium driven by Playwright, the claude-in-chrome
+      extension being disconnected. A server on an empty temporary root and
+      port 8799, never the real projects root. The run took 33 seconds:
+      marketplaces refreshed in 16, then 23 rows arrived one at a time, and
+      the summary read `16 updated, 0 failed, 7 left alone`. The six `local`
+      installs of one plugin and the one `synced` row were left alone and
+      listed. A listing taken before and after shows three versions actually
+      moved (forge-kit-devops 0.12.9 to 0.15.0, governance 0.16.9 to 0.18.0,
+      roadmap 0.8.4 to 0.9.2): the other thirteen `updated` were already
+      current, which is the limit the record documents and a ticket now asks
+      to end. The garbled listing case, a shim printing `{"plugins": ...}`,
+      was watched through `update-plugins`: `plugins_unreadable`, exit 2,
+      nothing updated.
 
 ## Done looks like
 
