@@ -866,9 +866,9 @@ def test_update_plugins_exits_one_when_a_plugin_failed(
 @pytest.mark.parametrize(
     ("agent", "code_word"),
     [
-        (FakeAgent([row("a@m")], refresh=done(1)), "refreshed"),
-        (FakeAgent("not json"), "understood"),
-        (FakeAgent([row("a@m")], refresh=FileNotFoundError()), "could not be run"),
+        (FakeAgent([row("a@m")], refresh=done(1)), "marketplace_refresh_failed:"),
+        (FakeAgent("not json"), "plugins_unreadable:"),
+        (FakeAgent([row("a@m")], refresh=FileNotFoundError()), "agent_missing:"),
     ],
     ids=["marketplace_refresh_failed", "plugins_unreadable", "agent_missing"],
 )
@@ -893,7 +893,9 @@ def test_update_plugins_spawns_nothing_when_the_agent_is_not_on_path(
     code, _ = _update(monkeypatch, agent, "--agent-binary", "nowhere")
     assert code == 2
     assert agent.calls == []
-    assert "'nowhere' is not on PATH" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "agent_missing:" in err
+    assert "'nowhere' is not on PATH" in err
 
 
 def test_update_plugins_uses_the_agent_binary_flag(monkeypatch: pytest.MonkeyPatch) -> None:

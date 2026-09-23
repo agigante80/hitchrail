@@ -85,11 +85,14 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# S603 is ruff's warning about subprocess calls. Silenced only in the two
+# S603 is ruff's warning about subprocess calls. Silenced only in the three
 # modules that legitimately run subprocesses, so the exception is visible in
 # configuration rather than scattered through the code as inline noqa comments.
+# `claude_ipc.py` joined them for #124: the plugin update is vendor knowledge,
+# and its argv is built in the same module that runs it.
 "src/hitchrail/tmux.py" = ["S603"]
 "src/hitchrail/procs.py" = ["S603"]
+"src/hitchrail/claude_ipc.py" = ["S603"]
 # Tests are where the dangerous literals belong: a wildcard bind and a fake
 # token are the subject matter of the security suite, not a leak. src/ stays
 # strict, so a real 0.0.0.0 or credential in shipped code still fails.

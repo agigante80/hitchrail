@@ -593,7 +593,10 @@ def update_plugins_command(argv: list[str]) -> int:
         )
         return 2
     if shutil.which(binary) is None:
-        print(f"hitchrail: {binary!r} is not on PATH, so nothing was updated", file=sys.stderr)
+        print(
+            f"hitchrail: agent_missing: {binary!r} is not on PATH, so nothing was updated",
+            file=sys.stderr,
+        )
         return 2
 
     def show(outcome: claude_ipc.PluginOutcome) -> None:
@@ -608,7 +611,9 @@ def update_plugins_command(argv: list[str]) -> int:
             binary, run=claude_ipc.plugin_runner(withhold=(TOKEN_ENV,)), report=show
         )
     except claude_ipc.PluginsFailed as exc:
-        print(f"hitchrail: {exc}", file=sys.stderr)
+        # The code first: it is the same word the route's record carries, so
+        # a script or a person can match on it rather than on the prose.
+        print(f"hitchrail: {exc.code}: {exc}", file=sys.stderr)
         return 2
     counts = {r: sum(o.result == r for o in outcomes) for r in ("updated", "failed", "skipped")}
     print(

@@ -30,6 +30,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
 
+from hitchrail.projectnames import display_name
+
 # How the agent is found in the process table. State derivation matches this as
 # a substring of a command line, so it has to be something no other process on
 # the machine carries by accident.
@@ -909,7 +911,7 @@ def plugin_runner(withhold: Sequence[str]) -> PluginRunner:
 
     def run(argv: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
         env = {k: v for k, v in os.environ.items() if k not in withhold}
-        return subprocess.run(  # noqa: S603 - an argument list, built here
+        return subprocess.run(
             argv,
             stdin=subprocess.DEVNULL,
             capture_output=True,
@@ -1035,7 +1037,7 @@ def _approved_command(stdout: str) -> str | None:
         shown = parsed.get("shownCommand") if isinstance(parsed, dict) else None
         command = shown.get("command") if isinstance(shown, dict) else None
         if isinstance(command, str) and command:
-            return command[:_DETAIL_LIMIT]
+            return _shown(command)
     return None
 
 
@@ -1044,4 +1046,17 @@ def _detail(done: subprocess.CompletedProcess[str]) -> str:
     lines = [line.strip() for line in (done.stderr or done.stdout or "").splitlines()]
     last = next((line for line in reversed(lines) if line), "")
     text = f"exited {done.returncode}: {last}" if last else f"exited {done.returncode}"
-    return text[:_DETAIL_LIMIT]
+    return _shown(text)
+
+
+def _shown(text: str) -> str:
+    """Vendor text made safe to print, then bounded, in that order.
+
+    It reaches a terminal under `update-plugins` and a phone screen through
+    the route, and the approved command is the only record of what `-y` ran:
+    a `\r` and an erase-line sequence in it would print something harmless
+    over it, and a `\n` would forge a second outcome line. `display_name` is
+    the escaping the project already trusts for names it reports. Escaping
+    first means the cut can never split an escape sequence it left raw.
+    """
+    return display_name(text)[:_DETAIL_LIMIT]
