@@ -223,3 +223,27 @@ def test_the_default_operation_is_the_quarantined_one(monkeypatch: pytest.Monkey
     monkeypatch.setattr(claude_ipc, "update_plugins", fake_update)
     operation_for("/opt/agent")(lambda _o: None)
     assert seen == {"withhold": (TOKEN_ENV,), "binary": "/opt/agent", "run": "runner"}
+
+
+def test_every_change_carries_a_larger_seq_across_runs() -> None:
+    """Round 1 of batch 2's review, the high: a GET answered before the last
+    event and delivered after it painted the older record over the newer one
+    and left the page on "running". A page can only drop a stale record if it
+    can tell which is newer, and a run's state cannot say that across two
+    runs; a counter that only goes up can."""
+    published = Published()
+    plugin_runs = runs(published)
+    assert plugin_runs.snapshot()["seq"] == 0
+    first = Held(outcome("a@m"))
+    t = plugin_runs.start(first)
+    first.release(0)
+    first.release(1)
+    t.join(5)
+    second = Held()
+    t = plugin_runs.start(second)
+    second.release(0)
+    t.join(5)
+    seqs = [e["run"]["seq"] for e in published.events]  # type: ignore[index]
+    assert seqs == sorted(seqs)
+    assert len(set(seqs)) == len(seqs), "two different records shared a seq"
+    assert plugin_runs.snapshot()["seq"] == seqs[-1]

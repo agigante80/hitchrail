@@ -443,6 +443,8 @@ class Harness:
             "elif args[:2] == ['plugin', 'update']:\n"
             "    while not (d / ('release-' + args[2])).exists():\n"
             "        time.sleep(0.05)\n"
+            "    if (d / ('vanish-' + args[2])).exists():\n"
+            "        pathlib.Path(sys.argv[0]).unlink()\n"
             "    if (d / ('fail-' + args[2])).exists():\n"
             "        print(args[2] + ': download failed', file=sys.stderr)\n"
             "        sys.exit(1)\n"
@@ -450,7 +452,20 @@ class Harness:
         shim.chmod(0o755)
         self._plugin_operation = operation_for(str(shim))
 
-    def release_plugin(self, plugin: str, fail: bool = False) -> None:
+    def reset_plugin_releases(self) -> None:
+        """Hold every plugin again, for a second run in the same test."""
+        for marker in (
+            *self._plugin_control.glob("release-*"),
+            *self._plugin_control.glob("fail-*"),
+        ):
+            marker.unlink()
+
+    def release_plugin(self, plugin: str, fail: bool = False, vanish: bool = False) -> None:
+        """`vanish`: the fake agent deletes itself while updating this one,
+        which succeeds, so the NEXT call finds no agent: a run that fails
+        part way, with outcomes already listed."""
+        if vanish:
+            (self._plugin_control / f"vanish-{plugin}").touch()
         if fail:
             (self._plugin_control / f"fail-{plugin}").touch()
         (self._plugin_control / f"release-{plugin}").touch()

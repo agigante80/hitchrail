@@ -47,6 +47,7 @@ State = Literal["idle", "running", "done", "failed"]
 class RunRecord(TypedDict):
     """What `GET /api/plugins/update` returns and every event carries."""
 
+    seq: int
     state: State
     started_at: float | None
     finished_at: float | None
@@ -85,6 +86,12 @@ class PluginRuns:
         self._outcomes: list[PluginOutcome] = []
         self._code: str | None = None
         self._message: str | None = None
+        # Bumped under the lock on every change, never reset, so any two
+        # records say which is newer even across runs. The page drops a record
+        # older than the one it shows: a GET answered before the last event
+        # and delivered after it would otherwise repaint "running" over
+        # "done", and no later event would come to correct it.
+        self._seq = 0
 
     def start(self, operation: Operation) -> threading.Thread:
         """Begin a run on its own thread, or raise `RunInFlight`.
@@ -104,7 +111,7 @@ class PluginRuns:
             self._finished_at = None
             self._outcomes = []
             self._code = self._message = None
-            record = self._record()
+            record = self._changed()
         self._publish({"kind": EVENT_KIND, "run": record})
         thread = threading.Thread(
             target=self._run, args=(operation,), name="plugin-run", daemon=True
@@ -136,14 +143,19 @@ class PluginRuns:
                 self._state = state
                 self._code, self._message = code, message
                 self._finished_at = self._clock()
-                record = self._record()
+                record = self._changed()
             self._publish({"kind": EVENT_KIND, "run": record})
 
     def _report(self, outcome: PluginOutcome) -> None:
         with self._lock:
             self._outcomes.append(outcome)
-            record = self._record()
+            record = self._changed()
         self._publish({"kind": EVENT_KIND, "run": record})
+
+    def _changed(self) -> RunRecord:
+        """Under the lock: the record after a change, with the next seq."""
+        self._seq += 1
+        return self._record()
 
     def _record(self) -> RunRecord:
         """Under the lock. `counts` is None unless the run finished, so a
@@ -155,6 +167,7 @@ class PluginRuns:
                 for result in ("updated", "failed", "skipped")
             }
         return {
+            "seq": self._seq,
             "state": self._state,
             "started_at": self._started_at,
             "finished_at": self._finished_at,

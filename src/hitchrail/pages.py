@@ -31,6 +31,7 @@ ASSETS = {
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/logs.js": ("logs.js", "text/javascript; charset=utf-8"),
     "/settings.js": ("settings.js", "text/javascript; charset=utf-8"),
+    "/plugins.js": ("plugins.js", "text/javascript; charset=utf-8"),
     # #160. The mark, the tile a phone makes of it, and the manifest that
     # names the tile. Served without a token, the only assets that are: see
     # `security.UNAUTHENTICATED_ASSETS` for the argument.
