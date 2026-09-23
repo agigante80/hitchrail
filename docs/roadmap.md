@@ -217,8 +217,7 @@ that is not in words.
 ## Phase: Phase 21: The agent's tooling, kept current
 state: planned
 
-The operator can bring the agent's plugins, and the agent itself, up to date
-from a phone. Today they go stale without anyone noticing, and the operator
+The operator can bring the agent's plugins up to date from a phone. Today they go stale without anyone noticing, and the operator
 tends to notice when they are away from the desk, which is exactly when
 Hitchrail is the only way in. Placed ahead of 15 to 19 on 2026-09-23 on the
 operator's call. It is the third time a phase has jumped the queue, and it
@@ -236,6 +235,12 @@ that subcommand. Every fact about how the vendor's CLI does this stays in
 Done when a plugin update started from the phone has been watched completing
 on a real machine, with its per plugin results on screen, and an unreadable
 plugin list has been watched updating nothing and saying so.
+
+Two decisions were taken when it was placed, and #124 carries both: `-y` is
+passed, so a marketplace's declared install command is approved unseen, on
+the argument that an agent spawned with every permission already sets that
+ceiling; and only `user` scope is updated, because a project scoped install
+belongs to a folder the vendor's listing does not name.
 
 ## Phase: Phase 15: The package as strangers meet it
 state: planned
