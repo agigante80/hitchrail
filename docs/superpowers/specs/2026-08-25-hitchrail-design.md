@@ -92,7 +92,8 @@ What IS done, because each item costs nothing today and is expensive to retrofit
    that is structurally the same boundary a second vendor would need. Its
    members are an agent adapter interface in all but name: how to launch, how
    to identify the process, how to ask for a graceful stop, how to find a
-   session link.
+   session link, and, since #124 (2026-09-23), how to update the agent's
+   plugins.
 3. **The engine asks for a stop; it does not know what a stop is.** See section
    4.3. This is the one place the boundary would otherwise leak, and it leaks
    in a costly direction.
@@ -345,6 +346,15 @@ All of this lives in `claude_ipc.py` behind one documented function with an
 explicit instability warning. When it breaks on a Claude Code update, exactly
 one module changes, and the UI degrades to a `pending` state rather than
 reporting something false.
+
+**Amended 2026-09-23 for #124.** The module also runs the agent's plugin
+update: a marketplace refresh, the installed list, and one update per `user`
+scope plugin, reported per plugin. That widens the quarantine from reading
+and typing into a package manager, deliberately rather than by drift. The
+same rule holds: the subcommands, the JSON shape and the flags are known
+here and nowhere else, and a listing this module does not understand
+updates nothing and says so, which is this section's `pending` in another
+form.
 
 This module is also the vendor seam described in section 3.1, and the two roles
 reinforce each other rather than competing: whatever has to change when Claude

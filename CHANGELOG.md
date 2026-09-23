@@ -32,6 +32,14 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+### Added
+
+**`hitchrail update-plugins`**, which refreshes the agent's marketplaces and
+updates every plugin installed at `user` scope, one line per plugin, with no
+server. Nothing to do on upgrade: bare `hitchrail` still starts the server
+exactly as before. Read the new paragraph in `SECURITY.md` before relying on
+it: an install command a marketplace declares is approved without being shown.
+
 ## 0.9.0 - 2026-09-17
 
 Phase 20: the perimeter, hardened. Upgrading is safe with no action unless
