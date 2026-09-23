@@ -215,7 +215,8 @@ its reason on the ticket, and no refusal on those surfaces can be reached
 that is not in words.
 
 ## Phase: Phase 21: The agent's tooling, kept current
-state: planned
+state: open
+plan: docs/superpowers/plans/2026-09-23-hitchrail-phase-21-agent-tooling.md
 
 The operator can bring the agent's plugins up to date from a phone. Today they go stale without anyone noticing, and the operator
 tends to notice when they are away from the desk, which is exactly when
