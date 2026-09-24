@@ -257,6 +257,16 @@ async def test_a_refused_press_keeps_its_reason_on_screen(page: Page, server: Ha
     await expect(note).to_contain_text("a plugin update is already running")
     for plugin in ("alpha@m", "bravo@m", "charlie@m"):
         server.release_plugin(plugin)
+    # Round 2: the fix that kept the refusal kept it for good, so it stood
+    # above the next press that DID start a run. That press is a request the
+    # person made, and it clears the strip as a settings save does.
+    await expect(other.locator("[data-plugins-update]")).to_be_enabled()
+    server.reset_plugin_releases()
+    await other.locator("[data-plugins-update]").click()
+    await expect(other.locator("[data-plugins]")).to_have_attribute("data-state", "running")
+    await expect(note).to_be_hidden()
+    for plugin in ("alpha@m", "bravo@m", "charlie@m"):
+        server.release_plugin(plugin)
 
 
 async def test_no_restart_notice_when_nothing_was_updated(page: Page, server: Harness) -> None:
@@ -296,3 +306,31 @@ async def test_a_run_that_fails_part_way_does_not_say_nothing_was_updated(
     )
     await expect(page.locator('[data-plugins-list] li[data-result="updated"]')).to_have_count(2)
     await expect(status).not_to_contain_text("nothing was updated")
+
+
+async def test_a_page_left_open_across_a_restart_follows_the_new_server(
+    page: Page, server: Harness
+) -> None:
+    """Round 2 of batch 2's review, the high: `seq` starts at 0 again in a new
+    process, and a page that had seen a larger one dropped every record the
+    new server sent, the idle one included, and then sat on "running" with
+    the button disabled after the next press."""
+    server.seed_plugins([{"id": "alpha@m", "scope": "user"}])
+    server.seed()
+    await open_settings(page, server)
+    status = page.locator("[data-plugins-status]")
+    # Two runs, so the page holds a seq no one run of the new server reaches.
+    for _ in range(2):
+        server.reset_plugin_releases()
+        await page.locator("[data-plugins-update]").click()
+        server.release_plugin("alpha@m")
+        await expect(status).to_have_text("1 updated, 0 failed, 0 left alone.")
+
+    server.restart()
+    # The reconnect's GET is the new process's truth: nothing has run.
+    await expect(status).to_have_text("Not run since this server started.", timeout=15_000)
+    server.reset_plugin_releases()
+    await page.locator("[data-plugins-update]").click()
+    server.release_plugin("alpha@m")
+    await expect(status).to_have_text("1 updated, 0 failed, 0 left alone.")
+    await expect(page.locator("[data-plugins-update]")).to_be_enabled()

@@ -28,9 +28,10 @@ const PLUGIN_FAILURES = {
   internal_error: "The update stopped on an error in Hitchrail; the journal has the details",
 };
 
+let shownEpoch = null;
 let shownSeq = -1;
 let runningSessions = 0;
-let strip = { note: () => {}, keep: () => {} };
+let strip = { note: () => {}, keep: () => {}, settle: () => {} };
 
 function outcomeItem(outcome) {
   const item = document.createElement("li");
@@ -105,12 +106,21 @@ async function countRunning() {
   }
 }
 
+// Older only within one server process: `seq` starts at 0 again on a
+// restart, and a page left open across it would otherwise drop every record
+// of the new process (round 2 of batch 2's review). A different epoch always
+// wins, because the process that minted the old one can send nothing later.
+function isStale(record) {
+  return record.epoch === shownEpoch && record.seq < shownSeq;
+}
+
 async function onPluginRecord(record) {
   // Checked twice: once so a stale record costs no listing fetch, and again
   // after the await, which is where a newer one can overtake it.
-  if (record.seq < shownSeq) return;
+  if (isStale(record)) return;
   if (record.state === "done" && record.counts.updated) await countRunning();
-  if (record.seq < shownSeq) return;
+  if (isStale(record)) return;
+  shownEpoch = record.epoch;
   shownSeq = record.seq;
   renderPlugins(record);
 }
@@ -124,13 +134,15 @@ async function pluginRequest(method) {
     });
   } catch {
     // A POST lost on the network may or may not have started a run; the GET
-    // that follows says which. A GET lost on load started nothing.
-    strip.note(
-      method === "POST"
-        ? "Not connected. Whether the update started is shown below once the page reconnects."
-        : "Not connected. The plugin update's state could not be read.",
-    );
-    strip.keep(true);
+    // that follows says which, so the note is kept past that one repaint. A
+    // GET lost started nothing and is not kept: the next GET that succeeds,
+    // a reconnect's included, has the answer and clears it.
+    if (method === "POST") {
+      strip.note("Not connected. Whether the update started is shown below once the page reconnects.");
+      strip.keep(true);
+    } else {
+      strip.note("Not connected. The plugin update's state could not be read.");
+    }
     return null;
   }
   if (response.status === 401) {
@@ -143,10 +155,12 @@ async function pluginRequest(method) {
     strip.keep(true);
     return null;
   }
-  // Deliberately no clearing of the strip here. A refused POST repaints
-  // through the GET below, and clearing on that GET wiped the refusal before
-  // anyone could read it (round 1 of batch 2's review; #256 is the same
-  // lesson on the roots). The next settings request clears it, as there.
+  // settings.js's rule, not a plain clear: a refused POST repaints through
+  // a GET, and clearing on that GET wiped the refusal before anyone could
+  // read it (round 1 of batch 2's review; #256 is the same lesson on the
+  // roots). Never clearing instead left "Not started" above the next run
+  // that did start (round 2). The keep is consumed by one success, as there.
+  strip.settle();
   return body;
 }
 

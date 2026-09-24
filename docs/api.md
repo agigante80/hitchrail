@@ -235,6 +235,7 @@ does not replay.
 | Field | What it holds |
 |---|---|
 | `seq` | a number the server increases on every change to the record, across runs, and never resets while it runs; of two records the larger `seq` is the newer, so a client drops a record older than the one it shows. `0` before any run |
+| `epoch` | an opaque string that names this server process. `seq` restarts at `0` when the server does, so two records' `seq` are comparable only when their `epoch` is equal; a record with a different `epoch` than the one shown is from a newer process and replaces it |
 | `state` | `idle` before any run, `running`, `done`, or `failed` when the operation itself could not go on |
 | `started_at`, `finished_at` | Unix seconds, null until they happen |
 | `outcomes` | one per row of the agent's plugin list so far, in order: `{plugin, scope, result, detail, approved_command}`, `result` one of `updated`, `failed`, `skipped` |

@@ -10,8 +10,10 @@ it shares nothing with a session: no project, no tmux, no derivation.
 returns it, and every event carries it entire rather than a delta, because
 the event stream has no replay: a phone that opens the page or reconnects in
 the middle of a run reads the GET, and from then on renders each event the
-same way. A delta protocol would need a sequence number to be correct across
-a reconnect, and a list of at most a few dozen outcomes does not earn one.
+same way. A delta protocol would need replay to be correct across a
+reconnect, and a list of at most a few dozen outcomes does not earn one.
+Records do still arrive out of order, so each says which is newer: see
+`seq` and `epoch` below.
 
 **Memory only, like the graceful stop overlay.** If Hitchrail restarts
 mid run the knowledge is gone and the next request is accepted, which is the
@@ -24,6 +26,7 @@ This module is in the engine layer and imports nothing from the web layer.
 from __future__ import annotations
 
 import logging
+import secrets
 import threading
 import time
 from collections.abc import Callable
@@ -47,6 +50,7 @@ State = Literal["idle", "running", "done", "failed"]
 class RunRecord(TypedDict):
     """What `GET /api/plugins/update` returns and every event carries."""
 
+    epoch: str
     seq: int
     state: State
     started_at: float | None
@@ -92,6 +96,13 @@ class PluginRuns:
         # and delivered after it would otherwise repaint "running" over
         # "done", and no later event would come to correct it.
         self._seq = 0
+        # Which process's `seq` this is. A restart starts `seq` at 0 again,
+        # and a page left open across it held a larger one, so it dropped
+        # every record of the new process as older and sat with the button
+        # disabled (round 2 of batch 2's review). `seq` is compared only
+        # within one epoch; a different epoch always wins, since the process
+        # that minted the old one is gone and can send nothing later.
+        self._epoch = secrets.token_hex(8)
 
     def start(self, operation: Operation) -> threading.Thread:
         """Begin a run on its own thread, or raise `RunInFlight`.
@@ -167,6 +178,7 @@ class PluginRuns:
                 for result in ("updated", "failed", "skipped")
             }
         return {
+            "epoch": self._epoch,
             "seq": self._seq,
             "state": self._state,
             "started_at": self._started_at,

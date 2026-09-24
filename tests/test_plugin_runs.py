@@ -247,3 +247,20 @@ def test_every_change_carries_a_larger_seq_across_runs() -> None:
     assert seqs == sorted(seqs)
     assert len(set(seqs)) == len(seqs), "two different records shared a seq"
     assert plugin_runs.snapshot()["seq"] == seqs[-1]
+
+
+def test_the_epoch_names_the_process_and_holds_for_its_life() -> None:
+    """Round 2 of batch 2's review: `seq` restarts with the process, so a
+    page compares it only within one epoch. The epoch must therefore stay
+    fixed across runs in one process, or every record looks like a restart,
+    and differ between two, or a restart looks like nothing happened."""
+    published = Published()
+    plugin_runs = runs(published)
+    before = plugin_runs.snapshot()["epoch"]
+    held = Held()
+    t = plugin_runs.start(held)
+    held.release(0)
+    t.join(5)
+    epochs = {e["run"]["epoch"] for e in published.events}  # type: ignore[index]
+    assert epochs == {before}
+    assert runs(Published()).snapshot()["epoch"] != before
