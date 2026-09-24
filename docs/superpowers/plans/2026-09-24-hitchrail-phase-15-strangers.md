@@ -133,6 +133,25 @@ tested decision this ticket was never asked to reopen. Checking
 ("Hitchrail is a web UI for... Phone first"), so the omission is confined
 to the two surfaces #328 fixes, not a third.
 
+**A tenth was added the same day, from the operator asking to take new
+screenshots for the README rewrite this phase already carries.** Checked
+first whether the scripted capture the operator remembered still exists:
+it does, `tests/e2e/test_screenshots.py` behind `uv run pytest -m
+screenshots`, already seeding every image from demo data (all four derived
+states, two roots, a dark theme toggle) rather than a real machine, so
+there was nothing to build from scratch. What the review found instead:
+the committed images stop at commit `ad15337`, 2026-09-11, while twenty-odd
+commits since then changed `src/hitchrail/web/`, including the settings
+page itself, and the settings page has never been captured at all despite
+being documented prose twice in the README (the "Settings, from the phone"
+paragraph and the plugin-update section). Three of the seven images the
+tier already produces, `phone-grant.png`, `phone-logs.png` and
+`phone-new-folder.png`, are not referenced anywhere in the current
+README, either. #329 regenerates the set as part of this phase's rewrite,
+adds one capture test for the settings page mid plugin update, reusing the
+fake-agent seam `tests/e2e/test_plugins.py` already built, and confirms
+every image the tier produces is used somewhere in the rewritten README.
+
 ## What this phase is NOT about
 
 **A redesign of anything this phase's tickets touch.** Every ticket here is a
@@ -162,6 +181,14 @@ order. Listed by priority.
       update run" have an answer in the journal on a machine nobody here has
       seen. `tests/test_cli.py` or a new `tests/test_logging.py` per the
       ticket's own unit test specs.
+
+- [ ] **Task 125, #329 (P1).** `tests/e2e/test_screenshots.py` gains a
+      capture of the settings page mid plugin update, seeded through
+      `Harness.seed_plugins`/`release_plugin` the way `tests/e2e/test_plugins.py`
+      already does, and all seven images are regenerated via `uv run pytest
+      -m screenshots` after this phase's README markup changes land, not
+      before. Every image the tier produces ends up referenced somewhere in
+      `README.md`; three currently are not.
 
 - [ ] **Task 110, #156 (P2).** The README gets a `pip install hitchrail` line
       next to `uvx`, matching what PyPI's own project page already shows.
@@ -321,6 +348,7 @@ order. Listed by priority.
 - [ ] #167, #156, #157, #158, #319, #141, #17 and #320 are closed. #321 is
       closed; #322 is closed or is MOVED OUT to #321. #323 is closed. #324 is
       closed. #325 is closed. #326 is closed. #327 is closed. #328 is closed.
+      #329 is closed.
 - [ ] The PyPI page and the README agree: install line, licence statement,
       and what CI reports.
 - [ ] The licence is one clickable statement, not four scattered ones.
@@ -343,6 +371,9 @@ order. Listed by priority.
       `update-plugins` and `--help`/`--version` are unaffected.
 - [ ] The README answers "is this for me" with concrete scenarios before it
       shows a single screenshot.
+- [ ] Every screenshot in `docs/screenshots/` is captured against the
+      rewritten interface, is referenced somewhere in `README.md`, and the
+      settings page mid plugin update has a picture for the first time.
 - [ ] The GitHub About field and PyPI's summary both say "web UI," not only
       "from your phone"; the phone-first design priority is unchanged.
 - [ ] The roadmap's Phase 15 block says `state: done`, the milestone is
