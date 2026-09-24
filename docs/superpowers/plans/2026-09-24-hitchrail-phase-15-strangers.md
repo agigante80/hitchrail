@@ -68,6 +68,23 @@ and leaves the header toggle exactly as it behaves today, so #53's already
 tested guarantee that an explicit choice wins over a later system change is
 not touched.
 
+**A fifth was added the same day, from the operator's own direction rather
+than a gap found in passing.** #324 puts the app's own mark, #160's drawing,
+in front of the `hitchrail` heading on every page that carries one; today it
+only ever appears as a favicon. Researched first: an icon before a wordmark
+at the header's leading edge is the standard lockup, and the accepted
+accessible pattern for a mark that duplicates visible text is an inlined,
+`aria-hidden` SVG on CSS custom properties rather than an `<img>`, which this
+codebase's own badge glyphs already do. Reading `logs.js` found a real
+constraint rather than a style choice: its heading carries `data-title` and
+is overwritten wholesale on load, so the mark has to sit beside that element,
+not inside it, or that page alone would lose it the instant its own script
+ran. The same comparison also found `icon.svg`'s own dark mode accent colour
+never moved when #69 unified `--accent` across themes on 2026-09-11, since
+that retune was scoped to `app.css` and never touched the standalone file;
+task 120 corrects it in the same pass, since this ticket is already reading
+and duplicating that file's colours.
+
 ## What this phase is NOT about
 
 **A redesign of anything this phase's tickets touch.** Every ticket here is a
@@ -178,12 +195,34 @@ order. Listed by priority.
       toggle in both directions, and the private-window fallback;
       `tests/e2e/test_shell.py`'s two existing theme tests pass unmodified.
 
+### `web`: the mark appears in the header, not only as a favicon
+
+- [ ] **Task 120, #324 (P3).** The app's mark (`icon.svg`, #160) inlined as
+      static SVG, immediately before the `hitchrail` heading, in a new
+      `.bar-title-row` wrapper on `index.html`, `settings.html` and
+      `logs.html`; `grant.html` is out of scope, since it has no `.bar`
+      header and is byte compared against disk by
+      `test_the_grant_page_names_nothing_on_the_machine`. The inlined copy's
+      fills are `var(--ink)`/`var(--accent)`, not the standalone file's own
+      hardcoded colours and media query, so it follows the page's
+      `[data-theme]` override the way a favicon cannot. `aria-hidden="true"`,
+      since the adjacent heading already says "hitchrail". Placed beside the
+      `<h1>`, not inside it: `logs.html`'s heading carries `data-title` and
+      is overwritten wholesale by `logs.js:32` on load, so a child node there
+      would be lost the instant that page's own script ran. `icon.svg`'s own
+      dark mode `.live` fill, stale since #69's 2026-09-11 retune touched
+      only `app.css`, is corrected in the same pass to match the current
+      `--accent` value. `tests/e2e/test_shell.py` covers the mark's presence,
+      its theme tracking, the unaffected heading accessible name, and the
+      unchanged 390px bar width on all three pages.
+
 ## Done looks like
 
 - [ ] Every task above is ticked, or marked MOVED OUT or NOT BUILT with the
       issue number that carries it.
 - [ ] #167, #156, #157, #158, #319, #141, #17 and #320 are closed. #321 is
-      closed; #322 is closed or is MOVED OUT to #321. #323 is closed.
+      closed; #322 is closed or is MOVED OUT to #321. #323 is closed. #324 is
+      closed.
 - [ ] The PyPI page and the README agree: install line, licence statement,
       and what CI reports.
 - [ ] The licence is one clickable statement, not four scattered ones.
@@ -196,6 +235,9 @@ order. Listed by priority.
 - [ ] Settings offers an explicit Light / Dark / System choice; the header
       toggle's own behaviour is unchanged, and #53's guarantee that an
       explicit choice wins over a later system change still holds.
+- [ ] The app's mark sits in front of the `hitchrail` heading on every page
+      that has one, tracks the page's theme the way the rest of it does, and
+      the heading's accessible name is unchanged.
 - [ ] The roadmap's Phase 15 block says `state: done`, the milestone is
       closed, and `scripts/check-phases.sh` passes for this phase.
 
