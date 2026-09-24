@@ -33,6 +33,17 @@ phase's `docs` work rather than opened as its own phase, because it is the
 same "stranger meets the package" objection this phase already exists to
 answer.
 
+**A second ticket was added the same day, by the operator's own direction
+rather than from a gap found in passing.** #320 moves the settings control
+from a text link at the end of the footer into an icon button in the header
+bar. It is not in the roadmap's original Delivers list for this phase, and it
+is not about install or PyPI parity; it is included anyway because the
+operator asked for it directly, ahead of the same public write-up driving
+task 113. It reverses a placement #238 argued for on purpose (a *text*
+button in the bar wrapped at 390px and grew the header), so task 116 below
+carries the new measurement rather than assuming an icon behaves like the
+text button that was actually tested.
+
 ## What this phase is NOT about
 
 **A redesign of anything this phase's tickets touch.** Every ticket here is a
@@ -89,15 +100,30 @@ order. Listed by priority.
       README, `https://github.com/sponsors/agigante80`, replacing no other
       funding link since none currently exists.
 
+### `web`: settings moves from the footer into the bar
+
+- [ ] **Task 116, #320 (P2).** The settings link relocated from the footer's
+      `.about` line to an icon only gear button in `.bar-actions`, same
+      element (`data-settings-link`), same route, `aria-label="Settings"`.
+      Verified at the e2e tier's 390px viewport that the bar does not wrap
+      and the header's height is unchanged, since that is the exact
+      regression #238 was written to avoid for a text button; this is an
+      icon, and the ticket does not get to assume the old measurement still
+      holds. `tests/e2e/test_settings.py` updated for the new accessible
+      name and the new assertion. `index.html`'s comment rewritten to record
+      why the decision reversed.
+
 ## Done looks like
 
 - [ ] Every task above is ticked, or marked MOVED OUT or NOT BUILT with the
       issue number that carries it.
-- [ ] #167, #156, #157, #158, #319, #141 and #17 are closed.
+- [ ] #167, #156, #157, #158, #319, #141, #17 and #320 are closed.
 - [ ] The PyPI page and the README agree: install line, licence statement,
       and what CI reports.
 - [ ] The licence is one clickable statement, not four scattered ones.
 - [ ] A stranger's bug report can be answered from the journal alone.
+- [ ] Settings is reachable from an icon in the bar, not a text link at the
+      end of the footer, with no header wrap at 390px.
 - [ ] The roadmap's Phase 15 block says `state: done`, the milestone is
       closed, and `scripts/check-phases.sh` passes for this phase.
 
