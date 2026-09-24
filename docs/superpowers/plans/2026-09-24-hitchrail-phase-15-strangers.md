@@ -44,6 +44,18 @@ button in the bar wrapped at 390px and grew the header), so task 116 below
 carries the new measurement rather than assuming an icon behaves like the
 text button that was actually tested.
 
+**A third pair was added the same day, from the same direction rather than a
+gap found in passing.** The operator found the bar's `New` button unclear on
+its own, asked for online research before a ticket was filed, and chose both
+directions the research turned up rather than one: #322 gives the button a
+clearer label, and #321 removes it from the bar entirely in favour of a
+permanent row at the end of the project list, the "persistent add action"
+pattern Trello, Notion and Google Keep all use. #321, if built, makes #322
+moot, and #322 says so under its own Dependencies section. #321 also reverses
+part of #149's decision that the controls acting on the list survive
+scrolling: task 118 below records why creation is treated differently from
+the filters #149 named, and rewrites the one test that measured it.
+
 ## What this phase is NOT about
 
 **A redesign of anything this phase's tickets touch.** Every ticket here is a
@@ -113,17 +125,48 @@ order. Listed by priority.
       name and the new assertion. `index.html`'s comment rewritten to record
       why the decision reversed.
 
+### `web`: creating a project stops being a bar button
+
+- [ ] **Task 117, #321 (P2).** The `data-new` button removed from
+      `.bar-actions`; a permanent "create new project" row appended after the
+      real rows in `renderList()`, and after the empty state template too, so
+      it survives every filter (search, tab, root chip) and the zero-match
+      case alike. Same `showNewFolder()` dialog, unchanged. Reverses part of
+      #149's "controls that act on the list survive scrolling": the create
+      row does not, on a long list, and `index.html`'s new comment records
+      why creating is treated differently from the filters #149 named, per
+      this repository's rule that a reversed decision writes its reason into
+      the code.
+      `tests/e2e/test_list.py`'s `test_the_header_costs_no_more_at_rest_and_less_when_scrolled`
+      rewritten to stop asserting a bar bounding box for a control that no
+      longer lives there, plus a new assertion that the create row is the
+      list's last child at every filter state. The other ten `name="New"`
+      locators across `test_starting.py`, `test_roots.py`,
+      `test_screenshots.py`, `test_shell.py` and `test_stopping.py` updated
+      to the row.
+
+- [ ] **Task 118, #322 (P3).** MOVED OUT to #321 if task 117 lands first,
+      since the bar button #322 relabels will no longer exist; otherwise the
+      button's text becomes "New project" (not "Create New Project": the
+      research behind both tickets found that redundant), with the same
+      390px no-wrap check task 116 and #320 already carry, and the eleven
+      `name="New"` locators updated to `name="New project"`.
+
 ## Done looks like
 
 - [ ] Every task above is ticked, or marked MOVED OUT or NOT BUILT with the
       issue number that carries it.
-- [ ] #167, #156, #157, #158, #319, #141, #17 and #320 are closed.
+- [ ] #167, #156, #157, #158, #319, #141, #17 and #320 are closed. #321 is
+      closed; #322 is closed or is MOVED OUT to #321.
 - [ ] The PyPI page and the README agree: install line, licence statement,
       and what CI reports.
 - [ ] The licence is one clickable statement, not four scattered ones.
 - [ ] A stranger's bug report can be answered from the journal alone.
 - [ ] Settings is reachable from an icon in the bar, not a text link at the
       end of the footer, with no header wrap at 390px.
+- [ ] Creating a project is a permanent row at the end of the list, reachable
+      under every filter, not a bar button whose word alone did not say what
+      it did.
 - [ ] The roadmap's Phase 15 block says `state: done`, the milestone is
       closed, and `scripts/check-phases.sh` passes for this phase.
 
