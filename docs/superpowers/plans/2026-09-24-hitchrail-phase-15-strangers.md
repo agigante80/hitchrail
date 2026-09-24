@@ -56,6 +56,18 @@ part of #149's decision that the controls acting on the list survive
 scrolling: task 118 below records why creation is treated differently from
 the filters #149 named, and rewrites the one test that measured it.
 
+**A fourth was added the same day, from a question the operator asked
+directly rather than a gap found in passing.** The header's `Dark`/`Light`
+toggle can reach an explicit light or dark choice but never back to following
+the system once one is picked. Researched first: Lea Verou's 2026 piece on
+dark mode toggles argues a persistent header toggle, which is a developer
+tool convention Hitchrail already follows, should stay a simple two state
+control, and that the full three way choice belongs in settings instead of
+crowding the one-tap spot. #323 adds Light/Dark/System to the settings page
+and leaves the header toggle exactly as it behaves today, so #53's already
+tested guarantee that an explicit choice wins over a later system change is
+not touched.
+
 ## What this phase is NOT about
 
 **A redesign of anything this phase's tickets touch.** Every ticket here is a
@@ -152,12 +164,26 @@ order. Listed by priority.
       390px no-wrap check task 116 and #320 already carry, and the eleven
       `name="New"` locators updated to `name="New project"`.
 
+### `web`: a way back to following the system
+
+- [ ] **Task 119, #323 (P2).** A Light / Dark / System `role="radiogroup"`
+      added to `settings.html`, reusing `settings.js`'s existing `THEME_KEY`
+      read on load; picking one applies immediately with no reload and no
+      server round trip, unlike the Stopping field's `Save` button, since a
+      theme is stored in `localStorage` only. The header toggle's own
+      behaviour and markup are untouched; `settings.js`'s file comment
+      ("the two things a request may change") updated to name Appearance as
+      a third, explicitly non-request change. `tests/e2e/test_settings.py`
+      covers each of the three picks, cross page consistency with the header
+      toggle in both directions, and the private-window fallback;
+      `tests/e2e/test_shell.py`'s two existing theme tests pass unmodified.
+
 ## Done looks like
 
 - [ ] Every task above is ticked, or marked MOVED OUT or NOT BUILT with the
       issue number that carries it.
 - [ ] #167, #156, #157, #158, #319, #141, #17 and #320 are closed. #321 is
-      closed; #322 is closed or is MOVED OUT to #321.
+      closed; #322 is closed or is MOVED OUT to #321. #323 is closed.
 - [ ] The PyPI page and the README agree: install line, licence statement,
       and what CI reports.
 - [ ] The licence is one clickable statement, not four scattered ones.
@@ -167,6 +193,9 @@ order. Listed by priority.
 - [ ] Creating a project is a permanent row at the end of the list, reachable
       under every filter, not a bar button whose word alone did not say what
       it did.
+- [ ] Settings offers an explicit Light / Dark / System choice; the header
+      toggle's own behaviour is unchanged, and #53's guarantee that an
+      explicit choice wins over a later system change still holds.
 - [ ] The roadmap's Phase 15 block says `state: done`, the milestone is
       closed, and `scripts/check-phases.sh` passes for this phase.
 
