@@ -119,6 +119,20 @@ elsewhere (the phone interface, the four derived states, the memory floors,
 multiple roots), so the new section restates and frames rather than
 introduces a claim nothing else backs.
 
+**A ninth was added the same day, from the operator reading the project's
+own tagline back to itself.** The GitHub About field and `pyproject.toml`'s
+`description`, identical strings, both say "from your phone" and never say
+"web," so a reader who sees only that one line, GitHub search results or
+the PyPI page, before ever opening the README, has no way to tell this
+apart from a native phone app. `README.md`'s own opening sentence already
+gets this right ("A web UI for..."), so #328 brings the other two in line
+with it rather than inventing new copy; the phone-first design priority
+itself is untouched, since that is a deliberate, already argued and already
+tested decision this ticket was never asked to reopen. Checking
+`.claude/CLAUDE.md` as part of the same review found the identical omission
+a third time, confirming a habit rather than a typo, though that file is
+untracked and outside anything a PR can ship.
+
 ## What this phase is NOT about
 
 **A redesign of anything this phase's tickets touch.** Every ticket here is a
@@ -174,6 +188,17 @@ order. Listed by priority.
 - [ ] **Task 115, #17 (P3).** A GitHub Sponsors section and button in the
       README, `https://github.com/sponsors/agigante80`, replacing no other
       funding link since none currently exists.
+
+- [ ] **Task 124, #328 (P2).** `pyproject.toml`'s `description` (also
+      PyPI's summary) and the GitHub repo's About field, both currently
+      "from your phone" with no mention of "web," changed to name it as a
+      web UI, proposed wording "from a phone-first web UI," matching what
+      `README.md`'s own opening sentence already gets right and this
+      project's own established "phone," not "mobile," vocabulary. No
+      change to the phone-first design priority itself. Interacts with
+      task 122/#326, which quotes the pre-fix string as its reconciliation
+      target: whichever of the two ships second reads the other's final
+      wording.
 
 - [ ] **Task 123, #327 (P2).** A `## Why you'd use this` section added
       between `## What it will do` and `## What it looks like`, three to
@@ -295,7 +320,7 @@ order. Listed by priority.
       issue number that carries it.
 - [ ] #167, #156, #157, #158, #319, #141, #17 and #320 are closed. #321 is
       closed; #322 is closed or is MOVED OUT to #321. #323 is closed. #324 is
-      closed. #325 is closed. #326 is closed. #327 is closed.
+      closed. #325 is closed. #326 is closed. #327 is closed. #328 is closed.
 - [ ] The PyPI page and the README agree: install line, licence statement,
       and what CI reports.
 - [ ] The licence is one clickable statement, not four scattered ones.
@@ -318,6 +343,8 @@ order. Listed by priority.
       `update-plugins` and `--help`/`--version` are unaffected.
 - [ ] The README answers "is this for me" with concrete scenarios before it
       shows a single screenshot.
+- [ ] The GitHub About field and PyPI's summary both say "web UI," not only
+      "from your phone"; the phone-first design priority is unchanged.
 - [ ] The roadmap's Phase 15 block says `state: done`, the milestone is
       closed, and `scripts/check-phases.sh` passes for this phase.
 
