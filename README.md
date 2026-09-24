@@ -155,6 +155,26 @@ on a screen somewhere, this will end it there too.
 this design rather than a bug, and where to report privately. Please do not
 open a public issue for a vulnerability.
 
+## Install
+
+Hitchrail is a Python package, so the equivalent of `npx` here is `uvx`:
+
+```sh
+uvx hitchrail --root main=~/projects     # run it, install nothing
+uv tool install hitchrail                # keep it on PATH
+pipx install hitchrail                   # if you already live in pipx
+```
+
+One word, no hyphen. It is on PyPI as
+[`hitchrail`](https://pypi.org/project/hitchrail/), and it needs Python 3.11 or
+newer.
+
+**`uv tool install`, not `uvx`, if you are going to run it as a service.** `uvx`
+resolves and runs out of a cache it is free to evict, which is what makes it
+right for trying something and wrong for a systemd unit: that needs an
+executable still there next month. See `packaging/hitchrail.service`, whose
+`ExecStart` names `~/.local/bin/hitchrail` for exactly that reason.
+
 ## Prerequisites
 
 Hitchrail is a launcher, so the things it launches have to already be there. It
@@ -471,31 +491,6 @@ reasoning for each line in comments.
 It is written up there rather than here because it is what most people want
 rather than an appendix, and it is written once because two copies of a setup
 guide is one copy that goes stale.
-
-## Install
-
-Hitchrail is a Python package, so the equivalent of `npx` here is `uvx`:
-
-```sh
-uvx hitchrail --root main=~/projects     # run it, install nothing
-uv tool install hitchrail                # keep it on PATH
-pipx install hitchrail                   # if you already live in pipx
-```
-
-One word, no hyphen. It is on PyPI as
-[`hitchrail`](https://pypi.org/project/hitchrail/), and it needs Python 3.11 or
-newer.
-
-**`uv tool install`, not `uvx`, if you are going to run it as a service.** `uvx`
-resolves and runs out of a cache it is free to evict, which is what makes it
-right for trying something and wrong for a systemd unit: that needs an
-executable still there next month. See `packaging/hitchrail.service`.
-
-**The service route is `uv tool install`, not `uvx`.** `uvx` resolves and runs
-out of a cache it is free to evict, which is what makes it good for trying
-something and wrong for a unit: the systemd unit needs an executable path that
-is still there next month. That is why the template's `ExecStart` names
-`~/.local/bin/hitchrail`.
 
 ## Working on it
 

@@ -187,6 +187,37 @@ name="description">` and no Open Graph tags at all, so a shared link or a
 search result shows a bare title today. #331 adds it, reusing whichever
 wording #158 settles on rather than inventing a fifth string.
 
+**A thirteenth changed the phase's own shape rather than adding a ticket.**
+Re-reading this file, the operator asked whether PyPI publishing was a
+future decision, since the roadmap's own Phase 15 prose already says "the
+published PyPI page." Checked directly against PyPI's own JSON API for this
+project: twelve releases exist, most recently 0.10.0, published through the
+trusted-publishing pipeline `docs/releasing.md` already documents. Publishing is not a decision left to make; the README already is
+the PyPI page, so there is no second, separable "PyPI phase" to split this
+one into. The operator also asked whether the Linux-only constraint was an
+untested hedge; `git log -S "POSIX :: Linux" -- pyproject.toml` shows it was
+a deliberate, dated decision from the same day as the design spec, tied to
+`/proc/meminfo` and `ps`, and the README's Prerequisites table already states
+the reason. Neither needed a ticket. What the same re-reading did surface,
+checked against the file rather than recalled: the README's `## Install`
+section is the hardest of three install mentions to reach, 475 lines in,
+after the entire systemd walkthrough, and repeats its own `uv tool install`
+versus `uvx` reasoning in two adjacent paragraphs. #332 carries that,
+folded into the same `docs`, `packaging`, `cli` work already listed. The
+operator's actual ask, once the PyPI premise was corrected, was narrower
+than a split: keep this phase for what a stranger meets before and during
+install, and move out what a stranger only meets once the app is already
+running. Tasks 116 to 121, #320 to #325 (the bar's settings icon, the
+project creation row, the Light/Dark/System choice, the header mark, and
+the favicon route) are in-app UI a stranger reaches only after installing
+and signing in; none of them changes what the PyPI page, the README or
+`--help` say. Moved to the existing Backlog milestone rather than a new
+phase, the same move `docs/roadmap.md` itself already describes for Phase
+10, "sixteen tickets to thirty nine... narrowed to escape it": Backlog is
+where a real, already-triaged ticket waits for a phase, not an invented
+extra phase, and every guard this file is checked against still holds with
+Phase 15 open and Backlog the one phase already carrying that state.
+
 ## What this phase is NOT about
 
 **A redesign of anything this phase's tickets touch.** Every ticket here is a
@@ -247,6 +278,13 @@ order. Listed by priority.
       restart hitchrail` for the packaged unit), with `hitchrail --version`
       named as the way to confirm it landed.
 
+- [ ] **Task 128, #332 (P2).** `## Install` moves from `README.md:475` to
+      directly after `## What it costs you to run this` and before
+      `## Prerequisites`; the two near-identical `uv tool install` versus
+      `uvx` paragraphs inside it collapse into one. The risk-before-
+      instructions guard is unaffected, since it only requires `## Install`
+      follow the risk heading, not that it follow `## Run it` as well.
+
 - [ ] **Task 114, #141 (P3).** `--port` and the other undocumented flags get
       help text and shown defaults; `--help`'s epilog gets one worked
       example invocation.
@@ -289,93 +327,31 @@ order. Listed by priority.
       and names nothing on the machine on purpose, the latter is never a
       stranger's first, cold visit.
 
-### `web`: settings moves from the footer into the bar
+### `web`: the bar and settings rearrangement, moved out
 
-- [ ] **Task 116, #320 (P2).** The settings link relocated from the footer's
-      `.about` line to an icon only gear button in `.bar-actions`, same
-      element (`data-settings-link`), same route, `aria-label="Settings"`.
-      Verified at the e2e tier's 390px viewport that the bar does not wrap
-      and the header's height is unchanged, since that is the exact
-      regression #238 was written to avoid for a text button; this is an
-      icon, and the ticket does not get to assume the old measurement still
-      holds. `tests/e2e/test_settings.py` updated for the new accessible
-      name and the new assertion. `index.html`'s comment rewritten to record
-      why the decision reversed.
+None of these five is about what a stranger meets before or during install;
+each is in-app UI reached only after installing and signing in, the
+distinction the thirteenth paragraph above draws. Moved to the Backlog
+milestone on 2026-09-24; each ticket's own body is unchanged and carries its
+full implementation detail, not duplicated here.
 
-### `web`: creating a project stops being a bar button
+- [ ] **Task 116, #320 (P2).** MOVED OUT to Backlog, #320: settings
+      relocated from the footer into a gear icon in `.bar-actions`.
 
-- [ ] **Task 117, #321 (P2).** The `data-new` button removed from
-      `.bar-actions`; a permanent "create new project" row appended after the
-      real rows in `renderList()`, and after the empty state template too, so
-      it survives every filter (search, tab, root chip) and the zero-match
-      case alike. Same `showNewFolder()` dialog, unchanged. Reverses part of
-      #149's "controls that act on the list survive scrolling": the create
-      row does not, on a long list, and `index.html`'s new comment records
-      why creating is treated differently from the filters #149 named, per
-      this repository's rule that a reversed decision writes its reason into
-      the code.
-      `tests/e2e/test_list.py`'s `test_the_header_costs_no_more_at_rest_and_less_when_scrolled`
-      rewritten to stop asserting a bar bounding box for a control that no
-      longer lives there, plus a new assertion that the create row is the
-      list's last child at every filter state. The other ten `name="New"`
-      locators across `test_starting.py`, `test_roots.py`,
-      `test_screenshots.py`, `test_shell.py` and `test_stopping.py` updated
-      to the row.
+- [ ] **Task 117, #321 (P2).** MOVED OUT to Backlog, #321: the bar's `New`
+      button replaced by a permanent create-project row in the list.
 
-- [ ] **Task 118, #322 (P3).** MOVED OUT to #321 if task 117 lands first,
-      since the bar button #322 relabels will no longer exist; otherwise the
-      button's text becomes "New project" (not "Create New Project": the
-      research behind both tickets found that redundant), with the same
-      390px no-wrap check task 116 and #320 already carry, and the eleven
-      `name="New"` locators updated to `name="New project"`.
+- [ ] **Task 118, #322 (P3).** MOVED OUT to Backlog, #322: the `New`
+      button's label clarified, moot if #321 lands first.
 
-### `web`: a way back to following the system
+- [ ] **Task 119, #323 (P2).** MOVED OUT to Backlog, #323: a Light / Dark /
+      System choice added to settings.
 
-- [ ] **Task 119, #323 (P2).** A Light / Dark / System `role="radiogroup"`
-      added to `settings.html`, reusing `settings.js`'s existing `THEME_KEY`
-      read on load; picking one applies immediately with no reload and no
-      server round trip, unlike the Stopping field's `Save` button, since a
-      theme is stored in `localStorage` only. The header toggle's own
-      behaviour and markup are untouched; `settings.js`'s file comment
-      ("the two things a request may change") updated to name Appearance as
-      a third, explicitly non-request change. `tests/e2e/test_settings.py`
-      covers each of the three picks, cross page consistency with the header
-      toggle in both directions, and the private-window fallback;
-      `tests/e2e/test_shell.py`'s two existing theme tests pass unmodified.
+- [ ] **Task 120, #324 (P3).** MOVED OUT to Backlog, #324: the app's mark
+      inlined in the header, not only as a favicon.
 
-### `web`: the mark appears in the header, not only as a favicon
-
-- [ ] **Task 120, #324 (P3).** The app's mark (`icon.svg`, #160) inlined as
-      static SVG, immediately before the `hitchrail` heading, in a new
-      `.bar-title-row` wrapper on `index.html`, `settings.html` and
-      `logs.html`; `grant.html` is out of scope, since it has no `.bar`
-      header and is byte compared against disk by
-      `test_the_grant_page_names_nothing_on_the_machine`. The inlined copy's
-      fills are `var(--ink)`/`var(--accent)`, not the standalone file's own
-      hardcoded colours and media query, so it follows the page's
-      `[data-theme]` override the way a favicon cannot. `aria-hidden="true"`,
-      since the adjacent heading already says "hitchrail". Placed beside the
-      `<h1>`, not inside it: `logs.html`'s heading carries `data-title` and
-      is overwritten wholesale by `logs.js:32` on load, so a child node there
-      would be lost the instant that page's own script ran. `icon.svg`'s own
-      dark mode `.live` fill, stale since #69's 2026-09-11 retune touched
-      only `app.css`, is corrected in the same pass to match the current
-      `--accent` value. `tests/e2e/test_shell.py` covers the mark's presence,
-      its theme tracking, the unaffected heading accessible name, and the
-      unchanged 390px bar width on all three pages.
-
-### `security`, `web`: the implicit favicon probe stops being a 401
-
-- [ ] **Task 121, #325 (P3).** `/favicon.ico` added to `pages.ASSETS`,
-      aliasing the existing `icon.svg` bytes under `image/svg+xml` rather
-      than shipping a new binary asset, and added to
-      `security.UNAUTHENTICATED_ASSETS`, widening that set's comment from
-      four files to five with the reason written beside it. `tests/
-      test_security_token.py`'s pinned frozenset and `tests/test_api.py`'s
-      `test_the_mark_and_the_manifest_are_served_without_a_token`
-      parametrization both gain the new path; the existing full route sweep
-      picks it up automatically through `UNAUTHENTICATED_ASSETS`
-      membership, with no separate change.
+- [ ] **Task 121, #325 (P3).** MOVED OUT to Backlog, #325: `/favicon.ico`
+      added to the unauthenticated asset set instead of answering 401.
 
 ### `cli`: a startup banner names the service
 
@@ -398,27 +374,17 @@ order. Listed by priority.
 
 - [ ] Every task above is ticked, or marked MOVED OUT or NOT BUILT with the
       issue number that carries it.
-- [ ] #167, #156, #157, #158, #319, #141, #17 and #320 are closed. #321 is
-      closed; #322 is closed or is MOVED OUT to #321. #323 is closed. #324 is
-      closed. #325 is closed. #326 is closed. #327 is closed. #328 is closed.
-      #329 is closed. #330 is closed. #331 is closed.
+- [ ] #167, #156, #157, #158, #319, #141, #17 and #332 are closed. #326 is
+      closed. #327 is closed. #328 is closed. #329 is closed. #330 is
+      closed. #331 is closed. #320 to #325 are MOVED OUT to Backlog and are
+      no longer this phase's to close.
 - [ ] The PyPI page and the README agree: install line, licence statement,
       and what CI reports.
 - [ ] The licence is one clickable statement, not four scattered ones.
 - [ ] A stranger's bug report can be answered from the journal alone.
-- [ ] Settings is reachable from an icon in the bar, not a text link at the
-      end of the footer, with no header wrap at 390px.
-- [ ] Creating a project is a permanent row at the end of the list, reachable
-      under every filter, not a bar button whose word alone did not say what
-      it did.
-- [ ] Settings offers an explicit Light / Dark / System choice; the header
-      toggle's own behaviour is unchanged, and #53's guarantee that an
-      explicit choice wins over a later system change still holds.
-- [ ] The app's mark sits in front of the `hitchrail` heading on every page
-      that has one, tracks the page's theme the way the rest of it does, and
-      the heading's accessible name is unchanged.
-- [ ] `/favicon.ico` answers 200 with the app's mark, not a 401, with no
-      token presented.
+- [ ] `## Install` is the first heading reached after the risk section, not
+      one of three scattered install mentions 475 lines in, and states the
+      `uv tool install` versus `uvx` distinction once, not twice.
 - [ ] A normal `hitchrail` start prints the name, version and GitHub link
       before the server starts, even when a later check refuses to start;
       `update-plugins` and `--help`/`--version` are unaffected.
