@@ -129,9 +129,9 @@ gets this right ("A web UI for..."), so #328 brings the other two in line
 with it rather than inventing new copy; the phone-first design priority
 itself is untouched, since that is a deliberate, already argued and already
 tested decision this ticket was never asked to reopen. Checking
-`.claude/CLAUDE.md` as part of the same review found the identical omission
-a third time, confirming a habit rather than a typo, though that file is
-untracked and outside anything a PR can ship.
+`.claude/CLAUDE.md` as part of the same review found it already correct
+("Hitchrail is a web UI for... Phone first"), so the omission is confined
+to the two surfaces #328 fixes, not a third.
 
 ## What this phase is NOT about
 
