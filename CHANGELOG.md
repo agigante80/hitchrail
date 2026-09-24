@@ -32,6 +32,8 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+## 0.10.0 - 2026-09-24
+
 ### Added
 
 **`hitchrail update-plugins`**, which refreshes the agent's marketplaces and
