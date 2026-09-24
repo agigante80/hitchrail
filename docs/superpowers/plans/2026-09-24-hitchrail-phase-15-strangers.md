@@ -152,6 +152,21 @@ adds one capture test for the settings page mid plugin update, reusing the
 fake-agent seam `tests/e2e/test_plugins.py` already built, and confirms
 every image the tier produces is used somewhere in the rewritten README.
 
+**An eleventh was added the same day, from the operator asking that the
+roadmap be linked from the README.** Checked first: it already is, twice,
+in the intro paragraph (`README.md:18-25`), more prominently than most
+repos manage. What is missing is the second, scannable place a reader
+looks: the `## Documents` table (`README.md:517-524`) indexes every other
+doc, `docs/api.md`, `SECURITY.md`, `CONTRIBUTING.md`, `CHANGELOG.md`,
+`docs/releasing.md`, but not `docs/roadmap.md`. Researched first: current
+guidance wants a roadmap findable in a dedicated, scannable place, usually
+a `## Roadmap` heading with a checklist mirroring the roadmap's phase
+states; rejected here on the same grounds `README.md:18-19` already states
+out loud, that a phase checklist in the README goes stale the way "phases 0
+to 6" once did, and `tests/test_docs_are_true.py` exists to catch exactly
+that. #330 adds the one missing row to the table this project already has
+for this purpose instead, duplicating no state.
+
 ## What this phase is NOT about
 
 **A redesign of anything this phase's tickets touch.** Every ticket here is a
@@ -235,6 +250,12 @@ order. Listed by priority.
       refusing a start that would exhaust the machine; two roots kept
       apart by a chip), each naming a behaviour the README already
       documents elsewhere rather than a new claim.
+
+- [ ] **Task 126, #330 (P3).** `docs/roadmap.md` added as a row to the
+      `## Documents` table (`README.md:517-524`), alongside `docs/api.md`,
+      `CHANGELOG.md` and the rest. The two existing inline links in the
+      intro paragraph are unchanged; no phase state duplicated into the
+      README.
 
 ### `web`: settings moves from the footer into the bar
 
@@ -348,7 +369,7 @@ order. Listed by priority.
 - [ ] #167, #156, #157, #158, #319, #141, #17 and #320 are closed. #321 is
       closed; #322 is closed or is MOVED OUT to #321. #323 is closed. #324 is
       closed. #325 is closed. #326 is closed. #327 is closed. #328 is closed.
-      #329 is closed.
+      #329 is closed. #330 is closed.
 - [ ] The PyPI page and the README agree: install line, licence statement,
       and what CI reports.
 - [ ] The licence is one clickable statement, not four scattered ones.
@@ -376,6 +397,8 @@ order. Listed by priority.
       settings page mid plugin update has a picture for the first time.
 - [ ] The GitHub About field and PyPI's summary both say "web UI," not only
       "from your phone"; the phone-first design priority is unchanged.
+- [ ] `docs/roadmap.md` is a row in the `## Documents` table, not only in
+      the intro paragraph.
 - [ ] The roadmap's Phase 15 block says `state: done`, the milestone is
       closed, and `scripts/check-phases.sh` passes for this phase.
 
