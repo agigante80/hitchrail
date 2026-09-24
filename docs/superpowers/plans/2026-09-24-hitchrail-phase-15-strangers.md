@@ -105,6 +105,20 @@ print before `build_config()` so it still appears when a later config,
 preflight or gateway check refuses to start, exactly the case a stranger's
 bug report needs it most.
 
+**An eighth was added the same day, for the README rewrite this phase
+already carries.** The operator asked for a section explaining, in concrete
+scenarios, why a stranger would install this at all, distinct from the
+feature summary `## What it will do` already gives and from the badge,
+install-line and upgrade tickets already in this phase, none of which
+answer "is this for me". Researched first: current README guidance
+converges on a reader asking three questions in order, what is this, is it
+for me, how do I start, and answers the second with a small number of
+concrete, project specific scenarios rather than a generic use-case list.
+#327 draws its scenarios from behaviour the README already documents
+elsewhere (the phone interface, the four derived states, the memory floors,
+multiple roots), so the new section restates and frames rather than
+introduces a claim nothing else backs.
+
 ## What this phase is NOT about
 
 **A redesign of anything this phase's tickets touch.** Every ticket here is a
@@ -160,6 +174,15 @@ order. Listed by priority.
 - [ ] **Task 115, #17 (P3).** A GitHub Sponsors section and button in the
       README, `https://github.com/sponsors/agigante80`, replacing no other
       funding link since none currently exists.
+
+- [ ] **Task 123, #327 (P2).** A `## Why you'd use this` section added
+      between `## What it will do` and `## What it looks like`, three to
+      four concrete scenarios (checking on or stopping a session from a
+      phone with no shell; telling apart the four derived states so a
+      `detached` agent is not mistaken for `stopped`; the memory floors
+      refusing a start that would exhaust the machine; two roots kept
+      apart by a chip), each naming a behaviour the README already
+      documents elsewhere rather than a new claim.
 
 ### `web`: settings moves from the footer into the bar
 
@@ -272,7 +295,7 @@ order. Listed by priority.
       issue number that carries it.
 - [ ] #167, #156, #157, #158, #319, #141, #17 and #320 are closed. #321 is
       closed; #322 is closed or is MOVED OUT to #321. #323 is closed. #324 is
-      closed. #325 is closed. #326 is closed.
+      closed. #325 is closed. #326 is closed. #327 is closed.
 - [ ] The PyPI page and the README agree: install line, licence statement,
       and what CI reports.
 - [ ] The licence is one clickable statement, not four scattered ones.
@@ -293,6 +316,8 @@ order. Listed by priority.
 - [ ] A normal `hitchrail` start prints the name, version and GitHub link
       before the server starts, even when a later check refuses to start;
       `update-plugins` and `--help`/`--version` are unaffected.
+- [ ] The README answers "is this for me" with concrete scenarios before it
+      shows a single screenshot.
 - [ ] The roadmap's Phase 15 block says `state: done`, the milestone is
       closed, and `scripts/check-phases.sh` passes for this phase.
 
