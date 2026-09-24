@@ -85,6 +85,26 @@ that retune was scoped to `app.css` and never touched the standalone file;
 task 120 corrects it in the same pass, since this ticket is already reading
 and duplicating that file's colours.
 
+**A sixth and seventh were added the same day, both checked against the
+running code before being filed.** The operator asked to use the app's icon
+as the website favicon; reading all four pages, the manifest and #160 found
+that already shipped, so no duplicate ticket was filed for it. What that
+reading did turn up is a real, separate gap: `/favicon.ico`, the path a
+browser asks for on its own regardless of any `<link rel="icon">` tag, is
+neither a route in `pages.ASSETS` nor a member of
+`security.UNAUTHENTICATED_ASSETS`, so `TokenMiddleware` answers every
+browser's implicit probe with a 401. #325 files that gap alone, aliasing the
+existing `icon.svg` bytes rather than shipping a second binary asset. The
+operator's second ask, a CLI startup banner naming the service, its version
+and where it lives, found the opposite: `cli.py`'s only existing banner
+(`banner()`) is entirely about the token grant link and prints nothing on a
+normal start. Researched first, and grounded in a real constraint already
+in the file: the new banner in #326 is a second, always printed function,
+never a change to `banner()`'s own tested silence on loopback, and it has to
+print before `build_config()` so it still appears when a later config,
+preflight or gateway check refuses to start, exactly the case a stranger's
+bug report needs it most.
+
 ## What this phase is NOT about
 
 **A redesign of anything this phase's tickets touch.** Every ticket here is a
@@ -216,13 +236,43 @@ order. Listed by priority.
       its theme tracking, the unaffected heading accessible name, and the
       unchanged 390px bar width on all three pages.
 
+### `security`, `web`: the implicit favicon probe stops being a 401
+
+- [ ] **Task 121, #325 (P3).** `/favicon.ico` added to `pages.ASSETS`,
+      aliasing the existing `icon.svg` bytes under `image/svg+xml` rather
+      than shipping a new binary asset, and added to
+      `security.UNAUTHENTICATED_ASSETS`, widening that set's comment from
+      four files to five with the reason written beside it. `tests/
+      test_security_token.py`'s pinned frozenset and `tests/test_api.py`'s
+      `test_the_mark_and_the_manifest_are_served_without_a_token`
+      parametrization both gain the new path; the existing full route sweep
+      picks it up automatically through `UNAUTHENTICATED_ASSETS`
+      membership, with no separate change.
+
+### `cli`: a startup banner names the service
+
+- [ ] **Task 122, #326 (P2).** A new `identity_banner()` in `cli.py`,
+      separate from and never touching `banner()`'s own tested silence on
+      loopback, printing the name, `pyproject.toml`'s one line description,
+      `__version__` and the GitHub link, unconditionally, with `flush=True`
+      per the `#145` journal-buffering footgun `banner()` itself already
+      documents. Called in `main()` right after `parse_args()` succeeds and
+      before `build_config()`, so it still appears when a later config,
+      preflight or gateway check fails, and is skipped entirely on the
+      `update-plugins` one shot path. `cli.py:53`'s argparse `description=`
+      corrected in the same pass to match `pyproject.toml`'s wording, which
+      the new banner also reuses. `tests/test_cli.py` covers a normal start,
+      a start that fails after the banner, the `update-plugins` exclusion,
+      and the journal-buffering case, following the existing
+      `BlockBuffered` pattern.
+
 ## Done looks like
 
 - [ ] Every task above is ticked, or marked MOVED OUT or NOT BUILT with the
       issue number that carries it.
 - [ ] #167, #156, #157, #158, #319, #141, #17 and #320 are closed. #321 is
       closed; #322 is closed or is MOVED OUT to #321. #323 is closed. #324 is
-      closed.
+      closed. #325 is closed. #326 is closed.
 - [ ] The PyPI page and the README agree: install line, licence statement,
       and what CI reports.
 - [ ] The licence is one clickable statement, not four scattered ones.
@@ -238,6 +288,11 @@ order. Listed by priority.
 - [ ] The app's mark sits in front of the `hitchrail` heading on every page
       that has one, tracks the page's theme the way the rest of it does, and
       the heading's accessible name is unchanged.
+- [ ] `/favicon.ico` answers 200 with the app's mark, not a 401, with no
+      token presented.
+- [ ] A normal `hitchrail` start prints the name, version and GitHub link
+      before the server starts, even when a later check refuses to start;
+      `update-plugins` and `--help`/`--version` are unaffected.
 - [ ] The roadmap's Phase 15 block says `state: done`, the milestone is
       closed, and `scripts/check-phases.sh` passes for this phase.
 
