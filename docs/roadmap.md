@@ -255,13 +255,20 @@ ceiling; and only `user` scope is updated, because a project scoped install
 belongs to a folder the vendor's listing does not name.
 
 ## Phase: Phase 15: The package as strangers meet it
-state: planned
+state: open
+plan: docs/superpowers/plans/2026-09-24-hitchrail-phase-15-strangers.md
 
-Somebody who has never seen this project can install it, tell what it is, see
-that it is maintained, and be helped when it goes wrong. Everything here came
-from looking at the published PyPI page beside our own README and finding they
-disagree, or say nothing, and from failing to answer a support question about
-this machine because the journal held uvicorn's access lines and nothing else.
+**Opened 2026-09-24**, pulled forward from its place in the file (it was
+already the next `planned` phase) on the operator's call, ahead of publicly
+writing about the project. Somebody who has never seen this project can
+install it, tell what it is, see that it is maintained, and be helped when it
+goes wrong. Everything here came from looking at the published PyPI page
+beside our own README and finding they disagree, or say nothing, and from
+failing to answer a support question about this machine because the journal
+held uvicorn's access lines and nothing else. One ticket was filed the day it
+opened, #319: the README said how to install but never how to upgrade an
+installed copy, found when the operator's own running service turned out to
+be two minor and five patch versions behind.
 
 Delivers: `pip` acknowledged as an install route, the deprecated licence
 classifier removed and the licence made clickable, a badge row on the first
