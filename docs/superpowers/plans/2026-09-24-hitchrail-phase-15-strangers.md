@@ -167,6 +167,26 @@ to 6" once did, and `tests/test_docs_are_true.py` exists to catch exactly
 that. #330 adds the one missing row to the table this project already has
 for this purpose instead, duplicating no state.
 
+**A twelfth was added the same day, from the operator asking for the
+reference README's centred icon, title and badge row, plus a one line
+description reused across the app.** #158 already carried this phase's
+badge row research and two explicit decisions against exactly this: "left,
+not centred" and "an icon is out of scope." Both were correct when written
+and are not now: the icon they said did not exist yet shipped as #160 and
+is already used, uncentred, at `README.md:1`, and the centring request now
+has a second source, the operator who wrote the reference README asking
+directly for the same treatment here. #158 was rewritten in place rather
+than superseded by a new ticket, with the reversal and its reasoning
+written into the ticket body, and now also proposes the centred, bold one
+line description the reference uses beneath its badges, with several
+worded candidates rather than one guess, chosen so it can be the same
+string #328 ships for `pyproject.toml`, #326 ships for the CLI banner, and
+the fourth surface named directly, page metadata. That fourth surface had
+no ticket: `index.html` and `settings.html` have no `<meta
+name="description">` and no Open Graph tags at all, so a shared link or a
+search result shows a bare title today. #331 adds it, reusing whichever
+wording #158 settles on rather than inventing a fifth string.
+
 ## What this phase is NOT about
 
 **A redesign of anything this phase's tickets touch.** Every ticket here is a
@@ -213,9 +233,13 @@ order. Listed by priority.
       `pyproject.toml`, and the README's "MIT" becomes a clickable link to
       `LICENSE`.
 
-- [ ] **Task 112, #158 (P2).** A badge row above the fold: version,
-      downloads, licence, supported Python, CI status, matching the reference
-      `agigante80/actual-mcp-server` README the ticket names.
+- [ ] **Task 112, #158 (P2).** A centred icon and title, a badge row above
+      the fold (version, downloads, licence, supported Python, CI status),
+      and a centred, bold one line description beneath it, matching the
+      reference `agigante80/actual-mcp-server` README the ticket names.
+      Reverses #158's own earlier "left, not centred" and "icon is out of
+      scope" decisions, with the reversal's reasoning written into the
+      ticket.
 
 - [ ] **Task 113, #319 (P2).** An "Upgrading" section in the README covering
       both install shapes (`uvx` re-resolution and its cache escape hatch;
@@ -256,6 +280,14 @@ order. Listed by priority.
       `CHANGELOG.md` and the rest. The two existing inline links in the
       intro paragraph are unchanged; no phase state duplicated into the
       README.
+
+- [ ] **Task 127, #331 (P2).** `<meta name="description">` and
+      `og:title`/`og:description` added to `index.html` and `settings.html`,
+      reusing whichever one line description task 112/#158 settles on for
+      the README's centred tagline. `grant.html` and `logs.html` excluded:
+      the former is compared byte for byte against disk by an existing test
+      and names nothing on the machine on purpose, the latter is never a
+      stranger's first, cold visit.
 
 ### `web`: settings moves from the footer into the bar
 
@@ -369,7 +401,7 @@ order. Listed by priority.
 - [ ] #167, #156, #157, #158, #319, #141, #17 and #320 are closed. #321 is
       closed; #322 is closed or is MOVED OUT to #321. #323 is closed. #324 is
       closed. #325 is closed. #326 is closed. #327 is closed. #328 is closed.
-      #329 is closed. #330 is closed.
+      #329 is closed. #330 is closed. #331 is closed.
 - [ ] The PyPI page and the README agree: install line, licence statement,
       and what CI reports.
 - [ ] The licence is one clickable statement, not four scattered ones.
@@ -399,6 +431,12 @@ order. Listed by priority.
       "from your phone"; the phone-first design priority is unchanged.
 - [ ] `docs/roadmap.md` is a row in the `## Documents` table, not only in
       the intro paragraph.
+- [ ] The README's icon, title, badge row and one line description are
+      centred, matching the reference README, with the left-aligned body
+      prose below them unchanged.
+- [ ] `index.html` and `settings.html` carry a meta description and Open
+      Graph tags, reusing the same one line description the README, the
+      GitHub About field, PyPI's summary and the CLI banner all use.
 - [ ] The roadmap's Phase 15 block says `state: done`, the milestone is
       closed, and `scripts/check-phases.sh` passes for this phase.
 
