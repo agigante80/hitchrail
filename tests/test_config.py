@@ -998,7 +998,17 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # it reads. The predicate is five lines; the rest is the belief behind
         # the number and the two captured screens that justify it, which is
         # exactly the kind of vendor layout fact this module quarantines.
-        "claude_ipc.py": 821,
+        # 821 to 1062 for #124: the plugin update. A second responsibility in
+        # the quarantine, and it goes HERE rather than into a sibling module
+        # because "the only module that knows vendor internals" is the rule the
+        # AST guard in `test_plugins.py` enforces; a second quarantine file
+        # would be a second place to look when the vendor moves. About a third
+        # of it is the two decisions (`-y`, user scope only) and the facts they
+        # rest on, which the next reader would otherwise reopen. If the file is
+        # now two things, the split is a `claude_ipc` package, and that is
+        # Phase 18's argument rather than this phase's. The last 16 lines are
+        # round 1 of its review: vendor text escaped before it is printed.
+        "claude_ipc.py": 1062,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.
@@ -1251,7 +1261,14 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 616 for #258: the callback that makes OpenSSL's tty prompt
         # unreachable, and the refusal naming the key and the command that
         # decrypts it.
-        "cli.py": 616,
+        # 616 to 688 for #124: `update-plugins`, a second entry point with its
+        # own small parser, dispatched before the server's. A module of its own
+        # was the other seam; it would have been a third web layer module for
+        # forty lines of argument handling and printing, with the operation
+        # itself already in `claude_ipc.py`. If a second subcommand arrives,
+        # that is the moment to move both out. 693 in its review: the failure
+        # code printed ahead of the words, so a script can match on it.
+        "cli.py": 693,
         # 409, nine lines over, down from 542. #115 deleted the `?token=`
         # carrier: 135 lines once the two blocks inside `TokenMiddleware`
         # that only served it are counted.
@@ -1343,7 +1360,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 904 for #256: the listing says which hidden roots a request can
         # bring back, so the empty page stops sending somebody to a checkbox
         # that is not there.
-        "server.py": 904,
+        # 948 for #297: two plugin routes and the named event branch in the
+        # stream. The run itself is `plugin_runs.py`, deliberately, so what
+        # grew here is routing and the reason each answer is what it is.
+        "server.py": 948,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

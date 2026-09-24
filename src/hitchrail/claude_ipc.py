@@ -22,11 +22,15 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
-from collections.abc import Callable
+import subprocess
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
+
+from hitchrail.projectnames import display_name
 
 # How the agent is found in the process table. State derivation matches this as
 # a substring of a command line, so it has to be something no other process on
@@ -819,3 +823,240 @@ def session_url(
         return SessionUrl(from_bridge, "bridge")
 
     return SessionUrl(from_pane, "scraped") if from_pane is not None else None
+
+
+# -- plugin updates (#124) ------------------------------------------------------
+#
+# Checked against Claude Code 2.1.280 on 2026-09-23, `--help` for each
+# subcommand plus a real `plugin list --json`, rather than recalled. Every fact
+# below is the vendor's to change.
+#
+# **`-y` is passed, by the operator's decision of 2026-09-23.** It approves
+# whatever command a marketplace declares for fetching or installing a plugin,
+# unseen, and it is REQUIRED when stdin or stdout is not a terminal, which here
+# is always. `--accept-command <sha256>` would approve one shown command
+# instead; that means showing it to a person, and it was declined because an
+# agent this tool spawns with every permission already sets the ceiling. The
+# command that ran is carried out in the outcome when the vendor reports it.
+#
+# **Only `user` scope is updated.** A `local` or `project` install belongs to a
+# project directory the listing does not name: 2.1.280 printed one `local` row
+# per project for the same id, at four different versions. Updating them from
+# this process's working directory updates the wrong project or none, and
+# collapsing them hides installs. `synced` is not a value `-s` accepts, and
+# `managed` is an administrator's. Every such row is reported as skipped, so the
+# count covers every row the listing returned.
+
+_UPDATABLE_SCOPE = "user"
+
+# One per call. A marketplace refresh is a git fetch per marketplace, and an
+# update may download an archive; generous, because the failure they exist for
+# is a call that never returns, which would otherwise hold the in flight marker
+# until a restart.
+_REFRESH_TIMEOUT_S = 300.0
+_LISTING_TIMEOUT_S = 60.0
+_UPDATE_TIMEOUT_S = 300.0
+
+# Allowlists of shape for values that come from the vendor's JSON and go back
+# into an argv. An argv element cannot become a second command, but an id that
+# starts with `-` would be read as a flag, and anything unexpected means the
+# listing is not the one this code understands.
+_PLUGIN_ID = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._@+-]{0,199}\Z")
+_SCOPE = re.compile(r"\A[a-z]{1,32}\Z")
+
+# What a failure detail may carry to a phone screen.
+_DETAIL_LIMIT = 240
+
+PluginResult = Literal["updated", "failed", "skipped"]
+PluginFailure = Literal["agent_missing", "marketplace_refresh_failed", "plugins_unreadable"]
+PluginRunner = Callable[[list[str], float], "subprocess.CompletedProcess[str]"]
+
+
+@dataclass(frozen=True)
+class PluginOutcome:
+    """What happened to one row of the listing. Carries no argv: the caller
+    learns the vendor's words for nothing but what it shows a person."""
+
+    plugin: str
+    scope: str
+    result: PluginResult
+    detail: str | None = None
+    approved_command: str | None = None
+
+
+class PluginsFailed(Exception):
+    """The operation as a whole could not run, and updated nothing further."""
+
+    def __init__(self, code: PluginFailure, message: str) -> None:
+        super().__init__(message)
+        self.code: PluginFailure = code
+
+
+def plugin_runner(withhold: Sequence[str]) -> PluginRunner:
+    """The real runner: an argument list, never a shell, with no terminal.
+
+    `withhold` names environment variables the child must not inherit (#113):
+    a marketplace's install command runs with this environment, and `-y` has
+    approved it unseen. Which variable holds a secret is the caller's
+    vocabulary, not this module's.
+
+    The working directory is the home directory, fixed: the vendor resolves a
+    project scope from it, so inheriting it would make the listing depend on
+    where the operator's shell was when they typed the command.
+
+    stdin is closed rather than inherited. Under `hitchrail update-plugins` it
+    is the operator's terminal, and a child that decided to prompt would wait
+    there for an answer nobody knows is being asked for.
+    """
+
+    def run(argv: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
+        env = {k: v for k, v in os.environ.items() if k not in withhold}
+        return subprocess.run(
+            argv,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+            env=env,
+            cwd=Path.home(),
+        )
+
+    return run
+
+
+def update_plugins(
+    binary: str, *, run: PluginRunner, report: Callable[[PluginOutcome], None]
+) -> list[PluginOutcome]:
+    """Refresh the marketplaces, then update every `user` scope plugin once.
+
+    Each outcome goes to `report` as it happens, and the whole list is
+    returned. `updated` means the vendor's update exited zero, which is also
+    what it does for a plugin that was already current: the vendor does not
+    say which, and a status this code cannot observe would be a guess. A
+    disabled plugin is updated like any other; enabling is the operator's
+    business, staleness is ours. One plugin failing does not stop the rest;
+    `PluginsFailed` means the operation itself could not go on, and nothing
+    after that point ran.
+
+    **An unreadable listing updates nothing.** Not the rows that parsed, and
+    not "0 updated": either would report green on the day the vendor changes
+    its JSON, on a machine with twenty plugins that are no longer updated.
+    """
+    refresh = _call(run, [binary, "plugin", "marketplace", "update"], _REFRESH_TIMEOUT_S)
+    if refresh is None or refresh.returncode != 0:
+        raise PluginsFailed(
+            "marketplace_refresh_failed",
+            "the marketplaces could not be refreshed, so no plugin was updated: "
+            + (_detail(refresh) if refresh is not None else "timed out"),
+        )
+    listing = _call(run, [binary, "plugin", "list", "--json"], _LISTING_TIMEOUT_S)
+    rows = None if listing is None or listing.returncode != 0 else _read_listing(listing.stdout)
+    if rows is None:
+        raise PluginsFailed(
+            "plugins_unreadable",
+            "the installed plugin list could not be understood, so nothing was updated",
+        )
+
+    outcomes: list[PluginOutcome] = []
+    seen: set[str] = set()
+    for plugin, scope in rows:
+        if scope != _UPDATABLE_SCOPE:
+            outcome = PluginOutcome(plugin, scope, "skipped", f"{scope} scope is not updated")
+        elif plugin in seen:
+            continue
+        else:
+            seen.add(plugin)
+            outcome = _update_one(run, binary, plugin)
+        outcomes.append(outcome)
+        report(outcome)
+    return outcomes
+
+
+def _call(
+    run: PluginRunner, argv: list[str], timeout: float
+) -> subprocess.CompletedProcess[str] | None:
+    """`None` for a timeout. A missing or unrunnable binary is the operation
+    failing, wherever in the run it happens: reporting each remaining plugin
+    `failed` with the same cause would be a list of one fact."""
+    try:
+        return run(argv, timeout)
+    except subprocess.TimeoutExpired:
+        return None
+    except OSError as exc:
+        raise PluginsFailed(
+            "agent_missing",
+            f"{argv[0]!r} could not be run, so nothing further was updated: {exc}",
+        ) from exc
+
+
+def _update_one(run: PluginRunner, binary: str, plugin: str) -> PluginOutcome:
+    done = _call(
+        run,
+        [binary, "plugin", "update", plugin, "-s", _UPDATABLE_SCOPE, "-y", "--json"],
+        _UPDATE_TIMEOUT_S,
+    )
+    if done is None:
+        return PluginOutcome(plugin, _UPDATABLE_SCOPE, "failed", "timed out")
+    if done.returncode != 0:
+        return PluginOutcome(plugin, _UPDATABLE_SCOPE, "failed", _detail(done))
+    return PluginOutcome(
+        plugin, _UPDATABLE_SCOPE, "updated", approved_command=_approved_command(done.stdout)
+    )
+
+
+def _read_listing(text: str) -> list[tuple[str, str]] | None:
+    """Every row as `(id, scope)`, or `None` if ANY row is not understood."""
+    try:
+        raw = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(raw, list):
+        return None
+    rows = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            return None
+        plugin, scope = entry.get("id"), entry.get("scope")
+        if not (isinstance(plugin, str) and _PLUGIN_ID.match(plugin)):
+            return None
+        if not (isinstance(scope, str) and _SCOPE.match(scope)):
+            return None
+        rows.append((plugin, scope))
+    return rows
+
+
+def _approved_command(stdout: str) -> str | None:
+    """The command `-y` approved, when `--json` reports one. Optional by
+    design: the outcome comes from the exit status, never from this."""
+    for line in stdout.splitlines():
+        try:
+            parsed = json.loads(line)
+        except ValueError:
+            continue
+        shown = parsed.get("shownCommand") if isinstance(parsed, dict) else None
+        command = shown.get("command") if isinstance(shown, dict) else None
+        if isinstance(command, str) and command:
+            return _shown(command)
+    return None
+
+
+def _detail(done: subprocess.CompletedProcess[str]) -> str:
+    """The exit status and the last line the vendor said, bounded."""
+    lines = [line.strip() for line in (done.stderr or done.stdout or "").splitlines()]
+    last = next((line for line in reversed(lines) if line), "")
+    text = f"exited {done.returncode}: {last}" if last else f"exited {done.returncode}"
+    return _shown(text)
+
+
+def _shown(text: str) -> str:
+    """Vendor text made safe to print, then bounded, in that order.
+
+    It reaches a terminal under `update-plugins` and a phone screen through
+    the route, and the approved command is the only record of what `-y` ran:
+    a `\r` and an erase-line sequence in it would print something harmless
+    over it, and a `\n` would forge a second outcome line. `display_name` is
+    the escaping the project already trusts for names it reports. Escaping
+    first means the cut can never split an escape sequence it left raw.
+    """
+    return display_name(text)[:_DETAIL_LIMIT]

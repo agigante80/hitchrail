@@ -97,6 +97,28 @@ def _no_proc_cwd(pid: int) -> Path:
     )
 
 
+def _no_real_plugin_update(_agent_binary: str) -> Callable[..., object]:
+    def refuse(_report: object) -> object:
+        raise AssertionError(
+            "a test reached the REAL plugin update, which would update this "
+            "machine's own plugins: pass `plugin_operation=` to `create_app`"
+        )
+
+    return refuse
+
+
+@pytest.fixture(autouse=True)
+def no_real_plugin_update(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The same rule for the plugin update (#297), and a sharper one: every
+    other seam here reads the machine, and this one CHANGES it. `create_app`
+    with no `plugin_operation` builds the real operation, so any test that
+    posts to `/api/plugins/update` with valid credentials would refresh the
+    developer's marketplaces and update their plugins. Replaced where the
+    server looks it up; `test_plugin_runs.py` tests the real builder directly.
+    """
+    monkeypatch.setattr("hitchrail.server.operation_for", _no_real_plugin_update)
+
+
 @pytest.fixture(autouse=True)
 def no_real_proc_cwd(monkeypatch: pytest.MonkeyPatch) -> None:
     """The same rule for the pid route's directory check (#264). An engine

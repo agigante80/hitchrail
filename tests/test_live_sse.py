@@ -165,15 +165,17 @@ async def test_a_change_arrives_on_the_stream(live: Fixture) -> None:
 
 async def test_two_readers_both_receive_the_same_change(live: Fixture) -> None:
     """A phone and a laptop must not have to take turns."""
-    async with httpx.AsyncClient(base_url=live.server.base) as c:
-        async with asyncio.timeout(TIMEOUT):
-            async with c.stream("GET", "/api/events", headers=live.headers) as first:
-                async with c.stream("GET", "/api/events", headers=live.headers) as second:
-                    readers = asyncio.gather(_events(first, 1), _events(second, 1))
-                    while live.bus.subscriber_count < 2:
-                        await asyncio.sleep(0.01)
-                    live.engine.stop(proj("vessel"))
-                    (a,), (b,) = await readers
+    async with (
+        httpx.AsyncClient(base_url=live.server.base) as c,
+        asyncio.timeout(TIMEOUT),
+        c.stream("GET", "/api/events", headers=live.headers) as first,
+        c.stream("GET", "/api/events", headers=live.headers) as second,
+    ):
+        readers = asyncio.gather(_events(first, 1), _events(second, 1))
+        while live.bus.subscriber_count < 2:
+            await asyncio.sleep(0.01)
+        live.engine.stop(proj("vessel"))
+        (a,), (b,) = await readers
     assert a["name"] == b["name"] == proj("vessel")
 
 
@@ -247,3 +249,77 @@ async def test_an_idle_stream_survives_its_own_poll_timeout(live: Fixture) -> No
                 live.engine.stop(proj("vessel"))
                 (event,) = await reader
     assert event["name"] == proj("vessel")
+
+
+async def _named_events(response: httpx.Response, count: int) -> list[tuple[str, object]]:
+    """`(event name, data)` pairs; an unnamed frame is `message`, as the SSE
+    spec says and as `EventSource` dispatches it."""
+    out: list[tuple[str, object]] = []
+    name = "message"
+    async for line in response.aiter_lines():
+        if line.startswith("event:"):
+            name = line.removeprefix("event:").strip()
+        elif line.startswith("data:"):
+            out.append((name, json.loads(line.removeprefix("data:").strip())))
+            name = "message"
+            if len(out) >= count:
+                return out
+    raise AssertionError(f"the stream closed after {len(out)} of {count} events")
+
+
+async def test_a_plugin_run_is_a_named_event_and_a_session_is_not(tmp_path: Path) -> None:
+    """#297. The page's `message` listener renders every frame as a session,
+    so a plugin record on `message` would be drawn as a row. Named, it reaches
+    only a listener that asks for `plugins`, and a session still arrives as
+    `message` beside it."""
+    from hitchrail.claude_ipc import PluginOutcome
+    from hitchrail.plugin_runs import EVENT_KIND
+
+    (tmp_path / "vessel").mkdir()
+    config = make_config(tmp_path, sessions_dir=tmp_path / ".sessions")
+    bus = EventBus()
+    engine = Engine(
+        config=config,
+        tmux=FakeTmux(sessions={proj("vessel"): 500}),
+        procs_fn=procs_from(RUNNING_PS),
+        meminfo_fn=lambda: PLENTY,
+        sleep=lambda _s: None,
+    )
+    release = threading.Event()
+
+    def operation(report: object) -> list[PluginOutcome]:
+        assert release.wait(TIMEOUT)
+        outcome = PluginOutcome("a@m", "user", "updated")
+        report(outcome)  # type: ignore[operator]
+        return [outcome]
+
+    server = LiveServer(
+        create_app(engine=engine, config=config, bus=bus, plugin_operation=operation),
+        free_port(),
+    )
+    server.start()
+    # The origin the CONFIG allows, which is its port, not the ephemeral one
+    # this socket happens to be bound to.
+    headers = {"host": "localhost", "origin": f"http://localhost:{config.port}"}
+    try:
+        async with (
+            httpx.AsyncClient(base_url=server.base, timeout=TIMEOUT) as client,
+            client.stream("GET", "/api/events", headers=headers) as stream,
+        ):
+            await _await_subscriber(bus)
+            assert (
+                await client.post("/api/plugins/update", headers=headers)
+            ).status_code == 202
+            bus.publish({"name": proj("vessel"), "state": "running"})
+            release.set()
+            events = await asyncio.wait_for(_named_events(stream, 4), TIMEOUT)
+    finally:
+        server.stop()
+
+    plugin_frames = [data for name, data in events if name == EVENT_KIND]
+    session_frames = [data for name, data in events if name == "message"]
+    assert session_frames == [{"name": proj("vessel"), "state": "running"}]
+    assert [f["state"] for f in plugin_frames] == ["running", "running", "done"]  # type: ignore[index]
+    # The data is the record itself, the GET's shape, never the bus envelope.
+    assert all("kind" not in f for f in plugin_frames)  # type: ignore[operator]
+    assert plugin_frames[-1]["counts"] == {"updated": 1, "failed": 0, "skipped": 0}  # type: ignore[index]

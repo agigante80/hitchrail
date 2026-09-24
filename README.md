@@ -214,15 +214,15 @@ path = "~/work"
 
 [[roots]]
 label = "personal"
-path = "~/personal"
+path = "~/projects/personal"
 
 [[roots]]
 label = "homelab"
-path = "~/homelab"
+path = "~/projects/homelab"
 
 [[roots]]
 label = "confidential"
-path = "~/confidential"
+path = "~/projects/confidential"
 enabled = false
 ```
 
@@ -413,7 +413,34 @@ install it first.
 | `--version` | | Print the version and exit |
 | `-h`, `--help` | | Print the options and exit |
 
-There are no subcommands. Hitchrail does one thing, and the flags configure it.
+One subcommand, and bare `hitchrail` still means the server.
+
+### Updating the agent's plugins
+
+```sh
+hitchrail update-plugins                      # or --agent-binary /path/to/agent
+```
+
+Refreshes the agent's marketplaces, then updates every plugin installed at
+`user` scope, and prints one line per plugin. No server is started and no
+root is needed. Exit 0 when nothing failed, 1 when a plugin failed, 2 when
+the update could not run at all: the agent is missing, the marketplaces did
+not refresh, or the list of installed plugins could not be understood, in
+which case nothing is updated rather than the part that could be read.
+
+- **Only `user` scope is updated.** A plugin installed for one project belongs
+  to that project's folder, which the agent's list does not name, so it is
+  reported as `skipped` with its scope rather than updated from the wrong
+  folder.
+- **Running sessions keep the old version** until they are restarted.
+- **An install command a marketplace declares is approved without being
+  shown to you**, because there is no terminal to show it on. When the agent
+  reports which command it approved, the line for that plugin names it.
+
+The same update runs from the phone: **Update plugins** on the settings page,
+with each plugin's result appearing as it finishes. One run at a time, for
+the whole machine; a second press while one runs is refused, and a page
+opened in the middle of a run shows where it is.
 
 ### Where the token comes from
 

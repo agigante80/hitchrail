@@ -62,6 +62,16 @@ README says so.
 there, because everything it can destroy is addressed by a session name it
 created. That is a deliberate limit rather than a missing feature.
 
+**Updating plugins runs what a marketplace declares, unseen.** `hitchrail
+update-plugins` passes the agent's `-y`, which approves an install command a
+marketplace declares without showing it to anyone. Whoever controls a
+marketplace you have added can therefore run code on this machine the next
+time plugins are updated, and unlike stopping a session, nothing Hitchrail
+does undoes it. This was decided rather than overlooked: an agent Hitchrail
+starts already runs with every permission, so the ceiling was already there,
+and a marketplace you added is one you chose to trust. The command's
+environment does not carry `HITCHRAIL_TOKEN`.
+
 If you think one of these is wrong rather than merely unwelcome, that argument
 is worth a public issue. The line between "the design is bad" and "the design
 is not implemented" is the line between an issue and an advisory.

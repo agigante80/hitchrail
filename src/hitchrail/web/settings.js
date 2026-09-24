@@ -24,6 +24,8 @@ try {
   /* a private window; the system preference applies */
 }
 
+import { startPlugins } from "/plugins.js";
+
 const $ = (selector) => document.querySelector(selector);
 
 function note(message) {
@@ -45,6 +47,13 @@ let generation = 0;
    one of them: a refusal's words survive until the next request the person
    makes. */
 let keepNote = false;
+
+// A success clears the strip unless a refusal is still owed its one repaint.
+// Shared with plugins.js so both sections keep the same rule on one strip.
+function settle() {
+  if (keepNote) keepNote = false;
+  else note("");
+}
 
 async function call(method, body) {
   const mine = ++generation;
@@ -85,8 +94,7 @@ async function call(method, body) {
     keepNote = true;
     return null;
   }
-  if (keepNote) keepNote = false;
-  else note("");
+  settle();
   return parsed;
 }
 
@@ -254,3 +262,5 @@ $("[data-stop-timeout]").addEventListener("keydown", (event) => {
 
 window.__settings = { refresh };
 refresh();
+// #297. Its own module: it shares the note strip and nothing else.
+startPlugins({ note, keep: (on) => (keepNote = on), settle });

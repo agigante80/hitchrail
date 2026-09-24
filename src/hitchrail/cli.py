@@ -15,7 +15,7 @@ from urllib.parse import quote
 import uvicorn
 from starlette.applications import Starlette
 
-from hitchrail import __version__, gateway, settings
+from hitchrail import __version__, claude_ipc, gateway, settings
 from hitchrail.config import (
     TOKEN_ENV,
     Config,
@@ -56,6 +56,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         # accept (`--stop 60`) is a spelling that scan cannot see. Exact
         # names only, which is what every document here uses anyway.
         allow_abbrev=False,
+        epilog=f"{UPDATE_PLUGINS}: update the agent's plugins and exit, with no server. "
+        f"See `hitchrail {UPDATE_PLUGINS} --help`",
     )
     # **`label=path`, repeatable, and there is no default.** #119 made a
     # project's identifier `<root-label>~<folder>`, so a root without a label
@@ -550,8 +552,83 @@ def _serve(app: Starlette, config: Config, tls: ssl.SSLContext | None) -> int:
     return 0
 
 
+UPDATE_PLUGINS = "update-plugins"
+
+
+def update_plugins_command(argv: list[str]) -> int:
+    """`hitchrail update-plugins`: 0 when nothing failed, 1 when a plugin
+    failed, 2 when the operation could not run (#124).
+
+    **Its own parser, dispatched before the server's**, rather than a
+    subparser. The server's parser has no positionals and a `flags_given`
+    scan (#238) that reads its option strings back out of argv; subparsers
+    would restructure both to add one verb, and bare `hitchrail` launching the
+    server is the compatibility promise that keeps this MINOR. A
+    `--update-plugins` flag was the other option and is worse: it makes a verb
+    look like a setting, the mistake the API avoided by keeping stop and kill
+    as separate routes.
+
+    It never builds a `Config`: it needs no root, no bind and no token, and a
+    machine with no config file must still be able to run it.
+    """
+    parser = argparse.ArgumentParser(
+        prog=f"hitchrail {UPDATE_PLUGINS}",
+        description="Refresh the agent's marketplaces and update every user scope "
+        "plugin, one result per plugin. Running sessions keep the old versions "
+        "until they are restarted.",
+        allow_abbrev=False,
+    )
+    parser.add_argument(
+        "--agent-binary",
+        default="claude",
+        help="the agent executable; must be on PATH or an absolute path",
+    )
+    args = parser.parse_args(argv)
+    binary = args.agent_binary.strip()
+    if not binary or binary.startswith("-"):
+        # The same refusal `Config._check_agent_binary` makes, for the reason
+        # it gives there: argv[0] starting with a hyphen is read as an option.
+        print(
+            f"hitchrail: not an acceptable agent binary: {args.agent_binary!r}", file=sys.stderr
+        )
+        return 2
+    if shutil.which(binary) is None:
+        print(
+            f"hitchrail: agent_missing: {binary!r} is not on PATH, so nothing was updated",
+            file=sys.stderr,
+        )
+        return 2
+
+    def show(outcome: claude_ipc.PluginOutcome) -> None:
+        note = outcome.detail or (
+            f"approved: {outcome.approved_command}" if outcome.approved_command else None
+        )
+        line = f"{outcome.result:<8} {outcome.plugin}"
+        print(f"{line} ({note})" if note else line, flush=True)
+
+    try:
+        outcomes = claude_ipc.update_plugins(
+            binary, run=claude_ipc.plugin_runner(withhold=(TOKEN_ENV,)), report=show
+        )
+    except claude_ipc.PluginsFailed as exc:
+        # The code first: it is the same word the route's record carries, so
+        # a script or a person can match on it rather than on the prose.
+        print(f"hitchrail: {exc.code}: {exc}", file=sys.stderr)
+        return 2
+    counts = {r: sum(o.result == r for o in outcomes) for r in ("updated", "failed", "skipped")}
+    print(
+        f"{counts['updated']} updated, {counts['failed']} failed, {counts['skipped']} skipped. "
+        "An update applies when a session next starts: running sessions keep the old "
+        "version until they are restarted."
+    )
+    return 1 if counts["failed"] else 0
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(sys.argv[1:] if argv is None else argv)
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == [UPDATE_PLUGINS]:
+        return update_plugins_command(argv[1:])
+    args = parse_args(argv)
     try:
         config = build_config(args)
         # allowed_hosts is a property, so a bad extra host only raises when it

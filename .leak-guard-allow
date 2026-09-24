@@ -1,0 +1,44 @@
+# Things this project has decided it may show. Tracked and public on purpose.
+# Keys: root, prefix, email (public scanner); skip (both).
+# NEVER put a private NAME here — the file is public, and a name would be an index.
+root proj
+# a test fixture value that happens to match a private-name shape
+skip tests/test_api.py
+
+# tests/test_no_private_data.py, tests/test_config.py, tests/test_ram.py, tests/test_docs_are_true.py,
+# packaging/hitchrail.service, src/hitchrail/config.py: this project's own private-data guard's test
+# fixtures and packaging examples, all placeholder/fake addresses
+email user@1000.service
+email pass@box.lan
+email name@instance.suffix
+email getty@tty1.service
+email someone@mail.service.com
+email somebody@realmail.com
+email systemd-nspawn@container.service
+email first.last@company.co.uk
+email user@box.lan
+
+# tests/test_no_private_data.py, tests/test_settings_file.py: placeholder fixture segments
+prefix /home/<somebody>
+prefix /home/someone
+prefix /Users/someone
+prefix /home/you
+prefix /home/x
+prefix /home/|
+
+# tests/e2e/conftest.py, tests/test_claude_ipc.py, tests/test_engine.py: a generic tool config
+# filename, not a person
+root .claude.json
+# tests/test_no_private_data.py: placeholder fixture roots
+root <scheme>
+root foo
+
+# docs/design/Desktop.dc.html:32, docs/design/Main.dc.html:33: an HTML tag immediately follows a
+# home-root reference to the built-in allowed "projects" root, with no whitespace, so the
+# scanner's word-token keeps the opening angle bracket from the next tag; the mangled token is
+# not itself allowed by default.
+root projects<
+
+# The three private home-root segments this file once left blocking were removed from the
+# content in commit 8407d2d; no allow entry exists for them by design.
+skip tests/test_no_private_data.py

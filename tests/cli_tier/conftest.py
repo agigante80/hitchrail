@@ -310,3 +310,22 @@ def run_cli(*args: str, env: dict[str, str] | None = None) -> subprocess.Complet
             check=False,
             env=_child_env(tmux_tmpdir, env),
         )
+
+
+def run_subcommand(
+    *args: str, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    """`run_cli` for a subcommand, which takes none of the server's flags.
+
+    `run_cli` puts `--host` and `--port` first, which is right for the server
+    and is a refusal for `update-plugins` (#124). Same isolation otherwise.
+    """
+    with _isolated_tmux() as tmux_tmpdir:
+        return subprocess.run(
+            [str(CONSOLE_SCRIPT), *args],
+            capture_output=True,
+            text=True,
+            timeout=RUN_TIMEOUT_S,
+            check=False,
+            env=_child_env(tmux_tmpdir, env),
+        )

@@ -52,7 +52,7 @@ is configured. `--root` takes `label=path` and is repeatable, and the label is
 the first half of every identifier below.
 
 ```
-hitchrail --root work=~/work --root personal=~/personal
+hitchrail --root work=~/work --root personal=~/projects
 
 POST /api/sessions/work~vessel
 POST /api/sessions/personal~vessel
@@ -91,6 +91,8 @@ See `CHANGELOG.md`.
 | `GET` | `/api/events` | SSE stream of state changes |
 | `GET` | `/api/config` | the effective configuration, every value with its source, never the token |
 | `PATCH` | `/api/config` | hide or show a configured root, or set the stop wait; the two settings a request may change |
+| `POST` | `/api/plugins/update` | begin updating the agent's plugins, returns immediately with the run record |
+| `GET` | `/api/plugins/update` | the current or last plugin run, `idle` when there has been none |
 | `GET` | `/logs/{name}` | a page showing one project's tail, bookmarkable; refuses a name exactly as `/api/sessions/{name}/logs` does |
 
 **Graceful stop and kill are separate routes, not one route with a flag.** A
@@ -220,6 +222,45 @@ is `{value, source, editable}`, its source `state` when the interface set it.
 **`token` carries its source and never its value**, and `none` means the
 server runs without one, which only a loopback bind allows.
 
+### `POST /api/plugins/update`, and `GET`
+
+Refreshes the agent's marketplaces and updates every plugin installed at
+`user` scope, one at a time, the operation `hitchrail update-plugins` runs
+(#124, #297). The POST answers 202 at once with the run record; a second POST
+while a run is in flight is 409 `update_in_flight` and changes nothing. The
+GET answers 200 with the same record at any time, which is how a page that
+opens or reconnects in the middle of a run learns where it is: the stream
+does not replay.
+
+| Field | What it holds |
+|---|---|
+| `seq` | a number the server increases on every change to the record, across runs, and never resets while it runs; of two records the larger `seq` is the newer, so a client drops a record older than the one it shows. `0` before any run |
+| `epoch` | an opaque string that names this server process. `seq` restarts at `0` when the server does, so two records' `seq` are comparable only when their `epoch` is equal; a record with a different `epoch` than the one shown is from a newer process and replaces it |
+| `state` | `idle` before any run, `running`, `done`, or `failed` when the operation itself could not go on |
+| `started_at`, `finished_at` | Unix seconds, null until they happen |
+| `outcomes` | one per row of the agent's plugin list so far, in order: `{plugin, scope, result, detail, approved_command}`, `result` one of `updated`, `failed`, `skipped` |
+| `counts` | `{updated, failed, skipped}` once `done`; **null otherwise, and always null when `failed`**, so a failure is never rendered as a count |
+| `code`, `message` | when `failed`, why, in the codes below; null otherwise |
+
+`updated` means the agent's update exited zero, which it also does for a
+plugin that was already current. A plugin at any scope other than `user` is
+`skipped` with its scope, since it belongs to a project folder the agent's
+list does not name. `detail` and `approved_command` are the agent's own words,
+with control characters escaped and cut to 240 characters: render them as
+text. `approved_command` is what `-y` approved without showing it, when the
+agent reports it; see `SECURITY.md`. Running sessions keep the old versions
+until they are restarted.
+
+The codes a `failed` record carries. They are not HTTP statuses: by the time
+the operation fails the 202 has been sent.
+
+| Record `code` | When |
+|---|---|
+| `agent_missing` | the configured agent binary could not be run |
+| `marketplace_refresh_failed` | the marketplaces did not refresh, so no plugin was updated |
+| `plugins_unreadable` | the installed plugin list was not understood, so nothing was updated, including the rows that parsed |
+| `internal_error` | the run stopped on a defect in Hitchrail; the journal has the traceback |
+
 ### `PATCH /api/config`
 
 Body: `{"roots": {"work": {"enabled": false}}, "stop_timeout": 45}`, either
@@ -318,6 +359,7 @@ than by position.
 | `state_unwritable` | 503 | the choice could not be written to `state.toml`, so it was not made |
 | `already_exists` | 409 | a folder of that name is already there |
 | `already_running` | 409 | that project already has a live session |
+| `update_in_flight` | 409 | a plugin update is already running; machine wide, unlike `locked` |
 | `locked` | 409 | a start is already in flight for that project |
 | `no_agent` | 409 | there is no agent to act on, so the request cannot be honoured |
 | `invalid_key` | 400 | the key asked for is not one of the keys Hitchrail will send |
@@ -345,8 +387,14 @@ machine could not be read. Say which it is.
 
 ## The event stream
 
-`GET /api/events` is `text/event-stream`. Each event carries one session as
-JSON, in the same shape as an entry from `GET /api/projects`.
+`GET /api/events` is `text/event-stream`. Each unnamed event (`message`)
+carries one session as JSON, in the same shape as an entry from
+`GET /api/projects`.
+
+A plugin run is announced as a NAMED event, `event: plugins`, whose data is
+the whole run record, the shape `GET /api/plugins/update` returns, on start,
+after each plugin, and at the end. A client listening only for `message`
+never sees one, which is what keeps it from being rendered as a session.
 
 It is exempt from the origin check, deliberately, because `EventSource` cannot
 set request headers. It is not exempt from the host allowlist or the token.

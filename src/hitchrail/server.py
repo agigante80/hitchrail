@@ -34,6 +34,7 @@ from hitchrail import security as sec
 from hitchrail.config import Config
 from hitchrail.events import EventBus
 from hitchrail.headers import SecurityHeadersMiddleware
+from hitchrail.plugin_runs import EVENT_KIND, Operation, PluginRuns, RunInFlight, operation_for
 from hitchrail.security import middleware_stack
 
 T = TypeVar("T")
@@ -143,6 +144,7 @@ def create_app(
     *,
     now: Callable[[], float] = time.time,
     user: Callable[[], str] = getpass.getuser,
+    plugin_operation: Operation | None = None,
 ) -> Starlette:
     """The bus is REQUIRED, and the caller owns it.
 
@@ -159,6 +161,11 @@ def create_app(
     """
     engine.attach_bus(bus)
     events = bus
+    # #297. The plugin update, one at a time. `plugin_operation` is the seam
+    # the tests fill; unset, it is the quarantined operation for the binary
+    # this server starts agents with.
+    plugin_updates = PluginRuns(publish=events.publish, clock=now)
+    run_plugins = plugin_operation or operation_for(config.agent_binary)
     # #147. Per server constants, read ONCE here and sent on the listing the
     # page already fetches, never on a route of their own: a second round trip
     # for a string is a round trip on a phone. `None` for the version is a
@@ -720,6 +727,34 @@ def create_app(
         # showing them as equals. Decided in #29.
         return JSONResponse({"name": name, "url": found.url, "source": found.source})
 
+    async def start_plugin_update(request: Request) -> Response:
+        """Begin the plugin update and answer at once, with the record (#297).
+
+        202 because the work has only begun: a run is minutes on a slow
+        marketplace, and a phone waiting on one request for that long loses
+        it to the first network change. The record then arrives on the stream
+        as a named `plugins` event, and `GET` below answers a page that opens
+        or reconnects in the middle. A failure of the operation itself
+        (`agent_missing`, `marketplace_refresh_failed`, `plugins_unreadable`)
+        is in the record, not in a status: by then this 202 has been sent.
+
+        `update_in_flight` rather than `locked`: `locked` is documented as a
+        start in flight for a PROJECT, and this is machine wide.
+        """
+        try:
+            plugin_updates.start(run_plugins)
+        except RunInFlight:
+            return _error(
+                409,
+                "update_in_flight",
+                "a plugin update is already running; this request changed nothing",
+            )
+        return JSONResponse(plugin_updates.snapshot(), status_code=202)
+
+    async def plugin_update(request: Request) -> Response:
+        """The current or last run, `state: idle` when there has been none."""
+        return JSONResponse(plugin_updates.snapshot())
+
     async def event_stream(request: Request) -> Response:
         """The one route `EventSource` can actually reach.
 
@@ -739,6 +774,13 @@ def create_app(
                         # idle stream, which is this system's normal state.
                         # The bounded wait exists so the loop stays cancellable
                         # rather than parked forever inside `queue.get()`.
+                        continue
+                    # #297. The plugin record is a NAMED event, so the page's
+                    # `message` listener, which renders every frame as a
+                    # session, never sees it; only a listener that asks for
+                    # `plugins` does. The session payload is unchanged.
+                    if event.get("kind") == EVENT_KIND:
+                        yield {"event": EVENT_KIND, "data": json.dumps(event["run"])}
                         continue
                     yield {"event": "message", "data": json.dumps(event)}
 
@@ -884,6 +926,8 @@ def create_app(
             Route("/api/sessions/{name}/logs", logs, methods=["GET"]),
             Route("/api/sessions/{name}/url", session_url, methods=["GET"]),
             Route("/api/events", event_stream, methods=["GET"]),
+            Route("/api/plugins/update", start_plugin_update, methods=["POST"]),
+            Route("/api/plugins/update", plugin_update, methods=["GET"]),
             Route(sec.GRANT_API_PATH, grant, methods=["POST"]),
             Route(sec.GRANT_PAGE_PATH, pages.grant_page, methods=["GET"]),
             Route("/", pages.page, methods=["GET"]),

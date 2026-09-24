@@ -10,6 +10,7 @@ from hitchrail import cli
 from hitchrail.cli import JOURNAL_ENV, banner, build_config, main, parse_args, preflight
 from hitchrail.config import ConfigError, is_loopback_host
 from support import make_config
+from test_plugins import FakeAgent, done, row
 
 
 @pytest.fixture(autouse=True)
@@ -782,3 +783,155 @@ def test_the_banner_reaches_the_journal_before_the_server_starts(
     main(["--root", f"main={tmp_path}", "--host", "0.0.0.0", "--token", "x" * 16])
 
     assert "Open one of these on your phone" in at_serve_time["visible"]
+
+
+# -- `hitchrail update-plugins` (#124) ----------------------------------------
+
+
+class _RunnerSpy:
+    """Stands in for `claude_ipc.plugin_runner`, recording what it withheld."""
+
+    def __init__(self, agent: FakeAgent) -> None:
+        self.agent = agent
+        self.withheld: tuple[str, ...] | None = None
+
+    def __call__(self, withhold: tuple[str, ...]) -> FakeAgent:
+        self.withheld = tuple(withhold)
+        return self.agent
+
+
+def _update(
+    monkeypatch: pytest.MonkeyPatch, agent: FakeAgent, *argv: str
+) -> tuple[int, _RunnerSpy]:
+    spy = _RunnerSpy(agent)
+    monkeypatch.setattr("hitchrail.claude_ipc.plugin_runner", spy)
+
+    def no_server(*_a: object, **_k: object) -> int:
+        raise AssertionError("update-plugins started a server")
+
+    monkeypatch.setattr(cli, "_serve", no_server)
+    return main(["update-plugins", *argv]), spy
+
+
+def test_update_plugins_reports_each_plugin_and_exits_zero(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    agent = FakeAgent([row("a@m"), row("adapt@kit", "local"), row("b@m")])
+    code, _ = _update(monkeypatch, agent)
+    out = capsys.readouterr().out
+    assert code == 0
+    assert agent.updated == ["a@m", "b@m"]
+    lines = out.splitlines()
+    assert lines[:3] == [
+        "updated  a@m",
+        "skipped  adapt@kit (local scope is not updated)",
+        "updated  b@m",
+    ]
+    assert "2 updated, 0 failed, 1 skipped" in out
+    # The vendor's own words: an update applies at the next start.
+    assert "restart" in out
+
+
+def test_update_plugins_needs_no_root_and_no_config_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Runs on a machine with no config at all: it never builds a `Config`."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    code, _ = _update(monkeypatch, FakeAgent([row("a@m")]))
+    assert code == 0
+
+
+def test_update_plugins_shows_what_y_approved(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    line = '{"shownCommand": {"command": "curl -s https://x/i", "sha256": "ab"}}'
+    agent = FakeAgent([row("a@m")], **{"a@m": done(0, stdout=line)})
+    code, _ = _update(monkeypatch, agent)
+    assert code == 0
+    assert "updated  a@m (approved: curl -s https://x/i)" in capsys.readouterr().out
+
+
+def test_update_plugins_exits_one_when_a_plugin_failed(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    agent = FakeAgent([row("a@m"), row("b@m")], **{"a@m": done(1, stderr="no network")})
+    code, _ = _update(monkeypatch, agent)
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "failed   a@m (exited 1: no network)" in out
+    assert "updated  b@m" in out
+    assert "1 updated, 1 failed, 0 skipped" in out
+
+
+@pytest.mark.parametrize(
+    ("agent", "code_word"),
+    [
+        (FakeAgent([row("a@m")], refresh=done(1)), "marketplace_refresh_failed:"),
+        (FakeAgent("not json"), "plugins_unreadable:"),
+        (FakeAgent([row("a@m")], refresh=FileNotFoundError()), "agent_missing:"),
+    ],
+    ids=["marketplace_refresh_failed", "plugins_unreadable", "agent_missing"],
+)
+def test_update_plugins_exits_two_when_the_operation_failed(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    agent: FakeAgent,
+    code_word: str,
+) -> None:
+    code, _ = _update(monkeypatch, agent)
+    captured = capsys.readouterr()
+    assert code == 2
+    assert code_word in captured.err
+    assert "updated" not in captured.out, "a failed operation printed a count"
+
+
+def test_update_plugins_spawns_nothing_when_the_agent_is_not_on_path(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+    agent = FakeAgent([row("a@m")])
+    code, _ = _update(monkeypatch, agent, "--agent-binary", "nowhere")
+    assert code == 2
+    assert agent.calls == []
+    err = capsys.readouterr().err
+    assert "agent_missing:" in err
+    assert "'nowhere' is not on PATH" in err
+
+
+def test_update_plugins_uses_the_agent_binary_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    agent = FakeAgent([row("a@m")])
+    _update(monkeypatch, agent, "--agent-binary", "/opt/agent")
+    assert {argv[0] for argv in agent.argvs} == {"/opt/agent"}
+
+
+def test_update_plugins_refuses_a_flag_shaped_agent_binary(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    agent = FakeAgent([row("a@m")])
+    code, _ = _update(monkeypatch, agent, "--agent-binary=-x")
+    assert code == 2
+    assert agent.calls == []
+    assert "not an acceptable agent binary" in capsys.readouterr().err
+
+
+def test_update_plugins_withholds_the_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#113: `-y` runs a marketplace's command with this environment."""
+    from hitchrail.config import TOKEN_ENV
+
+    _, spy = _update(monkeypatch, FakeAgent([]))
+    assert spy.withheld is not None
+    assert TOKEN_ENV in spy.withheld
+
+
+def test_update_plugins_refuses_the_server_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--root` means nothing to it, and accepting it silently would suggest
+    the update is scoped to that root."""
+    with pytest.raises(SystemExit) as caught:
+        _update(monkeypatch, FakeAgent([]), "--root", "main=/tmp")
+    assert caught.value.code == 2
+
+
+def test_the_server_help_names_the_subcommand(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        parse_args(["--help"])
+    assert "update-plugins" in capsys.readouterr().out

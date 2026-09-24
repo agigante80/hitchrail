@@ -29,11 +29,13 @@ every unfinished ticket somewhere explicit.
 
 Phases appear in the order they are meant to run. Three rules decide that
 order: dependency first, then risk where dependency allows a choice, then cost
-of delay, which has been invoked twice: when Phase 12 jumped ahead of 9, 10 and
-11 because the wire format it changed was free to break that week and more
-expensive every week after, and when Phase 19 moved ahead of 16, 17 and 18 on
-2026-09-16 because every stop until then loses the wrap up. The next candidate
-for jumping the queue is argued against those two.
+of delay, which has been invoked three times: when Phase 12 jumped ahead of 9,
+10 and 11 because the wire format it changed was free to break that week and
+more expensive every week after, when Phase 19 moved ahead of 16, 17 and 18 on
+2026-09-16 because every stop until then loses the wrap up, and when Phase 21
+moved ahead of 15 to 19 on 2026-09-23 because stale agent tooling is manual
+upkeep on every machine, every week. The next candidate for jumping the queue
+is argued against those three.
 
 **Phases 1 to 10 and 12 closed before this format was adopted on 2026-09-11
 and are not written into it.** Rewriting finished work to look planned in a
@@ -211,6 +213,46 @@ or declined in writing.
 Done when every ticket the Phase 14 review filed is closed or declined with
 its reason on the ticket, and no refusal on those surfaces can be reached
 that is not in words.
+
+## Phase: Phase 21: The agent's tooling, kept current
+state: done
+plan: docs/superpowers/plans/2026-09-23-hitchrail-phase-21-agent-tooling.md
+
+**Done, 2026-09-24.** Both tickets built and closed: #124, the CLI subcommand,
+and #297, the route and the phone control. Watched completing on a real
+machine as task 108. Two batches, each through the bounded review loop.
+Batch 1's review found two mediums fixed in `fdd12e8` and seven lows, then a
+second round found two more mediums in that fix and stopped there by the trip
+wire: #298 to #306. Batch 2's review found a high fixed in `11fb0c4`, then a
+second round found a high and a medium in that fix, fixed in `1f6ec49`, and a
+third round found two more defects in THAT fix: two consecutive rounds each
+finding a defect in the immediately preceding round's, which is the trip wire
+by its other name, and the loop stopped there. #307 to #310, #313 to #317.
+
+The operator can bring the agent's plugins up to date from a phone. Today they go stale without anyone noticing, and the operator
+tends to notice when they are away from the desk, which is exactly when
+Hitchrail is the only way in. Placed ahead of 15 to 19 on 2026-09-23 on the
+operator's call. It is the third time a phase has jumped the queue, and it
+jumps on cost of delay: every week without it is another week of manual
+upkeep on each machine. It has no dependency on any phase before it, and none
+of them depends on it.
+
+Delivers: one operation that refreshes the marketplaces and then updates
+every installed plugin, reporting each plugin's result separately so that one
+failure does not stop the rest. It is a CLI subcommand that works with no
+server running, and a route and a control in the interface built on top of
+that subcommand. Every fact about how the vendor's CLI does this stays in
+`claude_ipc.py`.
+
+Done when a plugin update started from the phone has been watched completing
+on a real machine, with its per plugin results on screen, and an unreadable
+plugin list has been watched updating nothing and saying so.
+
+Two decisions were taken when it was placed, and #124 carries both: `-y` is
+passed, so a marketplace's declared install command is approved unseen, on
+the argument that an agent spawned with every permission already sets that
+ceiling; and only `user` scope is updated, because a project scoped install
+belongs to a folder the vendor's listing does not name.
 
 ## Phase: Phase 15: The package as strangers meet it
 state: planned
