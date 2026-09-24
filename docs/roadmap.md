@@ -215,8 +215,19 @@ its reason on the ticket, and no refusal on those surfaces can be reached
 that is not in words.
 
 ## Phase: Phase 21: The agent's tooling, kept current
-state: open
+state: done
 plan: docs/superpowers/plans/2026-09-23-hitchrail-phase-21-agent-tooling.md
+
+**Done, 2026-09-24.** Both tickets built and closed: #124, the CLI subcommand,
+and #297, the route and the phone control. Watched completing on a real
+machine as task 108. Two batches, each through the bounded review loop.
+Batch 1's review found two mediums fixed in `fdd12e8` and seven lows, then a
+second round found two more mediums in that fix and stopped there by the trip
+wire: #298 to #306. Batch 2's review found a high fixed in `11fb0c4`, then a
+second round found a high and a medium in that fix, fixed in `1f6ec49`, and a
+third round found two more defects in THAT fix: two consecutive rounds each
+finding a defect in the immediately preceding round's, which is the trip wire
+by its other name, and the loop stopped there. #307 to #310, #313 to #317.
 
 The operator can bring the agent's plugins up to date from a phone. Today they go stale without anyone noticing, and the operator
 tends to notice when they are away from the desk, which is exactly when

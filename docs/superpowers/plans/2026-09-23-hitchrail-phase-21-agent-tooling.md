@@ -97,16 +97,30 @@ listener renders every frame as a session; and `GET /api/plugins/update`
 answers a page that joins or reconnects mid run, because the stream does
 not replay. Both are alternative 1 of the gate's three.
 
-- [ ] **Task 106, #297.** The engine side: an in memory in flight marker,
+- [x] **Task 106, #297.** The engine side: an in memory in flight marker,
       `update_in_flight` when it is set, the operation run on a worker thread,
       each outcome and one summary published on the bus, and the marker
       cleared on every exit path. `POST /api/plugins/update` answers 202 and
       is Origin checked. `docs/api.md` in both directions.
 
-- [ ] **Task 107, #297.** The control on the settings page, the outcomes
+- [x] **Task 107, #297.** The control on the settings page, the outcomes
       rendered as they arrive, the failure codes shown with no count, and the
       restart notice when a session is running. The e2e tier at the phone
       viewport with a fake agent.
+
+Round 1 of batch 2's review found a high (a stale GET answer painting
+"running" back over "done"), fixed in `11fb0c4`. Round 2 reviewed only that
+commit and found a high in it (`seq` restarting with the server so a page
+left open across a restart drops every later record) and a medium (the
+note never clears), fixed in `1f6ec49`, plus two lows filed as #316 and
+#317. Round 3 reviewed only `1f6ec49` and found two more defects: `isStale`
+treats a different epoch as always newer, so a record delayed by an await
+can repaint over a newer one once the server restarts under it (#314), and
+`settle`/`keepNote` are one flag shared by two independent request flows,
+so either one's success can wipe the other's owed refusal (#315). Two
+consecutive rounds each found a defect in the immediately preceding round's
+fix, tripping the review loop's trip wire; the loop stopped there by rule,
+both filed rather than fixed.
 
 - [x] **Task 108.** Watched on a real machine: a run from the phone against
       the real agent binary, its per plugin results on screen, and the
@@ -131,12 +145,12 @@ not replay. Both are alternative 1 of the gate's three.
 
 ## Done looks like
 
-- [ ] Every task above is ticked, or is marked MOVED OUT or NOT BUILT with
+- [x] Every task above is ticked, or is marked MOVED OUT or NOT BUILT with
       the issue that carries it.
-- [ ] #124 and #297 are closed.
-- [ ] `docs/api.md` documents the route, its code and the event shapes, held
+- [x] #124 and #297 are closed.
+- [x] `docs/api.md` documents the route, its code and the event shapes, held
       to the server both ways.
-- [ ] The roadmap's Phase 21 block says `state: done`, the milestone is
+- [x] The roadmap's Phase 21 block says `state: done`, the milestone is
       closed, and `scripts/check-phases.sh` passes for this phase.
 
 ## Fails if
