@@ -1274,11 +1274,16 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # metadata the same way `__init__.py` already reads `__version__`. The
         # fallback string, used only from a bare, uninstalled checkout, is
         # marked `# pragma: no cover` for that reason.
-        # 788 for #141: help text and a shown default for every option that
+        # 804 for #141: help text and a shown default for every option that
         # lacked one, the parser factored out as `build_parser()` so both
-        # `parse_args()` and the bare-invocation help path share it, and two
-        # worked examples in the epilog.
-        "cli.py": 788,
+        # `parse_args()` and the bare-invocation help path share it, two
+        # worked examples in the epilog, and a `mention_update_plugins` flag
+        # so that epilog's subcommand note can be left out of the concise
+        # "no roots configured" refusal without a second parser. (The commit
+        # that introduced this entry recorded 788, four short of the file it
+        # actually landed; corrected here rather than left to re-explain the
+        # gap the next time this cap is touched.)
+        "cli.py": 804,
         # 409, nine lines over, down from 542. #115 deleted the `?token=`
         # carrier: 135 lines once the two blocks inside `TokenMiddleware`
         # that only served it are counted.

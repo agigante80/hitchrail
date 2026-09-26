@@ -99,6 +99,19 @@ Two projects called `vessel` in two roots are two rows, and the chip is the
 only difference between them. Stopping one leaves the other's agent alone,
 which is the thing a browser test asserts on a real tmux rather than a fake.
 
+**The first page anyone reaches, before any of the above:**
+
+<img src="docs/screenshots/phone-grant.png" alt="The access grant page, asking for the key carried in the link" width="300">
+
+**Tapping Logs shows the pane's own last lines**, not a summary of them:
+
+<img src="docs/screenshots/phone-logs.png" alt="The log drawer open over a running row, showing the last 40 lines of the pane" width="300">
+
+**Starting a project Hitchrail has not seen before** offers a folder to create
+rather than requiring one to already exist:
+
+<img src="docs/screenshots/phone-new-folder.png" alt="The new folder sheet, open on a phone" width="300">
+
 These are captured from the running application against a scratch root, not
 taken by hand: `uv run pytest -m screenshots` regenerates every one of them.
 
@@ -355,6 +368,11 @@ list and shown again, and the wait before a stop is reported as unanswered.
 Both are kept in `~/.config/hitchrail/state.toml`, which is Hitchrail's own.
 Everything else is the perimeter and changes only in the config file or on
 the command line, on the machine.
+
+<img src="docs/screenshots/phone-settings-plugins.png" alt="The settings page having just finished a plugin update: three outcomes listed and a status line noting the running session keeps the old versions until restarted" width="300">
+
+The picture above is the update below, finished: see "Updating the agent's
+plugins".
 
 `journalctl --user -u hitchrail` shows the startup banner, which lists every
 address the server will answer to. It prints the links without the `#token=`

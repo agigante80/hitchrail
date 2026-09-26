@@ -96,7 +96,21 @@ _EXAMPLE_LINES = (
 _EXAMPLES = "examples:\n" + "\n".join(_EXAMPLE_LINES) + "\n"
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(*, mention_update_plugins: bool = True) -> argparse.ArgumentParser:
+    """`mention_update_plugins=False` is for the "no roots configured" refusal
+    (see `main`'s `except ConfigError`), which reuses this parser's help to
+    stay concise (#141) rather than to introduce the unrelated subcommand.
+    `test_bare_hitchrail_still_means_the_server` (#124) is the compatibility
+    promise behind that: the old, root-less invocation must not read like it
+    is being pointed at `update-plugins`, whatever `--help` itself goes on to
+    mention.
+    """
+    epilog = _EXAMPLES
+    if mention_update_plugins:
+        epilog += (
+            f"\n{UPDATE_PLUGINS}: update the agent's plugins and exit, with no server. "
+            f"See `hitchrail {UPDATE_PLUGINS} --help`"
+        )
     parser = argparse.ArgumentParser(
         prog="hitchrail",
         description=ONE_LINE_DESCRIPTION,
@@ -108,9 +122,7 @@ def build_parser() -> argparse.ArgumentParser:
         # Raw, so the examples above keep their line breaks: the default
         # formatter refills an epilog into one paragraph and loses them.
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=f"{_EXAMPLES}\n"
-        f"{UPDATE_PLUGINS}: update the agent's plugins and exit, with no server. "
-        f"See `hitchrail {UPDATE_PLUGINS} --help`",
+        epilog=epilog,
     )
     # **`label=path`, repeatable, and there is no default.** #119 made a
     # project's identifier `<root-label>~<folder>`, so a root without a label
@@ -738,7 +750,7 @@ def main(argv: list[str] | None = None) -> int:
         # config should not be buried under a full option dump.
         if "no roots configured" in str(exc):
             print(file=sys.stderr)
-            build_parser().print_help(sys.stderr)
+            build_parser(mention_update_plugins=False).print_help(sys.stderr)
         return 2
 
     # BEFORE the banner and before the bind. Printing a token and a set of

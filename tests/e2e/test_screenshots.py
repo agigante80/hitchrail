@@ -335,3 +335,46 @@ async def test_capture_the_grant_page(page: Page, shots_server: Harness) -> None
     await page.goto(f"{shots_server.base}/grant")
     await page.wait_for_timeout(600)
     await _shoot(page, "phone-grant", page.get_by_label("Access key"))
+
+
+# #329. Named fixture plugins, the same shape THREE takes in test_plugins.py,
+# not imported from there: that file's constant is scoped to its own tests and
+# this tier's own rule is that a picture is built from ITS seeding, not
+# borrowed from another file's fixture that could change shape for a reason
+# that has nothing to do with what gets photographed.
+_PLUGIN_LISTING = [
+    {"id": "alpha@m", "scope": "user"},
+    {"id": "bravo@m", "scope": "user"},
+    {"id": "charlie@m", "scope": "user"},
+]
+
+
+async def test_capture_the_settings_page_after_a_plugin_update(
+    page: Page, shots_server: Harness
+) -> None:
+    """The settings page's own documented feature (README's "Update plugins"),
+    shown having actually finished one rather than described in prose.
+
+    Follows `test_capture_the_log_drawer`'s shape: navigate, drive to the
+    state being shown, assert the control that proves it, then `_shoot`. The
+    driving is `Harness.seed_plugins`/`release_plugin`, already built for
+    `tests/e2e/test_plugins.py` and reused rather than a new seam.
+
+    A running session too, so the finished summary carries the "keeps the old
+    versions until restarted" line the README's plugin section also states,
+    rather than the bare count a machine with nothing running would show.
+    """
+    await page.set_viewport_size(PHONE)
+    shots_server.seed_plugins(_PLUGIN_LISTING)
+    shots_server.seed(running=["vessel"])
+    await page.goto(f"{shots_server.base}/settings")
+    await expect(page.locator("[data-settings]")).to_have_attribute("data-loaded", "")
+    await page.locator("[data-plugins-update]").click()
+    for plugin in ("alpha@m", "bravo@m", "charlie@m"):
+        shots_server.release_plugin(plugin)
+    status = page.locator("[data-plugins-status]")
+    await expect(status).to_have_text(
+        "3 updated, 0 failed, 0 left alone. "
+        "The running session keeps the old versions until restarted."
+    )
+    await _shoot(page, "phone-settings-plugins", page.locator("[data-plugins]"))

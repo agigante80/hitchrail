@@ -802,6 +802,28 @@ def test_every_shot_the_capture_declares_is_committed() -> None:
     )
 
 
+def test_every_committed_shot_is_referenced_in_the_readme() -> None:
+    """#329: `phone-grant.png`, `phone-logs.png` and `phone-new-folder.png`
+    were captured and committed for months without README ever linking to
+    any of them, found only by `grep` on a filename, not by anything the
+    repository stated. Derived from the capture module, the same way the
+    test above is, so a new shot with no README reference fails here rather
+    than shipping orphaned the same way.
+
+    A plain substring search, not a markdown parser: the README embeds each
+    image as `<img src="docs/screenshots/<name>.png" ...>`, and the filename
+    itself is the only part every reference shares.
+    """
+    declared = set(re.findall(r'_shoot\(page, "([a-z-]+)"[,)]', CAPTURE.read_text()))
+    assert declared, "the capture module declares no shots, so this checks nothing"
+    readme = README.read_text()
+    orphaned = sorted(name for name in declared if name not in readme)
+    assert not orphaned, (
+        f"{orphaned} are captured and committed but never referenced in README.md, "
+        "so they ship as pictures no stranger reading it ever sees."
+    )
+
+
 def test_the_capture_never_photographs_a_real_root() -> None:
     """The first run put `/tmp/pytest-of-<username>/...` in the page header,
     because the interface displays the root it was given and the tier's own

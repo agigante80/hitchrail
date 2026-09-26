@@ -250,13 +250,18 @@ order. Listed by priority.
       seen. `tests/test_cli.py` or a new `tests/test_logging.py` per the
       ticket's own unit test specs.
 
-- [ ] **Task 125, #329 (P1).** `tests/e2e/test_screenshots.py` gains a
-      capture of the settings page mid plugin update, seeded through
+- [x] **Task 125, #329 (P1).** `tests/e2e/test_screenshots.py` gained
+      `test_capture_the_settings_page_after_a_plugin_update`, seeded through
       `Harness.seed_plugins`/`release_plugin` the way `tests/e2e/test_plugins.py`
-      already does, and all seven images are regenerated via `uv run pytest
-      -m screenshots` after this phase's README markup changes land, not
-      before. Every image the tier produces ends up referenced somewhere in
-      `README.md`; three currently are not.
+      already does, producing `phone-settings-plugins.png`. All eight images
+      (the original seven plus this one) were regenerated via `uv run pytest
+      -m screenshots` after this phase's README markup changes had landed.
+      `phone-grant.png`, `phone-logs.png` and `phone-new-folder.png`, the
+      three that shipped with no README reference, are now shown in
+      `## What it looks like`; the new capture is shown beside "Settings,
+      from the phone". `tests/test_docs_are_true.py` gained
+      `test_every_committed_shot_is_referenced_in_the_readme`, which fails on
+      exactly the three-orphan state this ticket found.
 
 - [x] **Task 110, #156 (P2).** The README gets a `pip install hitchrail` line
       next to `uvx`, matching what PyPI's own project page already shows.
