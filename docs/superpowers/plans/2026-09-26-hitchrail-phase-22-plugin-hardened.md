@@ -18,7 +18,7 @@ fixed. They sat in Backlog, which is where the roadmap's second Backlog rule
 now says they must not stay. A phase that ships new surface is followed by one
 that hardens it, as Phase 20 followed 14.
 
-**Written on 2026-09-26, before the phase opened**, while Phase 15 was still
+**Written on 2026-09-26, before the phase opened; opened 2026-09-27**, while Phase 15 was still
 open, so the phase can open the moment 15 closes. Every ticket was checked
 against the tree that day, reading the body, the comments and the named lines.
 All eighteen still describe the code. One was half wrong: #304 claimed
@@ -70,6 +70,18 @@ is the one written.
       which file runs. One test asserts every spawn site, engine and plugin
       update alike, receives the single resolved value: the guard premortem 1
       below asks for.
+
+### Batch 1b: Phase 15's review lows on `cli.py`, tasks 148 to 150
+
+Added on 2026-09-27 when the phase opened: batch 1 changes `cli.py`, so the
+open from-review tickets on it come with it.
+
+- [ ] **Task 148, #336 (P3).** The banner's `--help` and `--version` test
+      goes through `main()`, so moving the print above `parse_args` fails it.
+- [ ] **Task 149, #337 (P3).** The banner's description test also pins
+      `_FALLBACK_DESCRIPTION` to `pyproject.toml`.
+- [ ] **Task 150, #338 (P3).** The pragma comment's spaced hyphen is
+      restructured.
 
 ### Batch 2: the settings strip and the run display, tasks 133 to 138
 

@@ -45,31 +45,9 @@ suite is green. It is finished when the behaviour has been watched working in
 the running application, on the phone it is for. See
 [`tech-guidelines.md`](tech-guidelines.md) section 7.
 
-## Phase: Phase 15: The package as strangers meet it
-state: open
-plan: docs/superpowers/plans/2026-09-24-hitchrail-phase-15-strangers.md
-
-**Opened 2026-09-24**, ahead of publicly writing about the project. Somebody
-who has never seen this project can install it, upgrade it, tell what it is,
-and see that it is maintained. Everything here came from reading the published
-PyPI page beside our own README and finding they disagree, or say nothing.
-
-Delivers: `pip` acknowledged as an install route, an upgrade path for an
-installed copy, the deprecated licence classifier removed and the licence made
-clickable, a badge row on the first screen, `--help` that shows its defaults
-and an example, and a banner that offers only links the server is listening on.
-
-Done when the PyPI page and the README agree, and the licence is one clickable
-statement rather than four scattered ones.
-
-Narrowed on 2026-09-26. Logging moved to Phase 19, whose stop sequence is the
-first thing that needs the journal to answer a question. The sponsor link
-moved to Backlog: nothing a stranger needs to install or trust the package
-waits on it.
-
 ## Phase: Phase 22: The plugin update, hardened
-state: planned
-plan: 
+state: open
+plan: docs/superpowers/plans/2026-09-26-hitchrail-phase-22-plugin-hardened.md
 
 The plugin update from a phone, made as careful as the rest of the spawn path.
 Phase 21 shipped it and closed on its own review loop's trip wire, so its last

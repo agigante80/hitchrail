@@ -389,37 +389,38 @@ full implementation detail, not duplicated here.
 
 ## Done looks like
 
-- [ ] Every task above is ticked, or marked MOVED OUT or NOT BUILT with the
+- [x] Every task above is ticked, or marked MOVED OUT or NOT BUILT with the
       issue number that carries it.
-- [ ] #156, #157, #158, #319, #141 and #332 are closed. #326 is
+- [x] #156, #157, #158, #319, #141 and #332 are closed. #326 is
       closed. #327 is closed. #328 is closed. #329 is closed. #330 is
       closed. #331 is closed. #320 to #325 and #333 are MOVED OUT to Phase 24, #167 to
       Phase 19 and #17 to Backlog, and are no longer this phase's to close.
-- [ ] The PyPI page and the README agree: install line, licence statement,
-      and what CI reports.
-- [ ] The licence is one clickable statement, not four scattered ones.
-- [ ] `## Install` is the first heading reached after the risk section, not
+- [x] The PyPI page and the README agree: install line, licence statement,
+      and what CI reports. True in the tree; PyPI shows it from the next
+      release, since `README.md` is the package's description.
+- [x] The licence is one clickable statement, not four scattered ones.
+- [x] `## Install` is the first heading reached after the risk section, not
       one of three scattered install mentions 475 lines in, and states the
       `uv tool install` versus `uvx` distinction once, not twice.
-- [ ] A normal `hitchrail` start prints the name, version and GitHub link
+- [x] A normal `hitchrail` start prints the name, version and GitHub link
       before the server starts, even when a later check refuses to start;
       `update-plugins` and `--help`/`--version` are unaffected.
-- [ ] The README answers "is this for me" with concrete scenarios before it
+- [x] The README answers "is this for me" with concrete scenarios before it
       shows a single screenshot.
-- [ ] Every screenshot in `docs/screenshots/` is captured against the
+- [x] Every screenshot in `docs/screenshots/` is captured against the
       rewritten interface, is referenced somewhere in `README.md`, and the
       settings page mid plugin update has a picture for the first time.
-- [ ] The GitHub About field and PyPI's summary both say "web UI," not only
+- [x] The GitHub About field and PyPI's summary both say "web UI," not only
       "from your phone"; the phone-first design priority is unchanged.
-- [ ] `docs/roadmap.md` is a row in the `## Documents` table, not only in
+- [x] `docs/roadmap.md` is a row in the `## Documents` table, not only in
       the intro paragraph.
-- [ ] The README's icon, title, badge row and one line description are
+- [x] The README's icon, title, badge row and one line description are
       centred, matching the reference README, with the left-aligned body
       prose below them unchanged.
-- [ ] `index.html` and `settings.html` carry a meta description and Open
+- [x] `index.html` and `settings.html` carry a meta description and Open
       Graph tags, reusing the same one line description the README, the
       GitHub About field, PyPI's summary and the CLI banner all use.
-- [ ] The roadmap's Phase 15 block says `state: done`, the milestone is
+- [x] The roadmap's Phase 15 block says `state: done`, the milestone is
       closed, and `scripts/check-phases.sh` passes for this phase.
 
 ## Fails if
@@ -449,3 +450,12 @@ one.
 - Project, local, synced and managed scope plugin work: Phase 21's own out
   of scope, unrelated to this phase.
 - A finding from this phase's own review: Backlog, or the next phase.
+
+## Outcome
+
+Closed on 2026-09-27 as **re-shaped**: the packaging, README and CLI work
+landed, and the in-app interface work moved to Phase 24 (#320 to #325, #333),
+the stop wording to Phase 19 (#167) and #17 to Backlog. The review loop ran
+one round over `c9bb546^..HEAD` and found no high or medium defect; its five
+lows are #336 to #338 (Phase 22, which changes `cli.py`), #339 (Phase 24) and
+#340 (Phase 17).
