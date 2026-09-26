@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# check-phases-version: 4
+# check-phases-version: 5
 #
 # The roadmap-phases guard: four rules that make rolling wave planning mechanical.
 #
@@ -131,8 +131,22 @@ find_forge_lib() {
       [ -f "$p" ] && { printf '%s' "$p"; return 0; }
     done
   fi
-  p="$(find "$HOME/.claude/plugins" -name forge-lib.sh 2>/dev/null | head -1)"
-  [ -n "$p" ] && { printf '%s' "$p"; return 0; }
+  # LAST RESORT, and the one place the choice is ambiguous (#189). ~/.claude/plugins holds plugin
+  # versions SIDE BY SIDE: the cache keeps every installed semver and the marketplace checkout is
+  # one more copy, and `find` lists them in directory order. `head -1` picked an arbitrary one,
+  # stale three gate runs out of four on the machine that filed the ticket, and nothing said which.
+  # Highest `forge-lib-version` marker wins; the path breaks a tie, which is safe because
+  # check-version-bump.sh makes an equal marker imply an equal committed body; a copy with no
+  # marker is skipped, since it predates the contract this script sources. The pick is PRINTED so
+  # a stale one is visible in the run rather than plausible and silent.
+  p="$(find "$HOME/.claude/plugins" -name forge-lib.sh 2>/dev/null | while IFS= read -r f; do
+         v="$(grep -m1 -o '^# forge-lib-version: [0-9][0-9]*' "$f" 2>/dev/null | grep -o '[0-9]*$')"
+         [ -n "$v" ] && printf '%s\t%s\n' "$v" "$f"
+       done | sort -t "$(printf '\t')" -k1,1n -k2,2 | tail -1 | cut -f2-)"
+  [ -n "$p" ] && {
+    echo "check-phases: forge-lib.sh from $p ($(grep -m1 -o 'forge-lib-version: [0-9]*' "$p"))" >&2
+    printf '%s' "$p"; return 0
+  }
   return 1
 }
 LIB="$(find_forge_lib)" || {

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# version-lib-version: 1
 # version-lib.sh: the shared release primitive. Compares the working-tree version against
 # the latest released git tag and classifies the result. Every release-automation lane
 # (gate / auto-on-dependency / auto-on-merge) sources this and acts on the one-word verdict,
