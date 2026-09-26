@@ -1268,7 +1268,13 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # itself already in `claude_ipc.py`. If a second subcommand arrives,
         # that is the moment to move both out. 693 in its review: the failure
         # code printed ahead of the words, so a script can match on it.
-        "cli.py": 693,
+        # 748 for #326: `identity_banner()`, printed once before
+        # `build_config()` so a refusal still names the service, and its
+        # `ONE_LINE_DESCRIPTION` constant, read from the installed package's
+        # metadata the same way `__init__.py` already reads `__version__`. The
+        # fallback string, used only from a bare, uninstalled checkout, is
+        # marked `# pragma: no cover` for that reason.
+        "cli.py": 748,
         # 409, nine lines over, down from 542. #115 deleted the `?token=`
         # carrier: 135 lines once the two blocks inside `TokenMiddleware`
         # that only served it are counted.
