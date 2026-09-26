@@ -364,7 +364,7 @@ full implementation detail, not duplicated here.
 
 ### `cli`: a startup banner names the service
 
-- [ ] **Task 122, #326 (P2).** A new `identity_banner()` in `cli.py`,
+- [x] **Task 122, #326 (P2).** A new `identity_banner()` in `cli.py`,
       separate from and never touching `banner()`'s own tested silence on
       loopback, printing the name, `pyproject.toml`'s one line description,
       `__version__` and the GitHub link, unconditionally, with `flush=True`

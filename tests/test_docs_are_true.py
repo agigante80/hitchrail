@@ -940,6 +940,25 @@ def test_a_renamed_workflow_file_would_fail_the_badge_check() -> None:
     assert _missing_badge_targets(fake), "a badge naming a missing workflow file was not caught"
 
 
+# -- #328, #158, #326, #331: one description, reused rather than retyped ----
+
+
+def _pyproject_description() -> str:
+    match = re.search(r'^description = "(.*)"$', (ROOT / "pyproject.toml").read_text(), re.M)
+    assert match, "pyproject.toml has no description field to check the other surfaces against"
+    return match.group(1)
+
+
+def test_the_cli_banner_reuses_pyprojects_description() -> None:
+    """#326: the argparse description and the startup banner both read
+    `ONE_LINE_DESCRIPTION` rather than a retyped copy, so this checks the one
+    place they could still drift, the fallback string used from a bare
+    checkout with no install."""
+    from hitchrail.cli import ONE_LINE_DESCRIPTION
+
+    assert _pyproject_description() == ONE_LINE_DESCRIPTION
+
+
 # -- #110: the unit template and the phone access document ------------------
 #
 # Both deliverables are text that instructs an operator, and text that

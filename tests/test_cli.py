@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from hitchrail import cli
+from hitchrail import __version__, cli
 from hitchrail.cli import JOURNAL_ENV, banner, build_config, main, parse_args, preflight
 from hitchrail.config import ConfigError, is_loopback_host
 from support import make_config
@@ -783,6 +783,88 @@ def test_the_banner_reaches_the_journal_before_the_server_starts(
     main(["--root", f"main={tmp_path}", "--host", "0.0.0.0", "--token", "x" * 16])
 
     assert "Open one of these on your phone" in at_serve_time["visible"]
+
+
+# -- #326: a startup banner names the service --------------------------------
+
+
+def test_the_identity_banner_names_the_service_before_the_grant_banner(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unlike `banner()`, which is silent until there is a token to grant,
+    this one always has something to say, and it says it first: it is
+    printed before `build_config()` even runs."""
+    monkeypatch.setattr("hitchrail.cli._serve", lambda app, cfg, tls: 0)
+    main(["--root", f"main={tmp_path}", "--host", "0.0.0.0", "--token", "t" * 16])
+    out = capsys.readouterr().out
+    assert __version__ in out
+    assert cli.GITHUB_URL in out
+    assert cli.ONE_LINE_DESCRIPTION in out
+    assert out.index(cli.GITHUB_URL) < out.index("Open one of these on your phone")
+
+
+def test_the_identity_banner_still_prints_when_the_start_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A stranger's bug report needs the version even when it is the config,
+    the preflight or the gateway check that refused to start."""
+    code = main(["--root", f"main={tmp_path / 'nope'}"])
+    assert code == 2
+    assert cli.GITHUB_URL in capsys.readouterr().out
+
+
+def test_update_plugins_does_not_print_the_identity_banner(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The one shot path returns before `parse_args` is ever reached, so it
+    never reaches the new print call in `main()`."""
+    _update(monkeypatch, FakeAgent([row("a@m")]))
+    assert cli.GITHUB_URL not in capsys.readouterr().out
+
+
+def test_help_and_version_short_circuit_before_the_identity_banner(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Both exit inside `argparse.parse_args` itself, before `main()`'s own
+    code, including the new print call, ever resumes."""
+    with pytest.raises(SystemExit):
+        parse_args(["--version"])
+    assert cli.GITHUB_URL not in capsys.readouterr().out
+
+
+def test_the_identity_banner_reaches_the_journal_before_the_server_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#145's footgun again, for a second print statement: `banner()`'s own
+    flush does not cover this one, since it is a separate `print` call."""
+    (tmp_path / "vessel").mkdir()
+    monkeypatch.setenv(JOURNAL_ENV, "9:1234")
+    stdout = BlockBuffered()
+    monkeypatch.setattr(sys, "stdout", stdout)
+    monkeypatch.setattr("shutil.which", lambda _n: "/usr/bin/x")
+    at_serve_time: dict[str, str] = {}
+
+    def fake_run(_app: object, **_kwargs: object) -> None:
+        at_serve_time["visible"] = stdout.visible
+
+    monkeypatch.setattr("uvicorn.run", fake_run)
+
+    main(["--root", f"main={tmp_path}", "--host", "0.0.0.0", "--token", "x" * 16])
+
+    assert cli.GITHUB_URL in at_serve_time["visible"]
+
+
+def test_the_argparse_description_reuses_the_same_string(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`cli.py:53`'s `description=` is `ONE_LINE_DESCRIPTION` rather than a
+    second, independently typed string, so `--help` prints it too. argparse's
+    own formatter rewraps it at the terminal width, so the comparison folds
+    whitespace on both sides rather than matching a literal substring."""
+    with pytest.raises(SystemExit):
+        parse_args(["--help"])
+    out = " ".join(capsys.readouterr().out.split())
+    assert " ".join(cli.ONE_LINE_DESCRIPTION.split()) in out
 
 
 # -- `hitchrail update-plugins` (#124) ----------------------------------------

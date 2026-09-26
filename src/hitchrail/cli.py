@@ -9,6 +9,7 @@ import shutil
 import ssl
 import sys
 from collections.abc import Callable
+from importlib.metadata import PackageNotFoundError, metadata
 from pathlib import Path
 from urllib.parse import quote
 
@@ -27,6 +28,36 @@ from hitchrail.events import EventBus
 from hitchrail.hostnames import reachable_hosts
 from hitchrail.roots import Root, RootError, parse_root_argument
 from hitchrail.server import create_app
+
+# #326. `pyproject.toml`'s `description`, which is also PyPI's summary
+# (#328), the GitHub About field (#328), the README's centred tagline
+# (#158) and the meta description on index.html/settings.html (#331). Read
+# from the installed distribution's metadata rather than retyped a sixth
+# time, the same seam `installed_version()` in `hitchrail/__init__.py`
+# already uses for the version. The surfaces that cannot run Python
+# (`README.md` and the two HTML pages) are checked against the same
+# `pyproject.toml` field instead, by `tests/test_docs_are_true.py`.
+_FALLBACK_DESCRIPTION = (
+    "Start and stop headless Claude Code sessions across a folder of projects, "
+    "from a phone-first web UI."
+)
+
+
+def _one_line_description() -> str:
+    try:
+        summary = metadata("hitchrail")["Summary"]
+    except (PackageNotFoundError, KeyError):  # pragma: no cover - only from a bare checkout
+        return _FALLBACK_DESCRIPTION
+    return summary or _FALLBACK_DESCRIPTION
+
+
+ONE_LINE_DESCRIPTION = _one_line_description()
+
+# Matches pyproject.toml's [project.urls] Homepage. Kept by hand: unlike the
+# description above, nothing else in this module has a reason to read
+# Project-URLs, and one more metadata lookup for a string that never changes
+# is not worth the indirection.
+GITHUB_URL = "https://github.com/agigante80/hitchrail"
 
 
 def _root_argument(raw: str) -> Root:
@@ -50,7 +81,7 @@ def _root_argument(raw: str) -> Root:
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="hitchrail",
-        description="Start and stop headless Claude Code sessions across a folder of projects.",
+        description=ONE_LINE_DESCRIPTION,
         # #238. `flags_given` reads the option strings back out of argv to
         # say where a value came from, and an abbreviation argparse would
         # accept (`--stop 60`) is a spelling that scan cannot see. Exact
@@ -297,6 +328,25 @@ def build_config(args: argparse.Namespace) -> Config:
         agent_binary=args.agent_binary,
         stop_timeout=args.stop_timeout,
     )
+
+
+def identity_banner() -> str:
+    """The name, the one line description, the version and the project's
+    home, unconditionally (#326). Separate from `banner()` below and never
+    touching it: `banner()` stays exactly what it already is, silent until
+    there is a token to grant, and this one always has something to print.
+
+    Takes no `Config`, on purpose: it carries nothing derived from one, which
+    is what lets it print before `build_config()` runs and still appear when
+    a later config, preflight or gateway check refuses to start, exactly the
+    case a stranger's bug report needs it most.
+
+    `flush=True` belongs to the `print` call at the call site in `main()`,
+    not here: this only builds the string. The reason is #145, already
+    documented at `banner()`'s own call site: stdout is block buffered under
+    the unit, and an unflushed line here would never reach the journal either.
+    """
+    return f"hitchrail {__version__} - {ONE_LINE_DESCRIPTION}\n{GITHUB_URL}"
 
 
 def banner(config: Config) -> str:
@@ -629,6 +679,11 @@ def main(argv: list[str] | None = None) -> int:
     if argv[:1] == [UPDATE_PLUGINS]:
         return update_plugins_command(argv[1:])
     args = parse_args(argv)
+    # #326. Before build_config(): identity_banner() carries nothing derived
+    # from a Config, so it still appears when a later config, preflight or
+    # gateway check refuses to start. flush=True for the same #145 reason
+    # banner()'s own print below documents.
+    print(identity_banner(), flush=True)
     try:
         config = build_config(args)
         # allowed_hosts is a property, so a bad extra host only raises when it
