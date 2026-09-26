@@ -1061,12 +1061,20 @@ def _pyproject_description() -> str:
 
 def test_the_cli_banner_reuses_pyprojects_description() -> None:
     """#326: the argparse description and the startup banner both read
-    `ONE_LINE_DESCRIPTION` rather than a retyped copy, so this checks the one
-    place they could still drift, the fallback string used from a bare
-    checkout with no install."""
-    from hitchrail.cli import ONE_LINE_DESCRIPTION
+    `ONE_LINE_DESCRIPTION` rather than a retyped copy.
+
+    #337: in any installed environment, this repository's own `uv sync`
+    included, `ONE_LINE_DESCRIPTION` comes from the package metadata's
+    Summary rather than from `_FALLBACK_DESCRIPTION`, so the docstring above
+    claiming this checks the fallback was wrong: nothing here ever read it.
+    `_FALLBACK_DESCRIPTION` is retyped by hand in `cli.py` and only runs from
+    a bare, uninstalled checkout, which is the one place it could drift
+    unnoticed.
+    """
+    from hitchrail.cli import _FALLBACK_DESCRIPTION, ONE_LINE_DESCRIPTION
 
     assert _pyproject_description() == ONE_LINE_DESCRIPTION
+    assert _pyproject_description() == _FALLBACK_DESCRIPTION
 
 
 def test_the_readme_tagline_matches_pyprojects_description() -> None:

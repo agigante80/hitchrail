@@ -76,11 +76,11 @@ is the one written.
 Added on 2026-09-27 when the phase opened: batch 1 changes `cli.py`, so the
 open from-review tickets on it come with it.
 
-- [ ] **Task 148, #336 (P3).** The banner's `--help` and `--version` test
+- [x] **Task 148, #336 (P3).** The banner's `--help` and `--version` test
       goes through `main()`, so moving the print above `parse_args` fails it.
-- [ ] **Task 149, #337 (P3).** The banner's description test also pins
+- [x] **Task 149, #337 (P3).** The banner's description test also pins
       `_FALLBACK_DESCRIPTION` to `pyproject.toml`.
-- [ ] **Task 150, #338 (P3).** The pragma comment's spaced hyphen is
+- [x] **Task 150, #338 (P3).** The pragma comment's spaced hyphen is
       restructured.
 
 ### Batch 2: the settings strip and the run display, tasks 133 to 138

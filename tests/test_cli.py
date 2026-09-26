@@ -861,13 +861,18 @@ def test_update_plugins_does_not_print_the_identity_banner(
     assert cli.GITHUB_URL not in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("flag", ["--version", "--help"])
 def test_help_and_version_short_circuit_before_the_identity_banner(
-    capsys: pytest.CaptureFixture[str],
+    flag: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Both exit inside `argparse.parse_args` itself, before `main()`'s own
-    code, including the new print call, ever resumes."""
+    """#336. The first version of this test called `parse_args` directly and
+    never `main()`, so it could not fail: `main`'s own `print(identity_banner())`
+    was never reached either way. Both flags exit inside `argparse.parse_args`
+    itself, before that print ever resumes, so `main()` is what must be called
+    for the assertion to mean anything.
+    """
     with pytest.raises(SystemExit):
-        parse_args(["--version"])
+        main([flag])
     assert cli.GITHUB_URL not in capsys.readouterr().out
 
 

@@ -49,7 +49,7 @@ _FALLBACK_DESCRIPTION = (
 def _one_line_description() -> str:
     try:
         summary = metadata("hitchrail")["Summary"]
-    except (PackageNotFoundError, KeyError):  # pragma: no cover - only from a bare checkout
+    except (PackageNotFoundError, KeyError):  # pragma: no cover (only from a bare checkout)
         return _FALLBACK_DESCRIPTION
     return summary or _FALLBACK_DESCRIPTION
 
