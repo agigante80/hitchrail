@@ -179,11 +179,19 @@ Hitchrail is a Python package, so the equivalent of `npx` here is `uvx`:
 uvx hitchrail --root main=~/projects     # run it, install nothing
 uv tool install hitchrail                # keep it on PATH
 pipx install hitchrail                   # if you already live in pipx
+pip install hitchrail                    # into the environment you are in
 ```
 
 One word, no hyphen. It is on PyPI as
 [`hitchrail`](https://pypi.org/project/hitchrail/), and it needs Python 3.11 or
 newer.
+
+**`pip` is last because it installs into whatever environment happens to be
+active**, which the PyPI page's own install line does not mention. On a modern
+Debian or Ubuntu that is an externally managed system Python, and `pip`
+refuses with `error: externally-managed-environment` rather than installing
+into it; the three lines above it all sidestep that by managing their own
+environment or PATH entry for you.
 
 **`uv tool install`, not `uvx`, if you are going to run it as a service.** `uvx`
 resolves and runs out of a cache it is free to evict, which is what makes it
@@ -201,7 +209,7 @@ does not vendor or install any of them.
 | **tmux** | every session Hitchrail starts lives in a tmux session; this is the whole mechanism, not an option | `tmux -V` |
 | **Claude Code on `PATH`** | it is what Hitchrail runs. Configurable with `--agent-binary`. The binary is self contained: no node, no npm, whichever installer you used, because the npm package ships the same native executable | `claude --version` |
 | **Linux** | memory pressure is read from `/proc/meminfo`, and the process table from `ps`. macOS has neither in this form, which is why the package declares `Operating System :: POSIX :: Linux` | |
-| **Python 3.11+** | `uvx` and `pipx` handle this for you | `python3 --version` |
+| **Python 3.11+** | `uvx` and `pipx` handle this for you; `pip` needs it already there | `python3 --version` |
 
 **Hitchrail installs no runtime and checks no version of one.** That table is
 the whole list, and the agent needs nothing beyond itself. Your own PROJECTS are

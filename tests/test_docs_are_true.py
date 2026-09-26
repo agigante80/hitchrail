@@ -875,6 +875,33 @@ def test_the_readme_states_the_risk_before_the_instructions() -> None:
         )
 
 
+def test_the_install_section_names_every_route_pypi_shows() -> None:
+    """#156: PyPI's own project page shows `pip install hitchrail` as the
+    install line, and for a while the README never mentioned `pip` at all, so
+    a visitor who followed PyPI's own instruction could not find themselves in
+    our docs. `pip` must be last, since it is the one route that installs into
+    whatever environment happens to be active, and the refusal a reader is
+    most likely to hit that way, PEP 668's externally managed environment,
+    must be named."""
+    readme = README.read_text()
+    install = readme[readme.index("## Install") : readme.index("## Prerequisites")]
+    routes = (
+        "uvx hitchrail",
+        "uv tool install hitchrail",
+        "pipx install hitchrail",
+        "pip install hitchrail",
+    )
+    for route in routes:
+        assert route in install, f"the Install section lost {route!r}"
+    assert install.index("pip install hitchrail") == max(
+        install.index(route) for route in routes
+    ), "pip install is not the last route offered"
+    assert "externally-managed-environment" in install, (
+        "the Install section names pip but not the refusal a reader is most "
+        "likely to hit on a modern distribution"
+    )
+
+
 def test_the_readme_still_states_every_limitation() -> None:
     """A section promoted to the top is one somebody will later want to soften,
     because it is the first thing a visitor sees. This is what stops that being

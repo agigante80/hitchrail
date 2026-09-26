@@ -258,7 +258,7 @@ order. Listed by priority.
       before. Every image the tier produces ends up referenced somewhere in
       `README.md`; three currently are not.
 
-- [ ] **Task 110, #156 (P2).** The README gets a `pip install hitchrail` line
+- [x] **Task 110, #156 (P2).** The README gets a `pip install hitchrail` line
       next to `uvx`, matching what PyPI's own project page already shows.
 
 - [ ] **Task 111, #157 (P2).** The deprecated PyPI licence classifier is
