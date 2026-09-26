@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import ast
 import sys
 from pathlib import Path
@@ -7,7 +8,15 @@ from pathlib import Path
 import pytest
 
 from hitchrail import __version__, cli
-from hitchrail.cli import JOURNAL_ENV, banner, build_config, main, parse_args, preflight
+from hitchrail.cli import (
+    JOURNAL_ENV,
+    banner,
+    build_config,
+    build_parser,
+    main,
+    parse_args,
+    preflight,
+)
 from hitchrail.config import ConfigError, is_loopback_host
 from support import make_config
 from test_plugins import FakeAgent, done, row
@@ -865,6 +874,73 @@ def test_the_argparse_description_reuses_the_same_string(
         parse_args(["--help"])
     out = " ".join(capsys.readouterr().out.split())
     assert " ".join(cli.ONE_LINE_DESCRIPTION.split()) in out
+
+
+# -- #141: help text, shown defaults, and an example nobody guesses ----------
+
+# Actions argparse adds or manages itself, or whose absence is not a defect:
+# `-h`/`--help` already carries its own default help text; `--version`'s
+# `given` bookkeeping isn't a parser action at all.
+_NOT_A_USER_OPTION = {"help"}
+
+
+def test_every_option_has_help_text() -> None:
+    """Walk the parser rather than a list here, so a new flag with no help
+    fails this instead of being forgotten. `--port` was exactly that."""
+    parser = build_parser()
+    missing = [
+        action.option_strings
+        for action in parser._actions
+        if action.dest not in _NOT_A_USER_OPTION and not action.help
+    ]
+    assert not missing, f"options with no help text: {missing}"
+
+
+def test_options_with_a_default_show_it() -> None:
+    """For every option whose default is a real value, not `None` and not the
+    empty list a repeatable flag defaults to, that value's string form must
+    appear in its own help text. Read off the parser, not a hardcoded table,
+    so a changed default and a help string that still names the old one both
+    fail here."""
+    parser = build_parser()
+    for action in parser._actions:
+        trivial = (
+            action.default is None
+            or action.default == []
+            or action.default is argparse.SUPPRESS
+        )
+        if trivial:
+            continue
+        assert str(action.default) in (action.help or ""), (
+            f"{action.option_strings} defaults to {action.default!r} but its "
+            "help text does not show it"
+        )
+
+
+def test_the_help_shows_an_example_using_both_allowlist_flags() -> None:
+    """clig.dev's strongest recommendation: show examples, particularly the
+    unobvious complex case. Here that is needing BOTH allowlist flags to sit
+    behind a proxy, which nobody guesses from the flags' own help text alone.
+    """
+    parser = build_parser()
+    lines = parser.format_help().splitlines()
+    paired = [line for line in lines if "--allow-host" in line and "--allow-origin" in line]
+    assert paired, "no line in --help shows --allow-host and --allow-origin together"
+
+
+def test_no_arguments_shows_help_and_exits_non_zero(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """clig.dev: a program that needs arguments to function, run with none,
+    should show concise help rather than a single refusal line. The exit code
+    stays non zero: this is a failed start, not a help request, and
+    `no_real_config_directory` in conftest.py is what makes a bare `main([])`
+    deterministically roots-less in the suite."""
+    code = main([])
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "no roots configured" in err
+    assert "usage: hitchrail" in err
 
 
 # -- `hitchrail update-plugins` (#124) ----------------------------------------

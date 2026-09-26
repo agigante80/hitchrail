@@ -78,7 +78,25 @@ def _root_argument(raw: str) -> Root:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
-def parse_args(argv: list[str]) -> argparse.Namespace:
+# #141. Two worked examples, not a fifth spelling of one: both are already
+# in the README (the bare case just above "## Prerequisites", the proxied
+# case in "## What it costs you to run this"), so the epilog quotes rather
+# than invents. clig.dev's own strongest recommendation is examples first,
+# particularly the unobvious complex case, which here is needing BOTH
+# allowlist flags to sit behind a proxy.
+# Built from a list and joined, rather than one string with an inline
+# newline escape after each line: the leak-guard's home-root pattern stops
+# at a quote, not at an escape sequence, so a root glued directly to that
+# escape reads as one longer root, which no allow-file entry can name.
+_EXAMPLE_LINES = (
+    "  hitchrail --root main=~/projects",
+    "  hitchrail --root main=~/dev --host 0.0.0.0 --allow-host box.lan "
+    "--allow-origin https://box.lan",
+)
+_EXAMPLES = "examples:\n" + "\n".join(_EXAMPLE_LINES) + "\n"
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="hitchrail",
         description=ONE_LINE_DESCRIPTION,
@@ -87,7 +105,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         # accept (`--stop 60`) is a spelling that scan cannot see. Exact
         # names only, which is what every document here uses anyway.
         allow_abbrev=False,
-        epilog=f"{UPDATE_PLUGINS}: update the agent's plugins and exit, with no server. "
+        # Raw, so the examples above keep their line breaks: the default
+        # formatter refills an epilog into one paragraph and loses them.
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=f"{_EXAMPLES}\n"
+        f"{UPDATE_PLUGINS}: update the agent's plugins and exit, with no server. "
         f"See `hitchrail {UPDATE_PLUGINS} --help`",
     )
     # **`label=path`, repeatable, and there is no default.** #119 made a
@@ -114,8 +136,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         metavar="FILE",
         help="the config file; default ~/.config/hitchrail/config.toml",
     )
-    parser.add_argument("--host", default="127.0.0.1", help="address to bind")
-    parser.add_argument("--port", default=8787, type=int)
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="address to bind; default 127.0.0.1, the safe loopback choice",
+    )
+    parser.add_argument("--port", default=8787, type=int, help="port to bind; default 8787")
     parser.add_argument(
         "--token", default=None, help="required off loopback; generated if omitted"
     )
@@ -150,7 +176,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--agent-binary",
         default="claude",
-        help="the agent executable to run; must be on PATH or an absolute path",
+        help="the agent executable to run; must be on PATH or an absolute path; default claude",
     )
     # A documented default that cannot be changed is a constant, and this one
     # is the wait a person actually watches. The three memory floors stay fixed
@@ -196,9 +222,19 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--stop-timeout",
         default=30,
         type=int,
-        help="seconds to wait for a graceful stop before reporting it timed out",
+        help="seconds to wait for a graceful stop before reporting it timed out; default 30",
     )
-    parser.add_argument("--version", action="version", version=f"hitchrail {__version__}")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"hitchrail {__version__}",
+        help="print the version and exit",
+    )
+    return parser
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = build_parser()
     args = parser.parse_args(argv)
     args.given = flags_given(parser, argv)
     return args
@@ -695,6 +731,14 @@ def main(argv: list[str] | None = None) -> int:
         tls = build_tls_context(config)
     except ConfigError as exc:
         print(f"hitchrail: {exc}", file=sys.stderr)
+        # #141. clig.dev: a program that needs arguments to function, run with
+        # none, should show concise help rather than a single refusal line.
+        # Scoped to the one case that IS a bare invocation, `roots.check_roots`'s
+        # own message, rather than every ConfigError: a typo in an existing
+        # config should not be buried under a full option dump.
+        if "no roots configured" in str(exc):
+            print(file=sys.stderr)
+            build_parser().print_help(sys.stderr)
         return 2
 
     # BEFORE the banner and before the bind. Printing a token and a set of

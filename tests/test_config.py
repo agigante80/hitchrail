@@ -1274,7 +1274,11 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # metadata the same way `__init__.py` already reads `__version__`. The
         # fallback string, used only from a bare, uninstalled checkout, is
         # marked `# pragma: no cover` for that reason.
-        "cli.py": 748,
+        # 788 for #141: help text and a shown default for every option that
+        # lacked one, the parser factored out as `build_parser()` so both
+        # `parse_args()` and the bare-invocation help path share it, and two
+        # worked examples in the epilog.
+        "cli.py": 788,
         # 409, nine lines over, down from 542. #115 deleted the `?token=`
         # carrier: 135 lines once the two blocks inside `TokenMiddleware`
         # that only served it are counted.

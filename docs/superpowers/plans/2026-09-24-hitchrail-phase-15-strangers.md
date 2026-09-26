@@ -287,7 +287,7 @@ order. Listed by priority.
       instructions guard is unaffected, since it only requires `## Install`
       follow the risk heading, not that it follow `## Run it` as well.
 
-- [ ] **Task 114, #141 (P3).** `--port` and the other undocumented flags get
+- [x] **Task 114, #141 (P3).** `--port` and the other undocumented flags get
       help text and shown defaults; `--help`'s epilog gets one worked
       example invocation.
 
