@@ -297,7 +297,7 @@ order. Listed by priority.
       README, `https://github.com/sponsors/agigante80`, replacing no other
       funding link since none currently exists.
 
-- [ ] **Task 124, #328 (P2).** `pyproject.toml`'s `description` (also
+- [x] **Task 124, #328 (P2).** `pyproject.toml`'s `description` (also
       PyPI's summary) and the GitHub repo's About field, both currently
       "from your phone" with no mention of "web," changed to name it as a
       web UI, proposed wording "from a phone-first web UI," matching what

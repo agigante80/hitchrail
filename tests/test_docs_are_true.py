@@ -959,6 +959,12 @@ def test_the_cli_banner_reuses_pyprojects_description() -> None:
     assert _pyproject_description() == ONE_LINE_DESCRIPTION
 
 
+def test_the_readme_tagline_matches_pyprojects_description() -> None:
+    """#158: the README's centred, bold one line tagline is the same string
+    #328 ships for `pyproject.toml`, not a fifth wording of its own."""
+    assert _pyproject_description() in README.read_text()
+
+
 # -- #110: the unit template and the phone access document ------------------
 #
 # Both deliverables are text that instructs an operator, and text that
