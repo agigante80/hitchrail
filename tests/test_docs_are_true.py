@@ -884,7 +884,7 @@ def test_the_install_section_names_every_route_pypi_shows() -> None:
     most likely to hit that way, PEP 668's externally managed environment,
     must be named."""
     readme = README.read_text()
-    install = readme[readme.index("## Install") : readme.index("## Prerequisites")]
+    install = readme[readme.index("## Install") : readme.index("## Upgrading")]
     routes = (
         "uvx hitchrail",
         "uv tool install hitchrail",
@@ -900,6 +900,23 @@ def test_the_install_section_names_every_route_pypi_shows() -> None:
         "the Install section names pip but not the refusal a reader is most "
         "likely to hit on a modern distribution"
     )
+
+
+def test_the_upgrading_section_covers_both_deployment_shapes() -> None:
+    """#319: the README said how to install and how to update the AGENT's
+    plugins, never how to update Hitchrail itself. `uvx` and `uv tool install`
+    plus systemd go stale differently, and this checks both get a real
+    command rather than a sentence saying it is possible."""
+    readme = README.read_text()
+    upgrading = readme[readme.index("## Upgrading") : readme.index("## Prerequisites")]
+    for needle in (
+        "uvx hitchrail@latest",
+        "uv cache clean",
+        "uv tool upgrade hitchrail",
+        "systemctl --user restart hitchrail",
+        "hitchrail --version",
+    ):
+        assert needle in upgrading, f"the Upgrading section lost {needle!r}"
 
 
 def test_the_readme_still_states_every_limitation() -> None:

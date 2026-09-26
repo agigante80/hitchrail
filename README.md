@@ -199,6 +199,21 @@ right for trying something and wrong for a systemd unit: that needs an
 executable still there next month. See `packaging/hitchrail.service`, whose
 `ExecStart` names `~/.local/bin/hitchrail` for exactly that reason.
 
+## Upgrading
+
+Which command you need depends on which line above you used.
+
+**`uvx`** re-resolves against PyPI on close to every invocation, so running
+`uvx hitchrail ...` again already picks up a new release. If a cached
+resolution is still stale, force it with `uvx hitchrail@latest`, or clear the
+cache entirely with `uv cache clean hitchrail`.
+
+**`uv tool install`, which is what `packaging/hitchrail.service` runs, does
+not notice a new release on its own.** `uv tool upgrade hitchrail` fetches it,
+and then, because the running process keeps serving the old code until it is
+restarted, `systemctl --user restart hitchrail` for the packaged unit. Either
+way, `hitchrail --version` is how you confirm the upgrade actually landed.
+
 ## Prerequisites
 
 Hitchrail is a launcher, so the things it launches have to already be there. It

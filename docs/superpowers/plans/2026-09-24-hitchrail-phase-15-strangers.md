@@ -274,7 +274,7 @@ order. Listed by priority.
       scope" decisions, with the reversal's reasoning written into the
       ticket.
 
-- [ ] **Task 113, #319 (P2).** An "Upgrading" section in the README covering
+- [x] **Task 113, #319 (P2).** An "Upgrading" section in the README covering
       both install shapes (`uvx` re-resolution and its cache escape hatch;
       `uv tool upgrade hitchrail` plus the required `systemctl --user
       restart hitchrail` for the packaged unit), with `hitchrail --version`
