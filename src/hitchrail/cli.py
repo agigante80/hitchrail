@@ -9,8 +9,10 @@ import shutil
 import ssl
 import sys
 from collections.abc import Callable
+from dataclasses import replace
 from importlib.metadata import PackageNotFoundError, metadata
 from pathlib import Path
+from typing import NamedTuple
 from urllib.parse import quote
 
 import uvicorn
@@ -21,6 +23,7 @@ from hitchrail.config import (
     TOKEN_ENV,
     Config,
     ConfigError,
+    check_agent_binary,
     remote_reach,
 )
 from hitchrail.engine import Engine
@@ -479,12 +482,24 @@ def banner(config: Config) -> str:
 MEMINFO = Path("/proc/meminfo")
 
 
+class Preflight(NamedTuple):
+    """`problems` empty means good to go. `agent_binary` is the absolute path
+    the lookup resolved, carried alongside `problems` rather than thrown away
+    once they are empty (#196): a bare name here would still be re-resolved
+    by whatever spawns it next, in that thing's own environment rather than
+    this process's, which is the mismatch #298 also names."""
+
+    problems: list[str]
+    agent_binary: str | None
+
+
 def preflight(
     config: Config,
     which: Callable[[str], str | None] | None = None,
     meminfo: Path = MEMINFO,
-) -> list[str]:
-    """What is missing, in the operator's words. Empty means good to go.
+) -> Preflight:
+    """What is missing, in the operator's words, and the agent binary's
+    resolved path when there is nothing missing to report it against.
 
     Hitchrail is a launcher, and its two prerequisites are binaries rather than
     packages. Without this the failure arrives at the first tap on a project,
@@ -513,7 +528,8 @@ def preflight(
             "there is nothing it can do without it. Install it with your "
             "package manager, for example: sudo apt install tmux"
         )
-    if look(config.agent_binary) is None:
+    found = look(config.agent_binary)
+    if found is None:
         # **"Install it" is the wrong first remedy, and #195 is why.** The case
         # this actually fires in is a lingering systemd unit at boot: the agent
         # IS installed, in `~/.local/bin`, and the user manager's PATH before
@@ -528,6 +544,18 @@ def preflight(
             "THIS process has: under a systemd unit that is the unit's own "
             "Environment=PATH rather than your login's"
         )
+    elif not Path(found).is_absolute():
+        # A PATH entry given as a relative directory, "." most often, is the
+        # one shape `shutil.which` will hand back unresolved: everything else
+        # it finds it joins onto an absolute directory first. Spawning that
+        # would be #298 again, decided by whatever the CHILD's cwd turns out
+        # to be rather than by this lookup, so it is refused here instead.
+        problems.append(
+            f"{found!r} resolved to a relative path from a relative PATH "
+            "entry. Put an absolute directory earlier on PATH, or point "
+            "--agent-binary directly at the executable"
+        )
+        found = None
     if not meminfo.exists():
         problems.append(
             f"{meminfo} cannot be read, so the memory guard has nothing to "
@@ -535,7 +563,7 @@ def preflight(
             "rather than run without the check that stops it filling the "
             "machine with agents"
         )
-    return problems
+    return Preflight(problems, found if not problems else None)
 
 
 EXIT_REFUSED = 2
@@ -682,20 +710,25 @@ def update_plugins_command(argv: list[str]) -> int:
         help="the agent executable; must be on PATH or an absolute path",
     )
     args = parser.parse_args(argv)
-    binary = args.agent_binary.strip()
-    if not binary or binary.startswith("-"):
-        # The same refusal `Config._check_agent_binary` makes, for the reason
-        # it gives there: argv[0] starting with a hyphen is read as an option.
-        print(
-            f"hitchrail: not an acceptable agent binary: {args.agent_binary!r}", file=sys.stderr
-        )
+    try:
+        binary = check_agent_binary(args.agent_binary)
+    except ConfigError as exc:
+        print(f"hitchrail: {exc}", file=sys.stderr)
         return 2
-    if shutil.which(binary) is None:
+    resolved = shutil.which(binary)
+    if resolved is None:
         print(
             f"hitchrail: agent_missing: {binary!r} is not on PATH, so nothing was updated",
             file=sys.stderr,
         )
         return 2
+    # #298. `shutil.which` hands a name containing a directory component back
+    # UNCHANGED when it is executable, rather than making it absolute: only a
+    # bare name searched across PATH comes back joined onto an absolute
+    # directory. `resolve()` against THIS process's cwd, before
+    # `plugin_runner` starts the child in `Path.home()`, is what makes the
+    # program checked and the program run the same file.
+    resolved = str(Path(resolved).resolve())
 
     def show(outcome: claude_ipc.PluginOutcome) -> None:
         note = outcome.detail or (
@@ -706,7 +739,7 @@ def update_plugins_command(argv: list[str]) -> int:
 
     try:
         outcomes = claude_ipc.update_plugins(
-            binary, run=claude_ipc.plugin_runner(withhold=(TOKEN_ENV,)), report=show
+            resolved, run=claude_ipc.plugin_runner(withhold=(TOKEN_ENV,)), report=show
         )
     except claude_ipc.PluginsFailed as exc:
         # The code first: it is the same word the route's record carries, so
@@ -755,12 +788,18 @@ def main(argv: list[str] | None = None) -> int:
 
     # BEFORE the banner and before the bind. Printing a token and a set of
     # links, then refusing to work, would be worse than refusing plainly.
-    problems = preflight(config)
-    if problems:
+    found = preflight(config)
+    if found.problems:
         print("hitchrail: cannot start.", file=sys.stderr)
-        for problem in problems:
+        for problem in found.problems:
             print(f"  - {problem}", file=sys.stderr)
         return 2
+    # #196. Threaded through rather than re-read: `spawn_agent_binary` is now
+    # the absolute path this exact preflight resolved, so the engine and the
+    # plugin update run the file that was just checked, not a bare name that
+    # tmux's own server, with its own inherited PATH, could resolve to
+    # something else.
+    config = replace(config, resolved_agent_binary=found.agent_binary)
     # #207. After the preflight, before the bind, and with two exit codes
     # because the unit reads them differently. A MISMATCH is exit 2, the
     # deliberate stop `RestartPreventExitStatus=2` keeps stopped until a

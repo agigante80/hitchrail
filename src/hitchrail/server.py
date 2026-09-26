@@ -165,7 +165,9 @@ def create_app(
     # the tests fill; unset, it is the quarantined operation for the binary
     # this server starts agents with.
     plugin_updates = PluginRuns(publish=events.publish, clock=now)
-    run_plugins = plugin_operation or operation_for(config.agent_binary)
+    # #196, #298: the resolved absolute path, so this update runs the same
+    # file `cli.preflight` checked rather than a bare name resolved again.
+    run_plugins = plugin_operation or operation_for(config.spawn_agent_binary)
     # #147. Per server constants, read ONCE here and sent on the listing the
     # page already fetches, never on a route of their own: a second round trip
     # for a string is a round trip on a phone. `None` for the version is a

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import shutil
 import sys
 from pathlib import Path
 
@@ -20,6 +21,13 @@ from hitchrail.cli import (
 from hitchrail.config import ConfigError, is_loopback_host
 from support import make_config
 from test_plugins import FakeAgent, done, row
+
+# Captured at collection time, before the autouse fixture below ever runs, so
+# this is the real `shutil.which` and not whatever it patched `shutil.which`
+# to. A test that reaches for `shutil.which` directly inside its own body
+# would get back the fixture's fake, since monkeypatch replaces the module
+# attribute in place and a bare name lookup always reads the current one.
+_REAL_SHUTIL_WHICH = shutil.which
 
 
 @pytest.fixture(autouse=True)
@@ -284,7 +292,13 @@ def test_main_returns_two_rather_than_raising_on_a_bad_bind(
 
 def test_a_machine_with_everything_present_has_nothing_to_say(tmp_path: Path) -> None:
     found = preflight(make_config(tmp_path), which=lambda _n: "/usr/bin/x", meminfo=tmp_path)
-    assert found == []
+    assert found.problems == []
+
+
+def test_a_machine_with_everything_present_resolves_the_agent_binary(tmp_path: Path) -> None:
+    """#196. Kept, not thrown away: this is what a clean preflight is FOR."""
+    found = preflight(make_config(tmp_path), which=lambda _n: "/usr/bin/x", meminfo=tmp_path)
+    assert found.agent_binary == "/usr/bin/x"
 
 
 def test_missing_tmux_is_named_and_says_what_to_install(tmp_path: Path) -> None:
@@ -295,9 +309,9 @@ def test_missing_tmux_is_named_and_says_what_to_install(tmp_path: Path) -> None:
         which=lambda n: None if n == "tmux" else "/usr/bin/x",
         meminfo=tmp_path,
     )
-    assert len(found) == 1
-    assert "tmux" in found[0]
-    assert "apt install tmux" in found[0], "naming the problem without the fix"
+    assert len(found.problems) == 1
+    assert "tmux" in found.problems[0]
+    assert "apt install tmux" in found.problems[0], "naming the problem without the fix"
 
 
 def test_a_missing_agent_binary_names_the_binary_that_was_looked_for(
@@ -310,9 +324,10 @@ def test_a_missing_agent_binary_names_the_binary_that_was_looked_for(
         which=lambda n: None if n == "my-agent" else "/usr/bin/x",
         meminfo=tmp_path,
     )
-    assert len(found) == 1
-    assert "my-agent" in found[0]
-    assert "--agent-binary" in found[0]
+    assert len(found.problems) == 1
+    assert "my-agent" in found.problems[0]
+    assert "--agent-binary" in found.problems[0]
+    assert found.agent_binary is None, "nothing found is nothing to spawn"
 
 
 def test_the_missing_agent_message_does_not_assume_it_is_uninstalled(
@@ -331,11 +346,26 @@ def test_the_missing_agent_message_does_not_assume_it_is_uninstalled(
         which=lambda n: None if n == "my-agent" else "/usr/bin/x",
         meminfo=tmp_path,
     )
-    assert "if it is installed" in found[0], (
+    assert "if it is installed" in found.problems[0], (
         "the message offers installing as the only remedy, and the failure it "
         "fires on most is one where the binary is installed and unreachable"
     )
-    assert "PATH" in found[0]
+    assert "PATH" in found.problems[0]
+
+
+def test_a_relative_path_on_path_is_refused_rather_than_spawned(tmp_path: Path) -> None:
+    """#298. `shutil.which` hands back an unresolved relative path only when
+    PATH itself holds a relative entry, most often '.'. Spawning it anyway
+    would let a later process's cwd decide which file runs, the same
+    mismatch as checking one directory and running another."""
+    found = preflight(
+        make_config(tmp_path),
+        which=lambda n: "./x" if n != "tmux" else "/usr/bin/tmux",
+        meminfo=tmp_path,
+    )
+    assert len(found.problems) == 1
+    assert "relative" in found.problems[0]
+    assert found.agent_binary is None
 
 
 def test_an_unreadable_meminfo_refuses_rather_than_running_unguarded(
@@ -346,15 +376,15 @@ def test_an_unreadable_meminfo_refuses_rather_than_running_unguarded(
     found = preflight(
         make_config(tmp_path), which=lambda _n: "/usr/bin/x", meminfo=tmp_path / "nope"
     )
-    assert len(found) == 1
-    assert "memory guard" in found[0]
+    assert len(found.problems) == 1
+    assert "memory guard" in found.problems[0]
 
 
 def test_every_missing_prerequisite_is_reported_at_once(tmp_path: Path) -> None:
     """Not one at a time. An operator on a fresh machine should learn
     everything they have to install from a single run."""
     found = preflight(make_config(tmp_path), which=lambda _n: None, meminfo=tmp_path / "nope")
-    assert len(found) == 3
+    assert len(found.problems) == 3
 
 
 def test_the_preflight_is_not_a_version_check(tmp_path: Path) -> None:
@@ -1057,9 +1087,62 @@ def test_update_plugins_spawns_nothing_when_the_agent_is_not_on_path(
 
 
 def test_update_plugins_uses_the_agent_binary_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The autouse fixture's fake `which` prepends "/usr/bin/", which is a
+    # believable answer for a bare name and a nonsensical one for a path
+    # already absolute. A real `which` given an absolute, executable path
+    # hands it back unchanged, which is what this test needs to tell apart
+    # "the flag reached argv" from "the flag reached argv, resolved" (#298).
+    monkeypatch.setattr("shutil.which", lambda name: name)
     agent = FakeAgent([row("a@m")])
     _update(monkeypatch, agent, "--agent-binary", "/opt/agent")
     assert {argv[0] for argv in agent.argvs} == {"/opt/agent"}
+
+
+def test_update_plugins_spawns_the_resolved_path_not_the_raw_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#298. `claude_ipc.plugin_runner` starts the child with `cwd=Path.home()`,
+    so a relative binary would be checked from one directory and run from
+    another. The absolute path this command's own `which` call found is what
+    must reach argv, not the name it was given."""
+    monkeypatch.setattr("shutil.which", lambda name: f"/opt/bin/{name}")
+    agent = FakeAgent([row("a@m")])
+    _update(monkeypatch, agent, "--agent-binary", "my-agent")
+    assert {argv[0] for argv in agent.argvs} == {"/opt/bin/my-agent"}
+
+
+def test_update_plugins_resolves_a_relative_agent_binary_against_this_cwd(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """#298, the exact scenario the security review ran: `shutil.which` hands
+    a name with a directory component back UNCHANGED when it is executable,
+    rather than making it absolute. `plugin_runner` then starts the child in
+    `Path.home()`, so an unresolved relative argv[0] is checked against one
+    directory and would run whatever POSIX finds by that name in another. A
+    decoy of the same relative name sits under the fake HOME so a fix that
+    forgets to resolve, and accidentally still runs the real one because the
+    decoy happens to be missing, is not mistaken for passing.
+    """
+    monkeypatch.setattr(
+        "shutil.which", _REAL_SHUTIL_WHICH
+    )  # the real lookup, not the fixture's fake
+    cwd = tmp_path / "cwd"
+    (cwd / "bin").mkdir(parents=True)
+    real_agent = cwd / "bin" / "claude"
+    real_agent.write_text("#!/bin/sh\n")
+    real_agent.chmod(0o755)
+
+    home = tmp_path / "home"
+    (home / "bin").mkdir(parents=True)
+    decoy = home / "bin" / "claude"
+    decoy.write_text("#!/bin/sh\n")
+    decoy.chmod(0o755)
+
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(cwd)
+    agent = FakeAgent([row("a@m")])
+    _update(monkeypatch, agent, "--agent-binary", "bin/claude")
+    assert {argv[0] for argv in agent.argvs} == {str(real_agent.resolve())}
 
 
 def test_update_plugins_refuses_a_flag_shaped_agent_binary(

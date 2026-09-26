@@ -424,6 +424,37 @@ def test_a_flag_shaped_agent_binary_is_refused(tmp_path: Path, binary: str) -> N
         Config(roots=_r(tmp_path), agent_binary=binary)
 
 
+def test_agent_binary_is_stored_stripped(tmp_path: Path) -> None:
+    """#302. The old per-caller check computed the stripped value and never
+    wrote it back, so the server spawned an operator's padding its own
+    refusal had already rejected as a shape."""
+    assert Config(roots=_r(tmp_path), agent_binary="  claude  ").agent_binary == "claude"
+
+
+def test_spawn_agent_binary_falls_back_to_agent_binary(tmp_path: Path) -> None:
+    """Every Config built outside `cli.main`, `support.make_config` included,
+    leaves `resolved_agent_binary` unset. #196's field must not make those
+    Configs spawn nothing."""
+    cfg = Config(roots=_r(tmp_path), agent_binary="my-agent")
+    assert cfg.resolved_agent_binary is None
+    assert cfg.spawn_agent_binary == "my-agent"
+
+
+def test_spawn_agent_binary_prefers_the_resolved_path(tmp_path: Path) -> None:
+    cfg = Config(
+        roots=_r(tmp_path), agent_binary="claude", resolved_agent_binary="/usr/local/bin/claude"
+    )
+    assert cfg.spawn_agent_binary == "/usr/local/bin/claude"
+
+
+def test_a_relative_resolved_agent_binary_is_refused(tmp_path: Path) -> None:
+    """Only `cli.preflight`'s own lookup may set this field, and that lookup
+    is required to answer with an absolute path or nothing (#298): a relative
+    value here can only mean a second, less careful resolver wrote it."""
+    with pytest.raises(ConfigError, match="resolved_agent_binary"):
+        Config(roots=_r(tmp_path), agent_binary="claude", resolved_agent_binary="claude")
+
+
 @pytest.mark.parametrize("port", [0, -1, 65536, 99999])
 def test_a_port_out_of_range_is_refused(tmp_path: Path, port: int) -> None:
     with pytest.raises(ConfigError, match="port"):
@@ -1242,7 +1273,14 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 690 after round 2: that paragraph claimed nothing off the machine
         # can reach a loopback bind, which `remote_reach` twenty lines above
         # calls false for the same question.
-        "config.py": 690,
+        # 735 for Phase 22 batch 1 (#302, #196, #298): `check_agent_binary`
+        # moved to module level so `cli.update_plugins_command` can share it
+        # instead of running its own copy that forgot to write the stripped
+        # value back, and `resolved_agent_binary` plus `spawn_agent_binary`
+        # arrived to carry what `cli.preflight` resolved through to every
+        # spawn site without a second, less careful resolution. New
+        # behaviour and a new refusal, not the growth of one job into two.
+        "config.py": 735,
         # 460 for #123, #154 and #238: `--config`, `--session-prefix` and the
         # source tagging the settings page shows, which is one function
         # reading the flags back out of argv. Nothing here parses a value
@@ -1283,7 +1321,15 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # that introduced this entry recorded 788, four short of the file it
         # actually landed; corrected here rather than left to re-explain the
         # gap the next time this cap is touched.)
-        "cli.py": 804,
+        # 843 for Phase 22 batch 1 (#302, #196, #298): `preflight` returns a
+        # `Preflight` NamedTuple carrying the absolute path it resolved
+        # alongside its problems, instead of answering only `is None` and
+        # discarding the value a caller needed; `main` threads that path into
+        # `Config` once, before `Engine` and `create_app` exist;
+        # `update_plugins_command` shares `check_agent_binary` and resolves
+        # its own relative `--agent-binary` against this process's cwd before
+        # spawning, so the file it checked is the file it runs.
+        "cli.py": 843,
         # 409, nine lines over, down from 542. #115 deleted the `?token=`
         # carrier: 135 lines once the two blocks inside `TokenMiddleware`
         # that only served it are counted.
@@ -1378,7 +1424,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 948 for #297: two plugin routes and the named event branch in the
         # stream. The run itself is `plugin_runs.py`, deliberately, so what
         # grew here is routing and the reason each answer is what it is.
-        "server.py": 948,
+        # 950 for Phase 22 batch 1 (#196, #298): the plugin update route reads
+        # `config.spawn_agent_binary`, not `config.agent_binary`, so it too
+        # runs the absolute path preflight resolved rather than a bare name.
+        "server.py": 950,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"
@@ -1517,6 +1566,52 @@ def test_every_environment_variable_the_product_reads_is_scrubbed() -> None:
         f"`conftest.no_ambient_environment`: {unscrubbed}. Add them to "
         f"`AMBIENT_ENV`, or to `scrubbed` here with the reason the suite "
         f"should inherit the developer's value."
+    )
+
+
+# -- Phase 22 batch 1, #302/#196/#298: one resolved agent binary ------------
+
+
+def test_every_spawn_site_reads_the_resolved_agent_binary() -> None:
+    """#196's premortem: the binary got fixed three times before, each fix
+    passing its own test while a fourth caller reading `config.agent_binary`
+    directly appeared later and resolved it again in its own environment.
+
+    So this reads the code that spawns rather than listing today's three
+    call sites: `claude_ipc.launch_argv` and `claude_ipc.update_plugins` are
+    the only two places a binary string becomes argv[0] for something this
+    project runs, and every call to either, in any module, is a spawn site.
+    Its first argument must not be a raw `.agent_binary` read: `.agent_binary`
+    is the operator's setting, `.spawn_agent_binary` is what preflight found
+    on this machine, and only the second is safe to hand to a subprocess a
+    tmux server or a different cwd could resolve again.
+    """
+    src = Path(__file__).resolve().parents[1] / "src" / "hitchrail"
+    spawn_calls = {"claude_ipc.launch_argv", "claude_ipc.update_plugins"}
+    offenders: dict[str, str] = {}
+    found_a_spawn_call = False
+    for path in src.glob("*.py"):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and ast.unparse(node.func) in spawn_calls):
+                continue
+            found_a_spawn_call = True
+            first = node.args[0] if node.args else None
+            if isinstance(first, ast.Attribute) and first.attr == "agent_binary":
+                offenders[f"{path.name}:{node.lineno}"] = ast.unparse(node)
+
+    # Guard the guard, the same way test_every_environment_variable... does:
+    # if the parser stops matching either call, every assertion below is
+    # vacuously true.
+    assert found_a_spawn_call, (
+        "the parser found no call to claude_ipc.launch_argv or "
+        "claude_ipc.update_plugins at all, which means it has stopped "
+        "matching rather than that nothing spawns the agent any more"
+    )
+    assert not offenders, (
+        f"a spawn site reads the raw, unresolved agent binary: {offenders}. "
+        f"Read `config.spawn_agent_binary` instead, so this runs the exact "
+        f"file `cli.preflight` checked."
     )
 
 

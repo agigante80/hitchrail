@@ -608,7 +608,7 @@ class Engine:
                 # new session in a pane already holding old scrollback.
                 self.tmux.kill_session(name)
             self.tmux.new_session(
-                name, path_str, claude_ipc.launch_argv(self.config.agent_binary, name)
+                name, path_str, claude_ipc.launch_argv(self.config.spawn_agent_binary, name)
             )
         except TmuxUnavailable as exc:
             self._abandon_partial_session(name)

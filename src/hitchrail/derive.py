@@ -271,7 +271,7 @@ def find_detached(name: str, machine: Machine, config: Config) -> int | None:
     #
     # Built by calling `launch_argv`, so this cannot drift from what we
     # actually spawn, and the flags stay inside the quarantine.
-    suffix = " ".join(claude_ipc.launch_argv(config.agent_binary, name)[1:])
+    suffix = " ".join(claude_ipc.launch_argv(config.spawn_agent_binary, name)[1:])
     for proc in machine.table.matching(claude_ipc.REMOTE_CONTROL_MARKER):
         if proc.pid in machine.owned:
             continue

@@ -57,15 +57,15 @@ is the one written.
 
 ### Batch 1: the agent binary, resolved once, tasks 130 to 132
 
-- [ ] **Task 130, #302 (P2).** One `check_agent_binary(raw) -> str` in
+- [x] **Task 130, #302 (P2).** One `check_agent_binary(raw) -> str` in
       `config.py`, called from `Config.__post_init__` and from
       `cli.update_plugins_command`, returning the value that is actually
       spawned. The two divergent checks at `config.py` and `cli.py` go.
-- [ ] **Task 131, #196 (P2).** Preflight's resolution is kept and threaded
+- [x] **Task 131, #196 (P2).** Preflight's resolution is kept and threaded
       through `launch_argv` and `find_detached`, so the engine spawns the
       absolute path preflight found rather than a bare name tmux's server
       resolves again in its own environment.
-- [ ] **Task 132, #298 (P2).** The update's argv carries the same resolved
+- [x] **Task 132, #298 (P2).** The update's argv carries the same resolved
       absolute path, so `plugin_runner`'s `cwd=Path.home()` cannot change
       which file runs. One test asserts every spawn site, engine and plugin
       update alike, receives the single resolved value: the guard premortem 1
