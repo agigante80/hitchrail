@@ -320,7 +320,7 @@ order. Listed by priority.
       apart by a chip), each naming a behaviour the README already
       documents elsewhere rather than a new claim.
 
-- [ ] **Task 126, #330 (P3).** `docs/roadmap.md` added as a row to the
+- [x] **Task 126, #330 (P3).** `docs/roadmap.md` added as a row to the
       `## Documents` table (`README.md:517-524`), alongside `docs/api.md`,
       `CHANGELOG.md` and the rest. The two existing inline links in the
       intro paragraph are unchanged; no phase state duplicated into the

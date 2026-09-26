@@ -576,6 +576,7 @@ survive.
 | | |
 |---|---|
 | [`docs/api.md`](docs/api.md) | the HTTP API: routes, auth, and every error code |
+| [`docs/roadmap.md`](docs/roadmap.md) | what is built, and what is planned next |
 | [`SECURITY.md`](SECURITY.md) | what is in scope, and where to report it privately |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | how a change is expected to arrive |
 | [`CHANGELOG.md`](CHANGELOG.md) | what upgrading costs you |
