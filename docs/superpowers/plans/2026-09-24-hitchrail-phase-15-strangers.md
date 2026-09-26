@@ -1,16 +1,15 @@
 # Phase 15: The package as strangers meet it
 
 **Objective: somebody who has never seen this project can install it, tell
-what it is, see that it is maintained, and be helped when it goes wrong.**
+what it is, and see that it is maintained.** Narrowed on 2026-09-26: being
+helped when it goes wrong, the logging ticket, moved to Phase 19.
 
 ## Goal
 
 The PyPI page and the README agree with each other and with what `--help`
 actually prints. A stranger's first two seconds on the README answer whether
 the project is published, maintained and licensed; their first `pip install`
-or `uvx` run works from the line PyPI itself shows; and a bug report from a
-machine nobody on this project has seen can be answered from the journal
-instead of guessed at.
+or `uvx` run works from the line PyPI itself shows.
 
 ## What this phase is actually about
 
@@ -228,7 +227,8 @@ framework beyond what #167 actually asks for. That restraint is the point:
 the premortem below is exactly about this phase absorbing more than its
 tickets, the way Phase 10 once did before it was narrowed to escape it.
 
-**Splitting `app.js` or `server.py`.** Phase 18.
+**Splitting `app.js` or `server.py`.** Phase 24 and Phase 16, since Phase 18
+was deleted on 2026-09-26.
 
 **The stop sequence.** Phase 19.
 
@@ -242,8 +242,10 @@ order. Listed by priority.
 
 ### `docs`, `packaging`, `cli`: the README and PyPI agree with each other
 
-- [ ] **Task 109, #167 (P1).** A real logging handler, level and timestamp
-      for the daemon, so "was the stop request sent" and "did the plugin
+- [ ] **Task 109, #167 (P1).** MOVED OUT to Phase 19, #167, on 2026-09-26:
+      its stop sequence is the first thing that needs the journal to answer
+      a question, so the handler is built and watched there. A real logging
+      handler, level and timestamp for the daemon, so "was the stop request sent" and "did the plugin
       update run" have an answer in the journal on a machine nobody here has
       seen. `tests/test_cli.py` or a new `tests/test_logging.py` per the
       ticket's own unit test specs.
@@ -289,7 +291,9 @@ order. Listed by priority.
       help text and shown defaults; `--help`'s epilog gets one worked
       example invocation.
 
-- [ ] **Task 115, #17 (P3).** A GitHub Sponsors section and button in the
+- [ ] **Task 115, #17 (P3).** MOVED OUT to Backlog, #17, on 2026-09-26:
+      nothing a stranger needs to install or trust the package waits on it.
+      A GitHub Sponsors section and button in the
       README, `https://github.com/sponsors/agigante80`, replacing no other
       funding link since none currently exists.
 
@@ -332,25 +336,25 @@ order. Listed by priority.
 None of these five is about what a stranger meets before or during install;
 each is in-app UI reached only after installing and signing in, the
 distinction the thirteenth paragraph above draws. Moved to the Backlog
-milestone on 2026-09-24; each ticket's own body is unchanged and carries its
+milestone on 2026-09-24, and from there to Phase 24 on 2026-09-26; each ticket's own body is unchanged and carries its
 full implementation detail, not duplicated here.
 
-- [ ] **Task 116, #320 (P2).** MOVED OUT to Backlog, #320: settings
+- [ ] **Task 116, #320 (P2).** MOVED OUT to Phase 24, #320: settings
       relocated from the footer into a gear icon in `.bar-actions`.
 
-- [ ] **Task 117, #321 (P2).** MOVED OUT to Backlog, #321: the bar's `New`
+- [ ] **Task 117, #321 (P2).** MOVED OUT to Phase 24, #321: the bar's `New`
       button replaced by a permanent create-project row in the list.
 
-- [ ] **Task 118, #322 (P3).** MOVED OUT to Backlog, #322: the `New`
+- [ ] **Task 118, #322 (P3).** MOVED OUT to Phase 24, #322: the `New`
       button's label clarified, moot if #321 lands first.
 
-- [ ] **Task 119, #323 (P2).** MOVED OUT to Backlog, #323: a Light / Dark /
+- [ ] **Task 119, #323 (P2).** MOVED OUT to Phase 24, #323: a Light / Dark /
       System choice added to settings.
 
-- [ ] **Task 120, #324 (P3).** MOVED OUT to Backlog, #324: the app's mark
+- [ ] **Task 120, #324 (P3).** MOVED OUT to Phase 24, #324: the app's mark
       inlined in the header, not only as a favicon.
 
-- [ ] **Task 121, #325 (P3).** MOVED OUT to Backlog, #325: `/favicon.ico`
+- [ ] **Task 121, #325 (P3).** MOVED OUT to Phase 24, #325: `/favicon.ico`
       added to the unauthenticated asset set instead of answering 401.
 
 ### `cli`: a startup banner names the service
@@ -374,14 +378,13 @@ full implementation detail, not duplicated here.
 
 - [ ] Every task above is ticked, or marked MOVED OUT or NOT BUILT with the
       issue number that carries it.
-- [ ] #167, #156, #157, #158, #319, #141, #17 and #332 are closed. #326 is
+- [ ] #156, #157, #158, #319, #141 and #332 are closed. #326 is
       closed. #327 is closed. #328 is closed. #329 is closed. #330 is
-      closed. #331 is closed. #320 to #325 are MOVED OUT to Backlog and are
-      no longer this phase's to close.
+      closed. #331 is closed. #320 to #325 are MOVED OUT to Phase 24, #167 to
+      Phase 19 and #17 to Backlog, and are no longer this phase's to close.
 - [ ] The PyPI page and the README agree: install line, licence statement,
       and what CI reports.
 - [ ] The licence is one clickable statement, not four scattered ones.
-- [ ] A stranger's bug report can be answered from the journal alone.
 - [ ] `## Install` is the first heading reached after the risk section, not
       one of three scattered install mentions 475 lines in, and states the
       `uv tool install` versus `uvx` distinction once, not twice.
