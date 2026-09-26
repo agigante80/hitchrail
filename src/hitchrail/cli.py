@@ -346,7 +346,7 @@ def identity_banner() -> str:
     documented at `banner()`'s own call site: stdout is block buffered under
     the unit, and an unflushed line here would never reach the journal either.
     """
-    return f"hitchrail {__version__} - {ONE_LINE_DESCRIPTION}\n{GITHUB_URL}"
+    return f"hitchrail {__version__}: {ONE_LINE_DESCRIPTION}\n{GITHUB_URL}"
 
 
 def banner(config: Config) -> str:
