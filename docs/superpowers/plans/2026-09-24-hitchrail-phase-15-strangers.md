@@ -280,12 +280,15 @@ order. Listed by priority.
       restart hitchrail` for the packaged unit), with `hitchrail --version`
       named as the way to confirm it landed.
 
-- [ ] **Task 128, #332 (P2).** `## Install` moves from `README.md:475` to
+- [x] **Task 128, #332 (P2).** ALREADY TRUE, checked 2026-09-26: `fe88990`
+      (2026-09-05, before this ticket was filed) already put `## Install`
       directly after `## What it costs you to run this` and before
-      `## Prerequisites`; the two near-identical `uv tool install` versus
-      `uvx` paragraphs inside it collapse into one. The risk-before-
-      instructions guard is unaffected, since it only requires `## Install`
-      follow the risk heading, not that it follow `## Run it` as well.
+      `## Prerequisites`, and already folds the `uv tool install` versus
+      `uvx` point into one paragraph naming both `packaging/hitchrail.service`
+      and its `ExecStart`'s `~/.local/bin/hitchrail`, not two. Every
+      acceptance criterion in #332 holds against the current README with no
+      further edit; `test_the_readme_states_the_risk_before_the_instructions`
+      still passes.
 
 - [x] **Task 114, #141 (P3).** `--port` and the other undocumented flags get
       help text and shown defaults; `--help`'s epilog gets one worked
