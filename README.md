@@ -550,4 +550,4 @@ trademarks of Anthropic.
 
 ## Licence
 
-MIT.
+[MIT](LICENSE).

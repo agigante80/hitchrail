@@ -261,7 +261,7 @@ order. Listed by priority.
 - [x] **Task 110, #156 (P2).** The README gets a `pip install hitchrail` line
       next to `uvx`, matching what PyPI's own project page already shows.
 
-- [ ] **Task 111, #157 (P2).** The deprecated PyPI licence classifier is
+- [x] **Task 111, #157 (P2).** The deprecated PyPI licence classifier is
       dropped in favour of the SPDX expression already correct in
       `pyproject.toml`, and the README's "MIT" becomes a clickable link to
       `LICENSE`.

@@ -967,6 +967,50 @@ def test_a_renamed_workflow_file_would_fail_the_badge_check() -> None:
     assert _missing_badge_targets(fake), "a badge naming a missing workflow file was not caught"
 
 
+# -- #157: one licence, stated four times, and the four must agree ----------
+
+
+def test_the_licence_agrees_across_pyproject_readme_and_license_file() -> None:
+    """MIT is stated in `pyproject.toml`'s SPDX expression, in the LICENSE
+    file's own first line, in the README's Licence section, and in the README
+    badge #158 added. A licence is the wrong thing to let drift, so this reads
+    all four rather than hardcoding "MIT" and trusting it stays true."""
+    pyproject = (ROOT / "pyproject.toml").read_text()
+    match = re.search(r'^license = "(.+)"$', pyproject, re.M)
+    assert match, "pyproject.toml has no top level license expression to check against"
+    expression = match.group(1)
+
+    license_first_line = (ROOT / "LICENSE").read_text().splitlines()[0]
+    assert expression in license_first_line, (
+        f"pyproject.toml's license expression {expression!r} does not appear in "
+        f"LICENSE's first line {license_first_line!r}"
+    )
+
+    readme = README.read_text()
+    licence_section = readme[readme.index("## Licence") :]
+    assert expression in licence_section, (
+        f"the README's Licence section does not name {expression!r}"
+    )
+    assert "(LICENSE)" in licence_section, (
+        "the README's Licence section does not link to the LICENSE file"
+    )
+    assert any(expression in image for image, _ in _readme_badges(readme)), (
+        f"the badge row's licence badge does not name {expression!r}"
+    )
+
+
+def test_no_deprecated_license_classifier_is_declared() -> None:
+    """PEP 639 deprecated the `License ::` trove classifiers in favour of the
+    SPDX expression `pyproject.toml` already carries; PyPI has stopped
+    accepting new ones, and `uv build` warns when one is present. This fails
+    if the block is ever copy-pasted back in."""
+    pyproject = (ROOT / "pyproject.toml").read_text()
+    assert "License ::" not in pyproject, (
+        "pyproject.toml declares a deprecated License :: classifier "
+        "alongside the SPDX expression that replaced it"
+    )
+
+
 # -- #328, #158, #326, #331: one description, reused rather than retyped ----
 
 

@@ -79,10 +79,16 @@ jobs:
           ]
           missing = [n for n in needed if n not in names]
           fonts = [n for n in names if n.startswith("hitchrail/web/fonts/")]
+          # #157. `license-files = ["LICENSE"]` is what puts the text in the
+          # wheel; a build backend that stopped doing that would fail
+          # silently otherwise, discovered only after somebody installed it.
+          licenses = [n for n in names if n.endswith("/licenses/LICENSE")]
           if missing:
               sys.exit(f"the wheel is missing {missing}")
           if not fonts:
               sys.exit("the wheel carries no font faces, so the page falls back")
+          if not licenses:
+              sys.exit("the wheel carries no LICENSE file")
           print(f"ok: {len(names)} files, {len(fonts)} font faces")
           PY
 
