@@ -54,6 +54,29 @@ Stopping is a sequence rather than a button: it asks the agent to wrap up, shows
 you the wait, and keeps a kill control within reach the whole time if you would
 rather not wait.
 
+## Why you'd use this
+
+**You started a session before leaving the desk, and now need to check on it,
+stop it, or read what it did, with no shell in reach.** The browser interface
+does all three from a phone: the log tail, the stop sequence with its
+escalation, and Stop all when you are done for the day.
+
+**You have several project folders and cannot tell which ones have a live
+agent in them.** Each one is derived independently and shown as `running`,
+`stopped`, `detached` with its pid, or `stale`. Guessing wrong has a cost:
+treating a `detached` agent as `stopped` leaves it consuming memory unseen,
+and treating a project whose terminal died as still `running` leaves you
+waiting on nothing.
+
+**You do not want an agent to run the machine out of memory.** Hitchrail shows
+memory pressure and refuses to start a session that would exhaust it, rather
+than letting you find out by an OOM kill.
+
+**You keep two unrelated groups of projects apart**, a work root and a
+personal one. A project's identity is its root's label plus its folder, so two
+projects both called `vessel` in two roots are two separate rows, told apart
+by a chip.
+
 ## What it looks like
 
 The phone case first, because it is the one this exists for.

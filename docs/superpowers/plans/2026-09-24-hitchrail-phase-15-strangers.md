@@ -311,7 +311,7 @@ order. Listed by priority.
       target: whichever of the two ships second reads the other's final
       wording.
 
-- [ ] **Task 123, #327 (P2).** A `## Why you'd use this` section added
+- [x] **Task 123, #327 (P2).** A `## Why you'd use this` section added
       between `## What it will do` and `## What it looks like`, three to
       four concrete scenarios (checking on or stopping a session from a
       phone with no shell; telling apart the four derived states so a
