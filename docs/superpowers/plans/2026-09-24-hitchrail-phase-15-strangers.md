@@ -357,6 +357,11 @@ full implementation detail, not duplicated here.
 - [ ] **Task 121, #325 (P3).** MOVED OUT to Phase 24, #325: `/favicon.ico`
       added to the unauthenticated asset set instead of answering 401.
 
+- [ ] **Task 129, #333 (P3).** MOVED OUT to Phase 24, #333, on 2026-09-26:
+      the `hitchrail` heading made a link back to the project list. Filed
+      into this milestone after the narrowing above and in-app for the same
+      reason, so it follows #324, which edits the same heading.
+
 ### `cli`: a startup banner names the service
 
 - [ ] **Task 122, #326 (P2).** A new `identity_banner()` in `cli.py`,
@@ -380,7 +385,7 @@ full implementation detail, not duplicated here.
       issue number that carries it.
 - [ ] #156, #157, #158, #319, #141 and #332 are closed. #326 is
       closed. #327 is closed. #328 is closed. #329 is closed. #330 is
-      closed. #331 is closed. #320 to #325 are MOVED OUT to Phase 24, #167 to
+      closed. #331 is closed. #320 to #325 and #333 are MOVED OUT to Phase 24, #167 to
       Phase 19 and #17 to Backlog, and are no longer this phase's to close.
 - [ ] The PyPI page and the README agree: install line, licence statement,
       and what CI reports.
