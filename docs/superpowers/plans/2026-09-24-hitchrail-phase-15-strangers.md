@@ -266,7 +266,7 @@ order. Listed by priority.
       `pyproject.toml`, and the README's "MIT" becomes a clickable link to
       `LICENSE`.
 
-- [ ] **Task 112, #158 (P2).** A centred icon and title, a badge row above
+- [x] **Task 112, #158 (P2).** A centred icon and title, a badge row above
       the fold (version, downloads, licence, supported Python, CI status),
       and a centred, bold one line description beneath it, matching the
       reference `agigante80/actual-mcp-server` README the ticket names.

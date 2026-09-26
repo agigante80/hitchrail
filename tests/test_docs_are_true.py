@@ -887,6 +887,59 @@ def test_the_readme_still_states_every_limitation() -> None:
     )
 
 
+# -- #158: the README's centred badge row, each badge a checkable claim -----
+
+_BADGE_RE = re.compile(r"\[!\[[^\]]*\]\(([^)]+)\)\]\(([^)]+)\)")
+
+
+def _readme_badges(text: str) -> list[tuple[str, str]]:
+    """(image url, link url) pairs, image first, matching the row's own
+    `[![alt](image)](link)` shape."""
+    return _BADGE_RE.findall(text)
+
+
+def _missing_badge_targets(text: str) -> list[str]:
+    """What #158 asks to be checked: a badge naming a file this repository
+    does not have. Not every badge is checkable this way (PyPI, Downloads
+    and Stars point at accounts on another site, and #158's own E2E note
+    says a broken shield there is a human check, on GitHub and on PyPI both),
+    so this covers the two badges that name something local: the licence
+    file and the CI workflow.
+    """
+    problems = []
+    for image, link in _readme_badges(text):
+        if "License" in image and not (ROOT / link).exists():
+            problems.append(f"the licence badge links to {link!r}, not a file here")
+        workflow = re.search(r"workflows/([\w.-]+\.ya?ml)/badge\.svg", image)
+        if workflow and not (ROOT / ".github" / "workflows" / workflow.group(1)).exists():
+            problems.append(
+                f"the CI badge names {workflow.group(1)!r}, which is not in .github/workflows/"
+            )
+    return problems
+
+
+def test_every_badge_names_a_resource_the_project_actually_has() -> None:
+    """A badge is a claim, and copying a row wholesale is how a README ends up
+    making one it cannot keep. This checks the two badges that name a file in
+    this repository rather than an account on another site."""
+    readme = README.read_text()
+    assert _readme_badges(readme), "the README's badge row no longer matches this regex"
+    problems = _missing_badge_targets(readme)
+    assert not problems, "\n  ".join(["a badge names a resource this repo lacks:", *problems])
+
+
+def test_a_renamed_workflow_file_would_fail_the_badge_check() -> None:
+    """The realistic drift #158 names: a workflow gets renamed and the CI
+    badge silently 404s. Run against fabricated text, not the real README, so
+    this test does not depend on the CI workflow ever actually being renamed.
+    """
+    fake = (
+        "[![CI](https://github.com/agigante80/hitchrail/actions/workflows/"
+        "renamed.yml/badge.svg)](https://github.com/agigante80/hitchrail/actions)\n"
+    )
+    assert _missing_badge_targets(fake), "a badge naming a missing workflow file was not caught"
+
+
 # -- #110: the unit template and the phone access document ------------------
 #
 # Both deliverables are text that instructs an operator, and text that

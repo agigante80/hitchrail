@@ -1,6 +1,22 @@
-<img src="src/hitchrail/web/icon.svg" width="56" height="56" alt="">
+<p align="center">
+  <img src="src/hitchrail/web/icon.svg" width="72" height="72" alt="">
+</p>
 
-# hitchrail
+<h1 align="center">hitchrail</h1>
+
+<p align="center">
+
+[![PyPI](https://img.shields.io/pypi/v/hitchrail)](https://pypi.org/project/hitchrail/)
+[![Downloads](https://img.shields.io/pypi/dm/hitchrail)](https://pypi.org/project/hitchrail/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/pypi/pyversions/hitchrail)](https://pypi.org/project/hitchrail/)
+[![Platform](https://img.shields.io/badge/platform-linux-lightgrey.svg)](#prerequisites)
+[![CI](https://github.com/agigante80/hitchrail/actions/workflows/ci.yml/badge.svg)](https://github.com/agigante80/hitchrail/actions/workflows/ci.yml)
+[![Stars](https://img.shields.io/github/stars/agigante80/hitchrail?style=social)](https://github.com/agigante80/hitchrail)
+
+</p>
+
+<p align="center"><strong>Start and stop headless Claude Code sessions across a folder of projects, from a phone-first web UI.</strong></p>
 
 A web UI for starting and stopping headless Claude Code sessions across a
 folder of projects. Open it on your phone, tap a folder, get a session link.
