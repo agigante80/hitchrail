@@ -323,7 +323,7 @@ order. Listed by priority.
       intro paragraph are unchanged; no phase state duplicated into the
       README.
 
-- [ ] **Task 127, #331 (P2).** `<meta name="description">` and
+- [x] **Task 127, #331 (P2).** `<meta name="description">` and
       `og:title`/`og:description` added to `index.html` and `settings.html`,
       reusing whichever one line description task 112/#158 settles on for
       the README's centred tagline. `grant.html` and `logs.html` excluded:

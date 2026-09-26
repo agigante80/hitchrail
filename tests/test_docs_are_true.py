@@ -965,6 +965,17 @@ def test_the_readme_tagline_matches_pyprojects_description() -> None:
     assert _pyproject_description() in README.read_text()
 
 
+def test_the_page_metadata_matches_pyprojects_description() -> None:
+    """#331: `index.html` and `settings.html` reuse the same string for their
+    `<meta name="description">`, rather than each inventing its own."""
+    description = _pyproject_description()
+    for page in ("index.html", "settings.html"):
+        html = (SRC / "web" / page).read_text()
+        assert f'<meta name="description" content="{description}">' in html, (
+            f"{page} has no meta description matching pyproject.toml's"
+        )
+
+
 # -- #110: the unit template and the phone access document ------------------
 #
 # Both deliverables are text that instructs an operator, and text that
