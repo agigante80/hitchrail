@@ -166,6 +166,18 @@ asks for, so they stay in this phase rather than going to Backlog.
 - [x] **Task 152, #346 (P2).** `main()`'s resolved path test also checks the
       `Config` that `create_app` receives, and that it is the one `Engine` got.
 
+### Batch 4c: batch 4's review, task 157
+
+Added on 2026-09-27. Batch 4's loop stopped after round 2 by rule: round 1
+found a high (an unbounded reap after the group kill) and four mediums, fixed
+in `73ce21b` and `e0a1b28`; round 2 found no high. Its three lows are defects
+in those fixes and went to Backlog as #362 to #364. Its medium is older than
+the fixes but made worse by task 143, so it stays here.
+
+- [ ] **Task 157, #361 (P2).** The server's shutdown kills an in flight plugin
+      update's group, since a daemon thread never sees Ctrl-C and the child
+      no longer shares the terminal's process group.
+
 ## Done looks like
 
 - [ ] Every task above is ticked, or marked MOVED OUT or NOT BUILT with the
