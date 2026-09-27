@@ -186,8 +186,8 @@ the fixes but made worse by task 143, so it stays here.
       so for every site at once.
 - [ ] No from-review ticket about the plugin update or the agent binary is
       open without a decision.
-- [ ] The mutation survivors in `claude_ipc.py`'s plugin section have been
-      read, not counted.
+- [x] The mutation survivors in `claude_ipc.py`'s plugin section have been
+      read, not counted: `495e6da` and `ed04093`, dispositions on #304.
 - [ ] A plugin update started from the phone has been watched finishing on
       the phone, after batch 2, against a private test root.
 - [ ] The roadmap's Phase 22 block says `state: done`, the milestone is
