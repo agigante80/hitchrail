@@ -112,7 +112,7 @@ candidate fix is an epoch the server mints with an order, not a fifth guess.
 - [ ] **Task 153, #348 (P1).** A restart during a page load no longer lets
       the old process's record retire the live epoch. Unreleased regression
       from `aad020c`; decide ordered epochs or the narrow bail first.
-- [ ] **Task 154, #349 (P2).** The owner guard test waits for the held
+- [x] **Task 154, #349 (P2).** The owner guard test waits for the held
       settings response to be delivered before asserting.
 - [ ] **Task 155, #350 (P3).** The residual case comment goes or is rewritten
       with task 153.

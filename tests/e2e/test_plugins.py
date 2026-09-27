@@ -485,6 +485,11 @@ async def test_a_plugin_get_failure_does_not_inherit_a_settings_refusals_owed_re
         # hold long enough to be safe on a slow one is still a guess. Released
         # only once the plugin failure has genuinely painted, below.
         release_settings_get = asyncio.Event()
+        # Set once `route.fulfill()` has handed the response to the browser.
+        # `release_settings_get.set()` alone only wakes `hold_config`; the
+        # test must not assert until the FULFILL has actually happened, or it
+        # is timing Playwright's own driver round trip, not the repaint (#349).
+        settings_get_delivered = asyncio.Event()
 
         async def hold_config(route: Route) -> None:
             if route.request.method == "GET":
@@ -492,6 +497,7 @@ async def test_a_plugin_get_failure_does_not_inherit_a_settings_refusals_owed_re
                 held.append(route)
                 await release_settings_get.wait()
                 await route.fulfill(response=response)
+                settings_get_delivered.set()
             else:
                 await route.continue_()
 
@@ -521,7 +527,27 @@ async def test_a_plugin_get_failure_does_not_inherit_a_settings_refusals_owed_re
         # Only now, with the plugin failure already on screen, let the held
         # settings GET resolve: `settle()`'s owner guard must not clear a
         # strip the plugin flow now owns.
+        #
+        # `release_settings_get.set()` alone used to be followed straight by
+        # the assertion below (#349): `expect().to_have_text()` checks the
+        # CURRENT text and returns at once when it already matches, and it
+        # already matched, unchanged, before `hold_config` had even resumed.
+        # The guard being tested was never exercised; the test passed with it
+        # removed entirely (round 3 of batch 2's review, reproduced). Ordering
+        # past `route.fulfill()` is not enough either: the browser still has
+        # to run its own `await` chain, through `settle()` and into `render`,
+        # before there is anything real to assert on. `render` rebuilds the
+        # roots list's CHILDREN from scratch (`replaceChildren`), whether or
+        # not any value in them changed; the list itself is not replaced, so
+        # marking the current checkbox, not the list, and waiting for that
+        # exact node to detach orders the assertion after `settle()`
+        # genuinely ran, whichever way it resolved.
+        await box.evaluate("(el) => { el.dataset.repaintMarker = '349'; }")
         release_settings_get.set()
+        await settings_get_delivered.wait()
+        await page.locator('[data-root-toggle="main"][data-repaint-marker="349"]').wait_for(
+            state="detached"
+        )
         await expect(note).to_have_text(
             "Not connected. The plugin update's state could not be read."
         )
