@@ -27,6 +27,7 @@ import os
 import re
 import signal
 import subprocess
+import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -906,7 +907,46 @@ class PluginsFailed(Exception):
         self.code: PluginFailure = code
 
 
-def plugin_runner(withhold: Sequence[str]) -> PluginRunner:
+class RunningChild:
+    """A thread-safe handle to `plugin_runner`'s current child, if any (#361).
+
+    `plugin_runs.py` creates one and hands it to `operation_for`, which
+    threads it into `plugin_runner` below; the server's lifespan calls
+    `kill()` on shutdown. That indirection exists because the daemon thread
+    a server-started run executes on (`plugin_runs.PluginRuns.start`'s
+    docstring says why it is daemon, not the executor) never receives
+    `KeyboardInterrupt`: Python delivers it only to the main thread, so
+    nothing inside `plugin_runner` itself, however it is written, ever sees
+    Ctrl-C for that run. The main thread has to reach in and kill the group
+    from outside instead, and `plugin_runs.py` is not allowed to know a pid
+    is the right thing to signal, or that `os.killpg` is how: that is exactly
+    the vendor-adjacent process knowledge this module exists to quarantine.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._pid: int | None = None
+
+    def kill(self) -> None:
+        """Kill the current child's process group, if one is running now.
+
+        A no-op when nothing is running. `ProcessLookupError` means the
+        child (or the whole group) is already gone, which is not a failure
+        here any more than it is at the timeout kill below."""
+        with self._lock:
+            pid = self._pid
+        if pid is not None:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(pid, signal.SIGKILL)
+
+    def _set(self, pid: int | None) -> None:
+        with self._lock:
+            self._pid = pid
+
+
+def plugin_runner(
+    withhold: Sequence[str], *, handle: RunningChild | None = None
+) -> PluginRunner:
     """The real runner: an argument list, never a shell, with no terminal.
 
     `withhold` names environment variables the child must not inherit (#113):
@@ -936,18 +976,27 @@ def plugin_runner(withhold: Sequence[str]) -> PluginRunner:
     while the child ran was also a kill; losing that when `run(timeout=)` was
     dropped meant Ctrl-C on the operator's terminal left `claude plugin update
     ... -y` running orphaned, in its own session, unreachable by the terminal's
-    own signal (measured). `except BaseException` restores it. And a plain
-    second `communicate()` after the kill assumed the pipes would hit EOF as
-    soon as the group died; they do not when a grandchild left the group
-    before dying, whether by running `setsid` itself or, as here, by being
-    started with its own session, and it still holds the inherited stdout or
-    stderr pipe open: EOF then waits for THAT process's own exit, not this
-    one's (measured: a grandchild sleeping 8 seconds made a 0.5 second bound
-    return after 8.0 seconds, and the run stayed `running` for every caller
-    until it did). Closing this process's ends of the pipes and waiting only
-    for the child actually killed avoids depending on who else is still
-    holding them; the bounded `wait` below is the last resort if even that
-    child is somehow slow to die after `SIGKILL`.
+    own signal (measured). `except BaseException` restores it **on the thread
+    the signal reaches**: true for `hitchrail update-plugins`, which calls
+    this from the main thread the way `subprocess.run` did. It is false for a
+    run the server started (#361): `plugin_runs.PluginRuns.start` runs the
+    operation on a daemon thread, and Python delivers `KeyboardInterrupt` only
+    to the main thread, so this `except` never fires there no matter what it
+    catches, and the child, no longer in the terminal's process group either,
+    outlives the request that leaves. `RunningChild` above is that path's
+    answer: the main thread kills the group from outside, when the server's
+    own lifespan tears down, instead of waiting for a signal this thread
+    cannot receive. And a plain second `communicate()` after the kill assumed
+    the pipes would hit EOF as soon as the group died; they do not when a
+    grandchild left the group before dying, whether by running `setsid`
+    itself or, as here, by being started with its own session, and it still
+    holds the inherited stdout or stderr pipe open: EOF then waits for THAT
+    process's own exit, not this one's (measured: a grandchild sleeping 8
+    seconds made a 0.5 second bound return after 8.0 seconds, and the run
+    stayed `running` for every caller until it did). Closing this process's
+    ends of the pipes and waiting only for the child actually killed avoids
+    depending on who else is still holding them; the bounded `wait` below is
+    the last resort if even that child is somehow slow to die after `SIGKILL`.
     """
 
     def run(argv: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
@@ -978,30 +1027,44 @@ def plugin_runner(withhold: Sequence[str]) -> PluginRunner:
             cwd=Path.home(),
             start_new_session=True,
         )
+        # #361. Visible to `RunningChild.kill()` from the moment this process
+        # exists to the moment it is reaped, on whichever thread this closure
+        # happens to run on: the server's plugin run is on a daemon thread,
+        # and the main thread needs `proc.pid` to reach it without knowing
+        # anything else about this call. Cleared in `finally` so a handle
+        # never outlives the child it named, and a `kill()` that lands after
+        # that either signals nothing (`pid is None`) or, if it raced this
+        # line, signals a pid that is about to be waited on anyway.
+        if handle is not None:
+            handle._set(proc.pid)
         try:
-            stdout, stderr = proc.communicate(timeout=timeout)
-        except BaseException:
-            # `proc.pid`, not `os.getpgid(proc.pid)`: `start_new_session`
-            # above makes this child its own group leader, so its pid IS
-            # the group id. Asking the OS for "this pid's group" instead
-            # would, the day `start_new_session` is ever dropped, answer
-            # with OUR OWN group and turn this into a kill of hitchrail
-            # itself. Addressing `proc.pid` directly means that mistake
-            # raises ProcessLookupError here instead, which this suppresses
-            # the same way as an already exited child: either way there is
-            # nothing left here to kill.
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(proc.pid, signal.SIGKILL)
-            if proc.stdout is not None:
-                proc.stdout.close()
-            if proc.stderr is not None:
-                proc.stderr.close()
-            # SIGKILL was sent; if the reap still does not land inside the
-            # bound, nothing more this function can do.
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                proc.wait(timeout=_REAP_TIMEOUT_S)
-            raise
-        return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
+            try:
+                stdout, stderr = proc.communicate(timeout=timeout)
+            except BaseException:
+                # `proc.pid`, not `os.getpgid(proc.pid)`: `start_new_session`
+                # above makes this child its own group leader, so its pid IS
+                # the group id. Asking the OS for "this pid's group" instead
+                # would, the day `start_new_session` is ever dropped, answer
+                # with OUR OWN group and turn this into a kill of hitchrail
+                # itself. Addressing `proc.pid` directly means that mistake
+                # raises ProcessLookupError here instead, which this suppresses
+                # the same way as an already exited child: either way there is
+                # nothing left here to kill.
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(proc.pid, signal.SIGKILL)
+                if proc.stdout is not None:
+                    proc.stdout.close()
+                if proc.stderr is not None:
+                    proc.stderr.close()
+                # SIGKILL was sent; if the reap still does not land inside the
+                # bound, nothing more this function can do.
+                with contextlib.suppress(subprocess.TimeoutExpired):
+                    proc.wait(timeout=_REAP_TIMEOUT_S)
+                raise
+            return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
+        finally:
+            if handle is not None:
+                handle._set(None)
 
     return run
 

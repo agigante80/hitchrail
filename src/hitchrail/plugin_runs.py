@@ -69,9 +69,19 @@ class RunInFlight(Exception):
     """A run is already going; the request changed nothing."""
 
 
-def operation_for(agent_binary: str) -> Operation:
-    """The real operation, withholding the token from every child (#113)."""
-    runner = claude_ipc.plugin_runner(withhold=(TOKEN_ENV,))
+def operation_for(
+    agent_binary: str, *, handle: claude_ipc.RunningChild | None = None
+) -> Operation:
+    """The real operation, withholding the token from every child (#113).
+
+    `handle`, when given, is `PluginRuns`'s own (#361): threaded into the
+    runner so the server's lifespan can kill whatever this operation is
+    running, from outside, on shutdown. `None` for every caller that has no
+    lifespan to tear down, `hitchrail update-plugins` foremost: there, the
+    operator's own Ctrl-C already reaches this thread directly, so nothing
+    needs to reach in from outside it.
+    """
+    runner = claude_ipc.plugin_runner(withhold=(TOKEN_ENV,), handle=handle)
 
     def operation(report: Callable[[PluginOutcome], None]) -> list[PluginOutcome]:
         return claude_ipc.update_plugins(agent_binary, run=runner, report=report)
@@ -87,6 +97,14 @@ class PluginRuns:
     ) -> None:
         self._publish = publish
         self._clock = clock
+        # #361. Public: the server's lifespan kills whatever this instance is
+        # running, from outside the daemon thread `start` puts it on, since
+        # that thread never sees the shutdown's `KeyboardInterrupt` (Python
+        # delivers it to the main thread only). `operation_for` is the other
+        # end, threading this same object into `plugin_runner` so the pid it
+        # sets is the one this `kill()` reaches. A no-op when idle: `kill()`
+        # itself is where that is decided, not here.
+        self.handle = claude_ipc.RunningChild()
         self._lock = threading.Lock()
         self._state: State = "idle"
         self._started_at: float | None = None

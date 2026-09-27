@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import pathlib
+import sys
 import threading
 from collections.abc import AsyncIterator, Callable
 
@@ -296,7 +298,10 @@ async def test_the_wired_operation_spawns_the_resolved_binary_not_the_raw_one(
     )
     agent = FakeAgent()
     monkeypatch.setattr("hitchrail.server.operation_for", operation_for)
-    monkeypatch.setattr(claude_ipc, "plugin_runner", lambda withhold: agent)
+    # #361 added a keyword-only `handle`, threaded from `create_app` on every
+    # call; accepted and ignored here, since `FakeAgent` never spawns a real
+    # process for a handle to name.
+    monkeypatch.setattr(claude_ipc, "plugin_runner", lambda withhold, **_kw: agent)
 
     engine = Engine(config=config, tmux=FakeTmux(), procs_fn=procs_from(""))
     app = create_app(engine=engine, config=config, bus=EventBus())
@@ -314,3 +319,78 @@ async def test_the_wired_operation_spawns_the_resolved_binary_not_the_raw_one(
     assert record["state"] == "done"
     assert agent.argvs, "the fake runner was never called"
     assert {argv[0] for argv in agent.argvs} == {"/abs/fake-agent"}
+
+
+async def test_the_lifespan_kills_an_in_flight_update_on_shutdown(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#361. Ctrl-C on the terminal cannot reach this run: the operation goes
+    on `PluginRuns`'s own daemon thread, and Python delivers `KeyboardInterrupt`
+    to the main thread only, never a daemon one. Since #299 the child is also
+    its own process group leader, so it no longer shares the terminal's group
+    either. The server's lifespan, tearing down through `RunningChild`, is the
+    only thing left that can end it.
+
+    A real child, not `FakeAgent`: the bug is a real process outliving a real
+    shutdown, which a runner that never calls `subprocess.Popen` cannot prove
+    either way, the same reasoning `test_plugins.py`'s real-runner tests use.
+    It writes its own pid to a marker file the moment the marketplace refresh
+    starts, then sleeps five seconds; the test waits for the marker, exits the
+    lifespan, and asserts the pid is gone well inside that five seconds.
+
+    Reverting `plugin_updates.handle.kill()` in `server.py`'s lifespan, with
+    `PYTHONDONTWRITEBYTECODE=1`, fails this: the marker's pid is still alive
+    at the two second bound, because nothing ever signalled it and the fake
+    agent's own sleep has not finished yet.
+    """
+    (tmp_path / "vessel").mkdir()
+    marker = tmp_path / "started"
+    agent = tmp_path / "claude"
+    agent.write_text(
+        f"#!{sys.executable}\n"
+        "import os, sys, time\n"
+        "args = sys.argv[1:]\n"
+        "if args[:2] == ['plugin', 'marketplace']:\n"
+        f"    with open({str(marker)!r}, 'w') as f:\n"
+        "        f.write(str(os.getpid()))\n"
+        "    time.sleep(5)\n"
+    )
+    agent.chmod(0o755)
+    config = make_config(tmp_path, agent_binary="fake-agent", resolved_agent_binary=str(agent))
+    # The autouse `no_real_plugin_update` guard replaces `operation_for` with
+    # a stub that refuses every run; restored here, as
+    # `test_the_wired_operation_spawns_the_resolved_binary_not_the_raw_one`
+    # does, because this test needs the real wiring from `create_app` through
+    # to `plugin_runner`, including the `handle=` #361 added. `plugin_runner`
+    # itself is left untouched: replacing it with a fake would prove nothing
+    # about a real process outliving a real shutdown.
+    monkeypatch.setattr("hitchrail.server.operation_for", operation_for)
+    engine = Engine(config=config, tmux=FakeTmux(), procs_fn=procs_from(""))
+    app = create_app(engine=engine, config=config, bus=EventBus())
+
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://localhost"
+        ) as client:
+            response = await client.post(PATH, headers=HEADERS)
+            assert response.status_code == 202
+            for _ in range(500):
+                if marker.exists():
+                    break
+                await asyncio.sleep(0.02)
+            else:
+                raise AssertionError("the fake agent never reached the marketplace refresh")
+        pid = int(marker.read_text())
+    # The lifespan's `finally` ran on the `async with` above exiting: the kill
+    # was sent before this point, and what remains is the daemon thread's own
+    # `communicate()` reaping the child once its pipes close, which is not
+    # instant but is not the five second sleep either.
+    for _ in range(40):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        await asyncio.sleep(0.05)
+    else:
+        raise AssertionError(f"pid {pid} outlived the lifespan by more than 2 seconds")

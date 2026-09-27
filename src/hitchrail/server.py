@@ -167,7 +167,15 @@ def create_app(
     plugin_updates = PluginRuns(publish=events.publish, clock=now)
     # #196, #298: the resolved absolute path, so this update runs the same
     # file `cli.preflight` checked rather than a bare name resolved again.
-    run_plugins = plugin_operation or operation_for(config.spawn_agent_binary)
+    #
+    # #361. `plugin_updates.handle` rides along so the lifespan below can kill
+    # whatever this operation is running when the server shuts down. A caller
+    # that passes its own `plugin_operation` (every test in this file) built
+    # that operation itself and is not wired to this handle, which is why the
+    # required regression test goes through the real `operation_for`.
+    run_plugins = plugin_operation or operation_for(
+        config.spawn_agent_binary, handle=plugin_updates.handle
+    )
     # #147. Per server constants, read ONCE here and sent on the listing the
     # page already fetches, never on a route of their own: a second round trip
     # for a string is a round trip on a phone. `None` for the version is a
@@ -889,6 +897,17 @@ def create_app(
         try:
             yield
         finally:
+            # #361. A plugin update runs on `PluginRuns`'s own daemon thread,
+            # which never receives `KeyboardInterrupt`: Python delivers it to
+            # the main thread only, and this coroutine, running on the main
+            # thread's event loop, is that thread. Since #299 the child is
+            # also its own process group leader, so it no longer shares the
+            # terminal's group either; Ctrl-C on the terminal reaches neither.
+            # `kill()` is a single `os.killpg`, synchronous and immediate: it
+            # does not itself need bounding. What follows it is bounded
+            # already, inside `plugin_runner`'s own `communicate()`, on the
+            # daemon thread this call does not wait for.
+            plugin_updates.handle.kill()
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task

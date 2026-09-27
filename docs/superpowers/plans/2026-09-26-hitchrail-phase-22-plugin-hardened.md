@@ -174,7 +174,7 @@ in `73ce21b` and `e0a1b28`; round 2 found no high. Its three lows are defects
 in those fixes and went to Backlog as #362 to #364. Its medium is older than
 the fixes but made worse by task 143, so it stays here.
 
-- [ ] **Task 157, #361 (P2).** The server's shutdown kills an in flight plugin
+- [x] **Task 157, #361 (P2).** The server's shutdown kills an in flight plugin
       update's group, since a daemon thread never sees Ctrl-C and the child
       no longer shares the terminal's process group.
 

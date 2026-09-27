@@ -246,8 +246,9 @@ def test_the_default_operation_is_the_quarantined_one(monkeypatch: pytest.Monkey
 
     seen: dict[str, object] = {}
 
-    def fake_runner(withhold: tuple[str, ...]) -> str:
+    def fake_runner(withhold: tuple[str, ...], *, handle: object = None) -> str:
         seen["withhold"] = tuple(withhold)
+        seen["handle"] = handle
         return "runner"
 
     def fake_update(binary: str, *, run: object, report: Report) -> list[PluginOutcome]:
@@ -257,7 +258,34 @@ def test_the_default_operation_is_the_quarantined_one(monkeypatch: pytest.Monkey
     monkeypatch.setattr(claude_ipc, "plugin_runner", fake_runner)
     monkeypatch.setattr(claude_ipc, "update_plugins", fake_update)
     operation_for("/opt/agent")(lambda _o: None)
-    assert seen == {"withhold": (TOKEN_ENV,), "binary": "/opt/agent", "run": "runner"}
+    assert seen == {
+        "withhold": (TOKEN_ENV,),
+        "handle": None,
+        "binary": "/opt/agent",
+        "run": "runner",
+    }
+
+
+def test_operation_for_threads_a_handle_into_the_runner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#361. `PluginRuns.handle` has to reach `plugin_runner` unchanged, or
+    the server's lifespan kills nothing: this is the seam the wiring goes
+    through, one call outside `create_app`'s own machinery."""
+    from hitchrail import claude_ipc
+    from hitchrail.plugin_runs import operation_for
+
+    seen: dict[str, object] = {}
+    sentinel = claude_ipc.RunningChild()
+
+    def fake_runner(withhold: tuple[str, ...], *, handle: object = None) -> str:
+        seen["handle"] = handle
+        return "runner"
+
+    monkeypatch.setattr(claude_ipc, "plugin_runner", fake_runner)
+    monkeypatch.setattr(claude_ipc, "update_plugins", lambda *a, **k: [])
+    operation_for("/opt/agent", handle=sentinel)(lambda _o: None)
+    assert seen["handle"] is sentinel
 
 
 def test_every_change_carries_a_larger_seq_across_runs() -> None:

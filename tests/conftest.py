@@ -146,7 +146,7 @@ def no_real_plugin_update(monkeypatch: pytest.MonkeyPatch) -> Iterator[PluginUpd
     """
     guard = PluginUpdateGuard()
 
-    def operation_for(_agent_binary: str) -> Callable[..., object]:
+    def operation_for(_agent_binary: str, *, handle: object = None) -> Callable[..., object]:
         def refuse(_report: object) -> object:
             exc = AssertionError(
                 "a test reached the REAL plugin update, which would update this "

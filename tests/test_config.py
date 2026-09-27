@@ -1080,7 +1080,15 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # growth is the comment saying why replacement and not a stricter
         # catch: `_read_listing`/`_approved_command` already treat malformed
         # JSON as unreadable, so reusing that path needed no new failure code.
-        "claude_ipc.py": 1163,
+        # 1163 to 1226 for task 157, #361: `RunningChild`, a thread-safe pid
+        # handle `plugin_runner` sets and clears around its `Popen`, so the
+        # server's lifespan can kill an in flight update's process group from
+        # outside the daemon thread it runs on, which never sees the
+        # shutdown's `KeyboardInterrupt`. Most of the growth is the docstring
+        # explaining why `except BaseException` above it only ever restores
+        # Ctrl-C's own kill for `hitchrail update-plugins`, never for a run
+        # the server started.
+        "claude_ipc.py": 1226,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.
@@ -1483,7 +1491,11 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 950 for Phase 22 batch 1 (#196, #298): the plugin update route reads
         # `config.spawn_agent_binary`, not `config.agent_binary`, so it too
         # runs the absolute path preflight resolved rather than a bare name.
-        "server.py": 950,
+        # 950 to 969 for task 157, #361: `operation_for` is built with
+        # `plugin_updates.handle`, and the lifespan's `finally` kills it
+        # before cancelling the sweep task, both with the comment saying why
+        # a daemon thread never sees the shutdown's `KeyboardInterrupt`.
+        "server.py": 969,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"
