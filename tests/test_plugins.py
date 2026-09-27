@@ -413,11 +413,44 @@ def test_the_real_runner_runs_in_the_home_directory() -> None:
 def test_the_real_runner_gives_the_child_no_terminal_to_ask_on() -> None:
     """Under `hitchrail update-plugins` stdin is the operator's terminal, and
     a child that prompts on it would wait for an answer nobody expects to
-    give. A closed stdin reads as end of file at once."""
-    runner = claude_ipc.plugin_runner(withhold=())
-    result = runner(["cat"], 10)
-    assert result.returncode == 0
-    assert result.stdout == ""
+    give. A closed stdin reads as end of file at once.
+
+    #301: calling the runner directly here cannot tell an inherited stdin
+    from a closed one, because pytest's own capture already points the TEST
+    process's fd 0 at `/dev/null`; the previous version of this test passed
+    with `stdin=subprocess.DEVNULL` removed from the runner. Run it through a
+    HELPER process instead, whose own stdin is a pipe this test opens and
+    never closes during the check: `cat` inheriting that open pipe would
+    block past the runner's own timeout, where `cat` given a closed stdin
+    exits at once regardless of what the pipe does.
+    """
+    script = (
+        "from hitchrail import claude_ipc\n"
+        "r = claude_ipc.plugin_runner(withhold=())(['cat'], 1.5)\n"
+        "print(r.returncode)\n"
+        "print(repr(r.stdout))\n"
+    )
+    with subprocess.Popen(
+        [sys.executable, "-c", script],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    ) as helper:
+        assert helper.stdout is not None
+        # Never written to and never closed here: a write or a close would
+        # deliver EOF to `cat` if it inherited this pipe, which is exactly
+        # the false pass #301 found. Only the runner's own timeout may end
+        # a `cat` that blocked on it.
+        readable, _, _ = select.select([helper.stdout], [], [], 3)
+        assert readable, "the helper produced nothing within the bound"
+        first = helper.stdout.readline()
+        second = helper.stdout.readline()
+    assert first.strip() == "0", (
+        f"cat did not exit as if given a closed stdin: {first!r}. Empty here "
+        "means cat blocked on an inherited pipe until the runner's own "
+        "timeout ended it (#301)."
+    )
+    assert second.strip() == "''", f"a failing command still captured output: {second!r}"
 
 
 def test_the_real_runner_kills_a_hung_childs_own_children(tmp_path: Path) -> None:
