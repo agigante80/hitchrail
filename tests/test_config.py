@@ -1572,46 +1572,115 @@ def test_every_environment_variable_the_product_reads_is_scrubbed() -> None:
 # -- Phase 22 batch 1, #302/#196/#298: one resolved agent binary ------------
 
 
-def test_every_spawn_site_reads_the_resolved_agent_binary() -> None:
-    """#196's premortem: the binary got fixed three times before, each fix
-    passing its own test while a fourth caller reading `config.agent_binary`
-    directly appeared later and resolved it again in its own environment.
+class _FunctionScopedAttributeReads(ast.NodeVisitor):
+    """Every `ast.Attribute` read (`Load` context) whose name is `attr`,
+    tagged with the name of the function it is lexically inside.
 
-    So this reads the code that spawns rather than listing today's three
-    call sites: `claude_ipc.launch_argv` and `claude_ipc.update_plugins` are
-    the only two places a binary string becomes argv[0] for something this
-    project runs, and every call to either, in any module, is a spawn site.
-    Its first argument must not be a raw `.agent_binary` read: `.agent_binary`
-    is the operator's setting, `.spawn_agent_binary` is what preflight found
-    on this machine, and only the second is safe to hand to a subprocess a
-    tmux server or a different cwd could resolve again.
+    Keyed by the immediate enclosing function rather than the line number
+    (#298 batch 1 review), because a line number allowlist is invalidated by
+    an unrelated edit two lines above it and nobody notices until the guard
+    it protects has already gone quiet. A nested function, such as
+    `server.py`'s `_config_view` inside `create_app`, is its OWN scope: the
+    outer function's name would let every closure inside it read the raw
+    setting once one legitimate read anywhere in `create_app` was allowed.
     """
+
+    def __init__(self, attr: str) -> None:
+        self.attr = attr
+        self.hits: list[tuple[str, int, str]] = []
+        self._stack: list[str] = ["<module>"]
+
+    def _function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        self._stack.append(node.name)
+        self.generic_visit(node)
+        self._stack.pop()
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._function(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._function(node)
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        if node.attr == self.attr and isinstance(node.ctx, ast.Load):
+            self.hits.append((self._stack[-1], node.lineno, ast.unparse(node)))
+        self.generic_visit(node)
+
+
+def test_every_read_of_agent_binary_is_the_resolved_property_or_allowlisted() -> None:
+    """#196's premortem, widened after the round 1 finding on this guard
+    itself: the first version only flagged `.agent_binary` passed directly
+    as the first argument to `claude_ipc.launch_argv` or
+    `claude_ipc.update_plugins`, so `server.py`'s plugin route, which goes
+    through `plugin_runs.operation_for(...)` rather than calling
+    `claude_ipc.update_plugins` itself, could revert to
+    `operation_for(config.agent_binary)` and pass every test in this file.
+
+    So this flags ANY read of the `agent_binary` attribute anywhere in
+    `src/hitchrail`, on any object, `Config` included, and allows only the
+    handful that are legitimately reading the OPERATOR'S raw setting rather
+    than what preflight resolved: the one shape check, preflight's own
+    lookup, the CLI's own re-check before it spawns the update directly, the
+    Config built from argparse's `args.agent_binary` (also named
+    `agent_binary`, since the attribute name is what this guard matches, not
+    the object it lives on), `cli.main` threading `Preflight.agent_binary`
+    through, and the settings page showing the operator what they typed.
+    Every other read must go through `.spawn_agent_binary` instead.
+    """
+    allowed: set[tuple[str, str]] = {
+        # The one shape check itself (#302): normalises and validates the
+        # operator's raw value before anything is derived from it.
+        ("config.py", "__post_init__"),
+        # `spawn_agent_binary` IS the safe read every spawn site must use
+        # instead; its own fallback to the raw field, for a Config built
+        # outside `cli.main`, is what it exists to hold in one place.
+        ("config.py", "spawn_agent_binary"),
+        # Builds a Config from the operator's own flags: `args.agent_binary`
+        # is what they typed, becoming `Config.agent_binary`, not a spawn.
+        ("cli.py", "build_config"),
+        # What preflight is resolving. This function's whole job is finding
+        # the absolute path from the raw name.
+        ("cli.py", "preflight"),
+        # `hitchrail update-plugins`: no Config exists yet, so this resolves
+        # and checks its OWN copy of the raw `--agent-binary` flag before it
+        # ever calls `claude_ipc.update_plugins` with the resolved value.
+        ("cli.py", "update_plugins_command"),
+        # Threads `Preflight.agent_binary`, the field preflight resolved,
+        # into `Config.resolved_agent_binary`. `Preflight` is a different
+        # object from `Config`, but the attribute name is the same string,
+        # which is exactly why this guard cannot key on the object either.
+        ("cli.py", "main"),
+        # The settings page shows the operator's raw setting, with `source`
+        # saying where it came from; showing the resolved absolute path here
+        # while `source` still said "default" would misrepresent provenance.
+        ("server.py", "_config_view"),
+    }
+
     src = Path(__file__).resolve().parents[1] / "src" / "hitchrail"
-    spawn_calls = {"claude_ipc.launch_argv", "claude_ipc.update_plugins"}
     offenders: dict[str, str] = {}
-    found_a_spawn_call = False
+    found_a_read = False
     for path in src.glob("*.py"):
-        tree = ast.parse(path.read_text())
-        for node in ast.walk(tree):
-            if not (isinstance(node, ast.Call) and ast.unparse(node.func) in spawn_calls):
+        finder = _FunctionScopedAttributeReads("agent_binary")
+        finder.visit(ast.parse(path.read_text()))
+        for func, lineno, text in finder.hits:
+            found_a_read = True
+            if (path.name, func) in allowed:
                 continue
-            found_a_spawn_call = True
-            first = node.args[0] if node.args else None
-            if isinstance(first, ast.Attribute) and first.attr == "agent_binary":
-                offenders[f"{path.name}:{node.lineno}"] = ast.unparse(node)
+            offenders[f"{path.name}:{lineno} ({func})"] = text
 
     # Guard the guard, the same way test_every_environment_variable... does:
-    # if the parser stops matching either call, every assertion below is
+    # if the parser stops matching at all, every assertion below is
     # vacuously true.
-    assert found_a_spawn_call, (
-        "the parser found no call to claude_ipc.launch_argv or "
-        "claude_ipc.update_plugins at all, which means it has stopped "
-        "matching rather than that nothing spawns the agent any more"
+    assert found_a_read, (
+        "the parser found no read of .agent_binary anywhere, which means it "
+        "has stopped matching rather than that nothing reads it any more"
     )
     assert not offenders, (
-        f"a spawn site reads the raw, unresolved agent binary: {offenders}. "
-        f"Read `config.spawn_agent_binary` instead, so this runs the exact "
-        f"file `cli.preflight` checked."
+        f"a read of the raw, unresolved agent binary outside the allowlist: "
+        f"{offenders}. Read `config.spawn_agent_binary` instead, so this runs "
+        f"the exact file `cli.preflight` checked; if this read is genuinely "
+        f"the operator's raw setting rather than a spawn site, add it to "
+        f"`allowed` above with the reason."
     )
 
 

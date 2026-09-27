@@ -16,12 +16,15 @@ import httpx
 import pytest
 
 from conftest import FakeTmux, procs_from
+from hitchrail import claude_ipc
 from hitchrail.claude_ipc import PluginOutcome, PluginsFailed
 from hitchrail.config import Config
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
+from hitchrail.plugin_runs import operation_for
 from hitchrail.server import create_app
 from support import make_config
+from test_plugins import FakeAgent
 
 pytestmark = pytest.mark.integration
 
@@ -198,3 +201,44 @@ async def test_the_default_operation_is_never_the_real_one_under_test(config: Co
             await asyncio.sleep(0.01)
     assert record["state"] == "failed"
     assert record["code"] == "internal_error"
+
+
+async def test_the_wired_operation_spawns_the_resolved_binary_not_the_raw_one(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#298 regression at the wiring in `create_app`, not at `update_plugins`
+    alone: every other test in this file passes `plugin_operation=`, which is
+    what lets the autouse `no_real_plugin_update` fixture refuse the real
+    builder everywhere else and would swallow a regression at server.py's own
+    `operation_for(config....)` call just as quietly.
+
+    So this test restores the real `operation_for` for itself and replaces
+    the one thing under it that would otherwise touch a real process, the
+    runner, with the fake one `tests/test_plugins.py` already uses for
+    `update_plugins` directly. `FakeAgent` never calls `subprocess.run`, so
+    nothing here can run a real plugin update.
+    """
+    (tmp_path / "vessel").mkdir()
+    config = make_config(
+        tmp_path, agent_binary="fake-agent", resolved_agent_binary="/abs/fake-agent"
+    )
+    agent = FakeAgent()
+    monkeypatch.setattr("hitchrail.server.operation_for", operation_for)
+    monkeypatch.setattr(claude_ipc, "plugin_runner", lambda withhold: agent)
+
+    engine = Engine(config=config, tmux=FakeTmux(), procs_fn=procs_from(""))
+    app = create_app(engine=engine, config=config, bus=EventBus())
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as client:
+        assert (await client.post(PATH, headers=HEADERS)).status_code == 202
+        for _ in range(100):
+            record = (await client.get(PATH, headers=HEADERS)).json()
+            if record["state"] != "running":
+                break
+            await asyncio.sleep(0.01)
+        else:
+            pytest.fail("the update never finished")
+
+    assert record["state"] == "done"
+    assert agent.argvs, "the fake runner was never called"
+    assert {argv[0] for argv in agent.argvs} == {"/abs/fake-agent"}
