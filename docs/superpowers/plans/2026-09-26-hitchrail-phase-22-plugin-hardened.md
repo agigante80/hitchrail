@@ -178,6 +178,17 @@ the fixes but made worse by task 143, so it stays here.
       update's group, since a daemon thread never sees Ctrl-C and the child
       no longer shares the terminal's process group.
 
+### Batch 5b: batch 5's review, task 158
+
+Added on 2026-09-27. Batch 5 built tasks 154, 156 and 157 (`422609d`,
+`20ffb9b`, `60c0465`). Its loop stopped after round 2 by rule: round 1 found
+two mediums in task 157, fixed in `0ea8706` (the handle latches); round 2
+found no high, and its one medium is a missing regression test for that
+latch, so it stays here. Its lows went to Backlog as #365 to #368 and #370.
+
+- [ ] **Task 158, #369 (P2).** A real runner test kills the handle mid
+      update and asserts the next plugin never spawns.
+
 ## Done looks like
 
 - [ ] Every task above is ticked, or marked MOVED OUT or NOT BUILT with the
