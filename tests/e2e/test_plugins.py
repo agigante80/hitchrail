@@ -8,6 +8,7 @@ page reads when it joins late, and what the page draws from each.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -478,12 +479,18 @@ async def test_a_plugin_get_failure_does_not_inherit_a_settings_refusals_owed_re
         await expect(box).to_be_checked()
 
         held: list[Route] = []
+        # An explicit gate, not a fixed sleep: a hold short enough for a fast
+        # runner to pass vacuously (the plugin failure never actually lands
+        # while the settings GET is still open) would prove nothing, and a
+        # hold long enough to be safe on a slow one is still a guess. Released
+        # only once the plugin failure has genuinely painted, below.
+        release_settings_get = asyncio.Event()
 
         async def hold_config(route: Route) -> None:
             if route.request.method == "GET":
                 response = await route.fetch()
                 held.append(route)
-                await page.wait_for_timeout(1500)
+                await release_settings_get.wait()
                 await route.fulfill(response=response)
             else:
                 await route.continue_()
@@ -511,9 +518,10 @@ async def test_a_plugin_get_failure_does_not_inherit_a_settings_refusals_owed_re
             "Not connected. The plugin update's state could not be read."
         )
 
-        await page.wait_for_timeout(2000)  # past the held settings GET's delivery
-        # `settle()`'s owner guard: the settings repaint must not clear a
+        # Only now, with the plugin failure already on screen, let the held
+        # settings GET resolve: `settle()`'s owner guard must not clear a
         # strip the plugin flow now owns.
+        release_settings_get.set()
         await expect(note).to_have_text(
             "Not connected. The plugin update's state could not be read."
         )
