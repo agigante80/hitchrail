@@ -284,6 +284,75 @@ def test_detached_and_stale_are_different_shapes() -> None:
 GRANT = APP_JS.parent / "grant.html"
 
 
+# -- #308: no page renders vendor text as markup ------------------------------
+
+WEB = APP_JS.parent
+
+
+def _stripped(source: str) -> str:
+    """The same source with every comment and every string or template
+    literal blanked to spaces, length preserved.
+
+    #308's own defect: a plain substring search for `innerHTML` matches this
+    file's comment saying the code never uses it (see `app.js`, "textContent,
+    never innerHTML"), so a guard that greps the raw text would trip on its
+    own explanation the day someone writes one. Blanking comments and string
+    bodies first means the regex below can only match code that is actually
+    there to run.
+    """
+    out = list(source)
+    i, n = 0, len(source)
+    while i < n:
+        two = source[i : i + 2]
+        c = source[i]
+        if two == "//":
+            end = source.find("\n", i)
+            end = n if end == -1 else end
+        elif two == "/*":
+            close = source.find("*/", i)
+            end = n if close == -1 else close + 2
+        elif c in "\"'`":
+            j = i + 1
+            while j < n and source[j] != c:
+                j += 2 if source[j] == "\\" else 1
+            end = min(j + 1, n)
+        else:
+            i += 1
+            continue
+        for k in range(i, end):
+            if out[k] != "\n":
+                out[k] = " "
+        i = end
+    return "".join(out)
+
+
+_HTML_SINK = re.compile(r"\.(?:inner|outer)HTML\b|\.insertAdjacentHTML\s*\(")
+
+
+def test_no_web_script_assigns_vendor_text_as_markup() -> None:
+    """#308. `settings.js` renders every vendor string (a plugin id, its
+    `detail`, its `approved_command`) with `textContent`, which is correct
+    today; nothing noticed when a past review briefly switched two of those
+    sites to `innerHTML` and all fifteen e2e cases stayed green, because none
+    of them puts markup-shaped text in a vendor field. Every page, not only
+    that one (the ticket's own recommendation): a future page gets the same
+    guard for free rather than needing its own ticket filed against it.
+    """
+    scripts = sorted(WEB.glob("*.js"))
+    names = {p.name for p in scripts}
+    assert {"settings.js", "plugins.js"} <= names, (
+        f"expected settings.js and plugins.js in {WEB}, found {sorted(names)}"
+    )
+    for path in scripts:
+        stripped = _stripped(path.read_text(encoding="utf-8"))
+        match = _HTML_SINK.search(stripped)
+        assert match is None, (
+            f"{path.name} assigns HTML as a string ({match.group(0)!r} once "
+            f"comments and literals are stripped); render vendor text with "
+            f"textContent instead"
+        )
+
+
 def test_the_key_field_hints_a_password_manager_and_has_no_name() -> None:
     """#171's two decisions on the grant page, pinned (#260 item 7). The
     `autocomplete` value is what lets a password manager offer the entry it

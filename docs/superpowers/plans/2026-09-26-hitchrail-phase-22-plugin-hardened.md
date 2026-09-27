@@ -96,7 +96,7 @@ open from-review tickets on it come with it.
       the same staleness check as every other path that paints a record.
 - [x] **Task 137, #317 (P3).** The `internal_error` sentence reads as one
       sentence.
-- [ ] **Task 138, #308 (P3).** A guard that `settings.js` and `plugins.js`
+- [x] **Task 138, #308 (P3).** A guard that `settings.js` and `plugins.js`
       never assign `innerHTML`, reading structure rather than grepping for a
       string its own explanation contains.
 
