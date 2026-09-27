@@ -126,6 +126,18 @@ open from-review tickets on it come with it.
       `source_paths`, and the survivors in the plugin section are read after
       batch 3, each killed or written down as equivalent on the ticket.
 
+### Batch 4b: batch 1's round 2 findings, tasks 151 and 152
+
+Added on 2026-09-27. Batch 1's review loop stopped after round 2 by rule, as
+round 2 found no high; its two mediums are defects in the guard premortem 1
+asks for, so they stay in this phase rather than going to Backlog.
+
+- [ ] **Task 151, #345 (P2).** The `agent_binary` guard's allowlist names the
+      exact expression read, not a whole function, so a raw spawn added in
+      `cli.main` fails it.
+- [ ] **Task 152, #346 (P2).** `main()`'s resolved path test also checks the
+      `Config` that `create_app` receives, and that it is the one `Engine` got.
+
 ## Done looks like
 
 - [ ] Every task above is ticked, or marked MOVED OUT or NOT BUILT with the
