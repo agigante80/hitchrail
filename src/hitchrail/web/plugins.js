@@ -21,11 +21,19 @@ const $ = (selector) => document.querySelector(selector);
 // "so nothing was updated" or "after N" from the outcomes actually listed,
 // because a run can fail part way (the agent removed mid run) with rows
 // already updated above the sentence.
+//
+// #317. `internal_error` used to carry its own trailing clause, "; the
+// journal has the details", which put the appended "after N plugins" right
+// after "details" and read as though the JOURNAL had details after N
+// plugins rather than as though the UPDATE stopped after N plugins. Kept
+// short here, like every other entry, so the appended clause attaches to
+// "stopped" the way it is meant to; the journal mention moved to its own
+// trailing sentence in `failureText`.
 const PLUGIN_FAILURES = {
   agent_missing: "The agent could not be run",
   marketplace_refresh_failed: "The marketplaces did not refresh",
   plugins_unreadable: "The list of installed plugins could not be understood",
-  internal_error: "The update stopped on an error in Hitchrail; the journal has the details",
+  internal_error: "The update stopped on an error in Hitchrail",
 };
 
 let shownEpoch = null;
@@ -65,10 +73,14 @@ function outcomeItem(outcome) {
 function failureText(record) {
   const why = PLUGIN_FAILURES[record.code] ?? record.message ?? "The update did not finish";
   const n = record.outcomes.length;
+  // #317. A trailing sentence, not folded into `why`: appended after the
+  // outcomes clause so "after N plugins" still reads as attached to "the
+  // update stopped", not to this.
+  const journal = record.code === "internal_error" ? " The journal has the details." : "";
   // A failure is never a count of updated plugins: `counts` is null. What it
   // can honestly say is whether anything ran before it stopped.
-  if (!n) return `${why}, so nothing was updated.`;
-  return `${why} after ${n} ${n === 1 ? "plugin" : "plugins"}, listed below; the rest were not updated.`;
+  if (!n) return `${why}, so nothing was updated.${journal}`;
+  return `${why} after ${n} ${n === 1 ? "plugin" : "plugins"}, listed below; the rest were not updated.${journal}`;
 }
 
 function pluginStatus(record) {

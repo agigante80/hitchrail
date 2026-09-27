@@ -8,6 +8,7 @@ page reads when it joins late, and what the page draws from each.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -594,3 +595,52 @@ async def test_visibility_regained_refreshes_a_run_the_stream_missed(
         "1 updated, 0 failed, 0 left alone."
     )
     await page.unroute("**/api/events")
+
+
+async def test_internal_error_reads_as_one_sentence(page: Page, server: Harness) -> None:
+    """#317. `internal_error` used to carry its own trailing clause, "; the
+    journal has the details", which put the appended "after N plugins" right
+    after "details" and read as though the JOURNAL had details after N
+    plugins rather than as though the UPDATE stopped after N. A synthetic
+    record over the GET (an internal error is not one the fake agent can be
+    made to raise) exercises the same `failureText` a real one would reach."""
+    server.seed_plugins([{"id": "alpha@m", "scope": "user"}])
+    server.seed()
+    await open_settings(page, server)
+
+    record = {
+        "epoch": "e2e-synthetic-epoch",
+        "seq": 1,
+        "state": "failed",
+        "started_at": 0,
+        "finished_at": 1,
+        "outcomes": [
+            {
+                "plugin": "alpha@m",
+                "scope": "user",
+                "result": "updated",
+                "detail": None,
+                "approved_command": None,
+            }
+        ],
+        "counts": None,
+        "code": "internal_error",
+        "message": "the update stopped on an internal error",
+    }
+
+    async def answer(route):  # type: ignore[no-untyped-def]
+        if route.request.method == "GET":
+            await route.fulfill(
+                status=200, content_type="application/json", body=json.dumps(record)
+            )
+        else:
+            await route.continue_()
+
+    await page.route("**/api/plugins/update", answer)
+    await page.evaluate("() => window.__plugins.loadPlugins()")
+
+    status = page.locator("[data-plugins-status]")
+    await expect(status).to_have_text(
+        "The update stopped on an error in Hitchrail after 1 plugin, listed "
+        "below; the rest were not updated. The journal has the details."
+    )
