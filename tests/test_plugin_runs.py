@@ -143,6 +143,41 @@ def test_a_failed_operation_records_its_code_and_no_count() -> None:
     assert record["counts"] is None
 
 
+def test_a_thread_that_cannot_start_leaves_the_run_failed_not_stuck_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#307, premortem 2 in the plan. `Thread.start` can raise on its own,
+    `RuntimeError` on a machine out of threads being the documented case, and
+    `_run`'s `finally` never fires when `_run` itself never starts. Without
+    the fix, `running` sticks and every later request reads
+    `update_in_flight` until a restart; this asserts the marker clears and
+    the outcome is published instead.
+    """
+    published = Published()
+    plugin_runs = runs(published)
+
+    def cannot_start(self: threading.Thread) -> None:
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(threading.Thread, "start", cannot_start)
+    with pytest.raises(RuntimeError):
+        plugin_runs.start(Held())
+
+    record = plugin_runs.snapshot()
+    assert record["state"] == "failed"
+    assert record["code"] == "internal_error"
+    assert published.events[-1]["run"] == record
+
+    # Restore the real `Thread.start` before proving the marker does not
+    # stick: this run's own thread must actually run to complete.
+    monkeypatch.undo()
+    again = Held()
+    thread = plugin_runs.start(again)
+    again.release(0)
+    thread.join(5)
+    assert plugin_runs.snapshot()["state"] == "done"
+
+
 def test_the_marker_is_cleared_when_the_operation_raises_anything() -> None:
     """Fails if 2 in the plan: a marker that outlives its run refuses every
     later update until a restart."""

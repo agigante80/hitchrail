@@ -46,6 +46,10 @@ EVENT_KIND = "plugins"
 Operation = Callable[[Callable[[PluginOutcome], None]], list[PluginOutcome]]
 State = Literal["idle", "running", "done", "failed"]
 
+# Shared with `start`'s own failure path (#307), so the two can never drift
+# into reporting the same code with a different sentence.
+_INTERNAL_ERROR_MESSAGE = "the update stopped on an internal error"
+
 
 class RunRecord(TypedDict):
     """What `GET /api/plugins/update` returns and every event carries."""
@@ -127,7 +131,21 @@ class PluginRuns:
         thread = threading.Thread(
             target=self._run, args=(operation,), name="plugin-run", daemon=True
         )
-        thread.start()
+        try:
+            thread.start()
+        except Exception:
+            # #307. `_run`'s `finally` is what normally clears the marker, and
+            # it never runs if `_run` itself never starts: `Thread.start` can
+            # raise on its own, `RuntimeError` on a machine out of threads
+            # being the documented case. Without this, `running` sticks and
+            # every later request reads `update_in_flight` until a restart.
+            with self._lock:
+                self._state = "failed"
+                self._code, self._message = "internal_error", _INTERNAL_ERROR_MESSAGE
+                self._finished_at = self._clock()
+                record = self._changed()
+            self._publish({"kind": EVENT_KIND, "run": record})
+            raise
         return thread
 
     def snapshot(self) -> RunRecord:
@@ -148,7 +166,7 @@ class PluginRuns:
             code, message = exc.code, str(exc)
         except Exception:
             logger.exception("plugin run failed unexpectedly")
-            code, message = "internal_error", "the update stopped on an internal error"
+            code, message = "internal_error", _INTERNAL_ERROR_MESSAGE
         finally:
             with self._lock:
                 self._state = state

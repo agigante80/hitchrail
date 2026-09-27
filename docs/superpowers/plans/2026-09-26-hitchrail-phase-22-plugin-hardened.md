@@ -133,7 +133,7 @@ candidate fix is an epoch the server mints with an order, not a fifth guess.
 - [x] **Task 143, #299 (P2).** `plugin_runner` and `tmux.py`'s runner start
       the child in its own session and kill the group on timeout, so an
       install's grandchild does not outlive the run.
-- [ ] **Task 144, #307 (P2).** A `thread.start()` that raises leaves the run
+- [x] **Task 144, #307 (P2).** A `thread.start()` that raises leaves the run
       `failed` with `internal_error`, published, not stuck `running`.
 - [ ] **Task 145, #301 (P3).** The closed stdin test fails when
       `stdin=subprocess.DEVNULL` is removed, under pytest's own capture.
