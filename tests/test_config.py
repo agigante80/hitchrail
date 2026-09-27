@@ -1088,7 +1088,20 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # explaining why `except BaseException` above it only ever restores
         # Ctrl-C's own kill for `hitchrail update-plugins`, never for a run
         # the server started.
-        "claude_ipc.py": 1226,
+        # 1226 to 1335 for #361 round 1 review, M1: `RunningChild` becomes a
+        # one-shot latch (`_closed`, `raise_if_closed`, and a closed check
+        # inside `_set`) rather than a bare pid slot, because the bare slot
+        # left a kill landing between two plugins, or between one's `Popen`
+        # returning and its pid becoming visible, signalling nothing and
+        # letting the run carry on: measured by the reviewer as a second
+        # `claude plugin update ... -y` spawned 41ms after the lifespan that
+        # was supposed to have ended the run had already exited. `RunnerClosed`
+        # and `update_plugins`'s new `abandoned` handling are the honest
+        # report of what the latch refused, so a shutdown reads as a shutdown
+        # rather than a per-plugin failure or a dropped row. Most of the
+        # growth is the docstrings saying why the latch exists and which race
+        # each of its two checks closes.
+        "claude_ipc.py": 1341,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.

@@ -211,7 +211,7 @@ class PluginRuns:
         if self._state == "done":
             counts = {
                 result: sum(o.result == result for o in self._outcomes)
-                for result in ("updated", "failed", "skipped")
+                for result in ("updated", "failed", "skipped", "abandoned")
             }
         return {
             "epoch": self._epoch,

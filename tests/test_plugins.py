@@ -406,6 +406,44 @@ def test_a_missing_agent_spawns_nothing_further(error: OSError) -> None:
     )
 
 
+def test_a_closed_runner_abandons_the_row_it_interrupted_and_every_row_after() -> None:
+    """#361 round 1 review, M1. `run` raising `RunnerClosed` is what a
+    shutdown reaching `plugin_runner` through `RunningChild.kill()` looks
+    like to `update_plugins`: the plugin whose call raised, and every one
+    still waiting in the listing, is reported `abandoned` rather than
+    `failed` (it never ran) or silently dropped (the count would then be
+    short of what the listing returned, task 142's bug)."""
+    agent = FakeAgent(
+        [row("a@m"), row("b@m"), row("c@m")], **{"b@m": claude_ipc.RunnerClosed()}
+    )
+    outcomes = run(agent)
+    assert results(outcomes) == [
+        ("a@m", "user", "updated"),
+        ("b@m", "user", "abandoned"),
+        ("c@m", "user", "abandoned"),
+    ]
+    assert outcomes[1].detail == "never started: the server was shutting down"
+    assert outcomes[2].detail == "never started: the server was shutting down"
+    # The loop must not even ask the runner about the row after the one that
+    # raised: a closed handle refuses every further child, so calling again
+    # would only be answered `done()` by the fake, masking the abandonment.
+    assert agent.updated == ["a@m", "b@m"]
+
+
+def test_a_runner_closed_before_any_row_is_read_reports_shutting_down() -> None:
+    """#361 round 1 review, M1. A shutdown that lands during the refresh or
+    the listing call, before any plugin row exists to mark `abandoned`,
+    fails the whole operation with an honest code rather than
+    `internal_error`, which would misreport an expected shutdown as a
+    defect in Hitchrail."""
+    agent = FakeAgent([row("a@m")], refresh=claude_ipc.RunnerClosed())
+    with pytest.raises(PluginsFailed) as caught:
+        run(agent)
+    assert caught.value.code == "shutting_down"
+    assert str(caught.value) == "the server was shutting down, so nothing was updated"
+    assert agent.updated == []
+
+
 def test_the_agent_vanishing_mid_run_is_agent_missing() -> None:
     """Uninstalled between the listing and an update: what ran is reported
     through `report`, and the operation fails rather than calling each
@@ -885,6 +923,79 @@ def test_the_real_runner_swallows_a_reap_still_not_done_at_its_own_bound(
     assert excinfo.value.cmd == argv, (
         "the reap's own second timeout must be swallowed, not surfaced in place of the original"
     )
+
+
+# -- the shutdown latch (#361 round 1 review) --------------------------------
+
+
+def test_kill_before_any_child_refuses_every_later_one() -> None:
+    """M1. `kill()` with nothing running yet still latches the handle shut:
+    a shutdown racing the very first plugin, before `Popen` ever ran, must
+    not let that first child start either."""
+    handle = claude_ipc.RunningChild()
+    handle.kill()
+    with pytest.raises(claude_ipc.RunnerClosed):
+        handle.raise_if_closed()
+
+
+def test_kill_after_a_finished_child_still_latches_and_signals_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """M2. A handle whose only child already finished and was cleared
+    (`_set(None)` in `plugin_runner`'s `finally`) must not have `kill()` find
+    a stale pid to signal, and must still refuse a next child. Reverting the
+    `finally` clear leaves `_pid` at the finished child's value and this
+    asserts `os.killpg` is called for it, which is exactly the bug: a
+    shutdown hours later killing whatever process the operating system has
+    since given that pid back to."""
+    killed: list[tuple[int, int]] = []
+    monkeypatch.setattr("os.killpg", lambda pgid, sig: killed.append((pgid, sig)))
+    handle = claude_ipc.RunningChild()
+    runner = claude_ipc.plugin_runner(withhold=(), handle=handle)
+    result = runner(["true"], 5.0)
+    assert result.returncode == 0
+    handle.kill()
+    assert killed == [], "a finished, cleared child must not be signalled by a later kill()"
+    with pytest.raises(claude_ipc.RunnerClosed):
+        handle.raise_if_closed()
+
+
+def test_plugin_runner_refuses_to_spawn_once_the_handle_is_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """M1. The two plugin case above proves this through `update_plugins`;
+    this pins the mechanism directly: once `kill()` has run, `plugin_runner`
+    must raise before `subprocess.Popen` is even called, not only report a
+    failure afterward."""
+    spawned: list[list[str]] = []
+
+    def fake_popen(argv: list[str], **kw: object) -> None:
+        spawned.append(argv)
+        raise AssertionError("must not be reached once the handle is closed")
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    handle = claude_ipc.RunningChild()
+    handle.kill()
+    runner = claude_ipc.plugin_runner(withhold=(), handle=handle)
+    with pytest.raises(claude_ipc.RunnerClosed):
+        runner(["claude", "plugin", "update", "a@m", "-s", "user", "-y", "--json"], 5.0)
+    assert spawned == []
+
+
+def test_a_kill_landing_between_popen_and_registration_kills_the_late_pid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """M1's second race: `kill()` runs after `raise_if_closed` already let a
+    child's `Popen` through, but before that child's pid reached `_set`. The
+    pid then arrives on an already-closed handle, which must kill it at once
+    rather than record it silently, since no second `kill()` is coming to
+    catch it later."""
+    killed: list[tuple[int, int]] = []
+    monkeypatch.setattr("os.killpg", lambda pgid, sig: killed.append((pgid, sig)))
+    handle = claude_ipc.RunningChild()
+    handle.kill()  # closes the handle before any pid is ever recorded
+    handle._set(4242)
+    assert killed == [(4242, signal.SIGKILL)]
 
 
 # -- the quarantine ---------------------------------------------------------------

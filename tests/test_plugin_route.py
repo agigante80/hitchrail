@@ -104,7 +104,7 @@ async def test_a_post_starts_a_run_and_answers_at_once_with_the_record(config: C
         await finished(gate)
         record = (await client.get(PATH, headers=HEADERS)).json()
     assert record["state"] == "done"
-    assert record["counts"] == {"updated": 1, "failed": 0, "skipped": 0}
+    assert record["counts"] == {"updated": 1, "failed": 0, "skipped": 0, "abandoned": 0}
     assert record["outcomes"][0]["plugin"] == "a@m"
 
 

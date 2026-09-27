@@ -94,7 +94,7 @@ def test_a_run_is_recorded_and_published_as_each_plugin_finishes() -> None:
     thread.join(5)
     final = plugin_runs.snapshot()
     assert final["state"] == "done"
-    assert final["counts"] == {"updated": 1, "failed": 0, "skipped": 1}
+    assert final["counts"] == {"updated": 1, "failed": 0, "skipped": 1, "abandoned": 0}
     assert final["outcomes"][1] == {
         "plugin": "adapt@kit",
         "scope": "local",

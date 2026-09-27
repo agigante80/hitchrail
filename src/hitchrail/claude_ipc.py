@@ -882,8 +882,17 @@ _DETAIL_LIMIT = 240
 # rather than as the vendor's whole answer (#305).
 _CUT_MARKER = "(truncated)"
 
-PluginResult = Literal["updated", "failed", "skipped"]
-PluginFailure = Literal["agent_missing", "marketplace_refresh_failed", "plugins_unreadable"]
+# #361 round 1 review, M1. What an `abandoned` row's `detail` says, and what
+# `PluginsFailed("shutting_down", ...)` says when the runner closed before any
+# row was even read: both name the cause honestly rather than reading as an
+# ordinary per-plugin failure or an internal defect.
+_ABANDONED_DETAIL = "never started: the server was shutting down"
+_SHUTTING_DOWN_MESSAGE = "the server was shutting down, so nothing was updated"
+
+PluginResult = Literal["updated", "failed", "skipped", "abandoned"]
+PluginFailure = Literal[
+    "agent_missing", "marketplace_refresh_failed", "plugins_unreadable", "shutting_down"
+]
 PluginRunner = Callable[[list[str], float], "subprocess.CompletedProcess[str]"]
 
 
@@ -907,8 +916,15 @@ class PluginsFailed(Exception):
         self.code: PluginFailure = code
 
 
+class RunnerClosed(Exception):
+    """`plugin_runner` refuses to start a child: `RunningChild.kill()` has
+    already latched this handle shut (#361 round 1 review, M1). Raised
+    before `subprocess.Popen`, so nothing spawns for a `kill()` that already
+    ran and is not coming a second time."""
+
+
 class RunningChild:
-    """A thread-safe handle to `plugin_runner`'s current child, if any (#361).
+    """A thread-safe, one-shot latch on `plugin_runner`'s current child (#361).
 
     `plugin_runs.py` creates one and hands it to `operation_for`, which
     threads it into `plugin_runner` below; the server's lifespan calls
@@ -921,27 +937,82 @@ class RunningChild:
     from outside instead, and `plugin_runs.py` is not allowed to know a pid
     is the right thing to signal, or that `os.killpg` is how: that is exactly
     the vendor-adjacent process knowledge this module exists to quarantine.
+
+    **`kill()` closes the handle for good, not just the child it catches
+    live** (round 1 review of #361, M1). The first version killed only
+    whichever pid was recorded at the exact instant `kill()` ran: a kill
+    landing between two `plugin_runner` calls, or between one's `Popen`
+    returning and its pid becoming visible here, found `_pid` `None` and did
+    nothing, so `update_plugins` carried on into the next plugin as if the
+    shutdown had never happened. Measured by the reviewer: a second `claude
+    plugin update ... -y` spawned 41ms after the lifespan that had just
+    "ended" the run had already exited, and stayed alive. `_closed` is set
+    the instant `kill()` runs; `plugin_runner` checks it before every
+    `Popen` (`raise_if_closed`), and `_set` checks it for the one race that
+    check cannot see on its own: a pid that only becomes visible here after
+    `kill()` already ran and found nothing to signal. `_set` kills that pid
+    at once instead of recording it, since no second `kill()` call is coming
+    to catch it later.
     """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._pid: int | None = None
+        self._closed = False
 
     def kill(self) -> None:
-        """Kill the current child's process group, if one is running now.
+        """Kill the current child's process group, if one is running now,
+        and latch the handle shut for good: every child `plugin_runner`
+        would otherwise start after this point is refused before it spawns
+        (`raise_if_closed`), and one whose pid was not yet visible here when
+        this ran is killed the instant it registers (`_set`) rather than
+        left unsignalled the way an unlatched handle left it (#361 M1).
 
-        A no-op when nothing is running. `ProcessLookupError` means the
-        child (or the whole group) is already gone, which is not a failure
-        here any more than it is at the timeout kill below."""
+        A no-op on the currently running child when nothing is running now.
+        `ProcessLookupError` means the child (or the whole group) is already
+        gone, which is not a failure here any more than it is at the timeout
+        kill in `plugin_runner`.
+        """
         with self._lock:
             pid = self._pid
+            self._closed = True
         if pid is not None:
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(pid, signal.SIGKILL)
 
-    def _set(self, pid: int | None) -> None:
+    def raise_if_closed(self) -> None:
+        """Refuse a new child once `kill()` has latched this handle shut.
+
+        Called by `plugin_runner` before `Popen`, so a shutdown that landed
+        between two calls ends the run there instead of spawning one more
+        plugin update that nothing will ever be able to signal again.
+        """
         with self._lock:
-            self._pid = pid
+            closed = self._closed
+        if closed:
+            raise RunnerClosed
+
+    def _set(self, pid: int | None) -> None:
+        """Record `plugin_runner`'s current child, or clear it (`pid=None`)
+        once it has been reaped.
+
+        On a closed handle, `None` signals nothing: either the child ran to
+        completion on its own, or `kill()` already killed it while it was
+        still recorded here. A real pid lands here closed only when `kill()`
+        ran after `raise_if_closed` had already let this child's `Popen`
+        through but before this call made its pid visible; it is killed
+        here at once instead of being recorded, since no second `kill()`
+        call is coming to catch it later.
+        """
+        with self._lock:
+            if self._closed:
+                orphaned = pid
+            else:
+                self._pid = pid
+                orphaned = None
+        if orphaned is not None:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(orphaned, signal.SIGKILL)
 
 
 def plugin_runner(
@@ -1000,6 +1071,13 @@ def plugin_runner(
     """
 
     def run(argv: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
+        if handle is not None:
+            # #361 round 1 review, M1. Checked before `Popen`, not only
+            # recorded after it: a `kill()` that already ran refuses this
+            # child outright, so a shutdown landing between two plugins ends
+            # the run here instead of starting one more update nothing can
+            # signal a second time.
+            handle.raise_if_closed()
         env = {k: v for k, v in os.environ.items() if k not in withhold}
         proc = subprocess.Popen(
             argv,
@@ -1032,9 +1110,15 @@ def plugin_runner(
         # happens to run on: the server's plugin run is on a daemon thread,
         # and the main thread needs `proc.pid` to reach it without knowing
         # anything else about this call. Cleared in `finally` so a handle
-        # never outlives the child it named, and a `kill()` that lands after
-        # that either signals nothing (`pid is None`) or, if it raced this
-        # line, signals a pid that is about to be waited on anyway.
+        # never outlives the child it named. A `kill()` that raced this exact
+        # line, landing after `raise_if_closed` above let this child through
+        # but before its pid reached `_set`, is caught by `_set`'s own closed
+        # check (#361 M1): it kills this pid at once rather than recording a
+        # pid nobody signals again. `communicate()` below has not run yet at
+        # that point, so nothing here is "about to be waited on" by a wait
+        # already in flight; the SIGKILL from that kill is what makes
+        # `communicate()` return once it starts, the same as any other kill
+        # of this child.
         if handle is not None:
             handle._set(proc.pid)
         try:
@@ -1086,26 +1170,51 @@ def update_plugins(
     **An unreadable listing updates nothing.** Not the rows that parsed, and
     not "0 updated": either would report green on the day the vendor changes
     its JSON, on a machine with twenty plugins that are no longer updated.
+
+    **A closed runner abandons what is left, honestly** (#361 round 1
+    review, M1). `run` raises `RunnerClosed` instead of starting a child once
+    `RunningChild.kill()` has latched it shut, which is the server's
+    shutdown reaching in for whatever plugin update is in flight. The row
+    that raise interrupted, and every row still waiting behind it, is
+    reported `abandoned`: not `failed`, since it never ran, and not dropped
+    silently, which would read the same as task 142's fixed duplicate-row
+    bug, a count short of what the listing actually returned. One
+    `RunnerClosed` ends the loop for good; nothing later in `rows` is even
+    asked, since the handle that raised it does not reopen.
     """
-    refresh = _call(run, [binary, "plugin", "marketplace", "update"], _REFRESH_TIMEOUT_S)
-    if refresh is None or refresh.returncode != 0:
-        raise PluginsFailed(
-            "marketplace_refresh_failed",
-            "the marketplaces could not be refreshed, so no plugin was updated: "
-            + (_detail(refresh) if refresh is not None else "timed out"),
+    try:
+        refresh = _call(run, [binary, "plugin", "marketplace", "update"], _REFRESH_TIMEOUT_S)
+        if refresh is None or refresh.returncode != 0:
+            raise PluginsFailed(
+                "marketplace_refresh_failed",
+                "the marketplaces could not be refreshed, so no plugin was updated: "
+                + (_detail(refresh) if refresh is not None else "timed out"),
+            )
+        listing = _call(run, [binary, "plugin", "list", "--json"], _LISTING_TIMEOUT_S)
+        rows = (
+            None
+            if listing is None or listing.returncode != 0
+            else _read_listing(listing.stdout)
         )
-    listing = _call(run, [binary, "plugin", "list", "--json"], _LISTING_TIMEOUT_S)
-    rows = None if listing is None or listing.returncode != 0 else _read_listing(listing.stdout)
-    if rows is None:
-        raise PluginsFailed(
-            "plugins_unreadable",
-            "the installed plugin list could not be understood, so nothing was updated",
-        )
+        if rows is None:
+            raise PluginsFailed(
+                "plugins_unreadable",
+                "the installed plugin list could not be understood, so nothing was updated",
+            )
+    except RunnerClosed as exc:
+        # A shutdown landed before any row was even read: there is no listing
+        # to mark individual rows `abandoned` against, so the operation as a
+        # whole reports why, the same shape as the other two ways this
+        # function cannot go on.
+        raise PluginsFailed("shutting_down", _SHUTTING_DOWN_MESSAGE) from exc
 
     outcomes: list[PluginOutcome] = []
     seen: set[str] = set()
+    abandoned = False
     for plugin, scope in rows:
-        if scope != _UPDATABLE_SCOPE:
+        if abandoned:
+            outcome = PluginOutcome(plugin, scope, "abandoned", _ABANDONED_DETAIL)
+        elif scope != _UPDATABLE_SCOPE:
             outcome = PluginOutcome(plugin, scope, "skipped", f"{scope} scope is not updated")
         elif plugin in seen:
             # Dropping this row silently left the count short of what the
@@ -1114,7 +1223,13 @@ def update_plugins(
             outcome = PluginOutcome(plugin, scope, "skipped", "listed twice")
         else:
             seen.add(plugin)
-            outcome = _update_one(run, binary, plugin)
+            try:
+                outcome = _update_one(run, binary, plugin)
+            except RunnerClosed:
+                abandoned = True
+                outcome = PluginOutcome(
+                    plugin, _UPDATABLE_SCOPE, "abandoned", _ABANDONED_DETAIL
+                )
         outcomes.append(outcome)
         report(outcome)
     return outcomes

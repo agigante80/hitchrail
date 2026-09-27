@@ -746,7 +746,7 @@ async def test_an_older_same_epoch_record_painted_during_the_held_count_must_not
                 "approved_command": None,
             }
         ],
-        "counts": {"updated": 1, "failed": 0, "skipped": 0},
+        "counts": {"updated": 1, "failed": 0, "skipped": 0, "abandoned": 0},
         "code": None,
         "message": None,
     }
@@ -932,7 +932,7 @@ def _synthetic_record(epoch: str, seq: int, state: str, **extra: object) -> dict
 
 
 _DONE_UPDATED_ONE = {
-    "counts": {"updated": 1, "failed": 0, "skipped": 0},
+    "counts": {"updated": 1, "failed": 0, "skipped": 0, "abandoned": 0},
     "outcomes": [
         {
             "plugin": "alpha@m",
