@@ -20,6 +20,7 @@ This module is in the engine layer and imports nothing from the web layer.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -859,6 +860,13 @@ _REFRESH_TIMEOUT_S = 300.0
 _LISTING_TIMEOUT_S = 60.0
 _UPDATE_TIMEOUT_S = 300.0
 
+# The last resort bound on the wait AFTER a kill (#299 round 1 review): the
+# child received SIGKILL, which it cannot catch or delay, so this is not
+# expected to fire. It exists so `plugin_runner`'s `run` returns close to
+# `timeout` under every caller rather than blocking on however long reaping
+# an already dead process happens to take.
+_REAP_TIMEOUT_S = 2.0
+
 # Allowlists of shape for values that come from the vendor's JSON and go back
 # into an argv. An argv element cannot become a second command, but an id that
 # starts with `-` would be read as a flag, and anything unexpected means the
@@ -921,6 +929,25 @@ def plugin_runner(withhold: Sequence[str]) -> PluginRunner:
     membership is what lets a timeout end both at once, and `subprocess.run`
     never hands back the `Popen` a caller would need to call `os.killpg` on,
     so the wait and the kill are done here instead of through `run(timeout=)`.
+
+    **The kill covers more than a timeout, and the reap after it is bounded**
+    (#299 round 1 review). `subprocess.run` wrapped its own wait in
+    `except: process.kill(); raise`, so a `SIGINT` delivered to this process
+    while the child ran was also a kill; losing that when `run(timeout=)` was
+    dropped meant Ctrl-C on the operator's terminal left `claude plugin update
+    ... -y` running orphaned, in its own session, unreachable by the terminal's
+    own signal (measured). `except BaseException` restores it. And a plain
+    second `communicate()` after the kill assumed the pipes would hit EOF as
+    soon as the group died; they do not when a grandchild left the group
+    before dying, whether by running `setsid` itself or, as here, by being
+    started with its own session, and it still holds the inherited stdout or
+    stderr pipe open: EOF then waits for THAT process's own exit, not this
+    one's (measured: a grandchild sleeping 8 seconds made a 0.5 second bound
+    return after 8.0 seconds, and the run stayed `running` for every caller
+    until it did). Closing this process's ends of the pipes and waiting only
+    for the child actually killed avoids depending on who else is still
+    holding them; the bounded `wait` below is the last resort if even that
+    child is somehow slow to die after `SIGKILL`.
     """
 
     def run(argv: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
@@ -937,11 +964,26 @@ def plugin_runner(withhold: Sequence[str]) -> PluginRunner:
         )
         try:
             stdout, stderr = proc.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            # The group, not just `proc.pid`: that is the one difference from
-            # `subprocess.run`'s own handling, and the reason for it.
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            proc.communicate()  # reap; the caller only sees the timeout
+        except BaseException:
+            # `proc.pid`, not `os.getpgid(proc.pid)`: `start_new_session`
+            # above makes this child its own group leader, so its pid IS
+            # the group id. Asking the OS for "this pid's group" instead
+            # would, the day `start_new_session` is ever dropped, answer
+            # with OUR OWN group and turn this into a kill of hitchrail
+            # itself. Addressing `proc.pid` directly means that mistake
+            # raises ProcessLookupError here instead, which this suppresses
+            # the same way as an already exited child: either way there is
+            # nothing left here to kill.
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
+            if proc.stdout is not None:
+                proc.stdout.close()
+            if proc.stderr is not None:
+                proc.stderr.close()
+            # SIGKILL was sent; if the reap still does not land inside the
+            # bound, nothing more this function can do.
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                proc.wait(timeout=_REAP_TIMEOUT_S)
             raise
         return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
 

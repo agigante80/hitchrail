@@ -1057,7 +1057,22 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # session and kills that group on timeout; the growth is the
         # `Popen`/`communicate` split `subprocess.run` used to do in one call,
         # plus the comment saying why.
-        "claude_ipc.py": 1105,
+        # 1105 to 1146 for #299's round 1 review: the kill now catches
+        # `BaseException`, not only `TimeoutExpired`, so a `SIGINT` mid update
+        # is still a kill (M2); `os.killpg` is given `proc.pid` directly
+        # rather than `os.getpgid(proc.pid)`, so a `start_new_session`
+        # regression raises instead of killing hitchrail's own group (M3);
+        # and the reap after the kill closes the pipes and bounds its own
+        # `wait`, rather than a second unbounded `communicate()` that a
+        # grandchild outside the group and still holding them could block for
+        # as long as it runs (H1, measured at 8.0s against a 0.5s bound).
+        # Most of the growth is the docstring carrying those three reasons and
+        # the measurement, not the code, which is ten lines longer: `SIM105`
+        # wants the two suppressed exceptions as `contextlib.suppress`, not
+        # `try`/`except`/`pass`, one line pricier once the reason each one is
+        # suppressed stays a comment above the `with` rather than beside the
+        # `pass` it used to sit on.
+        "claude_ipc.py": 1147,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.
@@ -1255,7 +1270,14 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # sharing it would import the tmux adapter into the vendor quarantine
         # or the vendor quarantine into the tmux adapter, either a worse
         # coupling than fifteen duplicated lines with a comment in each.
-        "tmux.py": 640,
+        # 640 to 678 for #299's round 1 review, the same three fixes as
+        # `claude_ipc.py`'s and duplicated for the identical reason: catch
+        # `BaseException` so Ctrl-C mid call still kills the group (M2), give
+        # `os.killpg` `proc.pid` directly so a dropped `start_new_session`
+        # raises instead of killing this process's own group (M3), and bound
+        # the reap after the kill by closing the pipes rather than a second
+        # unbounded `communicate()` (H1).
+        "tmux.py": 678,
         # 413, and thirteen lines over the guideline is not a second job. #18
         # already took the host vocabulary out of this file, and what is left
         # is one dataclass and its startup refusals, which is one thing. The

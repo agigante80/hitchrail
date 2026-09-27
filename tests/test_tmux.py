@@ -623,6 +623,12 @@ def test_the_tmux_runner_passes_a_bound_to_communicate(monkeypatch: pytest.Monke
     `Popen` a caller would need for that). The bound now reaches
     `Popen.communicate`, not `subprocess.run`, and this is the test that would
     have caught the runner losing it in that move.
+
+    Also asserts `start_new_session=True` reached `Popen` (#299 round 1
+    review, M3): the fake Popen used to ignore every constructor keyword, so
+    this and the test below stayed green with that argument deleted
+    entirely, which would make `os.killpg`'s target on a real timeout this
+    process's OWN group rather than the child's.
     """
     seen: dict[str, object] = {}
 
@@ -634,42 +640,139 @@ def test_the_tmux_runner_passes_a_bound_to_communicate(monkeypatch: pytest.Monke
             seen["timeout"] = timeout
             return "", ""
 
-    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: FakeProcess())
+    def fake_popen(*args: object, **kw: object) -> FakeProcess:
+        seen["start_new_session"] = kw.get("start_new_session")
+        return FakeProcess()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
     tmux_runner(["tmux", "list-panes"])
     bound = seen.get("timeout")
     assert isinstance(bound, float), "no bound reached Popen.communicate"
     assert 0 < bound <= 30, "the bound is not a bound"
+    assert seen["start_new_session"] is True, (
+        "the child must be its own process group leader, or a timeout's "
+        "os.killpg(proc.pid, ...) targets this process's own group instead (M3)"
+    )
+
+
+class _FakeStream:
+    """What `proc.stdout`/`proc.stderr` need to be for the reap after a kill
+    (#299 round 1 review, H1/M1): something `close()`able, so the runner can
+    stop waiting on a pipe a grandchild outside the group might still hold."""
+
+    def __init__(self, name: str, closed: list[str]) -> None:
+        self._name = name
+        self._closed = closed
+
+    def close(self) -> None:
+        self._closed.append(self._name)
 
 
 def test_the_tmux_runner_kills_the_group_and_reraises_on_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """#299. `subprocess.run`'s own timeout handling kills only the pid it
-    started; a tmux invocation that shells out further would leave that
-    behind. The group is what `os.killpg` needs, and the group id is the
-    child's own pid because `start_new_session=True` makes it the leader.
+    """#299 and its round 1 review (M2, M3). `subprocess.run`'s own timeout
+    handling kills only the pid it started; a tmux invocation that shells out
+    further would leave that behind. `os.killpg` is given `proc.pid` directly
+    rather than `os.getpgid(proc.pid)` (M3): `start_new_session=True` below
+    makes the child its own group leader, so its pid already IS the group id,
+    and asking the OS for "this pid's group" would, the day `start_new_session`
+    is ever dropped, answer with THIS TEST's own group instead of raising. The
+    fake `Popen` asserts that argument is still passed, since the previous
+    version of this test ignored every constructor keyword and would have
+    stayed green either way.
+
+    The reap after the kill is now a bounded `wait()` on closed pipes, not a
+    second `communicate()` with no timeout (H1/M1): asserted here too, since a
+    grandchild that left the group and still held the pipes open would make an
+    unbounded second `communicate()` wait on ITS exit rather than the runner's
+    own bound.
     """
     killed: list[tuple[int, int]] = []
+    waited: list[float | None] = []
+    closed: list[str] = []
+    seen: dict[str, object] = {}
 
     class FakeProcess:
         pid = 4242
         returncode = -9
         calls = 0
+        stdout = _FakeStream("stdout", closed)
+        stderr = _FakeStream("stderr", closed)
 
         def communicate(self, timeout: float | None = None) -> tuple[str, str]:
             self.calls += 1
-            if self.calls == 1:
-                raise subprocess.TimeoutExpired(cmd=["tmux"], timeout=timeout or 0.0)
-            return "", ""  # the reaping call after the kill
+            raise subprocess.TimeoutExpired(cmd=["tmux"], timeout=timeout or 0.0)
 
-    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: FakeProcess())
-    monkeypatch.setattr("os.getpgid", lambda pid: pid)
+        def wait(self, timeout: float | None = None) -> int:
+            waited.append(timeout)
+            return self.returncode
+
+    def fake_popen(*args: object, **kw: object) -> FakeProcess:
+        seen["start_new_session"] = kw.get("start_new_session")
+        return FakeProcess()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
     monkeypatch.setattr("os.killpg", lambda pgid, sig: killed.append((pgid, sig)))
 
     with pytest.raises(subprocess.TimeoutExpired):
         tmux_runner(["tmux", "list-panes"])
 
     assert killed == [(4242, signal.SIGKILL)], "the whole group was not killed on timeout"
+    assert seen["start_new_session"] is True, (
+        "without this, the killpg above would target this process's own group (M3)"
+    )
+    assert set(closed) == {"stdout", "stderr"}, "the pipes were not closed before the reap"
+    assert waited and all(isinstance(w, float) and 0 < w <= 5 for w in waited), (
+        "the reap after the kill must stay bounded"
+    )
+
+
+def test_the_tmux_runner_kills_the_group_on_any_exception_not_only_a_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#299 round 1 review (M2), the tmux sibling of
+    `claude_ipc`'s `test_the_real_runner_kills_the_group_on_any_exception_not_only_a_timeout`.
+    `subprocess.run`'s own timeout handling was `except: process.kill();
+    raise`, catching every exception, so a `SIGINT` mid call was also a kill;
+    narrowing that to `except subprocess.TimeoutExpired` when this runner
+    moved onto its own `Popen` would leave a tmux invocation's child orphaned
+    in its own session on Ctrl-C. The test above only ever raises
+    `TimeoutExpired`, so it cannot tell `except subprocess.TimeoutExpired`
+    apart from `except BaseException`; this one raises `KeyboardInterrupt`
+    from the fake `communicate` to do that.
+    """
+    killed: list[tuple[int, int]] = []
+    waited: list[float | None] = []
+
+    class FakeProcess:
+        pid = 4242
+        returncode = -2
+        stdout = _FakeStream("stdout", [])
+        stderr = _FakeStream("stderr", [])
+
+        def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+            raise KeyboardInterrupt
+
+        def wait(self, timeout: float | None = None) -> int:
+            waited.append(timeout)
+            return self.returncode
+
+    def fake_popen(*args: object, **kw: object) -> FakeProcess:
+        return FakeProcess()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    monkeypatch.setattr("os.killpg", lambda pgid, sig: killed.append((pgid, sig)))
+
+    with pytest.raises(KeyboardInterrupt):
+        tmux_runner(["tmux", "list-panes"])
+
+    assert killed == [(4242, signal.SIGKILL)], (
+        "an exception other than a timeout must still kill the group (M2)"
+    )
+    assert waited and all(isinstance(w, float) and 0 < w <= 5 for w in waited), (
+        "the reap after the kill must stay bounded"
+    )
 
 
 def test_a_tmux_that_never_answers_becomes_an_honest_refusal() -> None:

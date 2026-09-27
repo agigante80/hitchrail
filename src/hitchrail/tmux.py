@@ -17,6 +17,7 @@ This module is in the engine layer and imports nothing from the web layer;
 
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 import subprocess
@@ -92,6 +93,13 @@ class Panes:
 # milliseconds, so this can only fire on the case it is for.
 _CALL_TIMEOUT_S = 10.0
 
+# The last resort bound on the wait AFTER a kill (#299 round 1 review): the
+# child received SIGKILL, which it cannot catch or delay, so this is not
+# expected to fire. It exists so `_default_runner` returns close to `timeout`
+# under every caller rather than blocking on however long reaping an already
+# dead process happens to take.
+_REAP_TIMEOUT_S = 2.0
+
 
 def _scrub_flags(names: tuple[str, ...]) -> list[str]:
     """`-u NAME` for each, as separate argv elements. No shell, ever."""
@@ -119,6 +127,20 @@ def _default_runner(
     the bound was meant to end. `subprocess.run` never hands back the `Popen`
     a caller would need for `os.killpg`, so the wait and the kill are done
     here instead of through `run(timeout=)`.
+
+    **The kill covers more than a timeout, and the reap after it is bounded**
+    (#299 round 1 review), for the identical reason `claude_ipc.plugin_runner`
+    has it: `subprocess.run` used to kill on `except: process.kill(); raise`
+    too, so a `SIGINT` mid call was also a kill, and losing that when
+    `run(timeout=)` was dropped left an orphaned child in its own session,
+    unreachable by the terminal's own signal. And a plain second
+    `communicate()` after the kill assumed EOF as soon as the group died,
+    which is false whenever something left the group before dying and still
+    holds the inherited pipe open; that read then waits for THAT process, not
+    this call's own bound. Closing this process's ends of the pipes and
+    waiting only for the child actually killed avoids depending on who else
+    still holds them; the bounded `wait` below is the last resort if even
+    that child is somehow slow to die after `SIGKILL`.
     """
     # S603 is ignored for this module in pyproject.toml, not inline: every
     # call here is an argument list built by `_argv`, and there is no shell.
@@ -127,9 +149,25 @@ def _default_runner(
     )
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        proc.communicate()  # reap; the caller only sees the timeout
+    except BaseException:
+        # `proc.pid`, not `os.getpgid(proc.pid)`: `start_new_session` above
+        # makes this child its own group leader, so its pid IS the group id.
+        # Asking the OS for "this pid's group" instead would, the day
+        # `start_new_session` is ever dropped, answer with OUR OWN group and
+        # turn this into hitchrail killing itself. Addressing `proc.pid`
+        # directly means that mistake raises ProcessLookupError here instead,
+        # which this suppresses the same way as an already exited child:
+        # either way there is nothing left here to kill.
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGKILL)
+        if proc.stdout is not None:
+            proc.stdout.close()
+        if proc.stderr is not None:
+            proc.stderr.close()
+        # SIGKILL was sent; if the reap still does not land inside the
+        # bound, nothing more this function can do.
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=_REAP_TIMEOUT_S)
         raise
     return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
 

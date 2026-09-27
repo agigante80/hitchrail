@@ -9,11 +9,14 @@ fails" without knowing how the operation builds the call.
 from __future__ import annotations
 
 import ast
+import contextlib
 import json
 import os
 import select
+import signal
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -552,29 +555,146 @@ def test_the_real_runner_kills_a_hung_childs_own_children(tmp_path: Path) -> Non
     `subprocess.run` does after the call, which a fake runner cannot show.
     The child writes the grandchild's pid before it hangs, so this reads the
     OS's answer rather than trusting the runner's own report.
+
+    #299's round 1 review (M1) found the previous version of this test passed
+    for the wrong reason: the grandchild inherited the runner's own stdout and
+    stderr pipes, so replacing `os.killpg` with `proc.kill()` left the
+    grandchild alive holding them open, the reap's `communicate()` blocked on
+    ITS exit rather than ending at the runner's own bound, and by the time
+    this test's own check ran the grandchild had usually finished its whole 30
+    second sleep and exited on its own, which `pidfd_open` raising
+    `ProcessLookupError` then read as a pass. Redirected to `DEVNULL` here, so
+    that path cannot happen, and the elapsed time assertion below is what a
+    slow pass through the old bug cannot satisfy.
     """
     runner = claude_ipc.plugin_runner(withhold=())
     pid_file = tmp_path / "grandchild.pid"
     script = (
         "import subprocess, time\n"
-        "p = subprocess.Popen(['sleep', '30'])\n"
+        "p = subprocess.Popen(['sleep', '30'], stdout=subprocess.DEVNULL, "
+        "stderr=subprocess.DEVNULL)\n"
         f"open({str(pid_file)!r}, 'w').write(str(p.pid))\n"
         "time.sleep(30)\n"
     )
 
+    started = time.monotonic()
     with pytest.raises(subprocess.TimeoutExpired):
         runner([sys.executable, "-c", script], 0.5)
+    elapsed = time.monotonic() - started
+    assert elapsed < 5, f"the runner did not return near its 0.5s bound: {elapsed:.1f}s"
 
     grandchild_pid = int(pid_file.read_text())
     try:
         pidfd = os.pidfd_open(grandchild_pid)
     except ProcessLookupError:
-        return  # already reaped between the timeout firing and this check
+        # Gone this soon after a 0.5s timeout, with a 30 second sleep and no
+        # pipe left to block a slow pass on: nothing but the runner's own kill
+        # explains its absence, which `elapsed` above already confirms.
+        return
     try:
         exited = select.select([pidfd], [], [], 5)[0]
     finally:
         os.close(pidfd)
     assert exited, "the grandchild outlived the timeout: only the direct child was killed"
+
+
+def test_the_real_runner_bounds_the_reap_past_a_grandchild_holding_the_pipes(
+    tmp_path: Path,
+) -> None:
+    """#299 round 1 review (H1). A grandchild that leaves the process group,
+    the shape a daemonising install hook or one that runs `setsid` itself
+    takes, is untouched by `os.killpg` on the direct child's group, and if it
+    also inherited the runner's stdout/stderr pipes, a second `communicate()`
+    with no bound of its own would wait for THAT process's exit rather than
+    the runner's. Measured before the fix: a grandchild sleeping 8 seconds
+    made a 0.5 second bound return after 8.0 seconds, during which every
+    caller saw the plugin run stuck `running`.
+    """
+    runner = claude_ipc.plugin_runner(withhold=())
+    pid_file = tmp_path / "grandchild.pid"
+    script = (
+        "import subprocess, time\n"
+        "p = subprocess.Popen(['sleep', '8'], start_new_session=True)\n"
+        f"open({str(pid_file)!r}, 'w').write(str(p.pid))\n"
+        "time.sleep(30)\n"
+    )
+
+    started = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        runner([sys.executable, "-c", script], 0.5)
+    elapsed = time.monotonic() - started
+    assert elapsed < 5, f"the reap waited on a grandchild outside the group: {elapsed:.1f}s"
+
+    # Cleanup: this grandchild started its own session, so the direct
+    # child's group kill above never reached it, and it will otherwise
+    # outlive this test for the rest of its 8 second sleep.
+    grandchild_pid = int(pid_file.read_text())
+    with contextlib.suppress(ProcessLookupError):
+        os.kill(grandchild_pid, signal.SIGKILL)
+
+
+class _FakeStream:
+    """What `proc.stdout`/`proc.stderr` need to be for the reap after a kill:
+    something `close()`able. The tmux sibling of this fake, in `test_tmux.py`,
+    explains why."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_the_real_runner_kills_the_group_on_any_exception_not_only_a_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#299 round 1 review (M2). `subprocess.run`'s own timeout handling used
+    to be `except: process.kill(); raise`, catching every exception, not only
+    `TimeoutExpired`: a `SIGINT` on the operator's terminal while `claude
+    plugin update ... -y` ran was also a kill. `run(timeout=)` narrowing that
+    to `except subprocess.TimeoutExpired` when this runner moved off
+    `subprocess.run` (#299) meant Ctrl-C during a real update left the child
+    orphaned in its own session, unreachable by the terminal's own signal.
+
+    A fake `Popen` whose `communicate` raises `KeyboardInterrupt`, the same
+    shape a real SIGINT produces, proves the group is still killed and the
+    reap still bounded for an exception that is not a timeout at all, which
+    `test_the_real_runner_bounds_the_reap_past_a_grandchild_holding_the_pipes`
+    and the hung-child test above, both driven by an actual 0.5s timeout,
+    cannot exercise.
+    """
+    killed: list[tuple[int, int]] = []
+    waited: list[float | None] = []
+
+    class FakeProcess:
+        pid = 4242
+        returncode = -2
+        stdout = _FakeStream()
+        stderr = _FakeStream()
+
+        def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+            raise KeyboardInterrupt
+
+        def wait(self, timeout: float | None = None) -> int:
+            waited.append(timeout)
+            return self.returncode
+
+    def fake_popen(*args: object, **kw: object) -> FakeProcess:
+        return FakeProcess()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    monkeypatch.setattr("os.killpg", lambda pgid, sig: killed.append((pgid, sig)))
+
+    runner = claude_ipc.plugin_runner(withhold=())
+    with pytest.raises(KeyboardInterrupt):
+        runner(["claude", "plugin", "update"], 30.0)
+
+    assert killed == [(4242, signal.SIGKILL)], (
+        "an exception other than a timeout must still kill the group (M2)"
+    )
+    assert waited and all(isinstance(w, float) and 0 < w <= 5 for w in waited), (
+        "the reap after the kill must stay bounded"
+    )
 
 
 # -- the quarantine ---------------------------------------------------------------
