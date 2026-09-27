@@ -88,7 +88,7 @@ open from-review tickets on it come with it.
 - [x] **Task 133, #315 (P1).** The strip's `note` and `settle` get an owner,
       so the plugin flow cannot settle away a refusal the settings flow
       wrote. The comment says why the owner exists.
-- [ ] **Task 134, #314 (P2).** `onPluginRecord` compares against the epoch and
+- [x] **Task 134, #314 (P2).** `onPluginRecord` compares against the epoch and
       sequence captured before its `await`, not the live globals after it.
 - [ ] **Task 135, #316 (P3).** A test pins the second `isStale()` check,
       written against task 134's code, not before it.

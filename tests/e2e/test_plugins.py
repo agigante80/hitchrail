@@ -452,3 +452,54 @@ async def test_a_plugin_refusal_survives_an_interleaved_settings_success(
     await expect(note).to_contain_text("a plugin update is already running")
 
     server.release_plugin("alpha@m")
+
+
+async def test_a_restart_during_the_project_count_does_not_win_the_race(
+    page: Page, server: Harness
+) -> None:
+    """#314. `onPluginRecord`'s second check used to be a second
+    `isStale(record)`, asking "is THIS record newer than what is shown",
+    answered from two epoch strings alone. That question has no answer
+    across a restart. Here a `done` record's own `countRunning()` fetch is
+    held open while the server restarts: the reconnect's idle record, a new
+    epoch, is painted by a separate, un-awaited call while the first is still
+    suspended, and old code's `isStale` saw two merely DIFFERENT epochs,
+    called that "not stale", and let the dead record win when it resumed."""
+    server.seed_plugins([{"id": "alpha@m", "scope": "user"}])
+    server.seed()
+    await open_settings(page, server)
+
+    held: list[object] = []
+    # Long enough that the reconnect's idle record has time to land WHILE
+    # this is still open: the race only exists if the dead record resumes
+    # AFTER the live one already painted, not merely eventually after it.
+    hold_ms = 7000
+
+    async def hold(route):  # type: ignore[no-untyped-def]
+        response = await route.fetch()
+        held.append(response)
+        await page.wait_for_timeout(hold_ms)
+        await route.fulfill(response=response)
+
+    await page.route("**/api/projects", hold)
+    await page.locator("[data-plugins-update]").click()
+    server.release_plugin("alpha@m")
+    for _ in range(150):
+        if held:
+            break
+        await page.wait_for_timeout(20)
+    assert held, "the done record's countRunning() never reached the held route"
+
+    server.restart()
+    status = page.locator("[data-plugins-status]")
+    # Proves the race is real: the idle record must land well before the held
+    # fetch is due to resolve, or the ordering below tests nothing.
+    await expect(status).to_have_text(
+        "Not run since this server started.", timeout=hold_ms - 2000
+    )
+
+    # Past the held countRunning()'s delivery: the pre-restart done record
+    # arrives late and must not overwrite the new process's idle state.
+    await page.wait_for_timeout(hold_ms)
+    await expect(status).to_have_text("Not run since this server started.")
+    await expect(page.locator("[data-plugins-update]")).to_be_enabled()

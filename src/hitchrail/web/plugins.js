@@ -117,9 +117,23 @@ function isStale(record) {
 async function onPluginRecord(record) {
   // Checked twice: once so a stale record costs no listing fetch, and again
   // after the await, which is where a newer one can overtake it.
+  //
+  // #314. The second check used to be a second `isStale(record)`, which asks
+  // "is THIS record newer than what is shown right now", answered from the
+  // two epoch strings alone. That question has no answer across a restart:
+  // epochs carry no order, so a record suspended here with the OLD epoch,
+  // resumed after the NEW epoch's idle record has already been painted by a
+  // separate, un-awaited call, compares its own epoch against the live one,
+  // finds them merely DIFFERENT rather than older, and `isStale` said "not
+  // stale" and let the dead record win. The question that actually holds is
+  // "did anything paint while I was suspended", which needs no epoch
+  // ordering: snapshot what is shown before the await, and only proceed if
+  // it is still exactly that after.
   if (isStale(record)) return;
+  const beforeEpoch = shownEpoch;
+  const beforeSeq = shownSeq;
   if (record.state === "done" && record.counts.updated) await countRunning();
-  if (isStale(record)) return;
+  if (shownEpoch !== beforeEpoch || shownSeq !== beforeSeq) return;
   shownEpoch = record.epoch;
   shownSeq = record.seq;
   renderPlugins(record);
