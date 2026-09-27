@@ -113,7 +113,7 @@ async def test_a_project_scoped_plugin_is_listed_and_left_alone(
     )
     skipped = page.locator('[data-plugins-list] li[data-result="skipped"]')
     await expect(skipped).to_contain_text("kit@x")
-    await expect(skipped).to_contain_text("local scope, left alone")
+    await expect(skipped).to_contain_text("local scope is not updated")
 
 
 async def test_a_page_opened_mid_run_shows_where_the_run_is(

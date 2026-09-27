@@ -59,11 +59,14 @@ function outcomeItem(outcome) {
   name.textContent = outcome.plugin;
   head.append(result, name);
   item.append(head);
-  // The agent's own words, rendered as text: the server escaped control
-  // characters, and textContent means nothing here is parsed as markup.
+  // Rendered as text, never markup: for `updated` or `failed` this is the
+  // agent's own words, the server escaped control characters in it, and
+  // textContent means nothing here is parsed. For `skipped` it is ours, and
+  // a skip has more than one reason since #300 (another scope, or a `user`
+  // row the listing named twice), so the detail is shown rather than a
+  // fixed scope-shaped sentence that would misname the second one.
   const lines = [];
-  if (outcome.result === "skipped") lines.push(`${outcome.scope} scope, left alone`);
-  else if (outcome.detail) lines.push(outcome.detail);
+  if (outcome.detail) lines.push(outcome.detail);
   if (outcome.approved_command) lines.push(`approved: ${outcome.approved_command}`);
   for (const text of lines) {
     const line = document.createElement("span");
