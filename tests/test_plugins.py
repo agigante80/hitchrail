@@ -465,10 +465,14 @@ def test_an_approved_command_cannot_rewrite_the_line_that_records_it() -> None:
 
 
 def test_a_failure_detail_cannot_rewrite_its_line() -> None:
-    agent = FakeAgent([row("a@m")], **{"a@m": done(1, stderr=f"x {HOSTILE}")})
+    """`_detail` keeps only the last line of stderr, and `str.splitlines()`
+    also splits on `\r`, so `HOSTILE` never reaches the escaping: its last
+    line is plain text. An ESC with no line break around it does reach it
+    (#306)."""
+    agent = FakeAgent([row("a@m")], **{"a@m": done(1, stderr="x \x1b[2Kharmless")})
     (outcome,) = run(agent)
     assert outcome.detail is not None
-    assert not any(ch in outcome.detail for ch in "\r\x1b")
+    assert "\x1b" not in outcome.detail
 
 
 def test_the_cut_happens_before_the_escaping() -> None:

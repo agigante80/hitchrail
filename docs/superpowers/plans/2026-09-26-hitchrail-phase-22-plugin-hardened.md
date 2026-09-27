@@ -104,7 +104,7 @@ open from-review tickets on it come with it.
 
 - [x] **Task 139, #305 (P2).** `_shown` cuts the raw text and escapes after,
       with a visible cut marker, and its docstring is rewritten to match.
-- [ ] **Task 140, #306 (P2).** The escaping test's input has no `\r`, so it
+- [x] **Task 140, #306 (P2).** The escaping test's input has no `\r`, so it
       fails with escaping reverted. Written after task 139.
 - [ ] **Task 141, #303 (P3).** `_read_listing` and `_approved_command` catch
       `RecursionError` beside `ValueError`, and report `plugins_unreadable`.
