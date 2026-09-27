@@ -1138,9 +1138,7 @@ async def test_a_late_record_of_a_retired_epoch_does_not_revive_it(
     # shown, so painting it is unambiguous.
     await page.evaluate("() => { window.__plugins.loadPlugins(); }")
     await fulfill_next(
-        _synthetic_record(
-            "e1", 5, "done", counts={"updated": 0, "failed": 0, "skipped": 1}
-        )
+        _synthetic_record("e1", 5, "done", counts={"updated": 0, "failed": 0, "skipped": 1})
     )
     await expect(status).to_have_text("Refreshing the marketplaces.")
 
