@@ -18,7 +18,8 @@ from hitchrail.cli import (
     parse_args,
     preflight,
 )
-from hitchrail.config import ConfigError, is_loopback_host
+from hitchrail.config import Config, ConfigError, is_loopback_host
+from hitchrail.engine import Engine
 from support import make_config
 from test_plugins import FakeAgent, done, row
 
@@ -526,6 +527,37 @@ def test_main_serves_the_real_app_on_the_configured_address(
     assert "/api/projects" in paths
     assert "/api/events" in paths
     assert "/api/sessions/{name}/kill" in paths, "the app served is not the real one"
+
+
+def test_main_threads_preflights_resolved_path_into_the_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#196 regression in `main()`'s own wiring, not in `preflight` itself:
+    `config = replace(config, resolved_agent_binary=found.agent_binary)` is
+    the one line that carries the absolute path preflight resolved into the
+    `Config` `Engine` and `create_app` are built from. Every other cli test
+    stubs `shutil.which` to already answer with an absolute path, so turning
+    that line into a no-op passes every one of them; only reading which
+    `Config` `Engine` actually received catches it.
+    """
+    (tmp_path / "vessel").mkdir()
+    monkeypatch.setattr("shutil.which", lambda _n: "/opt/fake-agent")
+    monkeypatch.setattr("uvicorn.run", lambda *a, **k: None)
+
+    real_engine = Engine
+    captured: list[Config] = []
+
+    def spy_engine(*, config: Config) -> object:
+        captured.append(config)
+        return real_engine(config=config)
+
+    monkeypatch.setattr("hitchrail.cli.Engine", spy_engine)
+
+    code = main(["--root", f"main={tmp_path}", "--agent-binary", "fake-agent"])
+
+    assert code == 0
+    assert captured, "Engine was never constructed"
+    assert captured[0].spawn_agent_binary == "/opt/fake-agent"
 
 
 # -- #108: the CLI and Config ask the same question --------------------------
