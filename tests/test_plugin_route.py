@@ -195,6 +195,13 @@ async def test_the_default_operation_is_never_the_real_one_under_test(
     This is the one test that means to reach it (#310), so it calls
     `expect()` first: without that, the fixture's own teardown would fail
     THIS test for the very firing it exists to prove.
+
+    #310 round 1 review (M4): asserts `no_real_plugin_update.fired` too, not
+    only the `internal_error` record it produces. Before this, deleting the
+    `guard.fired.append(exc)` line in the fixture's `refuse` left this test
+    green, because nothing here read `fired` at all; the record it checks
+    comes from `PluginRuns` catching the same `AssertionError`, not from the
+    guard's own bookkeeping.
     """
     no_real_plugin_update.expect()
     engine = Engine(config=config, tmux=FakeTmux(), procs_fn=procs_from(""))
@@ -209,6 +216,7 @@ async def test_the_default_operation_is_never_the_real_one_under_test(
             await asyncio.sleep(0.01)
     assert record["state"] == "failed"
     assert record["code"] == "internal_error"
+    assert no_real_plugin_update.fired, "the guard's own bookkeeping never recorded the firing"
 
 
 def test_an_unexpected_firing_of_the_guard_fails_loudly() -> None:
@@ -233,6 +241,38 @@ def test_expect_lets_the_one_deliberate_test_reach_the_guard() -> None:
     guard.fired.append(AssertionError("a test reached the REAL plugin update"))
     guard.expect()
     guard.check()
+
+
+def test_a_forgetful_test_errors_at_teardown_not_silently(pytester: pytest.Pytester) -> None:
+    """#310 round 1 review (M4): the two tests above exercise `PluginUpdateGuard`
+    directly, never through pytest's own fixture teardown, so deleting either
+    `guard.fired.append(exc)` or the fixture's own `guard.check()` after
+    `yield` in `tests/conftest.py` left every test in this file green. Proven
+    by reverting each of those two lines by hand, with `PYTHONDONTWRITEBYTECODE=1`,
+    and watching THIS test go from one error to none.
+
+    Runs a "forgetful" test inside its own isolated pytest session, reusing
+    the REAL `no_real_plugin_update` fixture (imported, not reimplemented):
+    it swallows the guard's `AssertionError` the way `PluginRuns._run`'s own
+    `except Exception` does for real, so nothing escapes the test body, and
+    the only way this can still fail the inner run is the fixture's own
+    teardown noticing what its bookkeeping recorded.
+    """
+    pytester.makepyfile(
+        """
+        from conftest import no_real_plugin_update
+        from hitchrail import server
+
+
+        def test_forgetful(no_real_plugin_update):
+            try:
+                server.operation_for("agent-binary")(object())
+            except Exception:
+                pass
+        """
+    )
+    result = pytester.runpytest()
+    result.assert_outcomes(passed=1, errors=1)
 
 
 async def test_the_wired_operation_spawns_the_resolved_binary_not_the_raw_one(

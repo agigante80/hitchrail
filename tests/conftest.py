@@ -22,6 +22,12 @@ from hitchrail.procs import ProcTable, parse_ps
 from hitchrail.settings import CONFIG_HOME_ENV
 from hitchrail.tmux import Panes, Tmux
 
+# pytester is not a default plugin: `tests/test_plugin_route.py` needs it
+# (#310 round 1 review) to run a "forgetful" test inside its OWN pytest
+# invocation and check that invocation's outcome, which cannot be done from
+# inside the same run without failing this suite on purpose.
+pytest_plugins = ["pytester"]
+
 # What the stubbed resolver answers with. `.invalid` is reserved by RFC 2606
 # precisely so it can never resolve, and 203.0.113.0/24 is TEST-NET-3, so
 # neither can be confused for a real machine if one leaks into an assertion.
