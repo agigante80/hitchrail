@@ -92,7 +92,7 @@ open from-review tickets on it come with it.
       sequence captured before its `await`, not the live globals after it.
 - [x] **Task 135, #316 (P3).** A test pins the second `isStale()` check,
       written against task 134's code, not before it.
-- [ ] **Task 136, #313 (P3).** A `visibilitychange` refresh, going through
+- [x] **Task 136, #313 (P3).** A `visibilitychange` refresh, going through
       the same staleness check as every other path that paints a record.
 - [ ] **Task 137, #317 (P3).** The `internal_error` sentence reads as one
       sentence.

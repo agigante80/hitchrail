@@ -550,3 +550,47 @@ async def test_a_second_run_overtaking_during_the_project_count_wins(
 
     server.release_plugin("alpha@m")
     await expect(status).to_have_text("1 updated, 0 failed, 0 left alone.", timeout=15_000)
+
+
+async def test_visibility_regained_refreshes_a_run_the_stream_missed(
+    page: Page, server: Harness
+) -> None:
+    """#313. The stream can stay open while the one event marking a run's end
+    is exactly the frame the server's bus drops for a slow client, which is
+    what a phone that sleeps mid run looks like: the connection never
+    notices anything is wrong, so no reconnect ever fires to correct the
+    screen. Coming back from that is what `visibilitychange` is for, and it
+    must go through the same `loadPlugins` a reconnect uses, gated by the
+    same staleness check (#314), rather than paint anything directly."""
+    server.seed_plugins([{"id": "alpha@m", "scope": "user"}])
+    server.seed()
+    await open_settings(page, server)
+    await page.locator("[data-plugins-update]").click()
+    await expect(page.locator("[data-plugins-status]")).to_have_text(
+        "Refreshing the marketplaces."
+    )
+
+    # The stream stays open, but its next frame (the run finishing) never
+    # reaches the page: the stand in for a dropped SSE frame.
+    await page.route("**/api/events", lambda route: route.abort())
+    server.drop_connections()
+    server.release_plugin("alpha@m")
+    await page.wait_for_timeout(300)
+    await expect(page.locator("[data-plugins-status]")).to_have_text(
+        "Refreshing the marketplaces."
+    )
+
+    # The phone comes back to the foreground. No reconnect: the route above
+    # still aborts every attempt.
+    await page.evaluate(
+        "() => {"
+        "  Object.defineProperty(document, 'visibilityState', {"
+        "    configurable: true, get: () => 'visible'"
+        "  });"
+        "  document.dispatchEvent(new Event('visibilitychange'));"
+        "}"
+    )
+    await expect(page.locator("[data-plugins-status]")).to_have_text(
+        "1 updated, 0 failed, 0 left alone."
+    )
+    await page.unroute("**/api/events")

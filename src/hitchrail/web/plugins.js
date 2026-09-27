@@ -207,6 +207,20 @@ export function startPlugins(noteStrip) {
   // Every open, the first and each reconnect, reads the GET: what happened
   // while the stream was down is not replayed.
   stream.addEventListener("open", loadPlugins);
+  // #313. The stream can stay open while the ONE event marking a run's end
+  // is the frame the server's bus drops for a slow client, and a phone that
+  // sleeps mid run is exactly that: the connection never notices anything
+  // is wrong, so no reconnect ever fires to correct the screen. Reading on
+  // `visibilitychange` back to visible, which is when a phone that slept
+  // comes back, is the same recovery a reconnect already has, and it goes
+  // through the same `loadPlugins` a reconnect uses rather than painting
+  // anything directly: `onPluginRecord`'s staleness gate (#314) is what
+  // stops a dead run's record from overtaking one a meanwhile delivered
+  // stream event already painted, and a second entry point here would have
+  // to reimplement that rather than share it.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") loadPlugins();
+  });
   window.__plugins = { loadPlugins };
   loadPlugins();
 }
