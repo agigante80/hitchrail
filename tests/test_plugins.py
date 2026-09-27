@@ -695,6 +695,139 @@ def test_the_real_runner_kills_the_group_on_any_exception_not_only_a_timeout(
     assert waited and all(isinstance(w, float) and 0 < w <= 5 for w in waited), (
         "the reap after the kill must stay bounded"
     )
+    # #304's follow up sweep of this function (mutmut_29, mutmut_30): the
+    # `is not None` guards exist so a `None` stream is never asked to close
+    # itself, not to skip closing a real one, and closing is what lets the
+    # bounded `wait` below return without depending on who else holds the
+    # pipe open (H1).
+    assert FakeProcess.stdout.closed, "stdout must be closed before the bounded reap"
+    assert FakeProcess.stderr.closed, "stderr must be closed before the bounded reap"
+
+
+def test_the_real_runner_passes_a_closed_stdin_and_a_captured_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#304's follow up sweep of `plugin_runner` (mutmut_5, 7, 13, 15). The
+    real-process tests above (`..._gives_the_child_no_terminal_to_ask_on`)
+    run the assertion in a SPAWNED interpreter, which imports the installed
+    package rather than whatever this test's own process has patched, so
+    mutating either kwarg away is invisible to it. A mocked `Popen` in THIS
+    process is what a mutated `stdin` or a dropped `stderr` kwarg can still
+    change."""
+    captured: dict[str, object] = {}
+
+    class FakeProcess:
+        pid = 1
+        returncode = 0
+
+        def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+            return "", ""
+
+    def fake_popen(*args: object, **kw: object) -> FakeProcess:
+        captured.update(kw)
+        return FakeProcess()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    claude_ipc.plugin_runner(withhold=())(["claude", "plugin", "update"], 10.0)
+
+    assert captured.get("stdin") is subprocess.DEVNULL, (
+        "a closed stdin, not an inherited terminal (#301)"
+    )
+    assert captured.get("stderr") is subprocess.PIPE, "stderr must be captured, not inherited"
+
+
+def test_the_real_runner_returns_exactly_what_the_child_produced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#304's follow up sweep of `plugin_runner` (mutmut_33, 34, 36, 40): the
+    success path's `CompletedProcess` construction has no test of its own
+    fields anywhere else, since every other real-runner test reads only
+    `.stdout` or lets `update_plugins` consume the result."""
+    argv = ["claude", "plugin", "update", "widget", "-s", "user", "-y", "--json"]
+
+    class FakeProcess:
+        pid = 99
+        returncode = 7
+
+        def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+            return "the stdout", "the stderr"
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: FakeProcess())
+
+    result = claude_ipc.plugin_runner(withhold=())(argv, 10.0)
+
+    assert result.args == argv
+    assert result.returncode == 7
+    assert result.stdout == "the stdout"
+    assert result.stderr == "the stderr"
+
+
+def test_the_real_runner_swallows_a_kill_on_a_child_that_already_exited(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#304's follow up sweep of `plugin_runner` (mutmut_24): `os.killpg`
+    raises `ProcessLookupError` when the child died on its own between the
+    timeout and the kill, and that must be swallowed the same as a live kill,
+    or the operator sees a `ProcessLookupError` (or, mutated to
+    `contextlib.suppress(None)`, a `TypeError` from `suppress` itself) where
+    the original timeout belongs."""
+
+    class FakeProcess:
+        pid = 4242
+        returncode = -9
+        stdout = _FakeStream()
+        stderr = _FakeStream()
+
+        def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+            raise subprocess.TimeoutExpired(cmd="x", timeout=10.0)
+
+        def wait(self, timeout: float | None = None) -> int:
+            return self.returncode
+
+    def raise_gone(pgid: int, sig: int) -> None:
+        raise ProcessLookupError
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: FakeProcess())
+    monkeypatch.setattr("os.killpg", raise_gone)
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        claude_ipc.plugin_runner(withhold=())(["claude", "plugin", "update"], 10.0)
+
+
+def test_the_real_runner_swallows_a_reap_still_not_done_at_its_own_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#304's follow up sweep of `plugin_runner` (mutmut_31): the bounded
+    `wait` after the kill is the LAST resort, so timing out again there must
+    be swallowed rather than replacing the original timeout the caller is
+    waiting to see."""
+    argv = ["claude", "plugin", "update"]
+
+    class FakeProcess:
+        pid = 4242
+        returncode = None
+        stdout = _FakeStream()
+        stderr = _FakeStream()
+
+        def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+            raise subprocess.TimeoutExpired(cmd=argv, timeout=10.0)
+
+        def wait(self, timeout: float | None = None) -> int:
+            # A marker distinct from the original: if this surfaces instead
+            # of being swallowed, the assertion below on `excinfo.value.cmd`
+            # catches it even where `pytest.raises` alone could not.
+            raise subprocess.TimeoutExpired(cmd=["should-not-surface"], timeout=timeout or 0)
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: FakeProcess())
+    monkeypatch.setattr("os.killpg", lambda pgid, sig: None)
+
+    with pytest.raises(subprocess.TimeoutExpired) as excinfo:
+        claude_ipc.plugin_runner(withhold=())(argv, 10.0)
+
+    assert excinfo.value.cmd == argv, (
+        "the reap's own second timeout must be swallowed, not surfaced in place of the original"
+    )
 
 
 # -- the quarantine ---------------------------------------------------------------
