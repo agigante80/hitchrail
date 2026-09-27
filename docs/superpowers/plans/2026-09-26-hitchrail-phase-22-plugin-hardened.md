@@ -139,7 +139,7 @@ candidate fix is an epoch the server mints with an order, not a fifth guess.
       `stdin=subprocess.DEVNULL` is removed, under pytest's own capture.
 - [x] **Task 146, #310 (P3).** `no_real_plugin_update` fails the test that
       reaches it, instead of being swallowed into an `internal_error` record.
-- [ ] **Task 147, #304 (P2).** `claude_ipc.py` moves to mutmut's
+- [x] **Task 147, #304 (P2).** `claude_ipc.py` moves to mutmut's
       `source_paths`, and the survivors in the plugin section are read after
       batch 3, each killed or written down as equivalent on the ticket.
 

@@ -177,6 +177,10 @@ def test_other_scopes_are_counted_and_never_updated() -> None:
         ("cowork@synced", "synced", "skipped"),
         ("b@m", "user", "updated"),
     ]
+    # #304: the reason a skipped row was skipped, which the same route shows
+    # beside the plugin id; only the `result` tuple above was ever checked.
+    assert outcomes[1].detail == "local scope is not updated"
+    assert outcomes[4].detail == "synced scope is not updated"
 
 
 def test_a_genuine_user_duplicate_is_updated_once_and_reported_as_skipped() -> None:
@@ -222,6 +226,11 @@ def test_a_hung_update_is_a_failure_and_the_next_still_runs() -> None:
     assert agent.updated == ["a@m", "b@m", "c@m"]
     assert outcomes[1].result == "failed"
     assert outcomes[1].detail == "timed out"
+    # #304: the timeout branch built its own `PluginOutcome` rather than
+    # falling through to the one below, so nothing had checked it still
+    # named the plugin that timed out and the scope it was updating.
+    assert outcomes[1].plugin == "b@m"
+    assert outcomes[1].scope == "user"
 
 
 def test_a_failure_detail_is_bounded() -> None:
@@ -235,6 +244,32 @@ def test_a_failure_detail_is_bounded() -> None:
     assert outcome.detail.endswith("(truncated)")
 
 
+def test_the_last_line_of_stdout_is_used_when_stderr_is_empty() -> None:
+    """#304: `_detail` falls back to stdout only when stderr is empty; a
+    survived mutant discarded stdout unconditionally in that case and always
+    reported the bare exit code."""
+    agent = FakeAgent([row("a@m")], **{"a@m": done(1, stderr="", stdout="first\nlast one")})
+    (outcome,) = run(agent)
+    assert outcome.detail == "exited 1: last one"
+
+
+def test_no_output_at_all_still_reports_the_exit_code() -> None:
+    """#304: with neither stream saying anything, the vendor's own words are
+    genuinely absent, and that absence must not be papered over with a
+    placeholder or crash the operation outright."""
+    agent = FakeAgent([row("a@m")], **{"a@m": done(1, stderr="", stdout="")})
+    (outcome,) = run(agent)
+    assert outcome.detail == "exited 1"
+
+
+def test_blank_lines_do_not_count_as_the_last_line() -> None:
+    """#304: stderr with content that strips to nothing is the same absence
+    as no stderr at all, not a line worth reporting."""
+    agent = FakeAgent([row("a@m")], **{"a@m": done(1, stderr="\n   \n")})
+    (outcome,) = run(agent)
+    assert outcome.detail == "exited 1"
+
+
 # -- the operation fails ---------------------------------------------------------
 
 
@@ -243,6 +278,12 @@ def test_a_failed_refresh_updates_nothing() -> None:
     with pytest.raises(PluginsFailed) as caught:
         run(agent)
     assert caught.value.code == "marketplace_refresh_failed"
+    # #304: `plugin_runs.py` reads `str(exc)` for the sentence a phone shows;
+    # only `.code` was checked here, so the sentence itself could go missing
+    # or drift and nothing would notice.
+    assert str(caught.value) == (
+        "the marketplaces could not be refreshed, so no plugin was updated: exited 1: offline"
+    )
     assert agent.argvs == [REFRESH]
 
 
@@ -251,6 +292,11 @@ def test_a_hung_refresh_updates_nothing() -> None:
     with pytest.raises(PluginsFailed) as caught:
         run(agent)
     assert caught.value.code == "marketplace_refresh_failed"
+    # #304: the same sentence, on the branch with no process to read a detail
+    # from, so it ends in "timed out" rather than a `_detail(refresh)` call.
+    assert str(caught.value) == (
+        "the marketplaces could not be refreshed, so no plugin was updated: timed out"
+    )
     assert agent.updated == []
 
 
@@ -289,6 +335,11 @@ def test_an_unreadable_listing_updates_nothing(listing: str) -> None:
     with pytest.raises(PluginsFailed) as caught:
         run(agent)
     assert caught.value.code == "plugins_unreadable"
+    # #304: as above, the sentence itself is what `plugin_runs.py` shows;
+    # `.code` alone does not pin it.
+    assert str(caught.value) == (
+        "the installed plugin list could not be understood, so nothing was updated"
+    )
     assert agent.updated == []
 
 
@@ -337,6 +388,13 @@ def test_a_missing_agent_spawns_nothing_further(error: OSError) -> None:
         run(agent)
     assert caught.value.code == "agent_missing"
     assert agent.argvs == [REFRESH]
+    # #304: only `.code` was checked, so the message could name the wrong
+    # argv element (the subcommand rather than the binary) or vanish
+    # entirely and nothing here would notice.
+    assert (
+        str(caught.value)
+        == f"'claude' could not be run, so nothing further was updated: {error}"
+    )
 
 
 def test_the_agent_vanishing_mid_run_is_agent_missing() -> None:
@@ -383,6 +441,37 @@ def test_an_update_without_that_field_is_still_updated(stdout: str) -> None:
     (outcome,) = run(agent)
     assert outcome.result == "updated"
     assert outcome.approved_command is None
+
+
+def test_a_malformed_line_does_not_stop_the_search_for_the_command() -> None:
+    """#304: one line the vendor's `--json` output that does not parse is
+    that line's own problem, not a reason to give up on every line after it,
+    which a survived mutant did by turning the skip into a stop."""
+    line = json.dumps(
+        {"shownCommand": {"command": "curl -s https://x/install", "sha256": "ab"}}
+    )
+    agent = FakeAgent([row("a@m")], **{"a@m": done(0, stdout=f"not json\n{line}\n")})
+    (outcome,) = run(agent)
+    assert outcome.approved_command == "curl -s https://x/install"
+
+
+def test_an_empty_approved_command_is_treated_as_absent() -> None:
+    """#304: `shownCommand.command` being present but empty is the same as
+    it being absent, not a command worth carrying."""
+    line = json.dumps({"shownCommand": {"command": "", "sha256": "ab"}})
+    agent = FakeAgent([row("a@m")], **{"a@m": done(0, stdout=line)})
+    (outcome,) = run(agent)
+    assert outcome.approved_command is None
+
+
+def test_a_command_at_exactly_the_limit_is_not_marked_cut() -> None:
+    """#304: `_shown`'s length check is inclusive of `_DETAIL_LIMIT`, so a
+    command that exactly fills it is the whole vendor text, not a cut of it."""
+    command = "a" * claude_ipc._DETAIL_LIMIT
+    line = json.dumps({"shownCommand": {"command": command, "sha256": "ab"}})
+    agent = FakeAgent([row("a@m")], **{"a@m": done(0, stdout=line)})
+    (outcome,) = run(agent)
+    assert outcome.approved_command == command
 
 
 # -- the real runner -------------------------------------------------------------
