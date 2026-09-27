@@ -1652,34 +1652,43 @@ def test_every_read_of_agent_binary_is_the_resolved_property_or_allowlisted() ->
     the object it lives on), `cli.main` threading `Preflight.agent_binary`
     through, and the settings page showing the operator what they typed.
     Every other read must go through `.spawn_agent_binary` instead.
+
+    #345, round 2 of batch 1's review: keyed by (module, function) alone,
+    `("cli.py", "main")` allowed EVERY read anywhere in `main`, not only the
+    one line 802 that threads `found.agent_binary` through, so a raw spawn
+    added anywhere else in that function passed silently
+    (`claude_ipc.launch_argv(config.agent_binary, ...)`, verified on a
+    scratch copy). Keyed by the exact expression `ast.unparse` reads too, so
+    only that one line is exempt and a second read in the same function is
+    caught like any other offender.
     """
-    allowed: set[tuple[str, str]] = {
+    allowed: set[tuple[str, str, str]] = {
         # The one shape check itself (#302): normalises and validates the
         # operator's raw value before anything is derived from it.
-        ("config.py", "__post_init__"),
+        ("config.py", "__post_init__", "self.agent_binary"),
         # `spawn_agent_binary` IS the safe read every spawn site must use
         # instead; its own fallback to the raw field, for a Config built
         # outside `cli.main`, is what it exists to hold in one place.
-        ("config.py", "spawn_agent_binary"),
+        ("config.py", "spawn_agent_binary", "self.agent_binary"),
         # Builds a Config from the operator's own flags: `args.agent_binary`
         # is what they typed, becoming `Config.agent_binary`, not a spawn.
-        ("cli.py", "build_config"),
+        ("cli.py", "build_config", "args.agent_binary"),
         # What preflight is resolving. This function's whole job is finding
         # the absolute path from the raw name.
-        ("cli.py", "preflight"),
+        ("cli.py", "preflight", "config.agent_binary"),
         # `hitchrail update-plugins`: no Config exists yet, so this resolves
         # and checks its OWN copy of the raw `--agent-binary` flag before it
         # ever calls `claude_ipc.update_plugins` with the resolved value.
-        ("cli.py", "update_plugins_command"),
+        ("cli.py", "update_plugins_command", "args.agent_binary"),
         # Threads `Preflight.agent_binary`, the field preflight resolved,
         # into `Config.resolved_agent_binary`. `Preflight` is a different
         # object from `Config`, but the attribute name is the same string,
         # which is exactly why this guard cannot key on the object either.
-        ("cli.py", "main"),
+        ("cli.py", "main", "found.agent_binary"),
         # The settings page shows the operator's raw setting, with `source`
         # saying where it came from; showing the resolved absolute path here
         # while `source` still said "default" would misrepresent provenance.
-        ("server.py", "_config_view"),
+        ("server.py", "_config_view", "config.agent_binary"),
     }
 
     src = Path(__file__).resolve().parents[1] / "src" / "hitchrail"
@@ -1690,7 +1699,7 @@ def test_every_read_of_agent_binary_is_the_resolved_property_or_allowlisted() ->
         finder.visit(ast.parse(path.read_text()))
         for func, lineno, text in finder.hits:
             found_a_read = True
-            if (path.name, func) in allowed:
+            if (path.name, func, text) in allowed:
                 continue
             offenders[f"{path.name}:{lineno} ({func})"] = text
 

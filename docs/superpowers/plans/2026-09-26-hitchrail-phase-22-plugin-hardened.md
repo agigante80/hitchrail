@@ -149,7 +149,7 @@ Added on 2026-09-27. Batch 1's review loop stopped after round 2 by rule, as
 round 2 found no high; its two mediums are defects in the guard premortem 1
 asks for, so they stay in this phase rather than going to Backlog.
 
-- [ ] **Task 151, #345 (P2).** The `agent_binary` guard's allowlist names the
+- [x] **Task 151, #345 (P2).** The `agent_binary` guard's allowlist names the
       exact expression read, not a whole function, so a raw spawn added in
       `cli.main` fails it.
 - [ ] **Task 152, #346 (P2).** `main()`'s resolved path test also checks the
