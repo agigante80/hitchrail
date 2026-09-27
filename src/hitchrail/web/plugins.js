@@ -130,22 +130,34 @@ async function onPluginRecord(record) {
   // Checked twice: once so a stale record costs no listing fetch, and again
   // after the await, which is where a newer one can overtake it.
   //
-  // #314. The second check used to be a second `isStale(record)`, which asks
-  // "is THIS record newer than what is shown right now", answered from the
-  // two epoch strings alone. That question has no answer across a restart:
-  // epochs carry no order, so a record suspended here with the OLD epoch,
-  // resumed after the NEW epoch's idle record has already been painted by a
-  // separate, un-awaited call, compares its own epoch against the live one,
-  // finds them merely DIFFERENT rather than older, and `isStale` said "not
-  // stale" and let the dead record win. The question that actually holds is
-  // "did anything paint while I was suspended", which needs no epoch
-  // ordering: snapshot what is shown before the await, and only proceed if
-  // it is still exactly that after.
+  // #314, fixed twice. First as a second `isStale(record)`: that asks "is
+  // THIS record newer than what is shown right now", answered from the two
+  // epoch strings alone, which has no answer across a restart. A record
+  // suspended here with the OLD epoch, resumed after the NEW epoch's idle
+  // record had already been painted by a separate, un-awaited call, found
+  // the two epochs merely DIFFERENT rather than older, and `isStale` said
+  // "not stale", letting the dead record win.
+  //
+  // The fix for that, comparing the live epoch and seq against a snapshot
+  // taken before the await, broke the case the first version got right:
+  // WITHIN one epoch, any repaint at all while suspended (an older, still
+  // genuinely older, record answered by a concurrent GET) made the snapshot
+  // differ, and the check bailed even though this call's own record was
+  // newer than what the concurrent one had just painted. A real run's last
+  // event, arriving after a stale GET answer painted over it, was dropped
+  // this way and the screen stuck on "running" with the button disabled.
+  //
+  // Both questions are real and neither alone answers both: a changed EPOCH
+  // means someone else's restart, which must always win regardless of any
+  // number on either side (numbers reset to 0 on a restart, so they cannot
+  // be compared). An UNCHANGED epoch means ordering is exactly what `seq`
+  // is for, so the live comparison every record already passes at entry is
+  // still correct after the await, no snapshot needed.
   if (isStale(record)) return;
   const beforeEpoch = shownEpoch;
-  const beforeSeq = shownSeq;
   if (record.state === "done" && record.counts.updated) await countRunning();
-  if (shownEpoch !== beforeEpoch || shownSeq !== beforeSeq) return;
+  if (shownEpoch !== beforeEpoch) return;
+  if (isStale(record)) return;
   shownEpoch = record.epoch;
   shownSeq = record.seq;
   renderPlugins(record);

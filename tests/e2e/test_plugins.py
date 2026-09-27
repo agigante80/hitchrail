@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 
 import pytest
-from playwright.async_api import Page, expect
+from playwright.async_api import APIResponse, Page, Route, expect
 
 from .conftest import Harness
 
@@ -509,14 +509,24 @@ async def test_a_restart_during_the_project_count_does_not_win_the_race(
 async def test_a_second_run_overtaking_during_the_project_count_wins(
     page: Page, server: Harness
 ) -> None:
-    """#316, pinned against task 134's code. A `done` record's own
-    `countRunning()` fetch is held open; while it is suspended, a second run
-    is started by ANOTHER client and reaches this page through the stream,
-    with no `await` of its own, and paints "Refreshing the marketplaces."
-    immediately. When the held fetch resolves, the first (now stale) record
-    must not overwrite what the second one already painted: the check that
-    stops it is not "is my epoch older", which this scenario alone shares
-    one epoch throughout, but "did anything paint while I was suspended"."""
+    """#316. A `done` record's own `countRunning()` fetch is held open; while
+    it is suspended, a second run is started by ANOTHER client and reaches
+    this page through the stream, with no `await` of its own, and paints
+    "Refreshing the marketplaces." immediately. When the held fetch
+    resolves, the first (now stale) record must not overwrite what the
+    second one already painted.
+
+    This does NOT pin task 134's snapshot formula specifically: within one
+    epoch a plain `isStale(record)` re-checked against the live state passes
+    it too, since the second run's seq is simply higher (round 1 of Phase 22
+    batch 2's review found this passing with 134's fix reverted to the
+    pre-134 code). What it guards is that SOME check runs again after the
+    await rather than none; the case only 134's fix (and no earlier version)
+    gets right is the cross-restart one in
+    `test_a_restart_during_the_project_count_does_not_win_the_race` above,
+    and the case 134's fix got wrong within one epoch is
+    `test_an_older_same_epoch_record_painted_during_the_held_count_must_not_win`
+    below."""
     server.seed_plugins([{"id": "alpha@m", "scope": "user"}])
     server.seed()
     await open_settings(page, server)
@@ -551,6 +561,159 @@ async def test_a_second_run_overtaking_during_the_project_count_wins(
 
     server.release_plugin("alpha@m")
     await expect(status).to_have_text("1 updated, 0 failed, 0 left alone.", timeout=15_000)
+
+
+async def test_an_older_same_epoch_record_painted_during_the_held_count_must_not_win(
+    page: Page, server: Harness
+) -> None:
+    """Round 1 of Phase 22 batch 2's review, the high on task 134's own fix.
+    A `done` record's `countRunning()` is held; while it is suspended, an
+    OLDER record (lower seq, same epoch, no await of its own) is answered
+    and paints. Task 134's snapshot check compared the live epoch and seq
+    against what was shown before the await, found them changed by that
+    older paint, and bailed, leaving the done record unpainted forever: the
+    button stayed disabled and nothing later corrected it, because the done
+    record was the run's last event.
+
+    Both records are synthetic, delivered through two plain GETs, because a
+    real run's own seq only ever advances by exactly one per broadcast: there
+    is no legitimate server state between "the last thing shown" and "the
+    next thing after it" to answer an older-but-still-newer GET with. What
+    matters is only that some record with a HIGHER seq than what is shown,
+    but LOWER than the suspended one, paints while it is suspended.
+
+    Fails on 76a5104 (task 134's snapshot compares beforeEpoch/beforeSeq
+    unconditionally: the older paint changes shownSeq, so the done record
+    reads itself as overtaken and returns without painting). Passes before
+    134 (#314) too: a plain `isStale(record)` re-checked live against
+    shownSeq correctly finds 2 not less than 1 and still paints, since both
+    records share one epoch, which was never the case 314 got wrong (that
+    was only the cross-restart one, still covered by
+    `test_a_restart_during_the_project_count_does_not_win_the_race` above).
+    It is 134's specific fix that regresses this, so this test's job is
+    solely to catch that regression, not to distinguish 134 from before it.
+    """
+    server.seed_plugins([{"id": "alpha@m", "scope": "user"}])
+    server.seed()
+    await open_settings(page, server)
+
+    epoch = "e2e-synthetic-epoch"
+    # The baseline: painted first so the done record's own pre-await
+    # snapshot is taken of THIS epoch, the same one the older record below
+    # shares. Skipping it would make the done record's very own arrival the
+    # epoch transition (idle's real epoch to this one), which the fix must
+    # treat as a restart, not as the within-epoch race under test.
+    baseline = {
+        "epoch": epoch,
+        "seq": 0,
+        "state": "running",
+        "started_at": 0,
+        "finished_at": None,
+        "outcomes": [],
+        "counts": None,
+        "code": None,
+        "message": None,
+    }
+    older = {
+        "epoch": epoch,
+        "seq": 1,
+        "state": "running",
+        "started_at": 0,
+        "finished_at": None,
+        "outcomes": [],
+        "counts": None,
+        "code": None,
+        "message": None,
+    }
+    newer_done = {
+        "epoch": epoch,
+        "seq": 2,
+        "state": "done",
+        "started_at": 0,
+        "finished_at": 1,
+        "outcomes": [
+            {
+                "plugin": "alpha@m",
+                "scope": "user",
+                "result": "updated",
+                "detail": None,
+                "approved_command": None,
+            }
+        ],
+        "counts": {"updated": 1, "failed": 0, "skipped": 0},
+        "code": None,
+        "message": None,
+    }
+
+    pending_gets: list[Route] = []
+
+    async def capture_get(route: Route) -> None:
+        if route.request.method == "GET":
+            pending_gets.append(route)
+        else:
+            await route.continue_()
+
+    held_count: list[tuple[Route, APIResponse]] = []
+
+    async def hold_count(route: Route) -> None:
+        response = await route.fetch()
+        held_count.append((route, response))
+
+    await page.route("**/api/plugins/update", capture_get)
+    await page.route("**/api/projects", hold_count)
+
+    # Paint the baseline first, so the done record's pre-await snapshot is
+    # taken of this epoch rather than of the real idle record's.
+    await page.evaluate("() => { window.__plugins.loadPlugins(); }")
+    for _ in range(100):
+        if pending_gets:
+            break
+        await page.wait_for_timeout(20)
+    assert pending_gets, "the baseline GET never reached the route, so this proves nothing"
+    await pending_gets.pop(0).fulfill(
+        status=200, content_type="application/json", body=json.dumps(baseline)
+    )
+    status = page.locator("[data-plugins-status]")
+    await expect(status).to_have_text("Refreshing the marketplaces.")
+
+    # The done record arrives next and its own countRunning() is what gets
+    # held: a real reconnect's GET, or the stream's own "plugins" event,
+    # would deliver it the same way onPluginRecord sees it either way.
+    await page.evaluate("() => { window.__plugins.loadPlugins(); }")
+    for _ in range(100):
+        if pending_gets:
+            break
+        await page.wait_for_timeout(20)
+    assert pending_gets, "the done record's GET never reached the route, so this proves nothing"
+    await pending_gets.pop(0).fulfill(
+        status=200, content_type="application/json", body=json.dumps(newer_done)
+    )
+
+    for _ in range(100):
+        if held_count:
+            break
+        await page.wait_for_timeout(20)
+    assert held_count, "the done record's countRunning() never reached the held route"
+
+    # The older, lower-seq record answered now and delivered with no await
+    # of its own: it paints immediately, ahead of the still-suspended done.
+    await page.evaluate("() => { window.__plugins.loadPlugins(); }")
+    for _ in range(100):
+        if pending_gets:
+            break
+        await page.wait_for_timeout(20)
+    assert pending_gets, "the second GET never reached the route, so this proves nothing"
+    await pending_gets.pop(0).fulfill(
+        status=200, content_type="application/json", body=json.dumps(older)
+    )
+    await expect(status).to_have_text("Refreshing the marketplaces.")
+
+    # Release the held countRunning(): the done record is still the newer
+    # one and must win, painting over the older record that overtook it.
+    count_route, count_response = held_count[0]
+    await count_route.fulfill(response=count_response)
+    await expect(status).to_have_text("1 updated, 0 failed, 0 left alone.")
+    await expect(page.locator("[data-plugins-update]")).to_be_enabled()
 
 
 async def test_visibility_regained_refreshes_a_run_the_stream_missed(
