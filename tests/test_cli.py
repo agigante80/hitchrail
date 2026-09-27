@@ -20,6 +20,7 @@ from hitchrail.cli import (
 )
 from hitchrail.config import Config, ConfigError, is_loopback_host
 from hitchrail.engine import Engine
+from hitchrail.server import create_app
 from support import make_config
 from test_plugins import FakeAgent, done, row
 
@@ -539,25 +540,47 @@ def test_main_threads_preflights_resolved_path_into_the_config(
     stubs `shutil.which` to already answer with an absolute path, so turning
     that line into a no-op passes every one of them; only reading which
     `Config` `Engine` actually received catches it.
+
+    #346, round 2 of batch 1's review: spying on `Engine` alone missed
+    `main()` keeping the pre-`replace` `Config` in a `raw` local and passing
+    `config=raw` to `create_app` instead of the threaded one, since `Engine`
+    still got the right object. `create_app` is spied on too, and the test
+    checks both that its `Config` carries the resolved path and that it is
+    the SAME object `Engine` received, so the two constructors cannot drift
+    onto two different `Config`s again.
     """
     (tmp_path / "vessel").mkdir()
     monkeypatch.setattr("shutil.which", lambda _n: "/opt/fake-agent")
     monkeypatch.setattr("uvicorn.run", lambda *a, **k: None)
 
     real_engine = Engine
-    captured: list[Config] = []
+    engine_configs: list[Config] = []
 
     def spy_engine(*, config: Config) -> object:
-        captured.append(config)
+        engine_configs.append(config)
         return real_engine(config=config)
 
     monkeypatch.setattr("hitchrail.cli.Engine", spy_engine)
 
+    real_create_app = create_app
+    app_configs: list[Config] = []
+
+    def spy_create_app(*, engine: object, config: Config, bus: object) -> object:
+        app_configs.append(config)
+        return real_create_app(engine=engine, config=config, bus=bus)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("hitchrail.cli.create_app", spy_create_app)
+
     code = main(["--root", f"main={tmp_path}", "--agent-binary", "fake-agent"])
 
     assert code == 0
-    assert captured, "Engine was never constructed"
-    assert captured[0].spawn_agent_binary == "/opt/fake-agent"
+    assert engine_configs, "Engine was never constructed"
+    assert app_configs, "create_app was never called"
+    assert engine_configs[0].spawn_agent_binary == "/opt/fake-agent"
+    assert app_configs[0].spawn_agent_binary == "/opt/fake-agent"
+    assert app_configs[0] is engine_configs[0], (
+        "create_app and Engine were built from two different Config objects"
+    )
 
 
 # -- #108: the CLI and Config ask the same question --------------------------

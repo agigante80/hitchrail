@@ -152,7 +152,7 @@ asks for, so they stay in this phase rather than going to Backlog.
 - [x] **Task 151, #345 (P2).** The `agent_binary` guard's allowlist names the
       exact expression read, not a whole function, so a raw spawn added in
       `cli.main` fails it.
-- [ ] **Task 152, #346 (P2).** `main()`'s resolved path test also checks the
+- [x] **Task 152, #346 (P2).** `main()`'s resolved path test also checks the
       `Config` that `create_app` receives, and that it is the one `Engine` got.
 
 ## Done looks like
