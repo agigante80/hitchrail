@@ -102,7 +102,7 @@ open from-review tickets on it come with it.
 
 ### Batch 3: what the update prints, tasks 139 to 142
 
-- [ ] **Task 139, #305 (P2).** `_shown` cuts the raw text and escapes after,
+- [x] **Task 139, #305 (P2).** `_shown` cuts the raw text and escapes after,
       with a visible cut marker, and its docstring is rewritten to match.
 - [ ] **Task 140, #306 (P2).** The escaping test's input has no `\r`, so it
       fails with escaping reverted. Written after task 139.

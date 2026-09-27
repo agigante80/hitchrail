@@ -867,6 +867,10 @@ _SCOPE = re.compile(r"\A[a-z]{1,32}\Z")
 # What a failure detail may carry to a phone screen.
 _DETAIL_LIMIT = 240
 
+# Appended when `_shown` cuts vendor text, so a shortened record reads as one
+# rather than as the vendor's whole answer (#305).
+_CUT_MARKER = "(truncated)"
+
 PluginResult = Literal["updated", "failed", "skipped"]
 PluginFailure = Literal["agent_missing", "marketplace_refresh_failed", "plugins_unreadable"]
 PluginRunner = Callable[[list[str], float], "subprocess.CompletedProcess[str]"]
@@ -1050,13 +1054,24 @@ def _detail(done: subprocess.CompletedProcess[str]) -> str:
 
 
 def _shown(text: str) -> str:
-    """Vendor text made safe to print, then bounded, in that order.
+    """Vendor text cut to length, then made safe to print, in that order.
 
     It reaches a terminal under `update-plugins` and a phone screen through
     the route, and the approved command is the only record of what `-y` ran:
     a `\r` and an erase-line sequence in it would print something harmless
     over it, and a `\n` would forge a second outcome line. `display_name` is
-    the escaping the project already trusts for names it reports. Escaping
-    first means the cut can never split an escape sequence it left raw.
+    the escaping the project already trusts for names it reports.
+
+    Cutting first bounds the vendor's own text, not what escaping turns it
+    into (#305). Escaping turns each control character into six (`\t`
+    becomes `\u0009`), so escaping before the cut let a marketplace pad its
+    declared command with controls and push the part that mattered past a
+    fixed budget six times sooner than an honest command would. Escaping the
+    already-cut text can only lengthen it, never split a raw escape
+    sequence, because none is left raw to split. `_CUT_MARKER` says a record
+    was shortened, so it reads as a cut rather than as the vendor's whole
+    answer.
     """
-    return display_name(text)[:_DETAIL_LIMIT]
+    if len(text) <= _DETAIL_LIMIT:
+        return display_name(text)
+    return display_name(text[:_DETAIL_LIMIT]) + _CUT_MARKER

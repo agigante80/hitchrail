@@ -1039,7 +1039,11 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # now two things, the split is a `claude_ipc` package, and that is
         # Phase 18's argument rather than this phase's. The last 16 lines are
         # round 1 of its review: vendor text escaped before it is printed.
-        "claude_ipc.py": 1062,
+        # 1062 to 1077 for batch 3 task 139, #305: `_shown` now cuts the raw
+        # text and escapes after, so the 240 limit bounds the vendor's own
+        # text rather than what escaping turns it into. The growth is mostly
+        # the docstring saying why the order flipped.
+        "claude_ipc.py": 1077,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.
