@@ -108,7 +108,7 @@ open from-review tickets on it come with it.
       fails with escaping reverted. Written after task 139.
 - [x] **Task 141, #303 (P3).** `_read_listing` and `_approved_command` catch
       `RecursionError` beside `ValueError`, and report `plugins_unreadable`.
-- [ ] **Task 142, #300 (P3).** A plugin listed twice is reported as skipped,
+- [x] **Task 142, #300 (P3).** A plugin listed twice is reported as skipped,
       "listed twice", so the count covers every row, as the comment claims.
 
 ### Batch 4: processes and the test seams, tasks 143 to 147

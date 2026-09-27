@@ -245,7 +245,10 @@ does not replay.
 `updated` means the agent's update exited zero, which it also does for a
 plugin that was already current. A plugin at any scope other than `user` is
 `skipped` with its scope, since it belongs to a project folder the agent's
-list does not name. `detail` and `approved_command` are the agent's own words,
+list does not name. A `user` scope plugin the listing names more than once is
+also `skipped`, with detail `listed twice`, after the first is updated: the
+count then covers every row the listing returned, not only the ones that
+updated. `detail` and `approved_command` are the agent's own words,
 with control characters escaped and cut to 240 characters: render them as
 text. `approved_command` is what `-y` approved without showing it, when the
 agent reports it; see `SECURITY.md`. Running sessions keep the old versions

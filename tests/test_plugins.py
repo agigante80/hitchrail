@@ -177,11 +177,19 @@ def test_other_scopes_are_counted_and_never_updated() -> None:
     ]
 
 
-def test_a_genuine_user_duplicate_is_updated_and_reported_once() -> None:
+def test_a_genuine_user_duplicate_is_updated_once_and_reported_as_skipped() -> None:
+    """#300: dropping the repeat left the outcomes short of what the listing
+    returned, so a duplicate is spawned once but still gets its own row, as
+    `skipped`, and the count covers every row."""
     agent = FakeAgent([row("a@m"), row("b@m"), row("a@m")])
     outcomes = run(agent)
     assert agent.updated == ["a@m", "b@m"]
-    assert [o.plugin for o in outcomes] == ["a@m", "b@m"]
+    assert results(outcomes) == [
+        ("a@m", "user", "updated"),
+        ("b@m", "user", "updated"),
+        ("a@m", "user", "skipped"),
+    ]
+    assert outcomes[2].detail == "listed twice"
 
 
 # -- one plugin fails ----------------------------------------------------------

@@ -844,8 +844,9 @@ def session_url(
 # per project for the same id, at four different versions. Updating them from
 # this process's working directory updates the wrong project or none, and
 # collapsing them hides installs. `synced` is not a value `-s` accepts, and
-# `managed` is an administrator's. Every such row is reported as skipped, so the
-# count covers every row the listing returned.
+# `managed` is an administrator's. Every such row is reported as skipped, and
+# so is a `user` row already seen once, so the count covers every row the
+# listing returned (#300).
 
 _UPDATABLE_SCOPE = "user"
 
@@ -968,7 +969,10 @@ def update_plugins(
         if scope != _UPDATABLE_SCOPE:
             outcome = PluginOutcome(plugin, scope, "skipped", f"{scope} scope is not updated")
         elif plugin in seen:
-            continue
+            # Dropping this row silently left the count short of what the
+            # listing actually returned (#300): the comment above promises
+            # every row is covered, and a duplicate is still a row.
+            outcome = PluginOutcome(plugin, scope, "skipped", "listed twice")
         else:
             seen.add(plugin)
             outcome = _update_one(run, binary, plugin)

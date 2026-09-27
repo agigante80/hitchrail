@@ -1047,7 +1047,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # `_approved_command` catch `RecursionError` beside `ValueError`,
         # since deeply nested `--json` output blows the parser's own stack
         # rather than raising the error they already handled.
-        "claude_ipc.py": 1083,
+        # 1083 to 1087 for task 142, #300: a `user` scope plugin the listing
+        # names twice is reported `skipped`, detail `listed twice`, instead
+        # of being dropped, so the outcome count covers every row returned.
+        "claude_ipc.py": 1087,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.
