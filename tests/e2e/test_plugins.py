@@ -503,3 +503,50 @@ async def test_a_restart_during_the_project_count_does_not_win_the_race(
     await page.wait_for_timeout(hold_ms)
     await expect(status).to_have_text("Not run since this server started.")
     await expect(page.locator("[data-plugins-update]")).to_be_enabled()
+
+
+async def test_a_second_run_overtaking_during_the_project_count_wins(
+    page: Page, server: Harness
+) -> None:
+    """#316, pinned against task 134's code. A `done` record's own
+    `countRunning()` fetch is held open; while it is suspended, a second run
+    is started by ANOTHER client and reaches this page through the stream,
+    with no `await` of its own, and paints "Refreshing the marketplaces."
+    immediately. When the held fetch resolves, the first (now stale) record
+    must not overwrite what the second one already painted: the check that
+    stops it is not "is my epoch older", which this scenario alone shares
+    one epoch throughout, but "did anything paint while I was suspended"."""
+    server.seed_plugins([{"id": "alpha@m", "scope": "user"}])
+    server.seed()
+    await open_settings(page, server)
+
+    held: list[object] = []
+
+    async def hold(route):  # type: ignore[no-untyped-def]
+        response = await route.fetch()
+        held.append(response)
+        await page.wait_for_timeout(2000)
+        await route.fulfill(response=response)
+
+    await page.route("**/api/projects", hold)
+    await page.locator("[data-plugins-update]").click()
+    server.release_plugin("alpha@m")
+    for _ in range(150):
+        if held:
+            break
+        await page.wait_for_timeout(20)
+    assert held, "the done record's countRunning() never reached the held route"
+
+    other = await page.context.new_page()
+    await other.goto(f"{server.base}/settings")
+    server.reset_plugin_releases()
+    await other.locator("[data-plugins-update]").click()
+
+    status = page.locator("[data-plugins-status]")
+    await expect(status).to_have_text("Refreshing the marketplaces.")
+
+    await page.wait_for_timeout(2500)  # past the held countRunning()'s delivery
+    await expect(status).to_have_text("Refreshing the marketplaces.")
+
+    server.release_plugin("alpha@m")
+    await expect(status).to_have_text("1 updated, 0 failed, 0 left alone.", timeout=15_000)

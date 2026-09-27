@@ -90,7 +90,7 @@ open from-review tickets on it come with it.
       wrote. The comment says why the owner exists.
 - [x] **Task 134, #314 (P2).** `onPluginRecord` compares against the epoch and
       sequence captured before its `await`, not the live globals after it.
-- [ ] **Task 135, #316 (P3).** A test pins the second `isStale()` check,
+- [x] **Task 135, #316 (P3).** A test pins the second `isStale()` check,
       written against task 134's code, not before it.
 - [ ] **Task 136, #313 (P3).** A `visibilitychange` refresh, going through
       the same staleness check as every other path that paints a record.
