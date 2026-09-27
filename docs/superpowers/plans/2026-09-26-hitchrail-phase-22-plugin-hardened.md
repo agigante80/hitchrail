@@ -106,7 +106,7 @@ open from-review tickets on it come with it.
       with a visible cut marker, and its docstring is rewritten to match.
 - [x] **Task 140, #306 (P2).** The escaping test's input has no `\r`, so it
       fails with escaping reverted. Written after task 139.
-- [ ] **Task 141, #303 (P3).** `_read_listing` and `_approved_command` catch
+- [x] **Task 141, #303 (P3).** `_read_listing` and `_approved_command` catch
       `RecursionError` beside `ValueError`, and report `plugins_unreadable`.
 - [ ] **Task 142, #300 (P3).** A plugin listed twice is reported as skipped,
       "listed twice", so the count covers every row, as the comment claims.

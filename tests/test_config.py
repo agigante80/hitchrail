@@ -1043,7 +1043,11 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # text and escapes after, so the 240 limit bounds the vendor's own
         # text rather than what escaping turns it into. The growth is mostly
         # the docstring saying why the order flipped.
-        "claude_ipc.py": 1077,
+        # 1077 to 1083 for task 141, #303: `_read_listing` and
+        # `_approved_command` catch `RecursionError` beside `ValueError`,
+        # since deeply nested `--json` output blows the parser's own stack
+        # rather than raising the error they already handled.
+        "claude_ipc.py": 1083,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.

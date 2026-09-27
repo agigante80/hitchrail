@@ -1013,7 +1013,11 @@ def _read_listing(text: str) -> list[tuple[str, str]] | None:
     """Every row as `(id, scope)`, or `None` if ANY row is not understood."""
     try:
         raw = json.loads(text)
-    except ValueError:
+    except (ValueError, RecursionError):
+        # Deeply nested input, `"[" * 100000`, blows the parser's own stack
+        # rather than raising ValueError (#303): the listing is exactly as
+        # unreadable, and reporting it any other way would surface a
+        # traceback where a caller expects `plugins_unreadable`.
         return None
     if not isinstance(raw, list):
         return None
@@ -1036,7 +1040,9 @@ def _approved_command(stdout: str) -> str | None:
     for line in stdout.splitlines():
         try:
             parsed = json.loads(line)
-        except ValueError:
+        except (ValueError, RecursionError):
+            # Same hazard as `_read_listing` (#303), on a line of the
+            # vendor's `--json` update output rather than the listing.
             continue
         shown = parsed.get("shownCommand") if isinstance(parsed, dict) else None
         command = shown.get("command") if isinstance(shown, dict) else None

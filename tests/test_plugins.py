@@ -257,6 +257,9 @@ def test_a_hung_refresh_updates_nothing() -> None:
         # One good row beside a bad one is still a listing this code does not
         # understand: updating the subset it could parse is the fail open.
         json.dumps([row("a@m"), {"name": "b"}]),
+        # Deep enough to blow the parser's own stack rather than raise
+        # ValueError (#303): the listing is exactly as unreadable.
+        "[" * 100_000,
     ],
     ids=[
         "text",
@@ -267,6 +270,7 @@ def test_a_hung_refresh_updates_nothing() -> None:
         "no-scope",
         "strings",
         "one-bad-row",
+        "deeply-nested",
     ],
 )
 def test_an_unreadable_listing_updates_nothing(listing: str) -> None:
@@ -359,6 +363,9 @@ def test_the_command_y_approved_is_carried_in_the_outcome() -> None:
         "{not json",
         json.dumps({"shownCommand": 7}),
         json.dumps([1]),
+        # Deep enough to blow the parser's own stack (#303), on a line of
+        # the update's own `--json` output rather than the listing.
+        "[" * 100_000,
     ],
 )
 def test_an_update_without_that_field_is_still_updated(stdout: str) -> None:
