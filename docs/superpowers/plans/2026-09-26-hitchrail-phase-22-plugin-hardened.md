@@ -128,6 +128,17 @@ candidate fix is an epoch the server mints with an order, not a fifth guess.
 - [x] **Task 142, #300 (P3).** A plugin listed twice is reported as skipped,
       "listed twice", so the count covers every row, as the comment claims.
 
+### Batch 3b: batch 3's review, task 156
+
+Added on 2026-09-27. Batch 3's loop stopped clean after round 2: round 1's
+one medium (the cut before escape pinned in the branch that actually cuts)
+was fixed in `190b93e`, and round 2 found nothing in it. Its lows went to
+Backlog as #352 to #357; one is a crash on the path this phase hardens, so it
+stays here.
+
+- [ ] **Task 156, #351 (P2).** Output that is not valid UTF-8 is reported as
+      unreadable rather than crashing the update into `internal_error`.
+
 ### Batch 4: processes and the test seams, tasks 143 to 147
 
 - [x] **Task 143, #299 (P2).** `plugin_runner` and `tmux.py`'s runner start
