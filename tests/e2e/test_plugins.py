@@ -8,6 +8,8 @@ page reads when it joins late, and what the page draws from each.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from playwright.async_api import Page, expect
 
@@ -334,3 +336,119 @@ async def test_a_page_left_open_across_a_restart_follows_the_new_server(
     server.release_plugin("alpha@m")
     await expect(status).to_have_text("1 updated, 0 failed, 0 left alone.")
     await expect(page.locator("[data-plugins-update]")).to_be_enabled()
+
+
+async def test_a_settings_refusal_survives_an_interleaved_plugin_success(
+    page: Page, server: Harness, tmp_path: Path
+) -> None:
+    """#315. `settle()` used to be one flag shared by both flows: a plugin
+    GET landing in the gap between a refused settings PATCH and that PATCH's
+    own repainting GET consumed the "one repaint is owed" flag believing
+    itself the owed one, and the settings GET that then arrived found
+    nothing left to consume, hit the unconditional clearing branch, and
+    wiped the refusal before anyone read it (reproduced from round 3 of
+    Phase 21's batch 2 review). The state directory made unwritable is
+    #256's own refusal; holding the settings repaint's GET open while a real
+    plugin GET succeeds in the gap is the interleaving; the owner recorded on
+    the strip is what stops the plugin's success from clearing it."""
+    server.seed_plugins([{"id": "alpha@m", "scope": "user"}])
+    state = tmp_path / "unwritable"
+    state.mkdir()
+    server.seed(state_path=state / "state.toml")
+    state.chmod(0o500)
+    try:
+        await open_settings(page, server)
+        box = page.locator('[data-root-toggle="main"]')
+        await expect(box).to_be_checked()
+
+        held: list[object] = []
+
+        async def hold(route):  # type: ignore[no-untyped-def]
+            if route.request.method == "GET":
+                response = await route.fetch()
+                held.append(response)
+                await page.wait_for_timeout(1500)
+                await route.fulfill(response=response)
+            else:
+                await route.continue_()
+
+        await page.route("**/api/config", hold)
+        # The PATCH fails (503, the directory cannot be written), then
+        # `toggle`'s own repainting GET is what gets held.
+        await box.click()
+        note = page.locator("[data-note]")
+        await expect(note).to_contain_text("Not changed.")
+
+        for _ in range(100):
+            if held:
+                break
+            await page.wait_for_timeout(20)
+        assert held, "the settings repaint's GET was never held, so this proves nothing"
+
+        # A genuinely successful plugin request, landing while the settings
+        # repaint is still suspended: its own settle() must not be the one
+        # that clears a strip the settings flow still owns.
+        await page.evaluate("() => window.__plugins.loadPlugins()")
+        await expect(note).to_contain_text("Not changed.")
+
+        await page.wait_for_timeout(2000)  # past the held GET's delivery
+        await expect(note).to_contain_text("Not changed.")
+        await expect(box).to_be_checked()
+    finally:
+        state.chmod(0o700)
+
+
+async def test_a_plugin_refusal_survives_an_interleaved_settings_success(
+    page: Page, server: Harness
+) -> None:
+    """#315, the reverse of the case above. A plugin POST refused because a
+    run is already going sets its own refusal and is owed a repaint from its
+    own GET; an unrelated settings GET succeeding in that gap must not
+    settle a strip the plugin flow still owns."""
+    server.seed_plugins([{"id": "alpha@m", "scope": "user"}])
+    server.seed()
+    await open_settings(page, server)
+    other = await page.context.new_page()
+    await other.goto(f"{server.base}/settings")
+
+    await page.locator("[data-plugins-update]").click()
+    await expect(page.locator("[data-plugins-status]")).to_have_text(
+        "Refreshing the marketplaces."
+    )
+
+    held: list[object] = []
+
+    async def hold(route):  # type: ignore[no-untyped-def]
+        if route.request.method == "GET":
+            response = await route.fetch()
+            held.append(response)
+            await other.wait_for_timeout(1500)
+            await route.fulfill(response=response)
+        else:
+            await route.continue_()
+
+    await other.route("**/api/plugins/update", hold)
+    await other.evaluate(
+        "() => document.querySelector('[data-plugins-update]').disabled = false"
+    )
+    # The POST is refused (a run is already going), then `startRun`'s own
+    # repainting GET is what gets held.
+    await other.locator("[data-plugins-update]").click()
+    note = other.locator("[data-note]")
+    await expect(note).to_contain_text("a plugin update is already running")
+
+    for _ in range(100):
+        if held:
+            break
+        await other.wait_for_timeout(20)
+    assert held, "the plugin repaint's GET was never held, so this proves nothing"
+
+    # A genuinely successful settings request, landing while the plugin
+    # repaint is still suspended.
+    await other.evaluate("() => window.__settings.refresh()")
+    await expect(note).to_contain_text("a plugin update is already running")
+
+    await other.wait_for_timeout(2000)  # past the held GET's delivery
+    await expect(note).to_contain_text("a plugin update is already running")
+
+    server.release_plugin("alpha@m")

@@ -85,7 +85,7 @@ open from-review tickets on it come with it.
 
 ### Batch 2: the settings strip and the run display, tasks 133 to 138
 
-- [ ] **Task 133, #315 (P1).** The strip's `note` and `settle` get an owner,
+- [x] **Task 133, #315 (P1).** The strip's `note` and `settle` get an owner,
       so the plugin flow cannot settle away a refusal the settings flow
       wrote. The comment says why the owner exists.
 - [ ] **Task 134, #314 (P2).** `onPluginRecord` compares against the epoch and

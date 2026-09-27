@@ -28,10 +28,28 @@ import { startPlugins } from "/plugins.js";
 
 const $ = (selector) => document.querySelector(selector);
 
-function note(message) {
+/* #315. WHO wrote the text currently on the strip, "settings" or "plugins",
+   or null when it is empty. The strip is one DOM element shared by two
+   independent async flows (this module's own `/api/config` calls, and
+   plugins.js's `/api/plugins/update` calls, wired together at the bottom of
+   this file), and neither flow's generation counter guards the OTHER flow's
+   right to clear it: a settings refusal sets `keepNote` expecting its own
+   follow up GET to consume it, but if a plugins.js request resolves first in
+   that async gap, its unconditional `settle()` used to consume the flag
+   believing itself the owed repaint, and the settings GET that then arrived
+   found nothing left to consume and wiped the refusal before anyone read it
+   (round 3 of Phase 21's batch 2 review, reproduced twice). Recording the
+   owner on every write, and checking it before any clear, is what stops that:
+   a flow's success may only settle a strip it owns or that is already empty.
+   If a third async writer is ever added, it must go through `note()` and
+   `settle()` like the other two, or this stops meaning anything. */
+let noteOwner = null;
+
+function note(message, owner) {
   const strip = $("[data-note]");
   strip.textContent = message;
   strip.style.display = message ? "block" : "none";
+  if (message) noteOwner = owner;
 }
 
 /* One request at a time and the last answer wins, as logs.js does: a slow
@@ -48,11 +66,18 @@ let generation = 0;
    makes. */
 let keepNote = false;
 
-// A success clears the strip unless a refusal is still owed its one repaint.
+// A success clears the strip unless a refusal is still owed its one repaint,
+// AND unless the strip is currently owned by the other flow (#315): a flow
+// settling its own request must never take away the other flow's message,
+// whether that message is a kept refusal or one just painted this instant.
 // Shared with plugins.js so both sections keep the same rule on one strip.
-function settle() {
+function settle(owner) {
+  if (noteOwner !== null && noteOwner !== owner) return;
   if (keepNote) keepNote = false;
-  else note("");
+  else {
+    note("", owner);
+    noteOwner = null;
+  }
 }
 
 async function call(method, body) {
@@ -69,7 +94,7 @@ async function call(method, body) {
     });
   } catch {
     if (mine === generation) {
-      note("Not connected. Retrying is up to you: nothing was changed.");
+      note("Not connected. Retrying is up to you: nothing was changed.", "settings");
       keepNote = true;
     }
     return null;
@@ -90,11 +115,11 @@ async function call(method, body) {
     // message is for a person; both are shown, because a person reading
     // `operator_pinned` on a phone still deserves the sentence.
     const message = parsed?.message ?? "The answer could not be read.";
-    note(`Not changed. ${message}`);
+    note(`Not changed. ${message}`, "settings");
     keepNote = true;
     return null;
   }
-  settle();
+  settle("settings");
   return parsed;
 }
 
@@ -182,7 +207,7 @@ async function saveStop() {
   const seconds = Number(input.value);
   const ceiling = Number(input.max);
   if (!Number.isInteger(seconds) || seconds < 1 || seconds > ceiling) {
-    note(`Not changed. The wait is a whole number of seconds, 1 to ${ceiling}.`);
+    note(`Not changed. The wait is a whole number of seconds, 1 to ${ceiling}.`, "settings");
     keepNote = true;
     return;
   }
@@ -262,5 +287,11 @@ $("[data-stop-timeout]").addEventListener("keydown", (event) => {
 
 window.__settings = { refresh };
 refresh();
-// #297. Its own module: it shares the note strip and nothing else.
-startPlugins({ note, keep: (on) => (keepNote = on), settle });
+// #297. Its own module: it shares the note strip and nothing else. Its
+// `note` and `settle` are bound to the "plugins" owner (#315), so its own
+// success can never clear a refusal this module wrote, and vice versa.
+startPlugins({
+  note: (message) => note(message, "plugins"),
+  keep: (on) => (keepNote = on),
+  settle: () => settle("plugins"),
+});
