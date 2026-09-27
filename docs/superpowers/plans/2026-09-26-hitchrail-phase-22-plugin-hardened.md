@@ -100,6 +100,23 @@ open from-review tickets on it come with it.
       never assign `innerHTML`, reading structure rather than grepping for a
       string its own explanation contains.
 
+### Batch 2b: batch 2's round 3 findings, tasks 153 to 155
+
+Added on 2026-09-27. Batch 2's review loop stopped on its trip wire: round 2
+found a defect in round 1's fix (`8967654`) and round 3 found defects in
+round 2's (`aad020c`, `18397c7`). What round 3 found is filed rather than
+fixed as a fourth round, and #348 waits on a decision: the page has now
+guessed wrong four times at which of two unordered epochs is newer, so the
+candidate fix is an epoch the server mints with an order, not a fifth guess.
+
+- [ ] **Task 153, #348 (P1).** A restart during a page load no longer lets
+      the old process's record retire the live epoch. Unreleased regression
+      from `aad020c`; decide ordered epochs or the narrow bail first.
+- [ ] **Task 154, #349 (P2).** The owner guard test waits for the held
+      settings response to be delivered before asserting.
+- [ ] **Task 155, #350 (P3).** The residual case comment goes or is rewritten
+      with task 153.
+
 ### Batch 3: what the update prints, tasks 139 to 142
 
 - [x] **Task 139, #305 (P2).** `_shown` cuts the raw text and escapes after,
