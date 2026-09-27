@@ -879,3 +879,266 @@ async def test_internal_error_reads_as_one_sentence(page: Page, server: Harness)
         "The update stopped on an error in Hitchrail after 1 plugin, listed "
         "below; the rest were not updated. The journal has the details."
     )
+
+
+def _synthetic_record(epoch: str, seq: int, state: str, **extra: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "epoch": epoch,
+        "seq": seq,
+        "state": state,
+        "started_at": 0,
+        "finished_at": None,
+        "outcomes": [],
+        "counts": None,
+        "code": None,
+        "message": None,
+    }
+    base.update(extra)
+    return base
+
+
+_DONE_UPDATED_ONE = {
+    "counts": {"updated": 1, "failed": 0, "skipped": 0},
+    "outcomes": [
+        {
+            "plugin": "alpha@m",
+            "scope": "user",
+            "result": "updated",
+            "detail": None,
+            "approved_command": None,
+        }
+    ],
+}
+
+
+async def test_a_first_load_done_record_still_wins_over_an_older_same_epoch_answer(
+    page: Page, server: Harness
+) -> None:
+    """Round 2 of the #314 review. `onPluginRecord`'s post await check used
+    to compare the live epoch against a snapshot taken before the await
+    (`shownEpoch !== beforeEpoch`), which reads as "someone else's restart,
+    I lose" even when the epoch that changed is this record's OWN, freshly
+    established while it was suspended. Here the very first record this page
+    ever sees is `done` and suspends in `countRunning()` with `shownEpoch`
+    still `null`; an older answer of that SAME epoch, from a concurrent GET,
+    paints first and sets `shownEpoch`; the done record resumes, finds
+    `shownEpoch` no longer the `null` it started from, and bails, though it
+    is plainly the newer of the two. Fails on HEAD at the final assertion:
+    the screen stays on "Refreshing the marketplaces." with the button
+    disabled instead of showing the done record's own outcome."""
+    server.seed_plugins([{"id": "alpha@m", "scope": "user"}])
+    server.seed()
+
+    pending_gets: list[Route] = []
+
+    async def capture_get(route: Route) -> None:
+        if route.request.method == "GET":
+            pending_gets.append(route)
+        else:
+            await route.continue_()
+
+    held_count: list[tuple[Route, APIResponse]] = []
+
+    async def hold_count(route: Route) -> None:
+        response = await route.fetch()
+        held_count.append((route, response))
+
+    await page.route("**/api/plugins/update", capture_get)
+    await page.route("**/api/projects", hold_count)
+
+    await page.goto(f"{server.base}/settings")
+    for _ in range(100):
+        if pending_gets:
+            break
+        await page.wait_for_timeout(20)
+    assert pending_gets, "the initial load's GET never reached the route"
+
+    epoch = "e2e-first-load-epoch"
+    # THE FIRST record this page ever processes: `shownEpoch` is `null`, not
+    # merely a different real epoch, when this suspends below.
+    await pending_gets.pop(0).fulfill(
+        status=200,
+        content_type="application/json",
+        body=json.dumps(_synthetic_record(epoch, 5, "done", **_DONE_UPDATED_ONE)),
+    )
+    for _ in range(100):
+        if held_count:
+            break
+        await page.wait_for_timeout(20)
+    assert held_count, "the done record's countRunning() never reached the held route"
+
+    # An older, but not stale, answer of the SAME epoch, delivered with no
+    # await of its own: it is what establishes `shownEpoch` for the first
+    # time, while the done record above is still suspended.
+    await page.evaluate("() => { window.__plugins.loadPlugins(); }")
+    for _ in range(100):
+        if pending_gets:
+            break
+        await page.wait_for_timeout(20)
+    assert pending_gets, "the older answer's GET never reached the route"
+    await pending_gets.pop(0).fulfill(
+        status=200,
+        content_type="application/json",
+        body=json.dumps(_synthetic_record(epoch, 3, "running")),
+    )
+    status = page.locator("[data-plugins-status]")
+    await expect(status).to_have_text("Refreshing the marketplaces.")
+
+    # Release the held countRunning(): the done record is still the newer of
+    # the two, epoch unchanged since it started, and must win.
+    count_route, count_response = held_count[0]
+    await count_route.fulfill(response=count_response)
+    await expect(status).to_have_text("1 updated, 0 failed, 0 left alone.")
+    await expect(page.locator("[data-plugins-update]")).to_be_enabled()
+
+
+async def test_a_reconnect_done_record_still_wins_over_an_older_answer_after_a_restart(
+    page: Page, server: Harness
+) -> None:
+    """The same case as above, from a genuine prior epoch rather than a
+    `null` one: the page has already shown a real epoch, the server
+    restarts, and the reconnect's own done record suspends in
+    `countRunning()` while an older, same-epoch answer paints first. HEAD's
+    `shownEpoch !== beforeEpoch` check bails the same way whether the epoch
+    it started from was `null` or a real one that has already been shown.
+    Fails on HEAD at the final assertion, as above."""
+    server.seed_plugins([{"id": "alpha@m", "scope": "user"}])
+    server.seed()
+    await open_settings(page, server)
+
+    pending_gets: list[Route] = []
+
+    async def capture_get(route: Route) -> None:
+        if route.request.method == "GET":
+            pending_gets.append(route)
+        else:
+            await route.continue_()
+
+    held_count: list[tuple[Route, APIResponse]] = []
+
+    async def hold_count(route: Route) -> None:
+        response = await route.fetch()
+        held_count.append((route, response))
+
+    await page.route("**/api/plugins/update", capture_get)
+    await page.route("**/api/projects", hold_count)
+
+    server.restart()
+    for _ in range(750):
+        if pending_gets:
+            break
+        await page.wait_for_timeout(20)
+    assert pending_gets, "the reconnect's own GET never reached the route"
+
+    epoch = "e2e-restarted-epoch"
+    await pending_gets.pop(0).fulfill(
+        status=200,
+        content_type="application/json",
+        body=json.dumps(_synthetic_record(epoch, 5, "done", **_DONE_UPDATED_ONE)),
+    )
+    for _ in range(100):
+        if held_count:
+            break
+        await page.wait_for_timeout(20)
+    assert held_count, "the done record's countRunning() never reached the held route"
+
+    await page.evaluate("() => { window.__plugins.loadPlugins(); }")
+    for _ in range(100):
+        if pending_gets:
+            break
+        await page.wait_for_timeout(20)
+    assert pending_gets, "the older answer's GET never reached the route"
+    await pending_gets.pop(0).fulfill(
+        status=200,
+        content_type="application/json",
+        body=json.dumps(_synthetic_record(epoch, 3, "running")),
+    )
+    status = page.locator("[data-plugins-status]")
+    await expect(status).to_have_text("Refreshing the marketplaces.")
+
+    count_route, count_response = held_count[0]
+    await count_route.fulfill(response=count_response)
+    await expect(status).to_have_text("1 updated, 0 failed, 0 left alone.")
+    await expect(page.locator("[data-plugins-update]")).to_be_enabled()
+
+
+async def test_a_late_record_of_a_retired_epoch_does_not_revive_it(
+    page: Page, server: Harness
+) -> None:
+    """ABA, out of scope for #314 until now. `isStale`'s old rule, "a
+    different epoch always wins", assumed a different epoch only ever means
+    a NEWER one. A LATE answer of an epoch that has already been replaced is
+    different from what is shown too, and the old rule let it win right
+    back over the epoch that is actually live, along with a second record of
+    that same dead epoch that had been sitting suspended in `countRunning()`
+    the whole time. Fails on HEAD right after the late record: the screen
+    reads "0 updated, 0 failed, 1 left alone." (the dead epoch's own record)
+    instead of staying on the live epoch's "Refreshing the marketplaces."."""
+    server.seed_plugins([{"id": "alpha@m", "scope": "user"}])
+    server.seed()
+
+    pending_gets: list[Route] = []
+
+    async def capture_get(route: Route) -> None:
+        if route.request.method == "GET":
+            pending_gets.append(route)
+        else:
+            await route.continue_()
+
+    held_count: list[tuple[Route, APIResponse]] = []
+
+    async def hold_count(route: Route) -> None:
+        response = await route.fetch()
+        held_count.append((route, response))
+
+    await page.route("**/api/plugins/update", capture_get)
+    await page.route("**/api/projects", hold_count)
+
+    async def fulfill_next(body: dict[str, object]) -> None:
+        for _ in range(100):
+            if pending_gets:
+                break
+            await page.wait_for_timeout(20)
+        assert pending_gets, "a GET never reached the route"
+        await pending_gets.pop(0).fulfill(
+            status=200, content_type="application/json", body=json.dumps(body)
+        )
+
+    await page.goto(f"{server.base}/settings")
+    # Establishes E1 as `shownEpoch`.
+    await fulfill_next(_synthetic_record("e1", 0, "running"))
+    status = page.locator("[data-plugins-status]")
+    await expect(status).to_have_text("Refreshing the marketplaces.")
+
+    # An E1 record that sits suspended in countRunning() for the rest of the
+    # test: released only at the very end.
+    await page.evaluate("() => { window.__plugins.loadPlugins(); }")
+    await fulfill_next(_synthetic_record("e1", 10, "done", **_DONE_UPDATED_ONE))
+    for _ in range(100):
+        if held_count:
+            break
+        await page.wait_for_timeout(20)
+    assert held_count, "the awaiting E1 record's countRunning() never reached the held route"
+
+    # E2 replaces E1 on screen: a genuine, newer epoch, which retires E1.
+    await page.evaluate("() => { window.__plugins.loadPlugins(); }")
+    await fulfill_next(_synthetic_record("e2", 0, "running"))
+    await expect(status).to_have_text("Refreshing the marketplaces.")
+
+    # A LATE E1 record, from before the E1 to E2 transition, delivered only
+    # now. Its own outcome ("1 left alone") is distinct from anything E2 has
+    # shown, so painting it is unambiguous.
+    await page.evaluate("() => { window.__plugins.loadPlugins(); }")
+    await fulfill_next(
+        _synthetic_record(
+            "e1", 5, "done", counts={"updated": 0, "failed": 0, "skipped": 1}
+        )
+    )
+    await expect(status).to_have_text("Refreshing the marketplaces.")
+
+    # Release the awaiting E1 record from the start: retired, it must not
+    # revive E1 either, whatever `seq` it carries.
+    count_route, count_response = held_count[0]
+    await count_route.fulfill(response=count_response)
+    await expect(status).to_have_text("Refreshing the marketplaces.")
+    await expect(page.locator("[data-plugins-update]")).to_be_disabled()

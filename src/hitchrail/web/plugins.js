@@ -38,6 +38,10 @@ const PLUGIN_FAILURES = {
 
 let shownEpoch = null;
 let shownSeq = -1;
+// Every epoch a newer one has ever painted over. Retirement is permanent:
+// nothing revives an epoch once replaced, which is what closes the ABA gap
+// (see `isStale` below) a plain "different epoch always wins" left open.
+const retiredEpochs = new Set();
 let runningSessions = 0;
 let strip = { note: () => {}, keep: () => {}, settle: () => {} };
 
@@ -118,46 +122,59 @@ async function countRunning() {
   }
 }
 
-// Older only within one server process: `seq` starts at 0 again on a
-// restart, and a page left open across it would otherwise drop every record
-// of the new process (round 2 of batch 2's review). A different epoch always
-// wins, because the process that minted the old one can send nothing later.
+// #314, wrong three times running. Epochs are a random token per SERVER
+// PROCESS (plugin_runs.py mints one with secrets.token_hex(8) once, when it
+// is built), so two epochs carry no order between them: seeing a DIFFERENT
+// one never means a NEWER one, only a different process, and the two
+// strings alone say nothing more. An epoch that gets painted over is dead
+// for good, because the process that minted it is either gone or has
+// nothing left to send this page: once a newer epoch has shown on screen,
+// every record of the one it replaced is retired, whatever `seq` it still
+// carries.
+//
+// Each earlier version got exactly one interleaving wrong, and the fix for
+// it broke another. Comparing epochs with nothing but `isStale` twice let a
+// record suspended here with the OLD epoch win when it resumed after a
+// SEPARATE, un-awaited call had already painted the NEW epoch's idle
+// record: the two epochs were merely different, never compared, so the
+// dead one was let through. Task 134's fix, a snapshot of epoch and seq
+// taken before the await, then broke the case that version got right:
+// WITHIN one epoch, any repaint at all while suspended, even a genuinely
+// older record a concurrent GET answered, changed the snapshot, and the
+// check bailed on a record that was still the newer of the two. Batch 2's
+// round 2 fix for THAT, bailing only when the live epoch no longer matched
+// what was shown before the await, then broke the case where THIS record's
+// own epoch is the one that first paints while it sits suspended: the live
+// epoch moves from the old value to this record's own epoch during the
+// await, the two no longer match, and the check bailed on a record that IS
+// the live epoch's newest.
+//
+// `retiredEpochs` answers all three at once. An epoch is retired the
+// instant something else paints over it and never un-retired, so a record
+// of a retired epoch is stale no matter when it resumes or what `seq` it
+// carries; an epoch that has not been retired and has not changed is
+// ordered exactly the way `seq` already says.
+//
+// What it cannot decide: a record from an epoch that was never shown at
+// all, arriving after a later epoch already is. That needs one in-flight
+// request answered by a server process whose entire life fits inside
+// another request's round trip on loopback, which the shipped
+// `RestartSec=5` (packaging/hitchrail.service) keeps seconds apart, far
+// outside that window; not proven impossible in general, just not reachable
+// the way this page and this unit actually run.
 function isStale(record) {
-  return record.epoch === shownEpoch && record.seq < shownSeq;
+  return retiredEpochs.has(record.epoch) || (record.epoch === shownEpoch && record.seq < shownSeq);
 }
 
 async function onPluginRecord(record) {
   // Checked twice: once so a stale record costs no listing fetch, and again
   // after the await, which is where a newer one can overtake it.
-  //
-  // #314, fixed twice. First as a second `isStale(record)`: that asks "is
-  // THIS record newer than what is shown right now", answered from the two
-  // epoch strings alone, which has no answer across a restart. A record
-  // suspended here with the OLD epoch, resumed after the NEW epoch's idle
-  // record had already been painted by a separate, un-awaited call, found
-  // the two epochs merely DIFFERENT rather than older, and `isStale` said
-  // "not stale", letting the dead record win.
-  //
-  // The fix for that, comparing the live epoch and seq against a snapshot
-  // taken before the await, broke the case the first version got right:
-  // WITHIN one epoch, any repaint at all while suspended (an older, still
-  // genuinely older, record answered by a concurrent GET) made the snapshot
-  // differ, and the check bailed even though this call's own record was
-  // newer than what the concurrent one had just painted. A real run's last
-  // event, arriving after a stale GET answer painted over it, was dropped
-  // this way and the screen stuck on "running" with the button disabled.
-  //
-  // Both questions are real and neither alone answers both: a changed EPOCH
-  // means someone else's restart, which must always win regardless of any
-  // number on either side (numbers reset to 0 on a restart, so they cannot
-  // be compared). An UNCHANGED epoch means ordering is exactly what `seq`
-  // is for, so the live comparison every record already passes at entry is
-  // still correct after the await, no snapshot needed.
   if (isStale(record)) return;
-  const beforeEpoch = shownEpoch;
   if (record.state === "done" && record.counts.updated) await countRunning();
-  if (shownEpoch !== beforeEpoch) return;
   if (isStale(record)) return;
+  // Retire the epoch this record is replacing, not the one it carries: a
+  // record only ever displaces whatever is currently shown.
+  if (shownEpoch !== null && record.epoch !== shownEpoch) retiredEpochs.add(shownEpoch);
   shownEpoch = record.epoch;
   shownSeq = record.seq;
   renderPlugins(record);
