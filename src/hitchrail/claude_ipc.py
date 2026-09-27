@@ -958,6 +958,22 @@ def plugin_runner(withhold: Sequence[str]) -> PluginRunner:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            # #351. `text=True` decodes strictly by default, and invalid
+            # UTF-8 on the vendor's stdout or stderr raised `UnicodeDecodeError`
+            # out of `communicate()` itself, before `_call` ever saw a
+            # `CompletedProcess` to inspect: neither its `TimeoutExpired` nor
+            # its `OSError` arm catches a `ValueError` subclass, so the CLI
+            # traced back and the route recorded `internal_error`. Chosen over
+            # catching `UnicodeDecodeError` in `_call`, which would need a new
+            # failure code, or borrow `plugins_unreadable` for calls that are
+            # not the listing. Every byte this runner captures is either
+            # SHOWN to a person or matched by `_PLUGIN_ID`/`_SCOPE` after
+            # `json.loads` already refused it: `_read_listing` and
+            # `_approved_command` already treat malformed JSON as unreadable,
+            # so a lossily replaced character fails there the same way a
+            # missing quote does, and nothing here parses a replacement
+            # character as an instruction.
+            errors="replace",
             env=env,
             cwd=Path.home(),
             start_new_session=True,

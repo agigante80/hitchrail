@@ -1133,6 +1133,69 @@ def test_update_plugins_exits_two_when_the_operation_failed(
     assert "updated" not in captured.out, "a failed operation printed a count"
 
 
+def test_update_plugins_reports_plugins_unreadable_not_a_traceback_on_invalid_utf8(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#351. A real agent, not `FakeAgent`: the crash this regresses happened
+    inside `communicate()`'s own decoding of real bytes off a real pipe, which
+    a fake runner returning an already built `str` cannot reproduce."""
+    monkeypatch.setattr("shutil.which", _REAL_SHUTIL_WHICH)
+
+    def no_server(*_a: object, **_k: object) -> int:
+        raise AssertionError("update-plugins started a server")
+
+    monkeypatch.setattr(cli, "_serve", no_server)
+    agent = tmp_path / "claude"
+    agent.write_text(
+        f"#!{sys.executable}\n"
+        "import sys\n"
+        "if sys.argv[1:3] == ['plugin', 'list']:\n"
+        "    sys.stdout.buffer.write(b'\\xff\\xfe')\n"
+    )
+    agent.chmod(0o755)
+
+    code = main(["update-plugins", "--agent-binary", str(agent)])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "plugins_unreadable:" in captured.err
+    assert "Traceback" not in captured.err
+    assert "Traceback" not in captured.out
+
+
+def test_update_plugins_reports_a_failed_plugin_not_a_traceback_on_invalid_utf8(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#351's other half: invalid UTF-8 out of the update command itself,
+    rather than the listing, must not crash the whole run to `internal_error`
+    either. It ends as an ordinary per plugin `failed`, the same as any other
+    non zero exit."""
+    monkeypatch.setattr("shutil.which", _REAL_SHUTIL_WHICH)
+
+    def no_server(*_a: object, **_k: object) -> int:
+        raise AssertionError("update-plugins started a server")
+
+    monkeypatch.setattr(cli, "_serve", no_server)
+    agent = tmp_path / "claude"
+    agent.write_text(
+        f"#!{sys.executable}\n"
+        "import sys, json\n"
+        "args = sys.argv[1:]\n"
+        "if args[:2] == ['plugin', 'list']:\n"
+        "    print(json.dumps([{'id': 'a@m', 'scope': 'user'}]))\n"
+        "elif args[:2] == ['plugin', 'update']:\n"
+        "    sys.stdout.buffer.write(b'\\xff\\xfe download failed')\n"
+        "    sys.exit(1)\n"
+    )
+    agent.chmod(0o755)
+
+    code = main(["update-plugins", "--agent-binary", str(agent)])
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "failed" in captured.out
+    assert "Traceback" not in captured.err
+    assert "Traceback" not in captured.out
+
+
 def test_update_plugins_spawns_nothing_when_the_agent_is_not_on_path(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

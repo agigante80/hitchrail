@@ -1072,7 +1072,15 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # `try`/`except`/`pass`, one line pricier once the reason each one is
         # suppressed stays a comment above the `with` rather than beside the
         # `pass` it used to sit on.
-        "claude_ipc.py": 1147,
+        # 1147 to 1163 for task 156, #351: `plugin_runner`'s `Popen` call takes
+        # `errors="replace"` on top of `text=True`, so an agent binary whose
+        # child prints bytes that are not valid UTF-8 is reported unreadable,
+        # like other malformed output already is, rather than raising
+        # `UnicodeDecodeError` out of `update_plugins` uncaught. Most of the
+        # growth is the comment saying why replacement and not a stricter
+        # catch: `_read_listing`/`_approved_command` already treat malformed
+        # JSON as unreadable, so reusing that path needed no new failure code.
+        "claude_ipc.py": 1163,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.

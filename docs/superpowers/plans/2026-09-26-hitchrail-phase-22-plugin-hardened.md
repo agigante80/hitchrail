@@ -136,7 +136,7 @@ was fixed in `190b93e`, and round 2 found nothing in it. Its lows went to
 Backlog as #352 to #357; one is a crash on the path this phase hardens, so it
 stays here.
 
-- [ ] **Task 156, #351 (P2).** Output that is not valid UTF-8 is reported as
+- [x] **Task 156, #351 (P2).** Output that is not valid UTF-8 is reported as
       unreadable rather than crashing the update into `internal_error`.
 
 ### Batch 4: processes and the test seams, tasks 143 to 147

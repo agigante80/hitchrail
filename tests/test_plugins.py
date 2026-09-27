@@ -319,6 +319,11 @@ def test_a_hung_refresh_updates_nothing() -> None:
         # Deep enough to blow the parser's own stack rather than raise
         # ValueError (#303): the listing is exactly as unreadable.
         "[" * 100_000,
+        # #351: what invalid UTF-8 on the wire looks like once the real
+        # runner's `errors="replace"` has already turned it into text. Not a
+        # crash to reproduce here, since `FakeAgent` never touches a byte:
+        # just the listing this code must already treat as unreadable JSON.
+        "��",
     ],
     ids=[
         "text",
@@ -330,6 +335,7 @@ def test_a_hung_refresh_updates_nothing() -> None:
         "strings",
         "one-bad-row",
         "deeply-nested",
+        "replaced-invalid-utf8",
     ],
 )
 def test_an_unreadable_listing_updates_nothing(listing: str) -> None:
@@ -500,6 +506,57 @@ def test_the_real_runner_runs_in_the_home_directory() -> None:
     depend on the operator's shell."""
     result = claude_ipc.plugin_runner(withhold=())(["pwd"], 10)
     assert result.stdout.strip() == str(Path.home())
+
+
+def test_the_real_runner_replaces_invalid_utf8_instead_of_raising() -> None:
+    """#351. `text=True` decodes strictly by default, and invalid UTF-8 on the
+    vendor's stdout raised `UnicodeDecodeError` out of `communicate()` itself,
+    before `_call` ever saw a `CompletedProcess` to inspect: neither its
+    `TimeoutExpired` nor its `OSError` arm catches a `ValueError` subclass, so
+    the exception reached the CLI as a traceback and the route as
+    `internal_error`.
+
+    A real child, not `FakeAgent`: the crash was in decoding bytes
+    `communicate()` reads off a real pipe, which a fake runner returning an
+    already built `str` cannot reproduce. The same decode boundary serves
+    every call this runner makes, listing or update alike, so one child
+    proves it for both.
+    """
+    script = (
+        "import sys\n"
+        "sys.stdout.buffer.write(b'before \\xff\\xfe after')\n"
+        "sys.stdout.buffer.flush()\n"
+    )
+    result = claude_ipc.plugin_runner(withhold=())([sys.executable, "-c", script], 10)
+    assert result.returncode == 0
+    assert "before " in result.stdout
+    assert " after" in result.stdout
+    assert "�" in result.stdout, "the invalid bytes must be replaced, not dropped silently"
+
+
+def test_the_real_runner_decodes_with_replacement_not_strictly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#351's follow up sweep of `plugin_runner`: asserted on the kwarg
+    directly as well as behaviourally above, since a mutation to a different
+    non raising mode (`"backslashreplace"`, say) would still avoid crashing
+    and slip past a test that only checks "did not raise"."""
+    captured: dict[str, object] = {}
+
+    class FakeProcess:
+        pid = 1
+        returncode = 0
+
+        def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+            return "", ""
+
+    def fake_popen(*args: object, **kw: object) -> FakeProcess:
+        captured.update(kw)
+        return FakeProcess()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    claude_ipc.plugin_runner(withhold=())(["claude", "plugin", "update"], 10.0)
+    assert captured.get("errors") == "replace"
 
 
 def test_the_real_runner_gives_the_child_no_terminal_to_ask_on() -> None:
