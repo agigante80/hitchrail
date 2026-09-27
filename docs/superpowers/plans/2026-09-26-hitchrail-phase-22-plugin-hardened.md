@@ -137,7 +137,7 @@ candidate fix is an epoch the server mints with an order, not a fifth guess.
       `failed` with `internal_error`, published, not stuck `running`.
 - [x] **Task 145, #301 (P3).** The closed stdin test fails when
       `stdin=subprocess.DEVNULL` is removed, under pytest's own capture.
-- [ ] **Task 146, #310 (P3).** `no_real_plugin_update` fails the test that
+- [x] **Task 146, #310 (P3).** `no_real_plugin_update` fails the test that
       reaches it, instead of being swallowed into an `internal_error` record.
 - [ ] **Task 147, #304 (P2).** `claude_ipc.py` moves to mutmut's
       `source_paths`, and the survivors in the plugin section are read after

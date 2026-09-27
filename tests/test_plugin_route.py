@@ -15,7 +15,7 @@ from collections.abc import AsyncIterator, Callable
 import httpx
 import pytest
 
-from conftest import FakeTmux, procs_from
+from conftest import FakeTmux, PluginUpdateGuard, procs_from
 from hitchrail import claude_ipc
 from hitchrail.claude_ipc import PluginOutcome, PluginsFailed
 from hitchrail.config import Config
@@ -186,9 +186,17 @@ async def test_other_methods_are_not_allowed(config: Config) -> None:
     assert response.json()["code"] == "method_not_allowed"
 
 
-async def test_the_default_operation_is_never_the_real_one_under_test(config: Config) -> None:
+async def test_the_default_operation_is_never_the_real_one_under_test(
+    config: Config, no_real_plugin_update: PluginUpdateGuard
+) -> None:
     """The autouse guard in conftest: a test that forgot to inject an
-    operation fails instead of updating this machine's plugins."""
+    operation fails instead of updating this machine's plugins.
+
+    This is the one test that means to reach it (#310), so it calls
+    `expect()` first: without that, the fixture's own teardown would fail
+    THIS test for the very firing it exists to prove.
+    """
+    no_real_plugin_update.expect()
     engine = Engine(config=config, tmux=FakeTmux(), procs_fn=procs_from(""))
     app = create_app(engine=engine, config=config, bus=EventBus())
     transport = httpx.ASGITransport(app=app)
@@ -201,6 +209,30 @@ async def test_the_default_operation_is_never_the_real_one_under_test(config: Co
             await asyncio.sleep(0.01)
     assert record["state"] == "failed"
     assert record["code"] == "internal_error"
+
+
+def test_an_unexpected_firing_of_the_guard_fails_loudly() -> None:
+    """#310. The refusal above runs on `PluginRuns`'s own daemon thread and
+    would otherwise only ever surface as an ordinary `internal_error` record,
+    same as any other bug in the operation: a test that forgot
+    `plugin_operation=` and asserted only the 202 passed silently. This is
+    the decision `no_real_plugin_update`'s own teardown makes, on the same
+    `PluginUpdateGuard` object it yields, so it fails if that check is ever
+    weakened back to a no-op."""
+    guard = PluginUpdateGuard()
+    guard.fired.append(AssertionError("a test reached the REAL plugin update"))
+    with pytest.raises(AssertionError, match="only failed the run's own daemon thread"):
+        guard.check()
+
+
+def test_expect_lets_the_one_deliberate_test_reach_the_guard() -> None:
+    """The escape hatch `test_the_default_operation_is_never_the_real_one_under_test`
+    uses: a firing after `expect()` must not raise, or that test could never
+    pass."""
+    guard = PluginUpdateGuard()
+    guard.fired.append(AssertionError("a test reached the REAL plugin update"))
+    guard.expect()
+    guard.check()
 
 
 async def test_the_wired_operation_spawns_the_resolved_binary_not_the_raw_one(
