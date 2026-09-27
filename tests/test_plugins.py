@@ -11,7 +11,9 @@ from __future__ import annotations
 import ast
 import json
 import os
+import select
 import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -416,6 +418,41 @@ def test_the_real_runner_gives_the_child_no_terminal_to_ask_on() -> None:
     result = runner(["cat"], 10)
     assert result.returncode == 0
     assert result.stdout == ""
+
+
+def test_the_real_runner_kills_a_hung_childs_own_children(tmp_path: Path) -> None:
+    """#299. A marketplace's install command, approved unseen by `-y`, runs as
+    the child's own child. `subprocess.run`'s timeout handling kills only the
+    pid it started, so a hung install command would outlive the run being
+    reported `failed: timed out`.
+
+    A real grandchild, not an argv assertion: the gap is in what
+    `subprocess.run` does after the call, which a fake runner cannot show.
+    The child writes the grandchild's pid before it hangs, so this reads the
+    OS's answer rather than trusting the runner's own report.
+    """
+    runner = claude_ipc.plugin_runner(withhold=())
+    pid_file = tmp_path / "grandchild.pid"
+    script = (
+        "import subprocess, time\n"
+        "p = subprocess.Popen(['sleep', '30'])\n"
+        f"open({str(pid_file)!r}, 'w').write(str(p.pid))\n"
+        "time.sleep(30)\n"
+    )
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        runner([sys.executable, "-c", script], 0.5)
+
+    grandchild_pid = int(pid_file.read_text())
+    try:
+        pidfd = os.pidfd_open(grandchild_pid)
+    except ProcessLookupError:
+        return  # already reaped between the timeout firing and this check
+    try:
+        exited = select.select([pidfd], [], [], 5)[0]
+    finally:
+        os.close(pidfd)
+    assert exited, "the grandchild outlived the timeout: only the direct child was killed"
 
 
 # -- the quarantine ---------------------------------------------------------------

@@ -17,6 +17,8 @@ This module is in the engine layer and imports nothing from the web layer;
 
 from __future__ import annotations
 
+import os
+import signal
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -104,13 +106,32 @@ def _default_runner(
 ) -> subprocess.CompletedProcess[str]:
     """The real one. An argument list, never a shell, and never checked.
 
-    `check=False` because a non zero return is normal here: `has-session` says
+    Never checked because a non zero return is normal here: `has-session` says
     no that way, and `list-panes` fails when no server is running at all. The
-    callers below decide what each failure means.
+    callers below decide what each failure means. `Popen` has no `check`
+    argument to set: it never raises on a return code, which is the same
+    behaviour `subprocess.run`'s `check=False` gave.
+
+    **The child is its own process group leader** (#299), the same fix as
+    `claude_ipc.plugin_runner` and for the same reason: `subprocess.run`'s
+    timeout handling kills only the pid it started, so a tmux invocation that
+    shells out further, or a wedged one, could leave something behind that
+    the bound was meant to end. `subprocess.run` never hands back the `Popen`
+    a caller would need for `os.killpg`, so the wait and the kill are done
+    here instead of through `run(timeout=)`.
     """
     # S603 is ignored for this module in pyproject.toml, not inline: every
     # call here is an argument list built by `_argv`, and there is no shell.
-    return subprocess.run(argv, capture_output=True, text=True, check=False, timeout=timeout)
+    proc = subprocess.Popen(
+        argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True
+    )
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        proc.communicate()  # reap; the caller only sees the timeout
+        raise
+    return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
 
 
 class Tmux:

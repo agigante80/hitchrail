@@ -9,6 +9,7 @@ tmux; this tier pins that the adapter builds what it believes it builds.
 from __future__ import annotations
 
 import re
+import signal
 import subprocess
 from pathlib import Path
 
@@ -584,20 +585,15 @@ def test_a_tmux_that_runs_and_says_no_is_still_just_no() -> None:
 # -- #67: an unbounded subprocess call in a request path is a hang ---------
 
 
-@pytest.mark.parametrize(
-    "runner",
-    [tmux_runner, procs_runner],
-    ids=["tmux", "process table"],
-)
-def test_both_default_runners_pass_a_bound_to_subprocess(
-    runner: object, monkeypatch: pytest.MonkeyPatch
+def test_the_process_table_runner_passes_a_bound_to_subprocess(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """#67's third candidate, and a defect whatever CI is doing.
 
-    Both of these run inside an HTTP handler. `subprocess.run` with no timeout
-    waits forever, so a tmux that blocks, on a loaded machine, an NFS home, a
-    server part way through a restart, does not make the listing slow: it makes
-    the request never answer and the browser wait with it.
+    This runs inside an HTTP handler. `subprocess.run` with no timeout waits
+    forever, so a `ps` that blocks, on a loaded machine, an NFS home, a server
+    part way through a restart, does not make the listing slow: it makes the
+    request never answer and the browser wait with it.
 
     Asserted on the CALL rather than by spawning something slow. This tier is
     hermetic with every external surface faked, per `.claude/CLAUDE.md`, and a
@@ -612,10 +608,68 @@ def test_both_default_runners_pass_a_bound_to_subprocess(
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    runner(["tmux", "list-panes"])  # type: ignore[operator]
+    procs_runner(["ps"])
     bound = seen.get("timeout")
     assert isinstance(bound, float), "no bound reached subprocess.run"
     assert 0 < bound <= 30, "the bound is not a bound"
+
+
+def test_the_tmux_runner_passes_a_bound_to_communicate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The tmux sibling of the test above.
+
+    #299 moved this runner off `subprocess.run` onto its own `Popen`, so the
+    group started for a timed out call can be killed by `os.killpg` rather
+    than leaving a grandchild behind (`subprocess.run` never hands back the
+    `Popen` a caller would need for that). The bound now reaches
+    `Popen.communicate`, not `subprocess.run`, and this is the test that would
+    have caught the runner losing it in that move.
+    """
+    seen: dict[str, object] = {}
+
+    class FakeProcess:
+        pid = 4242
+        returncode = 0
+
+        def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+            seen["timeout"] = timeout
+            return "", ""
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: FakeProcess())
+    tmux_runner(["tmux", "list-panes"])
+    bound = seen.get("timeout")
+    assert isinstance(bound, float), "no bound reached Popen.communicate"
+    assert 0 < bound <= 30, "the bound is not a bound"
+
+
+def test_the_tmux_runner_kills_the_group_and_reraises_on_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#299. `subprocess.run`'s own timeout handling kills only the pid it
+    started; a tmux invocation that shells out further would leave that
+    behind. The group is what `os.killpg` needs, and the group id is the
+    child's own pid because `start_new_session=True` makes it the leader.
+    """
+    killed: list[tuple[int, int]] = []
+
+    class FakeProcess:
+        pid = 4242
+        returncode = -9
+        calls = 0
+
+        def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+            self.calls += 1
+            if self.calls == 1:
+                raise subprocess.TimeoutExpired(cmd=["tmux"], timeout=timeout or 0.0)
+            return "", ""  # the reaping call after the kill
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: FakeProcess())
+    monkeypatch.setattr("os.getpgid", lambda pid: pid)
+    monkeypatch.setattr("os.killpg", lambda pgid, sig: killed.append((pgid, sig)))
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        tmux_runner(["tmux", "list-panes"])
+
+    assert killed == [(4242, signal.SIGKILL)], "the whole group was not killed on timeout"
 
 
 def test_a_tmux_that_never_answers_becomes_an_honest_refusal() -> None:
@@ -990,14 +1044,22 @@ def test_the_real_runner_captures_text_and_does_not_raise_on_a_refusal() -> None
 
     Each argument is load bearing and the docstring names one of them:
 
-    - `capture_output=True`, or `stdout` is `None` and every parser here reads
-      an attribute that is not there
+    - `stdout`/`stderr` piped, or one of them is `None` and every parser here
+      reads an attribute that is not there
     - `text=True`, or it is `bytes` and every `.split()` and `in` test compares
       against the wrong type
-    - `check=False`, and this is the one the docstring argues: **a non zero
+    - never checked, and this is the one the docstring argues: **a non zero
       return is normal here.** `has-session` says no that way and `list-panes`
-      fails when no server is running at all, so `check=True` turns both into a
-      `CalledProcessError` out of a method documented to answer False.
+      fails when no server is running at all, so raising on either would turn
+      an ordinary answer into an exception out of a method documented to
+      answer False.
+
+    #299 moved this runner from `subprocess.run(..., check=False)` to its own
+    `Popen`, for the group kill a timeout needs; `check` has no `Popen`
+    equivalent to drop or mutate, so the pair of `check=None` /
+    argument-dropped survivors this test used to also cover
+    (`test_the_remaining_runner_survivors_are_equivalent_to_the_default`,
+    removed with that move) no longer has anything to survive against.
 
     **This spawns `echo` and `false`, never tmux.** The tier's hermetic property
     is that no test here starts a tmux server, and that still holds: these are
@@ -1018,33 +1080,6 @@ def test_the_real_runner_captures_text_and_does_not_raise_on_a_refusal() -> None
 
     assert refused.returncode != 0, "a failing command reported success"
     assert refused.stdout == "", "a failing command still captures its (empty) output"
-
-
-def test_the_remaining_runner_survivors_are_equivalent_to_the_default() -> None:
-    """#233. Two survivors in `_default_runner` cannot be killed.
-
-    `check=None` and dropping `check` entirely both behave as `check=False`:
-    `subprocess.run`'s own default is `False`, and `None` is falsy where it is
-    tested. So no input distinguishes them from the code as written.
-
-    **Asserted rather than argued.** The claim "this argument's absence equals
-    its current value" is the kind that stops being true when a library changes
-    its default, and `check` is the one whose flip turns every ordinary tmux
-    refusal into an exception.
-    """
-    import inspect
-    import subprocess as sp
-
-    assert inspect.signature(sp.run).parameters["check"].default is False, (
-        "subprocess.run's default for `check` is no longer False, so dropping "
-        "the argument is no longer equivalent and those mutants are real"
-    )
-    # And None is falsy where `check` is tested, which is the other mutant.
-    assert not None
-
-    # The behaviour itself, through the real runner: a refusal does not raise
-    # however `check` is spelled.
-    assert tmux_runner(["false"]).returncode != 0
 
 
 def test_capture_panes_default_depth_is_a_tuning_number_not_a_boundary() -> None:

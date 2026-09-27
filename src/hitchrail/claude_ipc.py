@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import re
+import signal
 import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -912,20 +913,37 @@ def plugin_runner(withhold: Sequence[str]) -> PluginRunner:
     stdin is closed rather than inherited. Under `hitchrail update-plugins` it
     is the operator's terminal, and a child that decided to prompt would wait
     there for an answer nobody knows is being asked for.
+
+    **The child is its own process group leader** (#299). A marketplace's
+    install command, approved unseen by `-y`, runs as this child's child, and
+    `subprocess.run`'s own timeout handling kills only the pid it started:
+    the grandchild survives the run being reported `failed: timed out`. Group
+    membership is what lets a timeout end both at once, and `subprocess.run`
+    never hands back the `Popen` a caller would need to call `os.killpg` on,
+    so the wait and the kill are done here instead of through `run(timeout=)`.
     """
 
     def run(argv: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
         env = {k: v for k, v in os.environ.items() if k not in withhold}
-        return subprocess.run(
+        proc = subprocess.Popen(
             argv,
             stdin=subprocess.DEVNULL,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            check=False,
-            timeout=timeout,
             env=env,
             cwd=Path.home(),
+            start_new_session=True,
         )
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            # The group, not just `proc.pid`: that is the one difference from
+            # `subprocess.run`'s own handling, and the reason for it.
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            proc.communicate()  # reap; the caller only sees the timeout
+            raise
+        return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
 
     return run
 

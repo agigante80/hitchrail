@@ -1050,7 +1050,14 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 1083 to 1087 for task 142, #300: a `user` scope plugin the listing
         # names twice is reported `skipped`, detail `listed twice`, instead
         # of being dropped, so the outcome count covers every row returned.
-        "claude_ipc.py": 1087,
+        # 1087 to 1105 for task 143, #299: `plugin_runner`'s inner `run` moves
+        # off `subprocess.run`, which never exposes the `Popen` it creates
+        # internally and so cannot be told to kill a hung child's own
+        # children, a process group. It now starts the child in its own
+        # session and kills that group on timeout; the growth is the
+        # `Popen`/`communicate` split `subprocess.run` used to do in one call,
+        # plus the comment saying why.
+        "claude_ipc.py": 1105,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.
@@ -1240,7 +1247,15 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # holds on 3.7a, the unnamed session kept rather than dropped, and
         # the server's pid asked for on its own when there is no pane to
         # list it from (`exit-empty off`).
-        "tmux.py": 619,
+        # 619 to 640 for task 143, #299: `_default_runner` moves off
+        # `subprocess.run`, for the same reason as `claude_ipc.py`'s
+        # `plugin_runner` above: it never exposes the `Popen` it creates, so
+        # it cannot kill a hung tmux invocation's own child processes as a
+        # group. Duplicated rather than shared with `claude_ipc.py`, because
+        # sharing it would import the tmux adapter into the vendor quarantine
+        # or the vendor quarantine into the tmux adapter, either a worse
+        # coupling than fifteen duplicated lines with a comment in each.
+        "tmux.py": 640,
         # 413, and thirteen lines over the guideline is not a second job. #18
         # already took the host vocabulary out of this file, and what is left
         # is one dataclass and its startup refusals, which is one thing. The
