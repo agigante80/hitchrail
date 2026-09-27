@@ -455,6 +455,78 @@ async def test_a_plugin_refusal_survives_an_interleaved_settings_success(
     server.release_plugin("alpha@m")
 
 
+async def test_a_plugin_get_failure_does_not_inherit_a_settings_refusals_owed_repaint(
+    page: Page, server: Harness, tmp_path: Path
+) -> None:
+    """#315, a second gap the owner check alone did not close (round 1 of
+    batch 2's review). A settings refusal sets `keepNote` for its OWN
+    follow up GET; a plugin GET failing in the gap is a different owner, so
+    it is allowed to overwrite the strip's text, but `note()` used to leave
+    `keepNote` untouched when it did. The settings repaint's `settle()`
+    still correctly refuses to clear a strip it no longer owns, but the
+    plugin flow's own next successful GET inherited the settings refusal's
+    leftover flag, believed itself the owed repaint, consumed the flag, and
+    left its own failure text stuck instead of clearing it."""
+    server.seed_plugins([{"id": "alpha@m", "scope": "user"}])
+    state = tmp_path / "unwritable"
+    state.mkdir()
+    server.seed(state_path=state / "state.toml")
+    state.chmod(0o500)
+    try:
+        await open_settings(page, server)
+        box = page.locator('[data-root-toggle="main"]')
+        await expect(box).to_be_checked()
+
+        held: list[Route] = []
+
+        async def hold_config(route: Route) -> None:
+            if route.request.method == "GET":
+                response = await route.fetch()
+                held.append(route)
+                await page.wait_for_timeout(1500)
+                await route.fulfill(response=response)
+            else:
+                await route.continue_()
+
+        await page.route("**/api/config", hold_config)
+        # The PATCH is refused (the state directory cannot be written); its
+        # own repainting GET is what gets held, as in the test above.
+        await box.click()
+        note = page.locator("[data-note]")
+        await expect(note).to_contain_text("Not changed.")
+
+        for _ in range(100):
+            if held:
+                break
+            await page.wait_for_timeout(20)
+        assert held, "the settings repaint's GET was never held, so this proves nothing"
+
+        # A plugin GET fails outright, a network error rather than a server
+        # answer, while the settings repaint is still suspended. Its note
+        # overwrites the settings refusal: a different owner is allowed to,
+        # and that overwrite is not the bug under test.
+        await page.route("**/api/plugins/update", lambda route: route.abort(), times=1)
+        await page.evaluate("() => window.__plugins.loadPlugins()")
+        await expect(note).to_have_text(
+            "Not connected. The plugin update's state could not be read."
+        )
+
+        await page.wait_for_timeout(2000)  # past the held settings GET's delivery
+        # `settle()`'s owner guard: the settings repaint must not clear a
+        # strip the plugin flow now owns.
+        await expect(note).to_have_text(
+            "Not connected. The plugin update's state could not be read."
+        )
+
+        # The next plugin GET to succeed must clear the strip on its own: a
+        # GET failure is never owed a kept repaint, only a refused POST is,
+        # so nothing should still be pinning this text here.
+        await page.evaluate("() => window.__plugins.loadPlugins()")
+        await expect(note).to_be_hidden()
+    finally:
+        state.chmod(0o700)
+
+
 async def test_a_restart_during_the_project_count_does_not_win_the_race(
     page: Page, server: Harness
 ) -> None:

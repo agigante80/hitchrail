@@ -49,7 +49,16 @@ function note(message, owner) {
   const strip = $("[data-note]");
   strip.textContent = message;
   strip.style.display = message ? "block" : "none";
-  if (message) noteOwner = owner;
+  if (message) {
+    // A different owner overwriting the strip retires whatever repaint the
+    // PREVIOUS owner's message was still owed (round 1 of batch 2's review):
+    // `keepNote` says "the next settle for this text must not clear it yet",
+    // and that text is gone now, so the flag would otherwise survive to be
+    // consumed by the new owner's own next settle, which believes it is
+    // protecting ITS OWN message and instead leaves that message stuck.
+    if (noteOwner !== null && noteOwner !== owner) keepNote = false;
+    noteOwner = owner;
+  }
 }
 
 /* One request at a time and the last answer wins, as logs.js does: a slow
