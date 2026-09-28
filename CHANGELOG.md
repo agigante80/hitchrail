@@ -32,6 +32,38 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+## 0.11.0 - 2026-09-28
+
+Nothing to do on upgrade. Everything below is a fix or an addition.
+
+### Fixed
+
+**The plugin strip on the settings page no longer locks after a restart.**
+On 0.10.0, reloading the page while the server restarted could leave
+**Update plugins** disabled for good, until the page was closed and opened
+again. Each run record now carries the boot it started in and the kernel's
+boot clock (`boot` and `since_boot_us` in `docs/api.md`), so the page knows
+which server is newer instead of guessing. `epoch` is unchanged.
+
+**Stopping the server ends a plugin update it started.** Before, the update
+ran on in the background after Hitchrail exited. The plugins it had not
+reached are reported as `abandoned`, a new result that never means
+`failed`, and a shutdown before the list was read fails the run with the
+new code `shutting_down`. A client with a fixed list of results or codes
+should add both.
+
+**A plugin update that times out now kills the agent's own children too**,
+not only the agent, and output that is not valid UTF-8 is replaced rather
+than failing the run.
+
+**The agent binary checked at startup is the one that runs.** A relative
+`--agent-binary` used to be checked from one directory and run from another.
+
+### Added
+
+`hitchrail` names itself and its version before anything else it prints, so
+a refusal at startup says what refused. `--help` shows every flag's default.
+
 ## 0.10.0 - 2026-09-24
 
 ### Added
