@@ -10,7 +10,8 @@
    after it; painted, it put "running" back over "done" and disabled the
    button for good, since no later event comes (round 1 of batch 2's review,
    the high). Every record carries a `seq` the server bumps on each change,
-   and one older than what is on screen is dropped.
+   and one older than what is on screen is dropped; `isNewer` says how the
+   records of two different server processes are ordered.
 
    Its own module rather than more of settings.js, which it shares only the
    note strip with. */
@@ -36,12 +37,9 @@ const PLUGIN_FAILURES = {
   internal_error: "The update stopped on an error in Hitchrail",
 };
 
-let shownEpoch = null;
-let shownSeq = -1;
-// Every epoch a newer one has ever painted over. Retirement is permanent:
-// nothing revives an epoch once replaced, which is what closes the ABA gap
-// (see `isStale` below) a plain "different epoch always wins" left open.
-const retiredEpochs = new Set();
+// What is on screen: the record's ordering fields, and when it arrived.
+let shown = null;
+let arrivals = 0;
 let runningSessions = 0;
 let strip = { note: () => {}, keep: () => {}, settle: () => {} };
 
@@ -125,61 +123,43 @@ async function countRunning() {
   }
 }
 
-// #314, wrong three times running. Epochs are a random token per SERVER
-// PROCESS (plugin_runs.py mints one with secrets.token_hex(8) once, when it
-// is built), so two epochs carry no order between them: seeing a DIFFERENT
-// one never means a NEWER one, only a different process, and the two
-// strings alone say nothing more. An epoch that gets painted over is dead
-// for good, because the process that minted it is either gone or has
-// nothing left to send this page: once a newer epoch has shown on screen,
-// every record of the one it replaced is retired, whatever `seq` it still
-// carries.
+// #348. Which of two records is newer. This used to be a guess over two
+// random epochs, which carry no order, and it was wrong four times running
+// (#314 and three rounds of its review), each fix breaking an interleaving
+// the last one got right; the fourth let a dead process's record, suspended
+// in `countRunning()` across a restart, retire the live one for good. The
+// server now says which process is newer, so this compares instead:
 //
-// Each earlier version got exactly one interleaving wrong, and the fix for
-// it broke another. Comparing epochs with nothing but `isStale` twice let a
-// record suspended here with the OLD epoch win when it resumed after a
-// SEPARATE, un-awaited call had already painted the NEW epoch's idle
-// record: the two epochs were merely different, never compared, so the
-// dead one was let through. Task 134's fix, a snapshot of epoch and seq
-// taken before the await, then broke the case that version got right:
-// WITHIN one epoch, any repaint at all while suspended, even a genuinely
-// older record a concurrent GET answered, changed the snapshot, and the
-// check bailed on a record that was still the newer of the two. Batch 2's
-// round 2 fix for THAT, bailing only when the live epoch no longer matched
-// what was shown before the await, then broke the case where THIS record's
-// own epoch is the one that first paints while it sits suspended: the live
-// epoch moves from the old value to this record's own epoch during the
-// await, the two no longer match, and the check bailed on a record that IS
-// the live epoch's newest.
-//
-// `retiredEpochs` answers all three at once. An epoch is retired the
-// instant something else paints over it and never un-retired, so a record
-// of a retired epoch is stale no matter when it resumes or what `seq` it
-// carries; an epoch that has not been retired and has not changed is
-// ordered exactly the way `seq` already says.
-//
-// What it cannot decide: a record from an epoch that was never shown at
-// all, arriving after a later epoch already is. That needs one in-flight
-// request answered by a server process whose entire life fits inside
-// another request's round trip on loopback, which the shipped
-// `RestartSec=5` (packaging/hitchrail.service) keeps seconds apart, far
-// outside that window; not proven impossible in general, just not reachable
-// the way this page and this unit actually run.
-function isStale(record) {
-  return retiredEpochs.has(record.epoch) || (record.epoch === shownEpoch && record.seq < shownSeq);
+// - the same epoch is the same process, and `seq` orders its records;
+// - within one boot, the process that started later (`since_boot_us`, the
+//   kernel's boot clock, which NTP and `date` cannot step back) is newer;
+// - across boots the record that ARRIVED later wins. Boot ids carry no order
+//   either, but a reboot closes every connection, so every answer from the
+//   old boot reached this page before the machine went down and nothing from
+//   the new one existed until after. `arrival` is stamped when the record
+//   reaches `onPluginRecord`, before its await, so a record that merely
+//   RESUMES later is not mistaken for one that arrived later.
+function isNewer(record, arrival) {
+  if (shown === null) return true;
+  if (record.epoch === shown.epoch) return record.seq >= shown.seq;
+  if (record.boot === shown.boot) return record.since_boot_us > shown.sinceBootUs;
+  return arrival > shown.arrival;
 }
 
 async function onPluginRecord(record) {
+  const arrival = ++arrivals;
   // Checked twice: once so a stale record costs no listing fetch, and again
   // after the await, which is where a newer one can overtake it.
-  if (isStale(record)) return;
+  if (!isNewer(record, arrival)) return;
   if (record.state === "done" && record.counts.updated) await countRunning();
-  if (isStale(record)) return;
-  // Retire the epoch this record is replacing, not the one it carries: a
-  // record only ever displaces whatever is currently shown.
-  if (shownEpoch !== null && record.epoch !== shownEpoch) retiredEpochs.add(shownEpoch);
-  shownEpoch = record.epoch;
-  shownSeq = record.seq;
+  if (!isNewer(record, arrival)) return;
+  shown = {
+    epoch: record.epoch,
+    boot: record.boot,
+    sinceBootUs: record.since_boot_us,
+    seq: record.seq,
+    arrival,
+  };
   renderPlugins(record);
 }
 

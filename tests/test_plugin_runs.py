@@ -8,13 +8,17 @@ marker cannot outlive a run however the run ends.
 
 from __future__ import annotations
 
+import itertools
 import threading
+import time
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 
+from hitchrail import plugin_runs as plugin_runs_module
 from hitchrail.claude_ipc import PluginOutcome, PluginsFailed
-from hitchrail.plugin_runs import EVENT_KIND, PluginRuns, RunInFlight
+from hitchrail.plugin_runs import EVENT_KIND, PluginRuns, RunInFlight, read_boot_id
 
 Report = Callable[[PluginOutcome], None]
 
@@ -62,8 +66,19 @@ class Published:
             assert self.changed.wait_for(lambda: len(self.events) >= n, 5), self.events
 
 
+# Every instance a later start on the boot clock than the one before, as
+# successive server processes are; the boot id is fixed, so the real
+# /proc is never read here.
+_boot_clock = itertools.count(1_000_000, 1_000)
+
+
 def runs(published: Published) -> PluginRuns:
-    return PluginRuns(publish=published, clock=lambda: 1000.0)
+    return PluginRuns(
+        publish=published,
+        clock=lambda: 1000.0,
+        boot=lambda: "test-boot",
+        boot_clock=lambda: next(_boot_clock),
+    )
 
 
 def test_before_any_run_the_record_says_idle() -> None:
@@ -327,3 +342,63 @@ def test_the_epoch_names_the_process_and_holds_for_its_life() -> None:
     epochs = {e["run"]["epoch"] for e in published.events}  # type: ignore[index]
     assert epochs == {before}
     assert runs(Published()).snapshot()["epoch"] != before
+
+
+def test_the_boot_fields_order_two_processes_and_hold_for_each_life() -> None:
+    """#348. The page orders two processes by `boot` and `since_boot_us`, so
+    both must stay fixed for one process's life, and a later process of the
+    same boot must carry the larger `since_boot_us`."""
+    published = Published()
+    first = runs(published)
+    before = first.snapshot()
+    held = Held()
+    t = first.start(held)
+    held.release(0)
+    t.join(5)
+    for event in published.events:
+        run = event["run"]
+        assert run["boot"] == before["boot"]  # type: ignore[index]
+        assert run["since_boot_us"] == before["since_boot_us"]  # type: ignore[index]
+    later = runs(Published()).snapshot()
+    assert later["boot"] == before["boot"]
+    assert later["since_boot_us"] > before["since_boot_us"]
+
+
+def test_the_default_order_survives_the_wall_clock_stepping_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#348. A unit started at boot runs before NTP has synced, so the wall
+    clock can step back between two starts. Were the order read from it, the
+    new process would look older and the page would drop everything it
+    sends. Fails if `since_boot_us` is ever taken from `time.time` or
+    `time.time_ns`."""
+    wall = iter(range(10**18, 0, -(10**15)))
+    monkeypatch.setattr(time, "time", lambda: next(wall) / 1e9)
+    monkeypatch.setattr(time, "time_ns", lambda: next(wall))
+    older = PluginRuns(publish=Published(), boot=lambda: "b").snapshot()["since_boot_us"]
+    deadline = time.monotonic() + 1
+    while plugin_runs_module.since_boot_us() <= older and time.monotonic() < deadline:
+        pass
+    newer = PluginRuns(publish=Published(), boot=lambda: "b").snapshot()["since_boot_us"]
+    assert newer > older
+
+
+def test_the_boot_id_is_the_kernels(tmp_path: Path) -> None:
+    boot_id = tmp_path / "boot_id"
+    boot_id.write_text("0f3c1a2e-9b7d-4c1e-8a55-3d2f6e7b9c01\n", encoding="ascii")
+    assert read_boot_id(boot_id) == "0f3c1a2e-9b7d-4c1e-8a55-3d2f6e7b9c01"
+
+
+@pytest.mark.parametrize("content", [None, b"", b"\xff\xfe"])
+def test_an_unreadable_boot_id_is_a_fresh_token_each_time(
+    tmp_path: Path, content: bytes | None
+) -> None:
+    """Missing, empty or garbled: a random token, never a shared constant.
+    A constant would put every process in one "boot" with nothing ordering
+    them but the boot clock of whatever machine it is; a fresh token makes
+    each process its own boot, which the page orders by arrival."""
+    boot_id = tmp_path / "boot_id"
+    if content is not None:
+        boot_id.write_bytes(content)
+    first, second = read_boot_id(boot_id), read_boot_id(boot_id)
+    assert first and second and first != second

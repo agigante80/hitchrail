@@ -109,13 +109,16 @@ fixed as a fourth round, and #348 waits on a decision: the page has now
 guessed wrong four times at which of two unordered epochs is newer, so the
 candidate fix is an epoch the server mints with an order, not a fifth guess.
 
-- [ ] **Task 153, #348 (P1).** A restart during a page load no longer lets
-      the old process's record retire the live epoch. Unreleased regression
-      from `aad020c`; decide ordered epochs or the narrow bail first.
+- [x] **Task 153, #348 (P1).** A restart during a page load no longer lets
+      the old process's record retire the live epoch. Decided 2026-09-28:
+      ordered, not the narrow bail. Every record carries `boot` (the kernel's
+      boot id) and `since_boot_us` (`CLOCK_BOOTTIME`, which NTP cannot step
+      back); the page compares them within a boot and takes arrival order
+      across boots, and `retiredEpochs` is gone.
 - [x] **Task 154, #349 (P2).** The owner guard test waits for the held
       settings response to be delivered before asserting.
-- [ ] **Task 155, #350 (P3).** The residual case comment goes or is rewritten
-      with task 153.
+- [x] **Task 155, #350 (P3).** The residual case comment went with
+      `retiredEpochs` in task 153.
 
 ### Batch 3: what the update prints, tasks 139 to 142
 

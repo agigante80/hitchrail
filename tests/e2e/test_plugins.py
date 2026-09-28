@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from playwright.async_api import APIResponse, Page, Route, expect
@@ -18,6 +19,11 @@ from playwright.async_api import APIResponse, Page, Route, expect
 from .conftest import Harness
 
 pytestmark = pytest.mark.e2e
+
+# #348. Not the real server's boot id, so a synthetic record painted after
+# a real one is ordered by arrival, the page's rule across boots: it wins by
+# arriving later, which is what every test below that delivers one wants.
+SYNTHETIC_BOOT = "e2e-synthetic-boot"
 
 THREE = [
     {"id": "alpha@m", "scope": "user"},
@@ -711,6 +717,8 @@ async def test_an_older_same_epoch_record_painted_during_the_held_count_must_not
     # treat as a restart, not as the within-epoch race under test.
     baseline = {
         "epoch": epoch,
+        "boot": SYNTHETIC_BOOT,
+        "since_boot_us": 0,
         "seq": 0,
         "state": "running",
         "started_at": 0,
@@ -722,6 +730,8 @@ async def test_an_older_same_epoch_record_painted_during_the_held_count_must_not
     }
     older = {
         "epoch": epoch,
+        "boot": SYNTHETIC_BOOT,
+        "since_boot_us": 0,
         "seq": 1,
         "state": "running",
         "started_at": 0,
@@ -733,6 +743,8 @@ async def test_an_older_same_epoch_record_painted_during_the_held_count_must_not
     }
     newer_done = {
         "epoch": epoch,
+        "boot": SYNTHETIC_BOOT,
+        "since_boot_us": 0,
         "seq": 2,
         "state": "done",
         "started_at": 0,
@@ -879,6 +891,8 @@ async def test_internal_error_reads_as_one_sentence(page: Page, server: Harness)
 
     record = {
         "epoch": "e2e-synthetic-epoch",
+        "boot": SYNTHETIC_BOOT,
+        "since_boot_us": 0,
         "seq": 1,
         "state": "failed",
         "started_at": 0,
@@ -915,9 +929,19 @@ async def test_internal_error_reads_as_one_sentence(page: Page, server: Harness)
     )
 
 
-def _synthetic_record(epoch: str, seq: int, state: str, **extra: object) -> dict[str, object]:
+def _synthetic_record(
+    epoch: str,
+    seq: int,
+    state: str,
+    *,
+    boot: str = SYNTHETIC_BOOT,
+    since_boot_us: int = 0,
+    **extra: object,
+) -> dict[str, object]:
     base: dict[str, object] = {
         "epoch": epoch,
+        "boot": boot,
+        "since_boot_us": since_boot_us,
         "seq": seq,
         "state": state,
         "started_at": 0,
@@ -931,7 +955,9 @@ def _synthetic_record(epoch: str, seq: int, state: str, **extra: object) -> dict
     return base
 
 
-_DONE_UPDATED_ONE = {
+# Any, not object: spread into `_synthetic_record`, whose keyword only
+# `boot` and `since_boot_us` mypy would otherwise say it might fill.
+_DONE_UPDATED_ONE: dict[str, Any] = {
     "counts": {"updated": 1, "failed": 0, "skipped": 0, "abandoned": 0},
     "outcomes": [
         {
@@ -1096,18 +1122,16 @@ async def test_a_reconnect_done_record_still_wins_over_an_older_answer_after_a_r
     await expect(page.locator("[data-plugins-update]")).to_be_enabled()
 
 
-async def test_a_late_record_of_a_retired_epoch_does_not_revive_it(
+async def test_a_late_record_of_an_older_process_never_paints_over_a_newer_one(
     page: Page, server: Harness
 ) -> None:
-    """ABA, out of scope for #314 until now. `isStale`'s old rule, "a
-    different epoch always wins", assumed a different epoch only ever means
-    a NEWER one. A LATE answer of an epoch that has already been replaced is
-    different from what is shown too, and the old rule let it win right
-    back over the epoch that is actually live, along with a second record of
-    that same dead epoch that had been sitting suspended in `countRunning()`
-    the whole time. Fails on HEAD right after the late record: the screen
-    reads "0 updated, 0 failed, 1 left alone." (the dead epoch's own record)
-    instead of staying on the live epoch's "Refreshing the marketplaces."."""
+    """ABA. A late answer from a process that has already been replaced is
+    DIFFERENT from what is shown, and "a different epoch always wins" let it
+    win right back over the live process, along with a second record of the
+    same dead process that had sat suspended in `countRunning()` the whole
+    time. Since #348 both lose because E1 started earlier in the same boot
+    (`since_boot_us`), whatever `seq` they carry and whenever they arrive;
+    before it they lost only because E1 had been painted over first."""
     server.seed_plugins([{"id": "alpha@m", "scope": "user"}])
     server.seed()
 
@@ -1140,23 +1164,25 @@ async def test_a_late_record_of_a_retired_epoch_does_not_revive_it(
 
     await page.goto(f"{server.base}/settings")
     # Establishes E1 as `shownEpoch`.
-    await fulfill_next(_synthetic_record("e1", 0, "running"))
+    await fulfill_next(_synthetic_record("e1", 0, "running", since_boot_us=1))
     status = page.locator("[data-plugins-status]")
     await expect(status).to_have_text("Refreshing the marketplaces.")
 
     # An E1 record that sits suspended in countRunning() for the rest of the
     # test: released only at the very end.
     await page.evaluate("() => { window.__plugins.loadPlugins(); }")
-    await fulfill_next(_synthetic_record("e1", 10, "done", **_DONE_UPDATED_ONE))
+    await fulfill_next(
+        _synthetic_record("e1", 10, "done", since_boot_us=1, **_DONE_UPDATED_ONE)
+    )
     for _ in range(100):
         if held_count:
             break
         await page.wait_for_timeout(20)
     assert held_count, "the awaiting E1 record's countRunning() never reached the held route"
 
-    # E2 replaces E1 on screen: a genuine, newer epoch, which retires E1.
+    # E2 replaces E1 on screen: the same boot, started later.
     await page.evaluate("() => { window.__plugins.loadPlugins(); }")
-    await fulfill_next(_synthetic_record("e2", 0, "running"))
+    await fulfill_next(_synthetic_record("e2", 0, "running", since_boot_us=2))
     await expect(status).to_have_text("Refreshing the marketplaces.")
 
     # A LATE E1 record, from before the E1 to E2 transition, delivered only
@@ -1164,13 +1190,129 @@ async def test_a_late_record_of_a_retired_epoch_does_not_revive_it(
     # shown, so painting it is unambiguous.
     await page.evaluate("() => { window.__plugins.loadPlugins(); }")
     await fulfill_next(
-        _synthetic_record("e1", 5, "done", counts={"updated": 0, "failed": 0, "skipped": 1})
+        _synthetic_record(
+            "e1", 5, "done", since_boot_us=1, counts={"updated": 0, "failed": 0, "skipped": 1}
+        )
     )
     await expect(status).to_have_text("Refreshing the marketplaces.")
 
-    # Release the awaiting E1 record from the start: retired, it must not
+    # Release the awaiting E1 record from the start: older, it must not
     # revive E1 either, whatever `seq` it carries.
     count_route, count_response = held_count[0]
     await count_route.fulfill(response=count_response)
     await expect(status).to_have_text("Refreshing the marketplaces.")
     await expect(page.locator("[data-plugins-update]")).to_be_disabled()
+
+
+async def test_a_restart_during_a_page_load_leaves_the_strip_on_the_new_server(
+    page: Page, server: Harness
+) -> None:
+    """#348. A fresh load's first record is the old process's `done`, which
+    suspends in `countRunning()`; the server restarts, and the new process's
+    idle record paints while it is suspended. On `18397c7` the old record
+    then resumed, painted as though it were new, and retired the live epoch:
+    every later record of the new server was dropped and the button stayed
+    disabled after the next run. Here the order comes from the server, and
+    the old process started earlier on the boot clock."""
+    server.seed_plugins([{"id": "alpha@m", "scope": "user"}])
+    server.seed()
+    await open_settings(page, server)
+    status = page.locator("[data-plugins-status]")
+    button = page.locator("[data-plugins-update]")
+    await button.click()
+    server.release_plugin("alpha@m")
+    await expect(status).to_have_text("1 updated, 0 failed, 0 left alone.")
+
+    held: list[tuple[Route, APIResponse]] = []
+
+    async def hold(route: Route) -> None:
+        held.append((route, await route.fetch()))
+
+    await page.route("**/api/projects", hold)
+    await page.reload()
+    for _ in range(250):
+        if held:
+            break
+        await page.wait_for_timeout(20)
+    assert held, "the load's done record never reached countRunning(), so this proves nothing"
+
+    server.restart()
+    await expect(status).to_have_text("Not run since this server started.", timeout=15_000)
+
+    route, response = held[0]
+    await route.fulfill(response=response)
+    await page.unroute("**/api/projects")
+    # Nothing to wait on when the dead record is dropped, so give it the
+    # time a repaint takes, then prove the new server is still followed.
+    await page.wait_for_timeout(500)
+    await expect(status).to_have_text("Not run since this server started.")
+
+    server.reset_plugin_releases()
+    await button.click()
+    await expect(status).to_have_text("Refreshing the marketplaces.")
+    server.release_plugin("alpha@m")
+    await expect(status).to_have_text("1 updated, 0 failed, 0 left alone.")
+    await expect(button).to_be_enabled()
+
+
+async def test_a_record_of_another_boot_suspended_across_a_newer_paint_loses(
+    page: Page, server: Harness
+) -> None:
+    """#348. Boot ids carry no order, so across boots the page takes the
+    record that ARRIVED later, stamped before the await. A record that
+    arrived first and merely RESUMES last must not count as the later one:
+    stamping at paint time instead would reopen the lockout across a
+    reboot."""
+    server.seed_plugins([{"id": "alpha@m", "scope": "user"}])
+    server.seed()
+
+    pending_gets: list[Route] = []
+
+    async def capture_get(route: Route) -> None:
+        if route.request.method == "GET":
+            pending_gets.append(route)
+        else:
+            await route.continue_()
+
+    held_count: list[tuple[Route, APIResponse]] = []
+
+    async def hold_count(route: Route) -> None:
+        held_count.append((route, await route.fetch()))
+
+    await page.route("**/api/plugins/update", capture_get)
+    await page.route("**/api/projects", hold_count)
+
+    async def fulfill_next(body: dict[str, object]) -> None:
+        for _ in range(100):
+            if pending_gets:
+                break
+            await page.wait_for_timeout(20)
+        assert pending_gets, "a GET never reached the route"
+        await pending_gets.pop(0).fulfill(
+            status=200, content_type="application/json", body=json.dumps(body)
+        )
+
+    await page.goto(f"{server.base}/settings")
+    # The old boot's done record, a much LATER boot clock reading than the
+    # new boot's: were boot clocks compared across boots, it would win.
+    await fulfill_next(
+        _synthetic_record(
+            "old", 7, "done", boot="boot-a", since_boot_us=10**12, **_DONE_UPDATED_ONE
+        )
+    )
+    for _ in range(100):
+        if held_count:
+            break
+        await page.wait_for_timeout(20)
+    assert held_count, "the old boot's countRunning() never reached the held route"
+
+    await page.evaluate("() => { window.__plugins.loadPlugins(); }")
+    await fulfill_next(_synthetic_record("new", 0, "idle", boot="boot-b", since_boot_us=1))
+    status = page.locator("[data-plugins-status]")
+    await expect(status).to_have_text("Not run since this server started.")
+
+    count_route, count_response = held_count[0]
+    await count_route.fulfill(response=count_response)
+    await page.wait_for_timeout(500)
+    await expect(status).to_have_text("Not run since this server started.")
+    await expect(page.locator("[data-plugins-update]")).to_be_enabled()
