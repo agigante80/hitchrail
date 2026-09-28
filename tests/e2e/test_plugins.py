@@ -1225,7 +1225,15 @@ async def test_a_restart_during_a_page_load_leaves_the_strip_on_the_new_server(
 
     held: list[tuple[Route, APIResponse]] = []
 
+    # Only `countRunning()`'s request, and only the first: it is the one that
+    # sends `accept` rather than `content-type`. Holding every `/api/projects`
+    # also caught app.js's listing retry while the server was down, and that
+    # `route.fetch()` died with "socket hang up" inside the handler, failing
+    # the test on a slow CI leg rather than the page (#348's first CI run).
     async def hold(route: Route) -> None:
+        if held or route.request.headers.get("accept") != "application/json":
+            await route.continue_()
+            return
         held.append((route, await route.fetch()))
 
     await page.route("**/api/projects", hold)
