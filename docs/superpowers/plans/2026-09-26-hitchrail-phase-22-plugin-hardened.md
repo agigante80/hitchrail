@@ -192,6 +192,26 @@ latch, so it stays here. Its lows went to Backlog as #365 to #368 and #370.
 - [ ] **Task 158, #369 (P2).** A real runner test kills the handle mid
       update and asserts the next plugin never spawns.
 
+### Batch 6: the dependency updates, tasks 159 to 163
+
+Added on 2026-09-28 at Andrea's request: every open Dependabot pull request
+was closed unmerged and each direct dependency it named became a ticket in
+this phase, so a bump is made on `develop` and reviewed like any other change
+rather than merged as a bot wrote it. This is outside the phase's objective by
+decision, not by drift. Three of the nine pull requests (#192 to #194) needed
+no ticket, since `develop` already locks newer versions.
+
+- [ ] **Task 159, #371 (P2).** `uvicorn` 0.53, read against the access log
+      scrub and the lifespan.
+- [ ] **Task 160, #372 (P2).** `sse-starlette` 3.4.11, read against the
+      stream's disconnect and shutdown.
+- [ ] **Task 161, #373 (P2).** `upload-artifact` v7 and `download-artifact`
+      v8 in one commit, with the build handoff exercised before a release
+      depends on it.
+- [ ] **Task 162, #374 (P3).** `mutmut` 3.8, checked against each
+      `[tool.mutmut]` workaround.
+- [ ] **Task 163, #375 (P3).** `astral-sh/setup-uv` v10.2.0.
+
 ## Done looks like
 
 - [ ] Every task above is ticked, or marked MOVED OUT or NOT BUILT with the
