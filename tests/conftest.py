@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -21,6 +21,12 @@ from hitchrail.config import TOKEN_ENV
 from hitchrail.procs import ProcTable, parse_ps
 from hitchrail.settings import CONFIG_HOME_ENV
 from hitchrail.tmux import Panes, Tmux
+
+# pytester is not a default plugin: `tests/test_plugin_route.py` needs it
+# (#310 round 1 review) to run a "forgetful" test inside its OWN pytest
+# invocation and check that invocation's outcome, which cannot be done from
+# inside the same run without failing this suite on purpose.
+pytest_plugins = ["pytester"]
 
 # What the stubbed resolver answers with. `.invalid` is reserved by RFC 2606
 # precisely so it can never resolve, and 203.0.113.0/24 is TEST-NET-3, so
@@ -97,18 +103,40 @@ def _no_proc_cwd(pid: int) -> Path:
     )
 
 
-def _no_real_plugin_update(_agent_binary: str) -> Callable[..., object]:
-    def refuse(_report: object) -> object:
-        raise AssertionError(
-            "a test reached the REAL plugin update, which would update this "
-            "machine's own plugins: pass `plugin_operation=` to `create_app`"
-        )
+class PluginUpdateGuard:
+    """What `no_real_plugin_update` yields (#310).
 
-    return refuse
+    The refusal below runs on `PluginRuns`'s own daemon thread, not the
+    test's: `_run`'s `except Exception` catches it and records an ordinary
+    `internal_error`, so the AssertionError itself never reaches the test
+    that forgot `plugin_operation=`. `fired` is how the fixture's own
+    teardown notices anyway, on the test's thread, where a bare
+    `pytest.fail` would land. `expect()` is the one escape hatch, for the
+    single test that deliberately omits `plugin_operation=` to prove this
+    guard exists.
+    """
+
+    def __init__(self) -> None:
+        self.fired: list[AssertionError] = []
+        self.expected = False
+
+    def expect(self) -> None:
+        self.expected = True
+
+    def check(self) -> None:
+        """Called at the fixture's own teardown, on the test's thread, which
+        is what makes an unexpected firing loud (#310)."""
+        if self.fired and not self.expected:
+            raise AssertionError(
+                "the real plugin update guard fired, but only failed the run's "
+                "own daemon thread (#310): pass plugin_operation= to create_app, "
+                "or call no_real_plugin_update.expect() if this test means to "
+                "reach it"
+            ) from self.fired[0]
 
 
 @pytest.fixture(autouse=True)
-def no_real_plugin_update(monkeypatch: pytest.MonkeyPatch) -> None:
+def no_real_plugin_update(monkeypatch: pytest.MonkeyPatch) -> Iterator[PluginUpdateGuard]:
     """The same rule for the plugin update (#297), and a sharper one: every
     other seam here reads the machine, and this one CHANGES it. `create_app`
     with no `plugin_operation` builds the real operation, so any test that
@@ -116,7 +144,22 @@ def no_real_plugin_update(monkeypatch: pytest.MonkeyPatch) -> None:
     developer's marketplaces and update their plugins. Replaced where the
     server looks it up; `test_plugin_runs.py` tests the real builder directly.
     """
-    monkeypatch.setattr("hitchrail.server.operation_for", _no_real_plugin_update)
+    guard = PluginUpdateGuard()
+
+    def operation_for(_agent_binary: str, *, handle: object = None) -> Callable[..., object]:
+        def refuse(_report: object) -> object:
+            exc = AssertionError(
+                "a test reached the REAL plugin update, which would update this "
+                "machine's own plugins: pass `plugin_operation=` to `create_app`"
+            )
+            guard.fired.append(exc)
+            raise exc
+
+        return refuse
+
+    monkeypatch.setattr("hitchrail.server.operation_for", operation_for)
+    yield guard
+    guard.check()
 
 
 @pytest.fixture(autouse=True)

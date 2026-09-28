@@ -424,6 +424,37 @@ def test_a_flag_shaped_agent_binary_is_refused(tmp_path: Path, binary: str) -> N
         Config(roots=_r(tmp_path), agent_binary=binary)
 
 
+def test_agent_binary_is_stored_stripped(tmp_path: Path) -> None:
+    """#302. The old per-caller check computed the stripped value and never
+    wrote it back, so the server spawned an operator's padding its own
+    refusal had already rejected as a shape."""
+    assert Config(roots=_r(tmp_path), agent_binary="  claude  ").agent_binary == "claude"
+
+
+def test_spawn_agent_binary_falls_back_to_agent_binary(tmp_path: Path) -> None:
+    """Every Config built outside `cli.main`, `support.make_config` included,
+    leaves `resolved_agent_binary` unset. #196's field must not make those
+    Configs spawn nothing."""
+    cfg = Config(roots=_r(tmp_path), agent_binary="my-agent")
+    assert cfg.resolved_agent_binary is None
+    assert cfg.spawn_agent_binary == "my-agent"
+
+
+def test_spawn_agent_binary_prefers_the_resolved_path(tmp_path: Path) -> None:
+    cfg = Config(
+        roots=_r(tmp_path), agent_binary="claude", resolved_agent_binary="/usr/local/bin/claude"
+    )
+    assert cfg.spawn_agent_binary == "/usr/local/bin/claude"
+
+
+def test_a_relative_resolved_agent_binary_is_refused(tmp_path: Path) -> None:
+    """Only `cli.preflight`'s own lookup may set this field, and that lookup
+    is required to answer with an absolute path or nothing (#298): a relative
+    value here can only mean a second, less careful resolver wrote it."""
+    with pytest.raises(ConfigError, match="resolved_agent_binary"):
+        Config(roots=_r(tmp_path), agent_binary="claude", resolved_agent_binary="claude")
+
+
 @pytest.mark.parametrize("port", [0, -1, 65536, 99999])
 def test_a_port_out_of_range_is_refused(tmp_path: Path, port: int) -> None:
     with pytest.raises(ConfigError, match="port"):
@@ -1008,7 +1039,69 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # now two things, the split is a `claude_ipc` package, and that is
         # Phase 18's argument rather than this phase's. The last 16 lines are
         # round 1 of its review: vendor text escaped before it is printed.
-        "claude_ipc.py": 1062,
+        # 1062 to 1077 for batch 3 task 139, #305: `_shown` now cuts the raw
+        # text and escapes after, so the 240 limit bounds the vendor's own
+        # text rather than what escaping turns it into. The growth is mostly
+        # the docstring saying why the order flipped.
+        # 1077 to 1083 for task 141, #303: `_read_listing` and
+        # `_approved_command` catch `RecursionError` beside `ValueError`,
+        # since deeply nested `--json` output blows the parser's own stack
+        # rather than raising the error they already handled.
+        # 1083 to 1087 for task 142, #300: a `user` scope plugin the listing
+        # names twice is reported `skipped`, detail `listed twice`, instead
+        # of being dropped, so the outcome count covers every row returned.
+        # 1087 to 1105 for task 143, #299: `plugin_runner`'s inner `run` moves
+        # off `subprocess.run`, which never exposes the `Popen` it creates
+        # internally and so cannot be told to kill a hung child's own
+        # children, a process group. It now starts the child in its own
+        # session and kills that group on timeout; the growth is the
+        # `Popen`/`communicate` split `subprocess.run` used to do in one call,
+        # plus the comment saying why.
+        # 1105 to 1146 for #299's round 1 review: the kill now catches
+        # `BaseException`, not only `TimeoutExpired`, so a `SIGINT` mid update
+        # is still a kill (M2); `os.killpg` is given `proc.pid` directly
+        # rather than `os.getpgid(proc.pid)`, so a `start_new_session`
+        # regression raises instead of killing hitchrail's own group (M3);
+        # and the reap after the kill closes the pipes and bounds its own
+        # `wait`, rather than a second unbounded `communicate()` that a
+        # grandchild outside the group and still holding them could block for
+        # as long as it runs (H1, measured at 8.0s against a 0.5s bound).
+        # Most of the growth is the docstring carrying those three reasons and
+        # the measurement, not the code, which is ten lines longer: `SIM105`
+        # wants the two suppressed exceptions as `contextlib.suppress`, not
+        # `try`/`except`/`pass`, one line pricier once the reason each one is
+        # suppressed stays a comment above the `with` rather than beside the
+        # `pass` it used to sit on.
+        # 1147 to 1163 for task 156, #351: `plugin_runner`'s `Popen` call takes
+        # `errors="replace"` on top of `text=True`, so an agent binary whose
+        # child prints bytes that are not valid UTF-8 is reported unreadable,
+        # like other malformed output already is, rather than raising
+        # `UnicodeDecodeError` out of `update_plugins` uncaught. Most of the
+        # growth is the comment saying why replacement and not a stricter
+        # catch: `_read_listing`/`_approved_command` already treat malformed
+        # JSON as unreadable, so reusing that path needed no new failure code.
+        # 1163 to 1226 for task 157, #361: `RunningChild`, a thread-safe pid
+        # handle `plugin_runner` sets and clears around its `Popen`, so the
+        # server's lifespan can kill an in flight update's process group from
+        # outside the daemon thread it runs on, which never sees the
+        # shutdown's `KeyboardInterrupt`. Most of the growth is the docstring
+        # explaining why `except BaseException` above it only ever restores
+        # Ctrl-C's own kill for `hitchrail update-plugins`, never for a run
+        # the server started.
+        # 1226 to 1335 for #361 round 1 review, M1: `RunningChild` becomes a
+        # one-shot latch (`_closed`, `raise_if_closed`, and a closed check
+        # inside `_set`) rather than a bare pid slot, because the bare slot
+        # left a kill landing between two plugins, or between one's `Popen`
+        # returning and its pid becoming visible, signalling nothing and
+        # letting the run carry on: measured by the reviewer as a second
+        # `claude plugin update ... -y` spawned 41ms after the lifespan that
+        # was supposed to have ended the run had already exited. `RunnerClosed`
+        # and `update_plugins`'s new `abandoned` handling are the honest
+        # report of what the latch refused, so a shutdown reads as a shutdown
+        # rather than a per-plugin failure or a dropped row. Most of the
+        # growth is the docstrings saying why the latch exists and which race
+        # each of its two checks closes.
+        "claude_ipc.py": 1341,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.
@@ -1198,7 +1291,22 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # holds on 3.7a, the unnamed session kept rather than dropped, and
         # the server's pid asked for on its own when there is no pane to
         # list it from (`exit-empty off`).
-        "tmux.py": 619,
+        # 619 to 640 for task 143, #299: `_default_runner` moves off
+        # `subprocess.run`, for the same reason as `claude_ipc.py`'s
+        # `plugin_runner` above: it never exposes the `Popen` it creates, so
+        # it cannot kill a hung tmux invocation's own child processes as a
+        # group. Duplicated rather than shared with `claude_ipc.py`, because
+        # sharing it would import the tmux adapter into the vendor quarantine
+        # or the vendor quarantine into the tmux adapter, either a worse
+        # coupling than fifteen duplicated lines with a comment in each.
+        # 640 to 678 for #299's round 1 review, the same three fixes as
+        # `claude_ipc.py`'s and duplicated for the identical reason: catch
+        # `BaseException` so Ctrl-C mid call still kills the group (M2), give
+        # `os.killpg` `proc.pid` directly so a dropped `start_new_session`
+        # raises instead of killing this process's own group (M3), and bound
+        # the reap after the kill by closing the pipes rather than a second
+        # unbounded `communicate()` (H1).
+        "tmux.py": 678,
         # 413, and thirteen lines over the guideline is not a second job. #18
         # already took the host vocabulary out of this file, and what is left
         # is one dataclass and its startup refusals, which is one thing. The
@@ -1242,7 +1350,14 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 690 after round 2: that paragraph claimed nothing off the machine
         # can reach a loopback bind, which `remote_reach` twenty lines above
         # calls false for the same question.
-        "config.py": 690,
+        # 735 for Phase 22 batch 1 (#302, #196, #298): `check_agent_binary`
+        # moved to module level so `cli.update_plugins_command` can share it
+        # instead of running its own copy that forgot to write the stripped
+        # value back, and `resolved_agent_binary` plus `spawn_agent_binary`
+        # arrived to carry what `cli.preflight` resolved through to every
+        # spawn site without a second, less careful resolution. New
+        # behaviour and a new refusal, not the growth of one job into two.
+        "config.py": 735,
         # 460 for #123, #154 and #238: `--config`, `--session-prefix` and the
         # source tagging the settings page shows, which is one function
         # reading the flags back out of argv. Nothing here parses a value
@@ -1268,7 +1383,30 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # itself already in `claude_ipc.py`. If a second subcommand arrives,
         # that is the moment to move both out. 693 in its review: the failure
         # code printed ahead of the words, so a script can match on it.
-        "cli.py": 693,
+        # 748 for #326: `identity_banner()`, printed once before
+        # `build_config()` so a refusal still names the service, and its
+        # `ONE_LINE_DESCRIPTION` constant, read from the installed package's
+        # metadata the same way `__init__.py` already reads `__version__`. The
+        # fallback string, used only from a bare, uninstalled checkout, is
+        # marked `# pragma: no cover` for that reason.
+        # 804 for #141: help text and a shown default for every option that
+        # lacked one, the parser factored out as `build_parser()` so both
+        # `parse_args()` and the bare-invocation help path share it, two
+        # worked examples in the epilog, and a `mention_update_plugins` flag
+        # so that epilog's subcommand note can be left out of the concise
+        # "no roots configured" refusal without a second parser. (The commit
+        # that introduced this entry recorded 788, four short of the file it
+        # actually landed; corrected here rather than left to re-explain the
+        # gap the next time this cap is touched.)
+        # 843 for Phase 22 batch 1 (#302, #196, #298): `preflight` returns a
+        # `Preflight` NamedTuple carrying the absolute path it resolved
+        # alongside its problems, instead of answering only `is None` and
+        # discarding the value a caller needed; `main` threads that path into
+        # `Config` once, before `Engine` and `create_app` exist;
+        # `update_plugins_command` shares `check_agent_binary` and resolves
+        # its own relative `--agent-binary` against this process's cwd before
+        # spawning, so the file it checked is the file it runs.
+        "cli.py": 843,
         # 409, nine lines over, down from 542. #115 deleted the `?token=`
         # carrier: 135 lines once the two blocks inside `TokenMiddleware`
         # that only served it are counted.
@@ -1363,7 +1501,14 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 948 for #297: two plugin routes and the named event branch in the
         # stream. The run itself is `plugin_runs.py`, deliberately, so what
         # grew here is routing and the reason each answer is what it is.
-        "server.py": 948,
+        # 950 for Phase 22 batch 1 (#196, #298): the plugin update route reads
+        # `config.spawn_agent_binary`, not `config.agent_binary`, so it too
+        # runs the absolute path preflight resolved rather than a bare name.
+        # 950 to 969 for task 157, #361: `operation_for` is built with
+        # `plugin_updates.handle`, and the lifespan's `finally` kills it
+        # before cancelling the sweep task, both with the comment saying why
+        # a daemon thread never sees the shutdown's `KeyboardInterrupt`.
+        "server.py": 969,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"
@@ -1502,6 +1647,130 @@ def test_every_environment_variable_the_product_reads_is_scrubbed() -> None:
         f"`conftest.no_ambient_environment`: {unscrubbed}. Add them to "
         f"`AMBIENT_ENV`, or to `scrubbed` here with the reason the suite "
         f"should inherit the developer's value."
+    )
+
+
+# -- Phase 22 batch 1, #302/#196/#298: one resolved agent binary ------------
+
+
+class _FunctionScopedAttributeReads(ast.NodeVisitor):
+    """Every `ast.Attribute` read (`Load` context) whose name is `attr`,
+    tagged with the name of the function it is lexically inside.
+
+    Keyed by the immediate enclosing function rather than the line number
+    (#298 batch 1 review), because a line number allowlist is invalidated by
+    an unrelated edit two lines above it and nobody notices until the guard
+    it protects has already gone quiet. A nested function, such as
+    `server.py`'s `_config_view` inside `create_app`, is its OWN scope: the
+    outer function's name would let every closure inside it read the raw
+    setting once one legitimate read anywhere in `create_app` was allowed.
+    """
+
+    def __init__(self, attr: str) -> None:
+        self.attr = attr
+        self.hits: list[tuple[str, int, str]] = []
+        self._stack: list[str] = ["<module>"]
+
+    def _function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        self._stack.append(node.name)
+        self.generic_visit(node)
+        self._stack.pop()
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._function(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._function(node)
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        if node.attr == self.attr and isinstance(node.ctx, ast.Load):
+            self.hits.append((self._stack[-1], node.lineno, ast.unparse(node)))
+        self.generic_visit(node)
+
+
+def test_every_read_of_agent_binary_is_the_resolved_property_or_allowlisted() -> None:
+    """#196's premortem, widened after the round 1 finding on this guard
+    itself: the first version only flagged `.agent_binary` passed directly
+    as the first argument to `claude_ipc.launch_argv` or
+    `claude_ipc.update_plugins`, so `server.py`'s plugin route, which goes
+    through `plugin_runs.operation_for(...)` rather than calling
+    `claude_ipc.update_plugins` itself, could revert to
+    `operation_for(config.agent_binary)` and pass every test in this file.
+
+    So this flags ANY read of the `agent_binary` attribute anywhere in
+    `src/hitchrail`, on any object, `Config` included, and allows only the
+    handful that are legitimately reading the OPERATOR'S raw setting rather
+    than what preflight resolved: the one shape check, preflight's own
+    lookup, the CLI's own re-check before it spawns the update directly, the
+    Config built from argparse's `args.agent_binary` (also named
+    `agent_binary`, since the attribute name is what this guard matches, not
+    the object it lives on), `cli.main` threading `Preflight.agent_binary`
+    through, and the settings page showing the operator what they typed.
+    Every other read must go through `.spawn_agent_binary` instead.
+
+    #345, round 2 of batch 1's review: keyed by (module, function) alone,
+    `("cli.py", "main")` allowed EVERY read anywhere in `main`, not only the
+    one line 802 that threads `found.agent_binary` through, so a raw spawn
+    added anywhere else in that function passed silently
+    (`claude_ipc.launch_argv(config.agent_binary, ...)`, verified on a
+    scratch copy). Keyed by the exact expression `ast.unparse` reads too, so
+    only that one line is exempt and a second read in the same function is
+    caught like any other offender.
+    """
+    allowed: set[tuple[str, str, str]] = {
+        # The one shape check itself (#302): normalises and validates the
+        # operator's raw value before anything is derived from it.
+        ("config.py", "__post_init__", "self.agent_binary"),
+        # `spawn_agent_binary` IS the safe read every spawn site must use
+        # instead; its own fallback to the raw field, for a Config built
+        # outside `cli.main`, is what it exists to hold in one place.
+        ("config.py", "spawn_agent_binary", "self.agent_binary"),
+        # Builds a Config from the operator's own flags: `args.agent_binary`
+        # is what they typed, becoming `Config.agent_binary`, not a spawn.
+        ("cli.py", "build_config", "args.agent_binary"),
+        # What preflight is resolving. This function's whole job is finding
+        # the absolute path from the raw name.
+        ("cli.py", "preflight", "config.agent_binary"),
+        # `hitchrail update-plugins`: no Config exists yet, so this resolves
+        # and checks its OWN copy of the raw `--agent-binary` flag before it
+        # ever calls `claude_ipc.update_plugins` with the resolved value.
+        ("cli.py", "update_plugins_command", "args.agent_binary"),
+        # Threads `Preflight.agent_binary`, the field preflight resolved,
+        # into `Config.resolved_agent_binary`. `Preflight` is a different
+        # object from `Config`, but the attribute name is the same string,
+        # which is exactly why this guard cannot key on the object either.
+        ("cli.py", "main", "found.agent_binary"),
+        # The settings page shows the operator's raw setting, with `source`
+        # saying where it came from; showing the resolved absolute path here
+        # while `source` still said "default" would misrepresent provenance.
+        ("server.py", "_config_view", "config.agent_binary"),
+    }
+
+    src = Path(__file__).resolve().parents[1] / "src" / "hitchrail"
+    offenders: dict[str, str] = {}
+    found_a_read = False
+    for path in src.glob("*.py"):
+        finder = _FunctionScopedAttributeReads("agent_binary")
+        finder.visit(ast.parse(path.read_text()))
+        for func, lineno, text in finder.hits:
+            found_a_read = True
+            if (path.name, func, text) in allowed:
+                continue
+            offenders[f"{path.name}:{lineno} ({func})"] = text
+
+    # Guard the guard, the same way test_every_environment_variable... does:
+    # if the parser stops matching at all, every assertion below is
+    # vacuously true.
+    assert found_a_read, (
+        "the parser found no read of .agent_binary anywhere, which means it "
+        "has stopped matching rather than that nothing reads it any more"
+    )
+    assert not offenders, (
+        f"a read of the raw, unresolved agent binary outside the allowlist: "
+        f"{offenders}. Read `config.spawn_agent_binary` instead, so this runs "
+        f"the exact file `cli.preflight` checked; if this read is genuinely "
+        f"the operator's raw setting rather than a spawn site, add it to "
+        f"`allowed` above with the reason."
     )
 
 

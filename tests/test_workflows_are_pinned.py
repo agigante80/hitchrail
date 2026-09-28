@@ -159,6 +159,16 @@ def test_the_pins_have_something_that_updates_them() -> None:
     assert "github-actions" in _ECOSYSTEM.findall(DEPENDABOT.read_text())
 
 
+def _stanzas(text: str) -> list[str]:
+    """Each `- package-ecosystem:` entry's own lines."""
+    starts = [m.start() for m in _ECOSYSTEM.finditer(text)]
+    return [text[a:b] for a, b in zip(starts, [*starts[1:], len(text)], strict=True)]
+
+
+def _opens_no_version_updates(stanza: str) -> bool:
+    return re.search(r"^\s*open-pull-requests-limit:\s*0\s*$", stanza, re.M) is not None
+
+
 def test_every_ecosystem_sends_its_version_updates_where_they_can_merge() -> None:
     """#155. `main` requires the `version-bumped` check, which fails unless
     `pyproject.toml`'s version is ahead of the latest release tag, and a
@@ -169,20 +179,31 @@ def test_every_ecosystem_sends_its_version_updates_where_they_can_merge() -> Non
     the default branch, which is `main`, and produces exactly that: a pull
     request nobody can act on rather than a visible failure.
 
-    **A SECURITY update ignores this and goes to the default branch**, which is
-    deliberate and accepted: it is read as a notification, and the fix is
-    implemented on `develop` like every other change. Nothing here can affect
-    that, which is why this test is about version updates only.
+    The one entry exempt is the one that opens NO version updates
+    (`open-pull-requests-limit: 0`): it leaves `target-branch` out on purpose,
+    because only an entry without it governs security updates.
     """
-    text = DEPENDABOT.read_text()
-    ecosystems = _ECOSYSTEM.findall(text)
-    targets = _TARGET.findall(text)
-    assert len(targets) == len(ecosystems), (
-        f"{len(ecosystems)} ecosystems and {len(targets)} target-branch lines: one "
-        "of them opens its version updates against the release branch, where the "
-        "release gate fails them by construction"
-    )
-    assert set(targets) == {"develop"}, targets
+    stanzas = _stanzas(DEPENDABOT.read_text())
+    version_entries = [s for s in stanzas if not _opens_no_version_updates(s)]
+    assert version_entries, "no entry opens version updates at all"
+    for stanza in version_entries:
+        assert _TARGET.findall(stanza) == ["develop"], (
+            "an entry opens its version updates against the release branch, "
+            f"where the release gate fails them by construction:\n{stanza}"
+        )
+
+
+def test_security_updates_are_limited_to_direct_dependencies() -> None:
+    """A `target-branch` entry's `allow` does not reach security updates, so
+    without an entry that leaves it out, a transitive advisory opens a lockfile
+    only pull request on `main` (Actual-sync's #192). That entry must exist for
+    `uv`, allow direct dependencies only, and open no version updates of its
+    own, or it would duplicate every one the `develop` entry opens."""
+    uv = [s for s in _stanzas(DEPENDABOT.read_text()) if '"uv"' in s.splitlines()[0]]
+    security = [s for s in uv if not _TARGET.findall(s)]
+    assert len(security) == 1, "no uv entry governs security updates"
+    assert _opens_no_version_updates(security[0])
+    assert 'dependency-type: "direct"' in security[0]
 
 
 def test_the_python_ecosystem_updates_only_what_this_project_declares() -> None:
@@ -197,9 +218,10 @@ def test_the_python_ecosystem_updates_only_what_this_project_declares() -> None:
     Asserted for `uv` only. Every action a workflow names is direct, so the
     same filter on `github-actions` would express nothing.
     """
-    text = DEPENDABOT.read_text()
-    uv_stanza = text.split('package-ecosystem: "uv"', 1)[1].split("package-ecosystem:", 1)[0]
-    assert 'dependency-type: "direct"' in uv_stanza, (
-        "the Python ecosystem would open pull requests for transitive packages, "
-        "which are fixed by moving a direct dependency rather than by pinning them"
-    )
+    uv = [s for s in _stanzas(DEPENDABOT.read_text()) if '"uv"' in s.splitlines()[0]]
+    assert uv, "no uv entry"
+    for stanza in uv:
+        assert 'dependency-type: "direct"' in stanza, (
+            "the Python ecosystem would open pull requests for transitive packages, "
+            "which are fixed by moving a direct dependency rather than by pinning them"
+        )

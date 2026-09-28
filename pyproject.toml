@@ -1,7 +1,7 @@
 [project]
 name = "hitchrail"
-version = "0.10.0"
-description = "Start and stop headless Claude Code sessions across a folder of projects, from your phone."
+version = "0.11.0"
+description = "Start and stop headless Claude Code sessions across a folder of projects, from a phone-first web UI."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -9,10 +9,13 @@ license-files = ["LICENSE"]
 authors = [{ name = "agigante80" }]
 keywords = ["claude-code", "tmux", "session-manager", "self-hosted"]
 classifiers = [
+  # #157. No licence classifier here: it is deprecated under PEP 639, PyPI has
+  # stopped accepting new ones, and `license = "MIT"` above already says the
+  # same thing in the form the ecosystem standardised on. `uv build` warns on
+  # one when it is present; it warns on nothing once it is gone.
   "Development Status :: 3 - Alpha",
   "Environment :: Web Environment",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: MIT License",
   "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
@@ -56,7 +59,7 @@ dev = [
 # modules and runs pytest in process, so it needs an environment that already
 # has starlette, httpx and the rest; an isolated tool install has none of them.
 mutation = [
-  "mutmut>=3.7,<4",
+  "mutmut>=3.8,<4",
 ]
 
 [tool.ruff]
@@ -264,6 +267,24 @@ source_paths = [
   # stops two projects reaching one session, and since #119 that carries the
   # multi root guarantee.
   "src/hitchrail/tmuxnames.py",
+  # #304. Was `also_copy` only: mutated by nothing, despite being the
+  # quarantine module that builds `launch_argv` and now runs the plugin
+  # update's own argv, both between a web page and a shell. `.claude/rules/
+  # security.md` already listed it; this list did not, which is the half of
+  # the ticket that was true.
+  #
+  # The whole file is over a thousand lines, most of it `launch_argv`,
+  # `request_stop` and the tmux IPC key sequences, which `test_claude_ipc.py`
+  # already exercises hard without mutmut. Mutating all of it would make a
+  # single sweep the minutes the premortem above warns against for a much
+  # smaller file. `pytest_add_cli_args_test_selection` below stays scoped to
+  # `tests/test_plugins.py`, which is the suite that drives `update_plugins`
+  # end to end through an injected `FakeAgent`, and the run itself is scoped
+  # to the plugin section's mutant names (`update_plugins`, `_call`,
+  # `_update_one`, `_read_listing`, `_approved_command`, `_detail`, `_shown`,
+  # `plugin_runner`) rather than to every mutant the file has. Widening
+  # either list to the rest of the module is future work, not this ticket.
+  "src/hitchrail/claude_ipc.py",
 ]
 # The tests that actually exercise those five. The full suite takes 34 seconds
 # and would make a single run hours; these 441 take 1.5, which is what makes
@@ -283,7 +304,6 @@ also_copy = [
   # spawns and its capture arrives injected, so it is not obviously between a
   # web page and a shell.
   "src/hitchrail/attention.py",
-  "src/hitchrail/claude_ipc.py",
   "src/hitchrail/cli.py",
   "src/hitchrail/derive.py",
   "src/hitchrail/engine.py",
@@ -331,7 +351,14 @@ also_copy = [
 # **#273 added the sixth**, and it reads the source too: it parses every
 # `os.environ.get(X)` in `src/` for X, and a mutant of `settings.py` carries
 # `os.environ.get(None)` beside the real call, which no scrub list names.
+# **#374 added the seventh**, and mutmut 3.8 is why. 3.7 skipped the methods
+# of a decorated class, so `Config.__post_init__` was never mutated; 3.8
+# mutates it, and `test_every_read_of_agent_binary_is_the_resolved_property_
+# or_allowlisted` reads every `self.agent_binary` in the source, finds one per
+# `xǁConfigǁ__post_init____mutmut_N` copy, and none of them is the allowlisted
+# `__post_init__`.
 pytest_add_cli_args = [
+  "--deselect=tests/test_config.py::test_every_read_of_agent_binary_is_the_resolved_property_or_allowlisted",
   "--deselect=tests/test_config.py::test_every_environment_variable_the_product_reads_is_scrubbed",
   "--deselect=tests/test_config.py::test_every_module_is_under_the_size_guideline",
   "--deselect=tests/test_config.py::test_the_import_contract_covers_every_engine_layer_module",
@@ -370,4 +397,11 @@ pytest_add_cli_args_test_selection = [
   "tests/test_settings_file.py",
   "tests/test_settings_route.py",
   "tests/test_gateway.py",
+  # #304. Drives `update_plugins` end to end through an injected `FakeAgent`,
+  # which is what actually reaches `_read_listing`, `_approved_command`,
+  # `_detail` and `_shown`: `test_plugin_route.py` and `test_plugin_runs.py`
+  # exercise the thread and route around the operation but stub the operation
+  # itself out through `no_real_plugin_update`, so they cannot kill a mutant
+  # inside it.
+  "tests/test_plugins.py",
 ]

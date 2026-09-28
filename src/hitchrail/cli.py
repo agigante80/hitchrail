@@ -9,7 +9,10 @@ import shutil
 import ssl
 import sys
 from collections.abc import Callable
+from dataclasses import replace
+from importlib.metadata import PackageNotFoundError, metadata
 from pathlib import Path
+from typing import NamedTuple
 from urllib.parse import quote
 
 import uvicorn
@@ -20,6 +23,7 @@ from hitchrail.config import (
     TOKEN_ENV,
     Config,
     ConfigError,
+    check_agent_binary,
     remote_reach,
 )
 from hitchrail.engine import Engine
@@ -27,6 +31,36 @@ from hitchrail.events import EventBus
 from hitchrail.hostnames import reachable_hosts
 from hitchrail.roots import Root, RootError, parse_root_argument
 from hitchrail.server import create_app
+
+# #326. `pyproject.toml`'s `description`, which is also PyPI's summary
+# (#328), the GitHub About field (#328), the README's centred tagline
+# (#158) and the meta description on index.html/settings.html (#331). Read
+# from the installed distribution's metadata rather than retyped a sixth
+# time, the same seam `installed_version()` in `hitchrail/__init__.py`
+# already uses for the version. The surfaces that cannot run Python
+# (`README.md` and the two HTML pages) are checked against the same
+# `pyproject.toml` field instead, by `tests/test_docs_are_true.py`.
+_FALLBACK_DESCRIPTION = (
+    "Start and stop headless Claude Code sessions across a folder of projects, "
+    "from a phone-first web UI."
+)
+
+
+def _one_line_description() -> str:
+    try:
+        summary = metadata("hitchrail")["Summary"]
+    except (PackageNotFoundError, KeyError):  # pragma: no cover (only from a bare checkout)
+        return _FALLBACK_DESCRIPTION
+    return summary or _FALLBACK_DESCRIPTION
+
+
+ONE_LINE_DESCRIPTION = _one_line_description()
+
+# Matches pyproject.toml's [project.urls] Homepage. Kept by hand: unlike the
+# description above, nothing else in this module has a reason to read
+# Project-URLs, and one more metadata lookup for a string that never changes
+# is not worth the indirection.
+GITHUB_URL = "https://github.com/agigante80/hitchrail"
 
 
 def _root_argument(raw: str) -> Root:
@@ -47,17 +81,51 @@ def _root_argument(raw: str) -> Root:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
-def parse_args(argv: list[str]) -> argparse.Namespace:
+# #141. Two worked examples, not a fifth spelling of one: both are already
+# in the README (the bare case just above "## Prerequisites", the proxied
+# case in "## What it costs you to run this"), so the epilog quotes rather
+# than invents. clig.dev's own strongest recommendation is examples first,
+# particularly the unobvious complex case, which here is needing BOTH
+# allowlist flags to sit behind a proxy.
+# Built from a list and joined, rather than one string with an inline
+# newline escape after each line: the leak-guard's home-root pattern stops
+# at a quote, not at an escape sequence, so a root glued directly to that
+# escape reads as one longer root, which no allow-file entry can name.
+_EXAMPLE_LINES = (
+    "  hitchrail --root main=~/projects",
+    "  hitchrail --root main=~/dev --host 0.0.0.0 --allow-host box.lan "
+    "--allow-origin https://box.lan",
+)
+_EXAMPLES = "examples:\n" + "\n".join(_EXAMPLE_LINES) + "\n"
+
+
+def build_parser(*, mention_update_plugins: bool = True) -> argparse.ArgumentParser:
+    """`mention_update_plugins=False` is for the "no roots configured" refusal
+    (see `main`'s `except ConfigError`), which reuses this parser's help to
+    stay concise (#141) rather than to introduce the unrelated subcommand.
+    `test_bare_hitchrail_still_means_the_server` (#124) is the compatibility
+    promise behind that: the old, root-less invocation must not read like it
+    is being pointed at `update-plugins`, whatever `--help` itself goes on to
+    mention.
+    """
+    epilog = _EXAMPLES
+    if mention_update_plugins:
+        epilog += (
+            f"\n{UPDATE_PLUGINS}: update the agent's plugins and exit, with no server. "
+            f"See `hitchrail {UPDATE_PLUGINS} --help`"
+        )
     parser = argparse.ArgumentParser(
         prog="hitchrail",
-        description="Start and stop headless Claude Code sessions across a folder of projects.",
+        description=ONE_LINE_DESCRIPTION,
         # #238. `flags_given` reads the option strings back out of argv to
         # say where a value came from, and an abbreviation argparse would
         # accept (`--stop 60`) is a spelling that scan cannot see. Exact
         # names only, which is what every document here uses anyway.
         allow_abbrev=False,
-        epilog=f"{UPDATE_PLUGINS}: update the agent's plugins and exit, with no server. "
-        f"See `hitchrail {UPDATE_PLUGINS} --help`",
+        # Raw, so the examples above keep their line breaks: the default
+        # formatter refills an epilog into one paragraph and loses them.
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=epilog,
     )
     # **`label=path`, repeatable, and there is no default.** #119 made a
     # project's identifier `<root-label>~<folder>`, so a root without a label
@@ -83,8 +151,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         metavar="FILE",
         help="the config file; default ~/.config/hitchrail/config.toml",
     )
-    parser.add_argument("--host", default="127.0.0.1", help="address to bind")
-    parser.add_argument("--port", default=8787, type=int)
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="address to bind; default 127.0.0.1, the safe loopback choice",
+    )
+    parser.add_argument("--port", default=8787, type=int, help="port to bind; default 8787")
     parser.add_argument(
         "--token", default=None, help="required off loopback; generated if omitted"
     )
@@ -119,7 +191,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--agent-binary",
         default="claude",
-        help="the agent executable to run; must be on PATH or an absolute path",
+        help="the agent executable to run; must be on PATH or an absolute path; default claude",
     )
     # A documented default that cannot be changed is a constant, and this one
     # is the wait a person actually watches. The three memory floors stay fixed
@@ -165,9 +237,19 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--stop-timeout",
         default=30,
         type=int,
-        help="seconds to wait for a graceful stop before reporting it timed out",
+        help="seconds to wait for a graceful stop before reporting it timed out; default 30",
     )
-    parser.add_argument("--version", action="version", version=f"hitchrail {__version__}")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"hitchrail {__version__}",
+        help="print the version and exit",
+    )
+    return parser
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = build_parser()
     args = parser.parse_args(argv)
     args.given = flags_given(parser, argv)
     return args
@@ -299,6 +381,25 @@ def build_config(args: argparse.Namespace) -> Config:
     )
 
 
+def identity_banner() -> str:
+    """The name, the one line description, the version and the project's
+    home, unconditionally (#326). Separate from `banner()` below and never
+    touching it: `banner()` stays exactly what it already is, silent until
+    there is a token to grant, and this one always has something to print.
+
+    Takes no `Config`, on purpose: it carries nothing derived from one, which
+    is what lets it print before `build_config()` runs and still appear when
+    a later config, preflight or gateway check refuses to start, exactly the
+    case a stranger's bug report needs it most.
+
+    `flush=True` belongs to the `print` call at the call site in `main()`,
+    not here: this only builds the string. The reason is #145, already
+    documented at `banner()`'s own call site: stdout is block buffered under
+    the unit, and an unflushed line here would never reach the journal either.
+    """
+    return f"hitchrail {__version__}: {ONE_LINE_DESCRIPTION}\n{GITHUB_URL}"
+
+
 def banner(config: Config) -> str:
     """What to print before serving. Empty on loopback, where there is no token.
 
@@ -381,12 +482,24 @@ def banner(config: Config) -> str:
 MEMINFO = Path("/proc/meminfo")
 
 
+class Preflight(NamedTuple):
+    """`problems` empty means good to go. `agent_binary` is the absolute path
+    the lookup resolved, carried alongside `problems` rather than thrown away
+    once they are empty (#196): a bare name here would still be re-resolved
+    by whatever spawns it next, in that thing's own environment rather than
+    this process's, which is the mismatch #298 also names."""
+
+    problems: list[str]
+    agent_binary: str | None
+
+
 def preflight(
     config: Config,
     which: Callable[[str], str | None] | None = None,
     meminfo: Path = MEMINFO,
-) -> list[str]:
-    """What is missing, in the operator's words. Empty means good to go.
+) -> Preflight:
+    """What is missing, in the operator's words, and the agent binary's
+    resolved path when there is nothing missing to report it against.
 
     Hitchrail is a launcher, and its two prerequisites are binaries rather than
     packages. Without this the failure arrives at the first tap on a project,
@@ -415,7 +528,8 @@ def preflight(
             "there is nothing it can do without it. Install it with your "
             "package manager, for example: sudo apt install tmux"
         )
-    if look(config.agent_binary) is None:
+    found = look(config.agent_binary)
+    if found is None:
         # **"Install it" is the wrong first remedy, and #195 is why.** The case
         # this actually fires in is a lingering systemd unit at boot: the agent
         # IS installed, in `~/.local/bin`, and the user manager's PATH before
@@ -430,6 +544,18 @@ def preflight(
             "THIS process has: under a systemd unit that is the unit's own "
             "Environment=PATH rather than your login's"
         )
+    elif not Path(found).is_absolute():
+        # A PATH entry given as a relative directory, "." most often, is the
+        # one shape `shutil.which` will hand back unresolved: everything else
+        # it finds it joins onto an absolute directory first. Spawning that
+        # would be #298 again, decided by whatever the CHILD's cwd turns out
+        # to be rather than by this lookup, so it is refused here instead.
+        problems.append(
+            f"{found!r} resolved to a relative path from a relative PATH "
+            "entry. Put an absolute directory earlier on PATH, or point "
+            "--agent-binary directly at the executable"
+        )
+        found = None
     if not meminfo.exists():
         problems.append(
             f"{meminfo} cannot be read, so the memory guard has nothing to "
@@ -437,7 +563,7 @@ def preflight(
             "rather than run without the check that stops it filling the "
             "machine with agents"
         )
-    return problems
+    return Preflight(problems, found if not problems else None)
 
 
 EXIT_REFUSED = 2
@@ -584,20 +710,25 @@ def update_plugins_command(argv: list[str]) -> int:
         help="the agent executable; must be on PATH or an absolute path",
     )
     args = parser.parse_args(argv)
-    binary = args.agent_binary.strip()
-    if not binary or binary.startswith("-"):
-        # The same refusal `Config._check_agent_binary` makes, for the reason
-        # it gives there: argv[0] starting with a hyphen is read as an option.
-        print(
-            f"hitchrail: not an acceptable agent binary: {args.agent_binary!r}", file=sys.stderr
-        )
+    try:
+        binary = check_agent_binary(args.agent_binary)
+    except ConfigError as exc:
+        print(f"hitchrail: {exc}", file=sys.stderr)
         return 2
-    if shutil.which(binary) is None:
+    resolved = shutil.which(binary)
+    if resolved is None:
         print(
             f"hitchrail: agent_missing: {binary!r} is not on PATH, so nothing was updated",
             file=sys.stderr,
         )
         return 2
+    # #298. `shutil.which` hands a name containing a directory component back
+    # UNCHANGED when it is executable, rather than making it absolute: only a
+    # bare name searched across PATH comes back joined onto an absolute
+    # directory. `resolve()` against THIS process's cwd, before
+    # `plugin_runner` starts the child in `Path.home()`, is what makes the
+    # program checked and the program run the same file.
+    resolved = str(Path(resolved).resolve())
 
     def show(outcome: claude_ipc.PluginOutcome) -> None:
         note = outcome.detail or (
@@ -608,7 +739,7 @@ def update_plugins_command(argv: list[str]) -> int:
 
     try:
         outcomes = claude_ipc.update_plugins(
-            binary, run=claude_ipc.plugin_runner(withhold=(TOKEN_ENV,)), report=show
+            resolved, run=claude_ipc.plugin_runner(withhold=(TOKEN_ENV,)), report=show
         )
     except claude_ipc.PluginsFailed as exc:
         # The code first: it is the same word the route's record carries, so
@@ -629,6 +760,11 @@ def main(argv: list[str] | None = None) -> int:
     if argv[:1] == [UPDATE_PLUGINS]:
         return update_plugins_command(argv[1:])
     args = parse_args(argv)
+    # #326. Before build_config(): identity_banner() carries nothing derived
+    # from a Config, so it still appears when a later config, preflight or
+    # gateway check refuses to start. flush=True for the same #145 reason
+    # banner()'s own print below documents.
+    print(identity_banner(), flush=True)
     try:
         config = build_config(args)
         # allowed_hosts is a property, so a bad extra host only raises when it
@@ -640,16 +776,30 @@ def main(argv: list[str] | None = None) -> int:
         tls = build_tls_context(config)
     except ConfigError as exc:
         print(f"hitchrail: {exc}", file=sys.stderr)
+        # #141. clig.dev: a program that needs arguments to function, run with
+        # none, should show concise help rather than a single refusal line.
+        # Scoped to the one case that IS a bare invocation, `roots.check_roots`'s
+        # own message, rather than every ConfigError: a typo in an existing
+        # config should not be buried under a full option dump.
+        if "no roots configured" in str(exc):
+            print(file=sys.stderr)
+            build_parser(mention_update_plugins=False).print_help(sys.stderr)
         return 2
 
     # BEFORE the banner and before the bind. Printing a token and a set of
     # links, then refusing to work, would be worse than refusing plainly.
-    problems = preflight(config)
-    if problems:
+    found = preflight(config)
+    if found.problems:
         print("hitchrail: cannot start.", file=sys.stderr)
-        for problem in problems:
+        for problem in found.problems:
             print(f"  - {problem}", file=sys.stderr)
         return 2
+    # #196. Threaded through rather than re-read: `spawn_agent_binary` is now
+    # the absolute path this exact preflight resolved, so the engine and the
+    # plugin update run the file that was just checked, not a bare name that
+    # tmux's own server, with its own inherited PATH, could resolve to
+    # something else.
+    config = replace(config, resolved_agent_binary=found.agent_binary)
     # #207. After the preflight, before the bind, and with two exit codes
     # because the unit reads them differently. A MISMATCH is exit 2, the
     # deliberate stop `RestartPreventExitStatus=2` keeps stopped until a

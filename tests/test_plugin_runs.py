@@ -8,13 +8,17 @@ marker cannot outlive a run however the run ends.
 
 from __future__ import annotations
 
+import itertools
 import threading
+import time
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 
+from hitchrail import plugin_runs as plugin_runs_module
 from hitchrail.claude_ipc import PluginOutcome, PluginsFailed
-from hitchrail.plugin_runs import EVENT_KIND, PluginRuns, RunInFlight
+from hitchrail.plugin_runs import EVENT_KIND, PluginRuns, RunInFlight, read_boot_id
 
 Report = Callable[[PluginOutcome], None]
 
@@ -62,8 +66,19 @@ class Published:
             assert self.changed.wait_for(lambda: len(self.events) >= n, 5), self.events
 
 
+# Every instance a later start on the boot clock than the one before, as
+# successive server processes are; the boot id is fixed, so the real
+# /proc is never read here.
+_boot_clock = itertools.count(1_000_000, 1_000)
+
+
 def runs(published: Published) -> PluginRuns:
-    return PluginRuns(publish=published, clock=lambda: 1000.0)
+    return PluginRuns(
+        publish=published,
+        clock=lambda: 1000.0,
+        boot=lambda: "test-boot",
+        boot_clock=lambda: next(_boot_clock),
+    )
 
 
 def test_before_any_run_the_record_says_idle() -> None:
@@ -94,7 +109,7 @@ def test_a_run_is_recorded_and_published_as_each_plugin_finishes() -> None:
     thread.join(5)
     final = plugin_runs.snapshot()
     assert final["state"] == "done"
-    assert final["counts"] == {"updated": 1, "failed": 0, "skipped": 1}
+    assert final["counts"] == {"updated": 1, "failed": 0, "skipped": 1, "abandoned": 0}
     assert final["outcomes"][1] == {
         "plugin": "adapt@kit",
         "scope": "local",
@@ -141,6 +156,41 @@ def test_a_failed_operation_records_its_code_and_no_count() -> None:
     assert record["code"] == "plugins_unreadable"
     assert record["message"] == "could not be understood"
     assert record["counts"] is None
+
+
+def test_a_thread_that_cannot_start_leaves_the_run_failed_not_stuck_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#307, premortem 2 in the plan. `Thread.start` can raise on its own,
+    `RuntimeError` on a machine out of threads being the documented case, and
+    `_run`'s `finally` never fires when `_run` itself never starts. Without
+    the fix, `running` sticks and every later request reads
+    `update_in_flight` until a restart; this asserts the marker clears and
+    the outcome is published instead.
+    """
+    published = Published()
+    plugin_runs = runs(published)
+
+    def cannot_start(self: threading.Thread) -> None:
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(threading.Thread, "start", cannot_start)
+    with pytest.raises(RuntimeError):
+        plugin_runs.start(Held())
+
+    record = plugin_runs.snapshot()
+    assert record["state"] == "failed"
+    assert record["code"] == "internal_error"
+    assert published.events[-1]["run"] == record
+
+    # Restore the real `Thread.start` before proving the marker does not
+    # stick: this run's own thread must actually run to complete.
+    monkeypatch.undo()
+    again = Held()
+    thread = plugin_runs.start(again)
+    again.release(0)
+    thread.join(5)
+    assert plugin_runs.snapshot()["state"] == "done"
 
 
 def test_the_marker_is_cleared_when_the_operation_raises_anything() -> None:
@@ -211,8 +261,9 @@ def test_the_default_operation_is_the_quarantined_one(monkeypatch: pytest.Monkey
 
     seen: dict[str, object] = {}
 
-    def fake_runner(withhold: tuple[str, ...]) -> str:
+    def fake_runner(withhold: tuple[str, ...], *, handle: object = None) -> str:
         seen["withhold"] = tuple(withhold)
+        seen["handle"] = handle
         return "runner"
 
     def fake_update(binary: str, *, run: object, report: Report) -> list[PluginOutcome]:
@@ -222,7 +273,34 @@ def test_the_default_operation_is_the_quarantined_one(monkeypatch: pytest.Monkey
     monkeypatch.setattr(claude_ipc, "plugin_runner", fake_runner)
     monkeypatch.setattr(claude_ipc, "update_plugins", fake_update)
     operation_for("/opt/agent")(lambda _o: None)
-    assert seen == {"withhold": (TOKEN_ENV,), "binary": "/opt/agent", "run": "runner"}
+    assert seen == {
+        "withhold": (TOKEN_ENV,),
+        "handle": None,
+        "binary": "/opt/agent",
+        "run": "runner",
+    }
+
+
+def test_operation_for_threads_a_handle_into_the_runner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#361. `PluginRuns.handle` has to reach `plugin_runner` unchanged, or
+    the server's lifespan kills nothing: this is the seam the wiring goes
+    through, one call outside `create_app`'s own machinery."""
+    from hitchrail import claude_ipc
+    from hitchrail.plugin_runs import operation_for
+
+    seen: dict[str, object] = {}
+    sentinel = claude_ipc.RunningChild()
+
+    def fake_runner(withhold: tuple[str, ...], *, handle: object = None) -> str:
+        seen["handle"] = handle
+        return "runner"
+
+    monkeypatch.setattr(claude_ipc, "plugin_runner", fake_runner)
+    monkeypatch.setattr(claude_ipc, "update_plugins", lambda *a, **k: [])
+    operation_for("/opt/agent", handle=sentinel)(lambda _o: None)
+    assert seen["handle"] is sentinel
 
 
 def test_every_change_carries_a_larger_seq_across_runs() -> None:
@@ -264,3 +342,63 @@ def test_the_epoch_names_the_process_and_holds_for_its_life() -> None:
     epochs = {e["run"]["epoch"] for e in published.events}  # type: ignore[index]
     assert epochs == {before}
     assert runs(Published()).snapshot()["epoch"] != before
+
+
+def test_the_boot_fields_order_two_processes_and_hold_for_each_life() -> None:
+    """#348. The page orders two processes by `boot` and `since_boot_us`, so
+    both must stay fixed for one process's life, and a later process of the
+    same boot must carry the larger `since_boot_us`."""
+    published = Published()
+    first = runs(published)
+    before = first.snapshot()
+    held = Held()
+    t = first.start(held)
+    held.release(0)
+    t.join(5)
+    for event in published.events:
+        run = event["run"]
+        assert run["boot"] == before["boot"]  # type: ignore[index]
+        assert run["since_boot_us"] == before["since_boot_us"]  # type: ignore[index]
+    later = runs(Published()).snapshot()
+    assert later["boot"] == before["boot"]
+    assert later["since_boot_us"] > before["since_boot_us"]
+
+
+def test_the_default_order_survives_the_wall_clock_stepping_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#348. A unit started at boot runs before NTP has synced, so the wall
+    clock can step back between two starts. Were the order read from it, the
+    new process would look older and the page would drop everything it
+    sends. Fails if `since_boot_us` is ever taken from `time.time` or
+    `time.time_ns`."""
+    wall = iter(range(10**18, 0, -(10**15)))
+    monkeypatch.setattr(time, "time", lambda: next(wall) / 1e9)
+    monkeypatch.setattr(time, "time_ns", lambda: next(wall))
+    older = PluginRuns(publish=Published(), boot=lambda: "b").snapshot()["since_boot_us"]
+    deadline = time.monotonic() + 1
+    while plugin_runs_module.since_boot_us() <= older and time.monotonic() < deadline:
+        pass
+    newer = PluginRuns(publish=Published(), boot=lambda: "b").snapshot()["since_boot_us"]
+    assert newer > older
+
+
+def test_the_boot_id_is_the_kernels(tmp_path: Path) -> None:
+    boot_id = tmp_path / "boot_id"
+    boot_id.write_text("0f3c1a2e-9b7d-4c1e-8a55-3d2f6e7b9c01\n", encoding="ascii")
+    assert read_boot_id(boot_id) == "0f3c1a2e-9b7d-4c1e-8a55-3d2f6e7b9c01"
+
+
+@pytest.mark.parametrize("content", [None, b"", b"\xff\xfe"])
+def test_an_unreadable_boot_id_is_a_fresh_token_each_time(
+    tmp_path: Path, content: bytes | None
+) -> None:
+    """Missing, empty or garbled: a random token, never a shared constant.
+    A constant would put every process in one "boot" with nothing ordering
+    them but the boot clock of whatever machine it is; a fresh token makes
+    each process its own boot, which the page orders by arrival."""
+    boot_id = tmp_path / "boot_id"
+    if content is not None:
+        boot_id.write_bytes(content)
+    first, second = read_boot_id(boot_id), read_boot_id(boot_id)
+    assert first and second and first != second

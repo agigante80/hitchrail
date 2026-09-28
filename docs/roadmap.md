@@ -29,251 +29,48 @@ every unfinished ticket somewhere explicit.
 
 Phases appear in the order they are meant to run. Three rules decide that
 order: dependency first, then risk where dependency allows a choice, then cost
-of delay, which has been invoked three times: when Phase 12 jumped ahead of 9,
-10 and 11 because the wire format it changed was free to break that week and
-more expensive every week after, when Phase 19 moved ahead of 16, 17 and 18 on
-2026-09-16 because every stop until then loses the wrap up, and when Phase 21
-moved ahead of 15 to 19 on 2026-09-23 because stale agent tooling is manual
-upkeep on every machine, every week. The next candidate for jumping the queue
-is argued against those three.
+of delay. The third has jumped the queue three times (Phase 12 ahead of 9 to
+11, Phase 19 ahead of 16 to 18, Phase 21 ahead of 15 to 19), and the next
+candidate is argued against those three.
 
-**Phases 1 to 10 and 12 closed before this format was adopted on 2026-09-11
-and are not written into it.** Rewriting finished work to look planned in a
-format it never used would be less honest than saying where the format
-started. Their closed milestones hold their tickets, `superpowers/plans/`
-holds the plans the ones that had plans wrote, and `CHANGELOG.md` says what
-each release shipped.
+**A phase leaves this file when it closes.** Its closed milestone holds its
+tickets, its plan stays in `superpowers/plans/`, and `CHANGELOG.md` says what
+the release shipped. Phases 1 to 10 and 12 closed before this format was
+adopted on 2026-09-11 and were never written into it; 11, 13, 14, 20 and 21
+were, and left on 2026-09-26. The file is a plan of what happens next, and a
+finished phase's prose here only lengthens the walk to it.
 
 **The standing rule.** A phase is not finished because its code exists and the
 suite is green. It is finished when the behaviour has been watched working in
 the running application, on the phone it is for. See
 [`tech-guidelines.md`](tech-guidelines.md) section 7.
 
-## Phase: Phase 11: The interface in every state
-state: done
-plan: docs/superpowers/plans/2026-09-11-hitchrail-phase-11-interface-states.md
+## Phase: Phase 22: The plugin update, hardened
+state: open
+plan: docs/superpowers/plans/2026-09-26-hitchrail-phase-22-plugin-hardened.md
 
-**Done, 2026-09-11.** Every task landed. One swap on the day it opened,
-recorded in the plan, and one ticket filed out of the work rather than into
-it (#244). The palette task found 54 failing text pairs where its ticket had
-measured four, and the browser tier now runs at a phone viewport by default.
+The plugin update from a phone, made as careful as the rest of the spawn path.
+Phase 21 shipped it and closed on its own review loop's trip wire, so its last
+round's findings were filed rather than fixed, and several of them sit on the
+path between a web page and a shell.
 
-Every state the interface can be in says something true, legibly. Phase 6
-built the interface for the states a demo reaches; this is the rest: the
-dialog a person sees once a week, at the moment they are deciding whether to
-kill a process with unsaved work, and it sends them to the wrong place, tells
-them the opposite of what happened, or puts the destructive action nearest the
-thumb.
+Delivers: the agent binary resolved once, checked from the directory it runs
+in, and spawned exactly as checked. Three tickets describe that one defect from
+three sides and are built together rather than closed as duplicates, because
+each names a different place the second resolution happens. Every other
+finding from Phase 21's review is fixed or closed with its reason.
 
-Delivers: a stream that reports its own failures honestly, dialogs whose
-titles match what happened, a badge that says a person is needed whichever
-prompt is asking, and colour that passes AA on its own tints, computed rather
-than judged.
+Done when no from-review ticket about the plugin update or the agent binary is
+open without a decision, and a mutation run over `claude_ipc.py` and
+`plugin_runs.py` has been read.
 
-Done when no screen states something it did not read, and every token pair
-passes AA.
+Placed first after Phase 15 by the Backlog's second rule: a phase that ships
+new surface is followed by the one that hardens it, as Phase 20 followed 14.
+Ahead of 19 because both change how a spawned agent is found and started, and
+a stop sequence watched on an unhardened spawn path is watched on the wrong
+thing.
 
-Two things were cut out of it on the day it opened, and the plan is the
-precedent the next reviewer cites. The stop redesign is Phase 19: it changes
-what Stop means, in the engine and `claude_ipc`, and nothing about it is a
-screen saying something true. The `app.js` split is Phase 18. Two engine
-tickets stay, because each is the reason one badge lies; a third goes to its
-own phase or to Backlog.
-
-## Phase: Phase 13: Fifty rows on a phone
-state: done
-plan: docs/superpowers/plans/2026-09-12-hitchrail-phase-13-fifty-rows.md
-
-**Done, 2026-09-14.** Every task landed, reviewed in two bounded loops
-whose eleven findings were fixed as ordinary work before the close; the
-plan records the loops and where each stopped. The browser tier runs on a
-fifty row fixture now, which is the premortem's first rule made permanent.
-
-The interface stays usable when there are fifty projects across five roots,
-and says what it knows about each. Phase 11 is about states saying something
-true; this is about a person finding the row they want among a lot of them,
-and about the page answering what it currently cannot: which build is this,
-since when, as whom.
-
-Cut from a real five root install rather than from the design. None of it is a
-new power: the list is complete and correct, and what is missing is
-navigation, provenance, and one control composed from a power each row
-already has.
-
-Delivers: filtering by root, a header that survives scrolling, a footer that
-names the version and links to the source, the server's own start time and
-account, a row's memory figure with what bounds it, logs at a URL you can
-bookmark, bulk stop composed from the stop each row already has, and an icon
-set.
-
-Done when a fifty row list can be narrowed to one root in one tap, the primary
-action is reachable at any scroll position, and the page answers "which build
-is this and who is it running as" without an SSH session.
-
-Decisions already taken, argued on the tickets and in the plan. The badge
-glyphs are a SET, vendored from a library and never generated, because a set
-has to agree with itself on grid and stroke and that agreement is what
-generation gets wrong; the application's own mark is one drawing that agrees
-with nothing, so it is drawn, and its direction was chosen on 2026-09-12.
-Framing the vendor's session view under our header is measurably impossible:
-it refuses framing twice, by header and by CSP, so what remains of that idea
-is the header question underneath it. And a standalone Kill all is not built:
-design section 7's rule holds for the list as for the row, and the bulk kill
-lives inside Stop all's wait as its escalation.
-
-## Phase: Phase 14: The perimeter, chosen rather than assumed
-state: done
-plan: docs/superpowers/plans/2026-09-14-hitchrail-phase-14-perimeter.md
-
-**Done, 2026-09-16, shipped as 0.8.0.** Every task landed. Each of the four
-batches went through the bounded review loop with the security lens; every
-loop stopped by its own rule and none on the trip wire, and every finding
-below high or medium became a ticket rather than a fix. Those tickets are the
-whole of the next phase, which is why it sits directly after this one.
-
-The operator chooses how this is reached and how it is proved, instead of
-being handed one answer. Every ticket here touches a security control, so each
-is a decision before it is work, and they are together because they interact:
-TLS changes what a sign-in costs, and both change what the README's stated
-limitations say.
-
-Delivers: HTTPS from the server itself rather than only from a proxy in front
-of it; a way for a person holding a token to get in without the saved link;
-roots and the session prefix from configuration the operator can reach rather
-than only from a unit's `ExecStart`; and a settings page with the line drawn
-between what it shows and what a request may change.
-
-Five decisions were taken on the day it opened, 2026-09-14, and the plan
-carries them: the detached agent signal is built with an honest sentence in
-place of a predicate claiming to know ownership, enrolling a device is a
-paragraph and not a QR or a pairing code, the name pattern admits a space,
-and the config file and the network guard take their tickets' own answers.
-
-Two of those are deliberately not what was first asked for, and the tickets
-argue it rather than quietly narrowing. Replacing a 192 bit token with a
-password a person can type on a phone is a downgrade on an API equivalent to a
-shell, with no rate limiting anywhere in this codebase, so enrolling a device
-is solved another way. And a route that takes a PATH removes the root boundary
-outright: the credential that lists projects would become one that runs an
-agent anywhere the user can write, so roots come from a file the operator
-edits on the machine and a UI can only toggle what is already in it.
-
-Done when a LAN deployment can be HTTPS without a second daemon, a person
-holding a token can get in without a saved link, and adding a folder does not
-mean editing a systemd unit.
-
-## Phase: Phase 20: The perimeter, hardened
-state: done
-plan: docs/superpowers/plans/2026-09-16-hitchrail-phase-20-hardened.md
-
-**Done, 2026-09-17, shipped as 0.9.0.** Every ticket closed: fifteen built
-and one declined in writing (the ARP cache's STALE window, which needs
-netlink and does not answer the question this guard is for). Four batches,
-each through the bounded review loop with the security lens, and the loops
-found two things worth naming. The pane map's record terminator rested on a
-premise about tmux that release 3.7a had already falsified, which is the
-"verify, do not recall" rule catching a verification that had gone stale
-rather than one that was never done. And #189's first shape named Hitchrail's
-own tmux server as somebody else's and withheld End from the process End
-exists for, found because the live tier runs from inside a tmux.
-
-Re-shaped rather than extended in one place: #237, the mutation sweep over
-five modules, went back to Backlog. It is not a perimeter ticket, it is a
-hundred and thirty nine survivors to read, and this plan's own rule about
-absorbing work is what sent it out. Two findings that add rather than sharpen
-were split out to Backlog as #279 and #280.
-
-The second pass over what Phase 14 built, taken while the reasoning is
-fresh. Every ticket here is a finding from the review of that phase's own
-commits, code and security lenses, filed instead of fixed because the loop
-is bounded: a reviewer asked to find problems will find them, eventually in
-the fixes, so the loop stops and the remainder becomes work that is planned
-rather than work that happens to a fix commit.
-
-Ahead of Phase 15 on the second ordering rule, risk, and on the third, cost of
-delay. Risk: these are soft spots in the surfaces 0.8.0 shipped, a config
-file that draws the root boundary, a route that signals a pid, a guard that
-reads the network, and Phase 16 adds more perimeter on top of them. Cost of
-delay: the reviewers' scenarios are on the tickets now, verified against the
-code as it was; every week they age toward the state #153 reached, a ticket
-that asked for what had already shipped.
-
-Two shapes of ticket, and the priority says which. The P2s are things an
-operator can meet: a stop wait the page reports wrongly, a route that answers
-a 500 where the envelope was promised, a TLS deployment that is accepted and
-then silently fails, a settings write that re-reads the private key and lies
-about it, a guard the phase's out of scope rests on that a plausible edit
-walks around, and a pid route that checks the label and not the listing. The
-P3s are defence in depth on the same files, and one of them is a decision
-rather than work, carried as `needs-human`.
-
-Delivers: the perimeter Phase 14 drew, with its own review's findings closed
-or declined in writing.
-
-Done when every ticket the Phase 14 review filed is closed or declined with
-its reason on the ticket, and no refusal on those surfaces can be reached
-that is not in words.
-
-## Phase: Phase 21: The agent's tooling, kept current
-state: done
-plan: docs/superpowers/plans/2026-09-23-hitchrail-phase-21-agent-tooling.md
-
-**Done, 2026-09-24.** Both tickets built and closed: #124, the CLI subcommand,
-and #297, the route and the phone control. Watched completing on a real
-machine as task 108. Two batches, each through the bounded review loop.
-Batch 1's review found two mediums fixed in `fdd12e8` and seven lows, then a
-second round found two more mediums in that fix and stopped there by the trip
-wire: #298 to #306. Batch 2's review found a high fixed in `11fb0c4`, then a
-second round found a high and a medium in that fix, fixed in `1f6ec49`, and a
-third round found two more defects in THAT fix: two consecutive rounds each
-finding a defect in the immediately preceding round's, which is the trip wire
-by its other name, and the loop stopped there. #307 to #310, #313 to #317.
-
-The operator can bring the agent's plugins up to date from a phone. Today they go stale without anyone noticing, and the operator
-tends to notice when they are away from the desk, which is exactly when
-Hitchrail is the only way in. Placed ahead of 15 to 19 on 2026-09-23 on the
-operator's call. It is the third time a phase has jumped the queue, and it
-jumps on cost of delay: every week without it is another week of manual
-upkeep on each machine. It has no dependency on any phase before it, and none
-of them depends on it.
-
-Delivers: one operation that refreshes the marketplaces and then updates
-every installed plugin, reporting each plugin's result separately so that one
-failure does not stop the rest. It is a CLI subcommand that works with no
-server running, and a route and a control in the interface built on top of
-that subcommand. Every fact about how the vendor's CLI does this stays in
-`claude_ipc.py`.
-
-Done when a plugin update started from the phone has been watched completing
-on a real machine, with its per plugin results on screen, and an unreadable
-plugin list has been watched updating nothing and saying so.
-
-Two decisions were taken when it was placed, and #124 carries both: `-y` is
-passed, so a marketplace's declared install command is approved unseen, on
-the argument that an agent spawned with every permission already sets that
-ceiling; and only `user` scope is updated, because a project scoped install
-belongs to a folder the vendor's listing does not name.
-
-## Phase: Phase 15: The package as strangers meet it
-state: planned
-
-Somebody who has never seen this project can install it, tell what it is, see
-that it is maintained, and be helped when it goes wrong. Everything here came
-from looking at the published PyPI page beside our own README and finding they
-disagree, or say nothing, and from failing to answer a support question about
-this machine because the journal held uvicorn's access lines and nothing else.
-
-Delivers: `pip` acknowledged as an install route, the deprecated licence
-classifier removed and the licence made clickable, a badge row on the first
-screen, `--help` that shows its defaults and an example, a banner that offers
-only links the server is listening on, and logging with a handler, a level and
-a timestamp, so that "was the stop request sent" has an answer.
-
-Done when the PyPI page and the README agree, the licence is one clickable
-statement rather than four scattered ones, and a stranger's bug report can be
-answered from the journal.
-
-## Phase: Phase 19: Stop means wrap up
+## Phase: Phase 19: Stop means wrap up, and says so
 state: planned
 
 A session stopped from a phone leaves the same record as one closed by hand.
@@ -316,31 +113,86 @@ The deferral under "Deliberately later" still binds, and this phase is written
 against it rather than around it: the prompt is configuration on the machine,
 never text from the page, and the page's only verb is still Stop.
 
+## Phase: Phase 23: Decide on more than one agent
+state: planned
+plan: 
+
+Answer design section 3.1 before anybody builds against it. The spec says more
+than one agent is "not built, not closed off". An epic filed on 2026-09-22
+proposes building it, with a registry of command templates written from the
+settings page, and that collides with three things the product rests on: the
+settings file is read once and never written, no vendor name enters the
+operator or API contract, and no text from a page reaches a spawn.
+
+Those are decisions rather than obstacles, so the answer is one of three: stay
+single agent and close the epic with the reason; widen the vendor seam that
+`claude_ipc.py` already is, one quarantined module per agent and no templates;
+or change the security argument deliberately and say so in the spec.
+
+Delivers: the decision, written into the design spec and into what
+`docs/versioning.md` means by 1.0, and every ticket in this milestone rewritten
+against it or closed with it.
+
+Done when section 3.1 says built, not built, or closed off, with the reason,
+and no open ticket asks for something the decision refused.
+
+Placed before Phase 16 because both would add the first state the product
+writes, and a reboot restore designed for one agent is rework if the answer is
+several.
+
 ## Phase: Phase 16: What survives a reboot
 state: planned
 
 Decide whether Hitchrail remembers anything, and if so what. Small in tickets
 and a phase because of what it changes rather than how big it is.
 
-Hitchrail holds no state. The security argument says so in as many words: no
-database, no session registry, every answer derived from the operating system
-on demand. That is why nothing can get out of sync, nothing needs migrating,
+Hitchrail holds no state, and the security argument says so in as many words:
+every answer is derived from the operating system on demand, so nothing drifts
 and no file's contents decide what runs. Remembering which sessions were
 running is the first persistent state in the product, and specifically a file
 that decides what gets spawned. The ticket is written for a default of ON and
 lists what has to be true for that default to be defensible: the memory guard
 re-evaluated between each restored start, a cap, never doubling an agent that
-survived, a command line kill switch, protection against a restart loop
-multiplying it, and restored rows visibly restored. If any of those is not
-built, the default is off and the feature still ships.
+survived, a command line kill switch, protection against a restart loop, and
+restored rows visibly restored. If any of those is not built, the default is
+off and the feature still ships.
 
-The unit's own behaviour across a reboot belongs here too: an address that
-arrives after boot must not be a cliff the service falls off, and socket
-activation for a named bind comes with the token rule it needs.
+The unit's own behaviour across a reboot belongs here too, with one caveat
+written down before the phase opens: on the operator's machine the LAN address
+lives on a removable adapter that is often absent at boot, so no retry budget
+reaches it, and that ticket may close as a documented limitation rather than a
+fix. `server.py`'s split lands here, first, because the restore adds to the
+file that is already past the guideline.
 
 Done when a reboot brings back what was running, exactly once each, without a
 person tapping anything, and the security argument has been rewritten rather
 than quietly outgrown.
+
+## Phase: Phase 24: The interface, found
+state: planned
+plan: 
+
+Everything the phone offers can be found by looking at it. Filed together from
+using it: settings is a text link at the end of the footer, the button that
+creates a project disappears under every filter and does not say what it
+creates, a chosen theme cannot go back to following the system, the mark
+never appears in the header, and the browser's implicit favicon request is
+refused. Two display defects on the plugin update page join them, and so does
+`app.js`'s split, because every one of these edits `app.js` and the split is
+cheaper before them than after.
+
+Delivers: settings and project creation as bar controls that survive a filter,
+a theme choice that includes the system's, the mark in the header, the favicon
+request answered by decision rather than by accident, plugin update rows that
+say what moved and do not repeat, and `app.js` split along the seam it
+already follows.
+
+Done when each control is reached from the first screen on the phone the
+design is for, watched there, and the screenshots have been regenerated.
+
+After Phase 16 because only the favicon touches the perimeter, and that one is
+a refusal the operator never sees. Before 17 because interface changes are
+what the documents then describe.
 
 ## Phase: Phase 17: Documents that are true
 state: planned
@@ -348,65 +200,19 @@ state: planned
 Every claim a document, comment or guard makes is checked against the thing it
 describes, or it is not written. Counts are generated, never typed.
 
-Cut out of Phase 10 on 2026-09-07, because eleven of that phase's tickets were
-not about a suite that would notice. They were about a sentence, a comment, a
-label or a count that disagreed with the thing standing next to it: one defect
-in eleven costumes, and inside a phase about tests it looked like eleven
-unrelated chores.
-
-The guards are in scope, not only the prose, and they are the harder half. A
-lockstep guard that compares version markers proves the marker moved, which is
-not the claim. Every hygiene check reads from the ticket list, so a
-deliverable nobody ticketed is invisible to all of them at once. A governance
-guard that skips silently looks identical to one that passed.
-
-Delivers: counts derived from what they count, comments and docstrings that
-name something which exists and does what they say, and guards whose
-expectation comes from the thing described rather than from a second copy of
-the answer.
+Delivers: counts derived from what they count, and comments and docstrings that
+name something which exists and does what they say.
 
 Done when, and each is checkable rather than felt: no document states a count
-a person typed; every comment or docstring that names a file, a ticket or a
-behaviour names one that exists and does what it says, enforced by a guard;
-and no guard proves only that its own marker moved.
+a person typed, and every comment or docstring that names a file, a ticket or
+a behaviour names one that exists and does what it says, enforced by a guard.
 
-## Phase: Phase 18: Modules that do one thing
-state: planned
-
-A file is one thing, or the file says why it is not. Cut out of Phase 10 on
-2026-09-07, with the files that carry a split ticket and the one place an
-answer is computed twice.
-
-The guideline is 400 lines and the mechanism around it already works, which is
-why this is a set of splits rather than a policy: `test_config.py` holds a
-`caps` table, a module over the guideline fails unless it is tracked there
-with the ticket that splits it, and the table retires its own exceptions. No
-line count is written here or in the tickets on purpose. Every count they held
-was stale twice over; the table is generated from the files and was right
-about all of them.
-
-Each file is over for a different reason, and the reason decides the cut.
-`server.py` because routes accumulated, and its seam is what the handlers
-touch; its ticket also says what must NOT happen, which outranks the split:
-the per route error ladders stay at the route, because `docs/api.md` is
-checked against the server in both directions and a ladder at the route is
-what makes a route's refusals readable. `discovery.py` because the plural root
-layer sits on top of the single root one, two layers deep rather than two jobs
-wide. `app.js` because the browser code all landed in one file and it has a
-seam it already follows. `test_config.py` because it does not split along the
-seam its own source has, and it is the file the guard cannot see, since `caps`
-reads `src/` and this is where `caps` lives. And one computation done twice:
-`preflight` resolves the agent binary and throws the answer away, and the
-spawn resolves the bare name again in a different environment.
-
-Done when every file over the guideline has either been split along a seam
-that already existed, or carries in `caps` the argument for why it is one
-thing. `claude_ipc.py` is the standing example that the second answer is
-legitimate: it is over on purpose, because when Claude Code moves exactly one
-file changes. `engine.py` is the other, and most of its length is comments
-recording footguns that cost real debugging to find. A split that moves lines
-without moving responsibility is refused; length is the trigger for looking,
-never the reason for cutting.
+Narrowed on 2026-09-26 to the documents themselves. The tickets about the
+governance machinery, a lockstep guard that proves only its marker moved, a
+skipped guard that looks like a passed one, checks that read only the ticket
+list, moved to Backlog: they are about the process around the product, and
+several belong upstream in forge-kit. Placed last because every phase before
+it changes what the documents describe.
 
 ## Phase: Backlog
 state: backlog
@@ -415,7 +221,22 @@ Triaged, real, and belonging to no phase yet. A ticket whose home is unknown
 goes here rather than into the nearest phase with room, because a phase whose
 objective absorbs every finding never ends: Phase 10 went from sixteen tickets
 to thirty nine while six were being closed, and was narrowed to escape it.
-Every time a phase opens, this is read for what now belongs in it.
+
+Every time a phase opens, this is read for what now belongs in it, by two
+rules rather than by judgement. The opening phase takes every open
+`from-review` ticket about a file it changes, because that is when fixing it
+is cheapest. And a phase that ships new surface is followed by one that
+hardens it, as Phase 20 followed 14 and Phase 22 follows 21: a review loop that
+stops on its trip wire files its findings here, and without the second rule
+they stay here.
+
+## Toward 1.0
+
+`versioning.md` says 1.0 comes when the HTTP interface is one worth keeping.
+Three open questions decide whether it is, and each is a phase above rather
+than a promise here: whether anything survives a reboot (Phase 16), what Stop
+does (Phase 19), and whether there is more than one agent (Phase 23). A 1.0
+before all three are answered is a promise about an interface still moving.
 
 ## Deliberately later
 
@@ -423,11 +244,11 @@ Not scheduled, and not to be smuggled into an earlier phase:
 
 - **Restart as its own operation.** It is stop then start, and the interface
   can compose it.
-- **Authentication beyond a single shared token.** Phase 14 adds ways to
+- **Authentication beyond a single shared token.** Phase 14 added ways to
   present the existing credential and says why a second kind of credential is
   a downgrade rather than a feature.
 - **Streaming logs.** A tail on demand is enough until it demonstrably is not.
-  Phase 13 gives the tail its own URL and deliberately does not stream it.
+  Phase 13 gave the tail its own URL and deliberately did not stream it.
 - **Sending input to a session.** Hitchrail starts and stops agents; it is not
   a terminal, and making it one is a different product. Phase 16 restores
   sessions and deliberately does not reach into an agent's own conversation
@@ -449,3 +270,12 @@ Not scheduled, and not to be smuggled into an earlier phase:
   command line. If a free text field, an automatic choice, or a key sent
   without re-reading the pane ever appears, this becomes the deferred item and
   the deferral binds.
+
+## Notes
+
+- **Deleted, 2026-09-26: "Phase 18: Modules that do one thing".** Its splits
+  are refactors with no change a person can see. Each one that makes a later
+  phase cheaper went with that phase: `app.js` to 24, `server.py` to 16, and
+  the agent binary resolved twice to 22, as the defect it is. The rest wait in
+  Backlog for a phase that edits their files, which the Backlog's first rule
+  then hands them to.

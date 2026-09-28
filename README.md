@@ -1,6 +1,22 @@
-<img src="src/hitchrail/web/icon.svg" width="56" height="56" alt="">
+<p align="center">
+  <img src="src/hitchrail/web/icon.svg" width="72" height="72" alt="">
+</p>
 
-# hitchrail
+<h1 align="center">hitchrail</h1>
+
+<p align="center">
+
+[![PyPI](https://img.shields.io/pypi/v/hitchrail)](https://pypi.org/project/hitchrail/)
+[![Downloads](https://img.shields.io/pypi/dm/hitchrail)](https://pypi.org/project/hitchrail/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/pypi/pyversions/hitchrail)](https://pypi.org/project/hitchrail/)
+[![Platform](https://img.shields.io/badge/platform-linux-lightgrey.svg)](#prerequisites)
+[![CI](https://github.com/agigante80/hitchrail/actions/workflows/ci.yml/badge.svg)](https://github.com/agigante80/hitchrail/actions/workflows/ci.yml)
+[![Stars](https://img.shields.io/github/stars/agigante80/hitchrail?style=social)](https://github.com/agigante80/hitchrail)
+
+</p>
+
+<p align="center"><strong>Start and stop headless Claude Code sessions across a folder of projects, from a phone-first web UI.</strong></p>
 
 A web UI for starting and stopping headless Claude Code sessions across a
 folder of projects. Open it on your phone, tap a folder, get a session link.
@@ -38,6 +54,29 @@ Stopping is a sequence rather than a button: it asks the agent to wrap up, shows
 you the wait, and keeps a kill control within reach the whole time if you would
 rather not wait.
 
+## Why you'd use this
+
+**You started a session before leaving the desk, and now need to check on it,
+stop it, or read what it did, with no shell in reach.** The browser interface
+does all three from a phone: the log tail, the stop sequence with its
+escalation, and Stop all when you are done for the day.
+
+**You have several project folders and cannot tell which ones have a live
+agent in them.** Each one is derived independently and shown as `running`,
+`stopped`, `detached` with its pid, or `stale`. Guessing wrong has a cost:
+treating a `detached` agent as `stopped` leaves it consuming memory unseen,
+and treating a project whose terminal died as still `running` leaves you
+waiting on nothing.
+
+**You do not want an agent to run the machine out of memory.** Hitchrail shows
+memory pressure and refuses to start a session that would exhaust it, rather
+than letting you find out by an OOM kill.
+
+**You keep two unrelated groups of projects apart**, a work root and a
+personal one. A project's identity is its root's label plus its folder, so two
+projects both called `vessel` in two roots are two separate rows, told apart
+by a chip.
+
 ## What it looks like
 
 The phone case first, because it is the one this exists for.
@@ -59,6 +98,19 @@ Four derived states in one listing: `running` with its memory and uptime,
 Two projects called `vessel` in two roots are two rows, and the chip is the
 only difference between them. Stopping one leaves the other's agent alone,
 which is the thing a browser test asserts on a real tmux rather than a fake.
+
+**The first page anyone reaches, before any of the above:**
+
+<img src="docs/screenshots/phone-grant.png" alt="The access grant page, asking for the key carried in the link" width="300">
+
+**Tapping Logs shows the pane's own last lines**, not a summary of them:
+
+<img src="docs/screenshots/phone-logs.png" alt="The log drawer open over a running row, showing the last 40 lines of the pane" width="300">
+
+**Starting a project Hitchrail has not seen before** offers a folder to create
+rather than requiring one to already exist:
+
+<img src="docs/screenshots/phone-new-folder.png" alt="The new folder sheet, open on a phone" width="300">
 
 These are captured from the running application against a scratch root, not
 taken by hand: `uv run pytest -m screenshots` regenerates every one of them.
@@ -155,6 +207,49 @@ on a screen somewhere, this will end it there too.
 this design rather than a bug, and where to report privately. Please do not
 open a public issue for a vulnerability.
 
+## Install
+
+Hitchrail is a Python package, so the equivalent of `npx` here is `uvx`:
+
+```sh
+uvx hitchrail --root main=~/projects     # run it, install nothing
+uv tool install hitchrail                # keep it on PATH
+pipx install hitchrail                   # if you already live in pipx
+pip install hitchrail                    # into the environment you are in
+```
+
+One word, no hyphen. It is on PyPI as
+[`hitchrail`](https://pypi.org/project/hitchrail/), and it needs Python 3.11 or
+newer.
+
+**`pip` is last because it installs into whatever environment happens to be
+active**, which the PyPI page's own install line does not mention. On a modern
+Debian or Ubuntu that is an externally managed system Python, and `pip`
+refuses with `error: externally-managed-environment` rather than installing
+into it; the three lines above it all sidestep that by managing their own
+environment or PATH entry for you.
+
+**`uv tool install`, not `uvx`, if you are going to run it as a service.** `uvx`
+resolves and runs out of a cache it is free to evict, which is what makes it
+right for trying something and wrong for a systemd unit: that needs an
+executable still there next month. See `packaging/hitchrail.service`, whose
+`ExecStart` names `~/.local/bin/hitchrail` for exactly that reason.
+
+## Upgrading
+
+Which command you need depends on which line above you used.
+
+**`uvx`** re-resolves against PyPI on close to every invocation, so running
+`uvx hitchrail ...` again already picks up a new release. If a cached
+resolution is still stale, force it with `uvx hitchrail@latest`, or clear the
+cache entirely with `uv cache clean hitchrail`.
+
+**`uv tool install`, which is what `packaging/hitchrail.service` runs, does
+not notice a new release on its own.** `uv tool upgrade hitchrail` fetches it,
+and then, because the running process keeps serving the old code until it is
+restarted, `systemctl --user restart hitchrail` for the packaged unit. Either
+way, `hitchrail --version` is how you confirm the upgrade actually landed.
+
 ## Prerequisites
 
 Hitchrail is a launcher, so the things it launches have to already be there. It
@@ -165,7 +260,7 @@ does not vendor or install any of them.
 | **tmux** | every session Hitchrail starts lives in a tmux session; this is the whole mechanism, not an option | `tmux -V` |
 | **Claude Code on `PATH`** | it is what Hitchrail runs. Configurable with `--agent-binary`. The binary is self contained: no node, no npm, whichever installer you used, because the npm package ships the same native executable | `claude --version` |
 | **Linux** | memory pressure is read from `/proc/meminfo`, and the process table from `ps`. macOS has neither in this form, which is why the package declares `Operating System :: POSIX :: Linux` | |
-| **Python 3.11+** | `uvx` and `pipx` handle this for you | `python3 --version` |
+| **Python 3.11+** | `uvx` and `pipx` handle this for you; `pip` needs it already there | `python3 --version` |
 
 **Hitchrail installs no runtime and checks no version of one.** That table is
 the whole list, and the agent needs nothing beyond itself. Your own PROJECTS are
@@ -273,6 +368,11 @@ list and shown again, and the wait before a stop is reported as unanswered.
 Both are kept in `~/.config/hitchrail/state.toml`, which is Hitchrail's own.
 Everything else is the perimeter and changes only in the config file or on
 the command line, on the machine.
+
+<img src="docs/screenshots/phone-settings-plugins.png" alt="The settings page having just finished a plugin update: three outcomes listed and a status line noting the running session keeps the old versions until restarted" width="300">
+
+The picture above is the update below, finished: see "Updating the agent's
+plugins".
 
 `journalctl --user -u hitchrail` shows the startup banner, which lists every
 address the server will answer to. It prints the links without the `#token=`
@@ -472,31 +572,6 @@ It is written up there rather than here because it is what most people want
 rather than an appendix, and it is written once because two copies of a setup
 guide is one copy that goes stale.
 
-## Install
-
-Hitchrail is a Python package, so the equivalent of `npx` here is `uvx`:
-
-```sh
-uvx hitchrail --root main=~/projects     # run it, install nothing
-uv tool install hitchrail                # keep it on PATH
-pipx install hitchrail                   # if you already live in pipx
-```
-
-One word, no hyphen. It is on PyPI as
-[`hitchrail`](https://pypi.org/project/hitchrail/), and it needs Python 3.11 or
-newer.
-
-**`uv tool install`, not `uvx`, if you are going to run it as a service.** `uvx`
-resolves and runs out of a cache it is free to evict, which is what makes it
-right for trying something and wrong for a systemd unit: that needs an
-executable still there next month. See `packaging/hitchrail.service`.
-
-**The service route is `uv tool install`, not `uvx`.** `uvx` resolves and runs
-out of a cache it is free to evict, which is what makes it good for trying
-something and wrong for a unit: the systemd unit needs an executable path that
-is still there next month. That is why the template's `ExecStart` names
-`~/.local/bin/hitchrail`.
-
 ## Working on it
 
 ```sh
@@ -519,6 +594,7 @@ survive.
 | | |
 |---|---|
 | [`docs/api.md`](docs/api.md) | the HTTP API: routes, auth, and every error code |
+| [`docs/roadmap.md`](docs/roadmap.md) | what is built, and what is planned next |
 | [`SECURITY.md`](SECURITY.md) | what is in scope, and where to report it privately |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | how a change is expected to arrive |
 | [`CHANGELOG.md`](CHANGELOG.md) | what upgrading costs you |
@@ -531,4 +607,4 @@ trademarks of Anthropic.
 
 ## Licence
 
-MIT.
+[MIT](LICENSE).

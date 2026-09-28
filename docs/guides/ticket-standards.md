@@ -153,6 +153,46 @@ missed:
 N/A is legitimate and common: a pure refactor with no behaviour change, or a bug fix that
 restores documented behaviour, changes no document. Say that, with the reason.
 
+### 9. Implementation and dependency concreteness
+
+Judged against the fields a template already provides (`files`, `implementation`,
+`dependencies`, and `root_and_deps` on the infrastructure form), not a new form field. That is
+why this rule adds no section and no `template-version` bump.
+
+- File paths and implementation steps are concrete, and follow `docs/tech-guidelines.md`,
+  including the layer a module sits in: a step that has the engine import `server`, `cli` or
+  Starlette is not concrete, it is wrong.
+- The commands the ticket relies on are named, down to the pytest marker for each tier it
+  claims (`-m integration`, `-m live_tmux`, `-m e2e`), because the tier is declared, never
+  inferred.
+- A new runtime dependency is justified against the standard library and the three already
+  present. A fourth needs its written justification in the ticket, since the pull request
+  will need it anyway and the ticket is where the alternative is still cheap.
+- Scaling costs the approach introduces are named. There is no database here, so no N+1
+  query; the equivalent is a subprocess per row, the cost `attention.py` exists to budget. A
+  step that spawns one per session per request has that shape.
+
+A ticket whose template carries none of these fields (the design form) records N/A by domain,
+per the N/A rule below.
+
+## Precedence against the gate
+
+The `ticket-gate` agent restates some of these rules, so they hold where this document is not
+installed. Where it IS installed, its text governs, and three cases are distinguished:
+
+- **Conflict.** The gate's copy and this document say different things: **this document
+  wins.** The gate's copy is a convenience restatement, never a fork.
+- **Absence.** A rule the gate holds is missing here: that is NOT divergence. Absence never
+  relaxes a gate bar; only explicit text here does.
+- **A stricter restatement.** The gate says the same thing at finer granularity. The extra
+  strictness is **advisory, never blocking**, and the gate reports it as a gap in this
+  document, naming the rule, so the fix is to tighten this document and make the bar
+  legitimately blocking.
+
+Editing a rule here therefore means checking the gate for its restatement in the same change.
+The gate cites this document's rule numbers, which differ from forge-kit's upstream doc because
+rule 3 here is the integration tier.
+
 ## The N/A rule (load-bearing)
 
 A coverage or E2E requirement that a docs-only, infrastructure-only or engine-only ticket cannot

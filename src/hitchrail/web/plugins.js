@@ -10,7 +10,8 @@
    after it; painted, it put "running" back over "done" and disabled the
    button for good, since no later event comes (round 1 of batch 2's review,
    the high). Every record carries a `seq` the server bumps on each change,
-   and one older than what is on screen is dropped.
+   and one older than what is on screen is dropped; `isNewer` says how the
+   records of two different server processes are ordered.
 
    Its own module rather than more of settings.js, which it shares only the
    note strip with. */
@@ -21,15 +22,24 @@ const $ = (selector) => document.querySelector(selector);
 // "so nothing was updated" or "after N" from the outcomes actually listed,
 // because a run can fail part way (the agent removed mid run) with rows
 // already updated above the sentence.
+//
+// #317. `internal_error` used to carry its own trailing clause, "; the
+// journal has the details", which put the appended "after N plugins" right
+// after "details" and read as though the JOURNAL had details after N
+// plugins rather than as though the UPDATE stopped after N plugins. Kept
+// short here, like every other entry, so the appended clause attaches to
+// "stopped" the way it is meant to; the journal mention moved to its own
+// trailing sentence in `failureText`.
 const PLUGIN_FAILURES = {
   agent_missing: "The agent could not be run",
   marketplace_refresh_failed: "The marketplaces did not refresh",
   plugins_unreadable: "The list of installed plugins could not be understood",
-  internal_error: "The update stopped on an error in Hitchrail; the journal has the details",
+  internal_error: "The update stopped on an error in Hitchrail",
 };
 
-let shownEpoch = null;
-let shownSeq = -1;
+// What is on screen: the record's ordering fields, and when it arrived.
+let shown = null;
+let arrivals = 0;
 let runningSessions = 0;
 let strip = { note: () => {}, keep: () => {}, settle: () => {} };
 
@@ -47,11 +57,14 @@ function outcomeItem(outcome) {
   name.textContent = outcome.plugin;
   head.append(result, name);
   item.append(head);
-  // The agent's own words, rendered as text: the server escaped control
-  // characters, and textContent means nothing here is parsed as markup.
+  // Rendered as text, never markup: for `updated` or `failed` this is the
+  // agent's own words, the server escaped control characters in it, and
+  // textContent means nothing here is parsed. For `skipped` it is ours, and
+  // a skip has more than one reason since #300 (another scope, or a `user`
+  // row the listing named twice), so the detail is shown rather than a
+  // fixed scope-shaped sentence that would misname the second one.
   const lines = [];
-  if (outcome.result === "skipped") lines.push(`${outcome.scope} scope, left alone`);
-  else if (outcome.detail) lines.push(outcome.detail);
+  if (outcome.detail) lines.push(outcome.detail);
   if (outcome.approved_command) lines.push(`approved: ${outcome.approved_command}`);
   for (const text of lines) {
     const line = document.createElement("span");
@@ -65,10 +78,14 @@ function outcomeItem(outcome) {
 function failureText(record) {
   const why = PLUGIN_FAILURES[record.code] ?? record.message ?? "The update did not finish";
   const n = record.outcomes.length;
+  // #317. A trailing sentence, not folded into `why`: appended after the
+  // outcomes clause so "after N plugins" still reads as attached to "the
+  // update stopped", not to this.
+  const journal = record.code === "internal_error" ? " The journal has the details." : "";
   // A failure is never a count of updated plugins: `counts` is null. What it
   // can honestly say is whether anything ran before it stopped.
-  if (!n) return `${why}, so nothing was updated.`;
-  return `${why} after ${n} ${n === 1 ? "plugin" : "plugins"}, listed below; the rest were not updated.`;
+  if (!n) return `${why}, so nothing was updated.${journal}`;
+  return `${why} after ${n} ${n === 1 ? "plugin" : "plugins"}, listed below; the rest were not updated.${journal}`;
 }
 
 function pluginStatus(record) {
@@ -106,22 +123,43 @@ async function countRunning() {
   }
 }
 
-// Older only within one server process: `seq` starts at 0 again on a
-// restart, and a page left open across it would otherwise drop every record
-// of the new process (round 2 of batch 2's review). A different epoch always
-// wins, because the process that minted the old one can send nothing later.
-function isStale(record) {
-  return record.epoch === shownEpoch && record.seq < shownSeq;
+// #348. Which of two records is newer. This used to be a guess over two
+// random epochs, which carry no order, and it was wrong four times running
+// (#314 and three rounds of its review), each fix breaking an interleaving
+// the last one got right; the fourth let a dead process's record, suspended
+// in `countRunning()` across a restart, retire the live one for good. The
+// server now says which process is newer, so this compares instead:
+//
+// - the same epoch is the same process, and `seq` orders its records;
+// - within one boot, the process that started later (`since_boot_us`, the
+//   kernel's boot clock, which NTP and `date` cannot step back) is newer;
+// - across boots the record that ARRIVED later wins. Boot ids carry no order
+//   either, but a reboot closes every connection, so every answer from the
+//   old boot reached this page before the machine went down and nothing from
+//   the new one existed until after. `arrival` is stamped when the record
+//   reaches `onPluginRecord`, before its await, so a record that merely
+//   RESUMES later is not mistaken for one that arrived later.
+function isNewer(record, arrival) {
+  if (shown === null) return true;
+  if (record.epoch === shown.epoch) return record.seq >= shown.seq;
+  if (record.boot === shown.boot) return record.since_boot_us > shown.sinceBootUs;
+  return arrival > shown.arrival;
 }
 
 async function onPluginRecord(record) {
+  const arrival = ++arrivals;
   // Checked twice: once so a stale record costs no listing fetch, and again
   // after the await, which is where a newer one can overtake it.
-  if (isStale(record)) return;
+  if (!isNewer(record, arrival)) return;
   if (record.state === "done" && record.counts.updated) await countRunning();
-  if (isStale(record)) return;
-  shownEpoch = record.epoch;
-  shownSeq = record.seq;
+  if (!isNewer(record, arrival)) return;
+  shown = {
+    epoch: record.epoch,
+    boot: record.boot,
+    sinceBootUs: record.since_boot_us,
+    seq: record.seq,
+    arrival,
+  };
   renderPlugins(record);
 }
 
@@ -193,6 +231,20 @@ export function startPlugins(noteStrip) {
   // Every open, the first and each reconnect, reads the GET: what happened
   // while the stream was down is not replayed.
   stream.addEventListener("open", loadPlugins);
+  // #313. The stream can stay open while the ONE event marking a run's end
+  // is the frame the server's bus drops for a slow client, and a phone that
+  // sleeps mid run is exactly that: the connection never notices anything
+  // is wrong, so no reconnect ever fires to correct the screen. Reading on
+  // `visibilitychange` back to visible, which is when a phone that slept
+  // comes back, is the same recovery a reconnect already has, and it goes
+  // through the same `loadPlugins` a reconnect uses rather than painting
+  // anything directly: `onPluginRecord`'s staleness gate (#314) is what
+  // stops a dead run's record from overtaking one a meanwhile delivered
+  // stream event already painted, and a second entry point here would have
+  // to reimplement that rather than share it.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") loadPlugins();
+  });
   window.__plugins = { loadPlugins };
   loadPlugins();
 }

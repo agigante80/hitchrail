@@ -1,16 +1,35 @@
 from __future__ import annotations
 
+import argparse
 import ast
+import shutil
 import sys
 from pathlib import Path
 
 import pytest
 
-from hitchrail import cli
-from hitchrail.cli import JOURNAL_ENV, banner, build_config, main, parse_args, preflight
-from hitchrail.config import ConfigError, is_loopback_host
+from hitchrail import __version__, cli
+from hitchrail.cli import (
+    JOURNAL_ENV,
+    banner,
+    build_config,
+    build_parser,
+    main,
+    parse_args,
+    preflight,
+)
+from hitchrail.config import Config, ConfigError, is_loopback_host
+from hitchrail.engine import Engine
+from hitchrail.server import create_app
 from support import make_config
 from test_plugins import FakeAgent, done, row
+
+# Captured at collection time, before the autouse fixture below ever runs, so
+# this is the real `shutil.which` and not whatever it patched `shutil.which`
+# to. A test that reaches for `shutil.which` directly inside its own body
+# would get back the fixture's fake, since monkeypatch replaces the module
+# attribute in place and a bare name lookup always reads the current one.
+_REAL_SHUTIL_WHICH = shutil.which
 
 
 @pytest.fixture(autouse=True)
@@ -275,7 +294,13 @@ def test_main_returns_two_rather_than_raising_on_a_bad_bind(
 
 def test_a_machine_with_everything_present_has_nothing_to_say(tmp_path: Path) -> None:
     found = preflight(make_config(tmp_path), which=lambda _n: "/usr/bin/x", meminfo=tmp_path)
-    assert found == []
+    assert found.problems == []
+
+
+def test_a_machine_with_everything_present_resolves_the_agent_binary(tmp_path: Path) -> None:
+    """#196. Kept, not thrown away: this is what a clean preflight is FOR."""
+    found = preflight(make_config(tmp_path), which=lambda _n: "/usr/bin/x", meminfo=tmp_path)
+    assert found.agent_binary == "/usr/bin/x"
 
 
 def test_missing_tmux_is_named_and_says_what_to_install(tmp_path: Path) -> None:
@@ -286,9 +311,9 @@ def test_missing_tmux_is_named_and_says_what_to_install(tmp_path: Path) -> None:
         which=lambda n: None if n == "tmux" else "/usr/bin/x",
         meminfo=tmp_path,
     )
-    assert len(found) == 1
-    assert "tmux" in found[0]
-    assert "apt install tmux" in found[0], "naming the problem without the fix"
+    assert len(found.problems) == 1
+    assert "tmux" in found.problems[0]
+    assert "apt install tmux" in found.problems[0], "naming the problem without the fix"
 
 
 def test_a_missing_agent_binary_names_the_binary_that_was_looked_for(
@@ -301,9 +326,10 @@ def test_a_missing_agent_binary_names_the_binary_that_was_looked_for(
         which=lambda n: None if n == "my-agent" else "/usr/bin/x",
         meminfo=tmp_path,
     )
-    assert len(found) == 1
-    assert "my-agent" in found[0]
-    assert "--agent-binary" in found[0]
+    assert len(found.problems) == 1
+    assert "my-agent" in found.problems[0]
+    assert "--agent-binary" in found.problems[0]
+    assert found.agent_binary is None, "nothing found is nothing to spawn"
 
 
 def test_the_missing_agent_message_does_not_assume_it_is_uninstalled(
@@ -322,11 +348,26 @@ def test_the_missing_agent_message_does_not_assume_it_is_uninstalled(
         which=lambda n: None if n == "my-agent" else "/usr/bin/x",
         meminfo=tmp_path,
     )
-    assert "if it is installed" in found[0], (
+    assert "if it is installed" in found.problems[0], (
         "the message offers installing as the only remedy, and the failure it "
         "fires on most is one where the binary is installed and unreachable"
     )
-    assert "PATH" in found[0]
+    assert "PATH" in found.problems[0]
+
+
+def test_a_relative_path_on_path_is_refused_rather_than_spawned(tmp_path: Path) -> None:
+    """#298. `shutil.which` hands back an unresolved relative path only when
+    PATH itself holds a relative entry, most often '.'. Spawning it anyway
+    would let a later process's cwd decide which file runs, the same
+    mismatch as checking one directory and running another."""
+    found = preflight(
+        make_config(tmp_path),
+        which=lambda n: "./x" if n != "tmux" else "/usr/bin/tmux",
+        meminfo=tmp_path,
+    )
+    assert len(found.problems) == 1
+    assert "relative" in found.problems[0]
+    assert found.agent_binary is None
 
 
 def test_an_unreadable_meminfo_refuses_rather_than_running_unguarded(
@@ -337,15 +378,15 @@ def test_an_unreadable_meminfo_refuses_rather_than_running_unguarded(
     found = preflight(
         make_config(tmp_path), which=lambda _n: "/usr/bin/x", meminfo=tmp_path / "nope"
     )
-    assert len(found) == 1
-    assert "memory guard" in found[0]
+    assert len(found.problems) == 1
+    assert "memory guard" in found.problems[0]
 
 
 def test_every_missing_prerequisite_is_reported_at_once(tmp_path: Path) -> None:
     """Not one at a time. An operator on a fresh machine should learn
     everything they have to install from a single run."""
     found = preflight(make_config(tmp_path), which=lambda _n: None, meminfo=tmp_path / "nope")
-    assert len(found) == 3
+    assert len(found.problems) == 3
 
 
 def test_the_preflight_is_not_a_version_check(tmp_path: Path) -> None:
@@ -487,6 +528,59 @@ def test_main_serves_the_real_app_on_the_configured_address(
     assert "/api/projects" in paths
     assert "/api/events" in paths
     assert "/api/sessions/{name}/kill" in paths, "the app served is not the real one"
+
+
+def test_main_threads_preflights_resolved_path_into_the_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#196 regression in `main()`'s own wiring, not in `preflight` itself:
+    `config = replace(config, resolved_agent_binary=found.agent_binary)` is
+    the one line that carries the absolute path preflight resolved into the
+    `Config` `Engine` and `create_app` are built from. Every other cli test
+    stubs `shutil.which` to already answer with an absolute path, so turning
+    that line into a no-op passes every one of them; only reading which
+    `Config` `Engine` actually received catches it.
+
+    #346, round 2 of batch 1's review: spying on `Engine` alone missed
+    `main()` keeping the pre-`replace` `Config` in a `raw` local and passing
+    `config=raw` to `create_app` instead of the threaded one, since `Engine`
+    still got the right object. `create_app` is spied on too, and the test
+    checks both that its `Config` carries the resolved path and that it is
+    the SAME object `Engine` received, so the two constructors cannot drift
+    onto two different `Config`s again.
+    """
+    (tmp_path / "vessel").mkdir()
+    monkeypatch.setattr("shutil.which", lambda _n: "/opt/fake-agent")
+    monkeypatch.setattr("uvicorn.run", lambda *a, **k: None)
+
+    real_engine = Engine
+    engine_configs: list[Config] = []
+
+    def spy_engine(*, config: Config) -> object:
+        engine_configs.append(config)
+        return real_engine(config=config)
+
+    monkeypatch.setattr("hitchrail.cli.Engine", spy_engine)
+
+    real_create_app = create_app
+    app_configs: list[Config] = []
+
+    def spy_create_app(*, engine: object, config: Config, bus: object) -> object:
+        app_configs.append(config)
+        return real_create_app(engine=engine, config=config, bus=bus)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("hitchrail.cli.create_app", spy_create_app)
+
+    code = main(["--root", f"main={tmp_path}", "--agent-binary", "fake-agent"])
+
+    assert code == 0
+    assert engine_configs, "Engine was never constructed"
+    assert app_configs, "create_app was never called"
+    assert engine_configs[0].spawn_agent_binary == "/opt/fake-agent"
+    assert app_configs[0].spawn_agent_binary == "/opt/fake-agent"
+    assert app_configs[0] is engine_configs[0], (
+        "create_app and Engine were built from two different Config objects"
+    )
 
 
 # -- #108: the CLI and Config ask the same question --------------------------
@@ -785,6 +879,160 @@ def test_the_banner_reaches_the_journal_before_the_server_starts(
     assert "Open one of these on your phone" in at_serve_time["visible"]
 
 
+# -- #326: a startup banner names the service --------------------------------
+
+
+def test_the_identity_banner_names_the_service_before_the_grant_banner(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unlike `banner()`, which is silent until there is a token to grant,
+    this one always has something to say, and it says it first: it is
+    printed before `build_config()` even runs."""
+    monkeypatch.setattr("hitchrail.cli._serve", lambda app, cfg, tls: 0)
+    main(["--root", f"main={tmp_path}", "--host", "0.0.0.0", "--token", "t" * 16])
+    out = capsys.readouterr().out
+    assert __version__ in out
+    assert cli.GITHUB_URL in out
+    assert cli.ONE_LINE_DESCRIPTION in out
+    assert out.index(cli.GITHUB_URL) < out.index("Open one of these on your phone")
+
+
+def test_the_identity_banner_still_prints_when_the_start_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A stranger's bug report needs the version even when it is the config,
+    the preflight or the gateway check that refused to start."""
+    code = main(["--root", f"main={tmp_path / 'nope'}"])
+    assert code == 2
+    assert cli.GITHUB_URL in capsys.readouterr().out
+
+
+def test_update_plugins_does_not_print_the_identity_banner(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The one shot path returns before `parse_args` is ever reached, so it
+    never reaches the new print call in `main()`."""
+    _update(monkeypatch, FakeAgent([row("a@m")]))
+    assert cli.GITHUB_URL not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("flag", ["--version", "--help"])
+def test_help_and_version_short_circuit_before_the_identity_banner(
+    flag: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#336. The first version of this test called `parse_args` directly and
+    never `main()`, so it could not fail: `main`'s own `print(identity_banner())`
+    was never reached either way. Both flags exit inside `argparse.parse_args`
+    itself, before that print ever resumes, so `main()` is what must be called
+    for the assertion to mean anything.
+    """
+    with pytest.raises(SystemExit):
+        main([flag])
+    assert cli.GITHUB_URL not in capsys.readouterr().out
+
+
+def test_the_identity_banner_reaches_the_journal_before_the_server_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#145's footgun again, for a second print statement: `banner()`'s own
+    flush does not cover this one, since it is a separate `print` call."""
+    (tmp_path / "vessel").mkdir()
+    monkeypatch.setenv(JOURNAL_ENV, "9:1234")
+    stdout = BlockBuffered()
+    monkeypatch.setattr(sys, "stdout", stdout)
+    monkeypatch.setattr("shutil.which", lambda _n: "/usr/bin/x")
+    at_serve_time: dict[str, str] = {}
+
+    def fake_run(_app: object, **_kwargs: object) -> None:
+        at_serve_time["visible"] = stdout.visible
+
+    monkeypatch.setattr("uvicorn.run", fake_run)
+
+    main(["--root", f"main={tmp_path}", "--host", "0.0.0.0", "--token", "x" * 16])
+
+    assert cli.GITHUB_URL in at_serve_time["visible"]
+
+
+def test_the_argparse_description_reuses_the_same_string(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`cli.py:53`'s `description=` is `ONE_LINE_DESCRIPTION` rather than a
+    second, independently typed string, so `--help` prints it too. argparse's
+    own formatter rewraps it at the terminal width, so the comparison folds
+    whitespace on both sides rather than matching a literal substring."""
+    with pytest.raises(SystemExit):
+        parse_args(["--help"])
+    out = " ".join(capsys.readouterr().out.split())
+    assert " ".join(cli.ONE_LINE_DESCRIPTION.split()) in out
+
+
+# -- #141: help text, shown defaults, and an example nobody guesses ----------
+
+# Actions argparse adds or manages itself, or whose absence is not a defect:
+# `-h`/`--help` already carries its own default help text; `--version`'s
+# `given` bookkeeping isn't a parser action at all.
+_NOT_A_USER_OPTION = {"help"}
+
+
+def test_every_option_has_help_text() -> None:
+    """Walk the parser rather than a list here, so a new flag with no help
+    fails this instead of being forgotten. `--port` was exactly that."""
+    parser = build_parser()
+    missing = [
+        action.option_strings
+        for action in parser._actions
+        if action.dest not in _NOT_A_USER_OPTION and not action.help
+    ]
+    assert not missing, f"options with no help text: {missing}"
+
+
+def test_options_with_a_default_show_it() -> None:
+    """For every option whose default is a real value, not `None` and not the
+    empty list a repeatable flag defaults to, that value's string form must
+    appear in its own help text. Read off the parser, not a hardcoded table,
+    so a changed default and a help string that still names the old one both
+    fail here."""
+    parser = build_parser()
+    for action in parser._actions:
+        trivial = (
+            action.default is None
+            or action.default == []
+            or action.default is argparse.SUPPRESS
+        )
+        if trivial:
+            continue
+        assert str(action.default) in (action.help or ""), (
+            f"{action.option_strings} defaults to {action.default!r} but its "
+            "help text does not show it"
+        )
+
+
+def test_the_help_shows_an_example_using_both_allowlist_flags() -> None:
+    """clig.dev's strongest recommendation: show examples, particularly the
+    unobvious complex case. Here that is needing BOTH allowlist flags to sit
+    behind a proxy, which nobody guesses from the flags' own help text alone.
+    """
+    parser = build_parser()
+    lines = parser.format_help().splitlines()
+    paired = [line for line in lines if "--allow-host" in line and "--allow-origin" in line]
+    assert paired, "no line in --help shows --allow-host and --allow-origin together"
+
+
+def test_no_arguments_shows_help_and_exits_non_zero(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """clig.dev: a program that needs arguments to function, run with none,
+    should show concise help rather than a single refusal line. The exit code
+    stays non zero: this is a failed start, not a help request, and
+    `no_real_config_directory` in conftest.py is what makes a bare `main([])`
+    deterministically roots-less in the suite."""
+    code = main([])
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "no roots configured" in err
+    assert "usage: hitchrail" in err
+
+
 # -- `hitchrail update-plugins` (#124) ----------------------------------------
 
 
@@ -885,6 +1133,69 @@ def test_update_plugins_exits_two_when_the_operation_failed(
     assert "updated" not in captured.out, "a failed operation printed a count"
 
 
+def test_update_plugins_reports_plugins_unreadable_not_a_traceback_on_invalid_utf8(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#351. A real agent, not `FakeAgent`: the crash this regresses happened
+    inside `communicate()`'s own decoding of real bytes off a real pipe, which
+    a fake runner returning an already built `str` cannot reproduce."""
+    monkeypatch.setattr("shutil.which", _REAL_SHUTIL_WHICH)
+
+    def no_server(*_a: object, **_k: object) -> int:
+        raise AssertionError("update-plugins started a server")
+
+    monkeypatch.setattr(cli, "_serve", no_server)
+    agent = tmp_path / "claude"
+    agent.write_text(
+        f"#!{sys.executable}\n"
+        "import sys\n"
+        "if sys.argv[1:3] == ['plugin', 'list']:\n"
+        "    sys.stdout.buffer.write(b'\\xff\\xfe')\n"
+    )
+    agent.chmod(0o755)
+
+    code = main(["update-plugins", "--agent-binary", str(agent)])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "plugins_unreadable:" in captured.err
+    assert "Traceback" not in captured.err
+    assert "Traceback" not in captured.out
+
+
+def test_update_plugins_reports_a_failed_plugin_not_a_traceback_on_invalid_utf8(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#351's other half: invalid UTF-8 out of the update command itself,
+    rather than the listing, must not crash the whole run to `internal_error`
+    either. It ends as an ordinary per plugin `failed`, the same as any other
+    non zero exit."""
+    monkeypatch.setattr("shutil.which", _REAL_SHUTIL_WHICH)
+
+    def no_server(*_a: object, **_k: object) -> int:
+        raise AssertionError("update-plugins started a server")
+
+    monkeypatch.setattr(cli, "_serve", no_server)
+    agent = tmp_path / "claude"
+    agent.write_text(
+        f"#!{sys.executable}\n"
+        "import sys, json\n"
+        "args = sys.argv[1:]\n"
+        "if args[:2] == ['plugin', 'list']:\n"
+        "    print(json.dumps([{'id': 'a@m', 'scope': 'user'}]))\n"
+        "elif args[:2] == ['plugin', 'update']:\n"
+        "    sys.stdout.buffer.write(b'\\xff\\xfe download failed')\n"
+        "    sys.exit(1)\n"
+    )
+    agent.chmod(0o755)
+
+    code = main(["update-plugins", "--agent-binary", str(agent)])
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "failed" in captured.out
+    assert "Traceback" not in captured.err
+    assert "Traceback" not in captured.out
+
+
 def test_update_plugins_spawns_nothing_when_the_agent_is_not_on_path(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -899,9 +1210,62 @@ def test_update_plugins_spawns_nothing_when_the_agent_is_not_on_path(
 
 
 def test_update_plugins_uses_the_agent_binary_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The autouse fixture's fake `which` prepends "/usr/bin/", which is a
+    # believable answer for a bare name and a nonsensical one for a path
+    # already absolute. A real `which` given an absolute, executable path
+    # hands it back unchanged, which is what this test needs to tell apart
+    # "the flag reached argv" from "the flag reached argv, resolved" (#298).
+    monkeypatch.setattr("shutil.which", lambda name: name)
     agent = FakeAgent([row("a@m")])
     _update(monkeypatch, agent, "--agent-binary", "/opt/agent")
     assert {argv[0] for argv in agent.argvs} == {"/opt/agent"}
+
+
+def test_update_plugins_spawns_the_resolved_path_not_the_raw_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#298. `claude_ipc.plugin_runner` starts the child with `cwd=Path.home()`,
+    so a relative binary would be checked from one directory and run from
+    another. The absolute path this command's own `which` call found is what
+    must reach argv, not the name it was given."""
+    monkeypatch.setattr("shutil.which", lambda name: f"/opt/bin/{name}")
+    agent = FakeAgent([row("a@m")])
+    _update(monkeypatch, agent, "--agent-binary", "my-agent")
+    assert {argv[0] for argv in agent.argvs} == {"/opt/bin/my-agent"}
+
+
+def test_update_plugins_resolves_a_relative_agent_binary_against_this_cwd(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """#298, the exact scenario the security review ran: `shutil.which` hands
+    a name with a directory component back UNCHANGED when it is executable,
+    rather than making it absolute. `plugin_runner` then starts the child in
+    `Path.home()`, so an unresolved relative argv[0] is checked against one
+    directory and would run whatever POSIX finds by that name in another. A
+    decoy of the same relative name sits under the fake HOME so a fix that
+    forgets to resolve, and accidentally still runs the real one because the
+    decoy happens to be missing, is not mistaken for passing.
+    """
+    monkeypatch.setattr(
+        "shutil.which", _REAL_SHUTIL_WHICH
+    )  # the real lookup, not the fixture's fake
+    cwd = tmp_path / "cwd"
+    (cwd / "bin").mkdir(parents=True)
+    real_agent = cwd / "bin" / "claude"
+    real_agent.write_text("#!/bin/sh\n")
+    real_agent.chmod(0o755)
+
+    home = tmp_path / "home"
+    (home / "bin").mkdir(parents=True)
+    decoy = home / "bin" / "claude"
+    decoy.write_text("#!/bin/sh\n")
+    decoy.chmod(0o755)
+
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(cwd)
+    agent = FakeAgent([row("a@m")])
+    _update(monkeypatch, agent, "--agent-binary", "bin/claude")
+    assert {argv[0] for argv in agent.argvs} == {str(real_agent.resolve())}
 
 
 def test_update_plugins_refuses_a_flag_shaped_agent_binary(

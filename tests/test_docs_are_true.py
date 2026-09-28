@@ -802,6 +802,28 @@ def test_every_shot_the_capture_declares_is_committed() -> None:
     )
 
 
+def test_every_committed_shot_is_referenced_in_the_readme() -> None:
+    """#329: `phone-grant.png`, `phone-logs.png` and `phone-new-folder.png`
+    were captured and committed for months without README ever linking to
+    any of them, found only by `grep` on a filename, not by anything the
+    repository stated. Derived from the capture module, the same way the
+    test above is, so a new shot with no README reference fails here rather
+    than shipping orphaned the same way.
+
+    A plain substring search, not a markdown parser: the README embeds each
+    image as `<img src="docs/screenshots/<name>.png" ...>`, and the filename
+    itself is the only part every reference shares.
+    """
+    declared = set(re.findall(r'_shoot\(page, "([a-z-]+)"[,)]', CAPTURE.read_text()))
+    assert declared, "the capture module declares no shots, so this checks nothing"
+    readme = README.read_text()
+    orphaned = sorted(name for name in declared if name not in readme)
+    assert not orphaned, (
+        f"{orphaned} are captured and committed but never referenced in README.md, "
+        "so they ship as pictures no stranger reading it ever sees."
+    )
+
+
 def test_the_capture_never_photographs_a_real_root() -> None:
     """The first run put `/tmp/pytest-of-<username>/...` in the page header,
     because the interface displays the root it was given and the tier's own
@@ -875,6 +897,50 @@ def test_the_readme_states_the_risk_before_the_instructions() -> None:
         )
 
 
+def test_the_install_section_names_every_route_pypi_shows() -> None:
+    """#156: PyPI's own project page shows `pip install hitchrail` as the
+    install line, and for a while the README never mentioned `pip` at all, so
+    a visitor who followed PyPI's own instruction could not find themselves in
+    our docs. `pip` must be last, since it is the one route that installs into
+    whatever environment happens to be active, and the refusal a reader is
+    most likely to hit that way, PEP 668's externally managed environment,
+    must be named."""
+    readme = README.read_text()
+    install = readme[readme.index("## Install") : readme.index("## Upgrading")]
+    routes = (
+        "uvx hitchrail",
+        "uv tool install hitchrail",
+        "pipx install hitchrail",
+        "pip install hitchrail",
+    )
+    for route in routes:
+        assert route in install, f"the Install section lost {route!r}"
+    assert install.index("pip install hitchrail") == max(
+        install.index(route) for route in routes
+    ), "pip install is not the last route offered"
+    assert "externally-managed-environment" in install, (
+        "the Install section names pip but not the refusal a reader is most "
+        "likely to hit on a modern distribution"
+    )
+
+
+def test_the_upgrading_section_covers_both_deployment_shapes() -> None:
+    """#319: the README said how to install and how to update the AGENT's
+    plugins, never how to update Hitchrail itself. `uvx` and `uv tool install`
+    plus systemd go stale differently, and this checks both get a real
+    command rather than a sentence saying it is possible."""
+    readme = README.read_text()
+    upgrading = readme[readme.index("## Upgrading") : readme.index("## Prerequisites")]
+    for needle in (
+        "uvx hitchrail@latest",
+        "uv cache clean",
+        "uv tool upgrade hitchrail",
+        "systemctl --user restart hitchrail",
+        "hitchrail --version",
+    ):
+        assert needle in upgrading, f"the Upgrading section lost {needle!r}"
+
+
 def test_the_readme_still_states_every_limitation() -> None:
     """A section promoted to the top is one somebody will later want to soften,
     because it is the first thing a visitor sees. This is what stops that being
@@ -885,6 +951,147 @@ def test_the_readme_still_states_every_limitation() -> None:
         "the README no longer states: " + ", ".join(missing) + ". These are the "
         "limitations SECURITY.md repeats, so dropping one here makes two files wrong."
     )
+
+
+# -- #158: the README's centred badge row, each badge a checkable claim -----
+
+_BADGE_RE = re.compile(r"\[!\[[^\]]*\]\(([^)]+)\)\]\(([^)]+)\)")
+
+
+def _readme_badges(text: str) -> list[tuple[str, str]]:
+    """(image url, link url) pairs, image first, matching the row's own
+    `[![alt](image)](link)` shape."""
+    return _BADGE_RE.findall(text)
+
+
+def _missing_badge_targets(text: str) -> list[str]:
+    """What #158 asks to be checked: a badge naming a file this repository
+    does not have. Not every badge is checkable this way (PyPI, Downloads
+    and Stars point at accounts on another site, and #158's own E2E note
+    says a broken shield there is a human check, on GitHub and on PyPI both),
+    so this covers the two badges that name something local: the licence
+    file and the CI workflow.
+    """
+    problems = []
+    for image, link in _readme_badges(text):
+        if "License" in image and not (ROOT / link).exists():
+            problems.append(f"the licence badge links to {link!r}, not a file here")
+        workflow = re.search(r"workflows/([\w.-]+\.ya?ml)/badge\.svg", image)
+        if workflow and not (ROOT / ".github" / "workflows" / workflow.group(1)).exists():
+            problems.append(
+                f"the CI badge names {workflow.group(1)!r}, which is not in .github/workflows/"
+            )
+    return problems
+
+
+def test_every_badge_names_a_resource_the_project_actually_has() -> None:
+    """A badge is a claim, and copying a row wholesale is how a README ends up
+    making one it cannot keep. This checks the two badges that name a file in
+    this repository rather than an account on another site."""
+    readme = README.read_text()
+    assert _readme_badges(readme), "the README's badge row no longer matches this regex"
+    problems = _missing_badge_targets(readme)
+    assert not problems, "\n  ".join(["a badge names a resource this repo lacks:", *problems])
+
+
+def test_a_renamed_workflow_file_would_fail_the_badge_check() -> None:
+    """The realistic drift #158 names: a workflow gets renamed and the CI
+    badge silently 404s. Run against fabricated text, not the real README, so
+    this test does not depend on the CI workflow ever actually being renamed.
+    """
+    fake = (
+        "[![CI](https://github.com/agigante80/hitchrail/actions/workflows/"
+        "renamed.yml/badge.svg)](https://github.com/agigante80/hitchrail/actions)\n"
+    )
+    assert _missing_badge_targets(fake), "a badge naming a missing workflow file was not caught"
+
+
+# -- #157: one licence, stated four times, and the four must agree ----------
+
+
+def test_the_licence_agrees_across_pyproject_readme_and_license_file() -> None:
+    """MIT is stated in `pyproject.toml`'s SPDX expression, in the LICENSE
+    file's own first line, in the README's Licence section, and in the README
+    badge #158 added. A licence is the wrong thing to let drift, so this reads
+    all four rather than hardcoding "MIT" and trusting it stays true."""
+    pyproject = (ROOT / "pyproject.toml").read_text()
+    match = re.search(r'^license = "(.+)"$', pyproject, re.M)
+    assert match, "pyproject.toml has no top level license expression to check against"
+    expression = match.group(1)
+
+    license_first_line = (ROOT / "LICENSE").read_text().splitlines()[0]
+    assert expression in license_first_line, (
+        f"pyproject.toml's license expression {expression!r} does not appear in "
+        f"LICENSE's first line {license_first_line!r}"
+    )
+
+    readme = README.read_text()
+    licence_section = readme[readme.index("## Licence") :]
+    assert expression in licence_section, (
+        f"the README's Licence section does not name {expression!r}"
+    )
+    assert "(LICENSE)" in licence_section, (
+        "the README's Licence section does not link to the LICENSE file"
+    )
+    assert any(expression in image for image, _ in _readme_badges(readme)), (
+        f"the badge row's licence badge does not name {expression!r}"
+    )
+
+
+def test_no_deprecated_license_classifier_is_declared() -> None:
+    """PEP 639 deprecated the `License ::` trove classifiers in favour of the
+    SPDX expression `pyproject.toml` already carries; PyPI has stopped
+    accepting new ones, and `uv build` warns when one is present. This fails
+    if the block is ever copy-pasted back in."""
+    pyproject = (ROOT / "pyproject.toml").read_text()
+    assert "License ::" not in pyproject, (
+        "pyproject.toml declares a deprecated License :: classifier "
+        "alongside the SPDX expression that replaced it"
+    )
+
+
+# -- #328, #158, #326, #331: one description, reused rather than retyped ----
+
+
+def _pyproject_description() -> str:
+    match = re.search(r'^description = "(.*)"$', (ROOT / "pyproject.toml").read_text(), re.M)
+    assert match, "pyproject.toml has no description field to check the other surfaces against"
+    return match.group(1)
+
+
+def test_the_cli_banner_reuses_pyprojects_description() -> None:
+    """#326: the argparse description and the startup banner both read
+    `ONE_LINE_DESCRIPTION` rather than a retyped copy.
+
+    #337: in any installed environment, this repository's own `uv sync`
+    included, `ONE_LINE_DESCRIPTION` comes from the package metadata's
+    Summary rather than from `_FALLBACK_DESCRIPTION`, so the docstring above
+    claiming this checks the fallback was wrong: nothing here ever read it.
+    `_FALLBACK_DESCRIPTION` is retyped by hand in `cli.py` and only runs from
+    a bare, uninstalled checkout, which is the one place it could drift
+    unnoticed.
+    """
+    from hitchrail.cli import _FALLBACK_DESCRIPTION, ONE_LINE_DESCRIPTION
+
+    assert _pyproject_description() == ONE_LINE_DESCRIPTION
+    assert _pyproject_description() == _FALLBACK_DESCRIPTION
+
+
+def test_the_readme_tagline_matches_pyprojects_description() -> None:
+    """#158: the README's centred, bold one line tagline is the same string
+    #328 ships for `pyproject.toml`, not a fifth wording of its own."""
+    assert _pyproject_description() in README.read_text()
+
+
+def test_the_page_metadata_matches_pyprojects_description() -> None:
+    """#331: `index.html` and `settings.html` reuse the same string for their
+    `<meta name="description">`, rather than each inventing its own."""
+    description = _pyproject_description()
+    for page in ("index.html", "settings.html"):
+        html = (SRC / "web" / page).read_text()
+        assert f'<meta name="description" content="{description}">' in html, (
+            f"{page} has no meta description matching pyproject.toml's"
+        )
 
 
 # -- #110: the unit template and the phone access document ------------------

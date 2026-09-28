@@ -144,6 +144,24 @@ def _origin_parts(entry: str) -> tuple[str, str] | None:
 TOKEN_ENV = "HITCHRAIL_TOKEN"  # noqa: S105  the NAME of a variable, not a secret
 
 
+def check_agent_binary(raw: str) -> str:
+    """The value actually spawned: `raw`, stripped. A binary name beginning
+    with '-' becomes a flag in an argv slot, and there is no shell anywhere in
+    this project to blame instead: argv[0] starting with a hyphen is read as
+    an option by whatever ends up parsing it.
+
+    Module level rather than a method, and the one place this shape is
+    checked (#302): `Config.__post_init__` and `cli.update_plugins_command`
+    used to run two copies of this that only looked alike, and only one of
+    them wrote the stripped value back, so the server spawned an operator's
+    trailing whitespace that its own refusal had already rejected.
+    """
+    binary = raw.strip()
+    if not binary or binary.startswith("-"):
+        raise ConfigError(f"not an acceptable agent binary: {raw!r}")
+    return binary
+
+
 @dataclass(frozen=True)
 class Config:
     """Validated at construction, so an unsafe configuration cannot exist.
@@ -176,6 +194,17 @@ class Config:
     # is worth costing nothing now rather than a major version later. See the
     # multi agent note in the design's section 3.
     agent_binary: str = "claude"
+    # #196. The absolute path `cli.preflight` resolved `agent_binary` to,
+    # filled in by `cli.main` once preflight succeeds, before `Engine` and
+    # `create_app` are built. `None` is not "unresolved and about to be
+    # spawned anyway": it is what every Config built outside `cli.main`
+    # already is, `support.make_config` included, and `spawn_agent_binary`
+    # below falls back to `agent_binary` for exactly that case. Kept apart
+    # from `agent_binary` itself, rather than overwritten in place, so a
+    # static read of the field name can tell "what the operator typed" from
+    # "what preflight found on this machine" and hold every spawn site to
+    # the second: see the AST guard in test_config.py for #298.
+    resolved_agent_binary: str | None = None
     # The default is Claude Code's state directory. The field name is neutral
     # because the directory is the agent adapter's business, not the server's.
     sessions_dir: Path = field(default_factory=lambda: Path.home() / ".claude" / "sessions")
@@ -241,7 +270,8 @@ class Config:
 
         self._check_token()
         self._check_session_prefix()
-        self._check_agent_binary()
+        object.__setattr__(self, "agent_binary", check_agent_binary(self.agent_binary))
+        self._check_resolved_agent_binary()
         self._check_numbers()
         self._check_bind_host()
         self._check_extra_hosts()
@@ -298,6 +328,18 @@ class Config:
                 "tmux reads '.' and ':' as window and pane separators, so a session "
                 "named with one can be created and then never addressed"
             )
+
+    @property
+    def spawn_agent_binary(self) -> str:
+        """What every spawn site runs (#196, #298): the absolute path
+        `resolved_agent_binary` carries, or `agent_binary` itself when
+        nothing has resolved it, which is every Config built outside
+        `cli.main`, `support.make_config` included. `launch_argv`,
+        `find_detached` and the plugin update all read this property and
+        never the field directly; the AST guard in test_config.py enforces
+        that everywhere but here and in `cli.update_plugins_command`, which
+        resolves and checks its own copy before it ever builds a Config."""
+        return self.resolved_agent_binary or self.agent_binary
 
     @property
     def tls(self) -> bool:
@@ -410,16 +452,19 @@ class Config:
             )
         object.__setattr__(self, "expect_gateway_mac", mac)
 
-    def _check_agent_binary(self) -> None:
-        """A binary name beginning with '-' becomes a flag in an argv slot.
-
-        There is no shell anywhere in this project and that does not help here:
-        argv[0] starting with a hyphen is read as an option by whatever ends up
-        parsing it.
-        """
-        binary = self.agent_binary.strip()
-        if not binary or binary.startswith("-"):
-            raise ConfigError(f"not an acceptable agent binary: {self.agent_binary!r}")
+    def _check_resolved_agent_binary(self) -> None:
+        """The one property `resolved_agent_binary` must have: only preflight
+        sets it, from a `shutil.which` lookup that is required to answer with
+        an absolute path or nothing (#298). A relative value here would mean
+        a second, less careful resolver wrote it, and spawning it would put
+        the bug this field exists to remove right back in argv[0]."""
+        if self.resolved_agent_binary is None:
+            return
+        if not Path(self.resolved_agent_binary).is_absolute():
+            raise ConfigError(
+                f"resolved_agent_binary {self.resolved_agent_binary!r} is not "
+                "absolute: only cli.preflight's own lookup may set this field"
+            )
 
     def _check_numbers(self) -> None:
         if not (1 <= self.port <= 65535):
