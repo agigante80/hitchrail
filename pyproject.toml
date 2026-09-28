@@ -59,7 +59,7 @@ dev = [
 # modules and runs pytest in process, so it needs an environment that already
 # has starlette, httpx and the rest; an isolated tool install has none of them.
 mutation = [
-  "mutmut>=3.7,<4",
+  "mutmut>=3.8,<4",
 ]
 
 [tool.ruff]
@@ -351,7 +351,14 @@ also_copy = [
 # **#273 added the sixth**, and it reads the source too: it parses every
 # `os.environ.get(X)` in `src/` for X, and a mutant of `settings.py` carries
 # `os.environ.get(None)` beside the real call, which no scrub list names.
+# **#374 added the seventh**, and mutmut 3.8 is why. 3.7 skipped the methods
+# of a decorated class, so `Config.__post_init__` was never mutated; 3.8
+# mutates it, and `test_every_read_of_agent_binary_is_the_resolved_property_
+# or_allowlisted` reads every `self.agent_binary` in the source, finds one per
+# `xǁConfigǁ__post_init____mutmut_N` copy, and none of them is the allowlisted
+# `__post_init__`.
 pytest_add_cli_args = [
+  "--deselect=tests/test_config.py::test_every_read_of_agent_binary_is_the_resolved_property_or_allowlisted",
   "--deselect=tests/test_config.py::test_every_environment_variable_the_product_reads_is_scrubbed",
   "--deselect=tests/test_config.py::test_every_module_is_under_the_size_guideline",
   "--deselect=tests/test_config.py::test_the_import_contract_covers_every_engine_layer_module",
