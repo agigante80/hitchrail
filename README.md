@@ -239,16 +239,34 @@ executable still there next month. See `packaging/hitchrail.service`, whose
 
 Which command you need depends on which line above you used.
 
-**`uvx`** re-resolves against PyPI on close to every invocation, so running
-`uvx hitchrail ...` again already picks up a new release. If a cached
-resolution is still stale, force it with `uvx hitchrail@latest`, or clear the
-cache entirely with `uv cache clean hitchrail`.
+**If you installed it with `uv tool install`** (what the service below runs):
 
-**`uv tool install`, which is what `packaging/hitchrail.service` runs, does
-not notice a new release on its own.** `uv tool upgrade hitchrail` fetches it,
-and then, because the running process keeps serving the old code until it is
-restarted, `systemctl --user restart hitchrail` for the packaged unit. Either
-way, `hitchrail --version` is how you confirm the upgrade actually landed.
+```sh
+uv tool upgrade hitchrail
+systemctl --user restart hitchrail
+hitchrail --version
+```
+
+The restart is not optional: the running server keeps serving the old code
+until it restarts. Skip that line if you do not run it as a service.
+
+**If you run it with `uvx`**, it usually picks up a new release by itself. If
+it does not:
+
+```sh
+uvx hitchrail@latest --version
+```
+
+and if that still shows the old version, clear the cache and try again:
+
+```sh
+uv cache clean hitchrail
+```
+
+**A release can take a few minutes to reach the index `uv` reads**, so
+straight after one is announced, `uv tool upgrade` may still say there is
+nothing to do. Wait, then run `uv tool upgrade --reinstall hitchrail`,
+which skips the cached answer.
 
 ## Prerequisites
 
