@@ -28,26 +28,16 @@ updates:
     # against `main` is red on a required check by construction.
     target-branch: "develop"
     # **A SECURITY update ignores the line above and always targets the DEFAULT
-    # branch, which is `main`. That is accepted rather than worked around.**
+    # branch, which is `main`.** No configuration changes that
+    # (dependabot/dependabot-core#2767). Making `develop` the default would
+    # point a published project's front door at unreleased code, and exempting
+    # the bot from the release gate would hole the one check before a publish.
+    # Such a pull request is read as a NOTIFICATION: it becomes a ticket, the
+    # fix is built on `develop`, and the pull request is closed.
     #
-    # It cannot be configured: the default branch is where GitHub sends them,
-    # full stop. The alternatives were making `develop` the default, which
-    # points a published project's front door at unreleased code, or exempting
-    # the bot from the release gate, which puts a hole in the one check between
-    # a merge and an irreversible publish.
-    #
-    # So such a pull request lands on `main` and fails the gate, and that is
-    # fine, because it is read as a NOTIFICATION rather than as something to
-    # merge. The fix is implemented on `develop` like every other change and
-    # reaches `main` as a release. The pull request is the alert and the diff.
-    #
-    # **The consequence to know about:** GitHub's options reference says that
-    # once `target-branch` is set, the options in this stanza stop applying to
-    # security updates, and `allow` is one of them. So the direct-only rule
-    # below governs version updates, and a transitive advisory can still open a
-    # security pull request. Under the reading above that is a notification
-    # too, and the fix for a transitive vulnerability is still to move the
-    # direct dependency that pulls it in.
+    # GitHub's options reference says that once `target-branch` is set, the
+    # options in this stanza stop applying to security updates, `allow`
+    # included. The second `uv` entry below exists for that alone.
 
     # **Direct dependencies only, for version updates.**
     # `direct` is "all explicitly defined dependencies", which here is the three
@@ -68,6 +58,25 @@ updates:
     # limit would only ever be filled by the dev group, and a queue of tooling
     # bumps is how the interesting one gets skimmed past.
     open-pull-requests-limit: 3
+    labels: ["infrastructure"]
+    commit-message:
+      prefix: "chore(deps)"
+
+  # **Security updates, direct dependencies only.** Borrowed from Actual-sync,
+  # where a transitive advisory opened a lockfile only pull request on `main`
+  # (its #192). This entry sets NO `target-branch`, which is what makes GitHub
+  # consult it for security updates, and `open-pull-requests-limit: 0`, which
+  # switches its own version updates off, so the entry above stays the only
+  # source of those. Do not merge the two: merging reopens that hole. A
+  # transitive advisory still raises a Dependabot ALERT; its fix is moving the
+  # direct dependency that pulls it in.
+  - package-ecosystem: "uv"
+    directory: "/"
+    open-pull-requests-limit: 0
+    allow:
+      - dependency-type: "direct"
+    schedule:
+      interval: "weekly"
     labels: ["infrastructure"]
     commit-message:
       prefix: "chore(deps)"
