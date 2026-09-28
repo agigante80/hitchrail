@@ -1223,18 +1223,21 @@ async def test_a_restart_during_a_page_load_leaves_the_strip_on_the_new_server(
     server.release_plugin("alpha@m")
     await expect(status).to_have_text("1 updated, 0 failed, 0 left alone.")
 
-    held: list[tuple[Route, APIResponse]] = []
+    held: list[Route] = []
 
-    # Only `countRunning()`'s request, and only the first: it is the one that
-    # sends `accept` rather than `content-type`. Holding every `/api/projects`
-    # also caught app.js's listing retry while the server was down, and that
-    # `route.fetch()` died with "socket hang up" inside the handler, failing
-    # the test on a slow CI leg rather than the page (#348's first CI run).
+    # Only `countRunning()`'s requests, which send `accept` rather than
+    # `content-type`: app.js's listing retry runs while the server is down and
+    # must reach it. EVERY one is held, since the load can deliver the old
+    # `done` record more than once, and a copy let through paints the old
+    # epoch before the restart, where even the page before #348 retires it
+    # and the test proves nothing. None is fetched: a `route.fetch()` whose
+    # timing crosses the restart dies with "socket hang up", which failed
+    # #348's first CI run and about one local run in three after it.
     async def hold(route: Route) -> None:
-        if held or route.request.headers.get("accept") != "application/json":
+        if route.request.headers.get("accept") != "application/json":
             await route.continue_()
             return
-        held.append((route, await route.fetch()))
+        held.append(route)
 
     await page.route("**/api/projects", hold)
     await page.reload()
@@ -1247,8 +1250,8 @@ async def test_a_restart_during_a_page_load_leaves_the_strip_on_the_new_server(
     server.restart()
     await expect(status).to_have_text("Not run since this server started.", timeout=15_000)
 
-    route, response = held[0]
-    await route.fulfill(response=response)
+    for route in held:
+        await route.fulfill(json={"projects": []})
     await page.unroute("**/api/projects")
     # Nothing to wait on when the dead record is dropped, so give it the
     # time a repaint takes, then prove the new server is still followed.
