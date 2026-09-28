@@ -201,16 +201,17 @@ rather than merged as a bot wrote it. This is outside the phase's objective by
 decision, not by drift. Three of the nine pull requests (#192 to #194) needed
 no ticket, since `develop` already locks newer versions.
 
-- [ ] **Task 159, #371 (P2).** `uvicorn` 0.53, read against the access log
-      scrub and the lifespan.
-- [ ] **Task 160, #372 (P2).** `sse-starlette` 3.4.11, read against the
+- [x] **Task 159, #371 (P2).** `uvicorn` 0.53, read against the access log
+      scrub and the lifespan. Locked at 0.54, which adds only opt-in HTTP/2.
+- [x] **Task 160, #372 (P2).** `sse-starlette` 3.4.11, read against the
       stream's disconnect and shutdown.
-- [ ] **Task 161, #373 (P2).** `upload-artifact` v7 and `download-artifact`
+- [x] **Task 161, #373 (P2).** `upload-artifact` v7 and `download-artifact`
       v8 in one commit, with the build handoff exercised before a release
       depends on it.
-- [ ] **Task 162, #374 (P3).** `mutmut` 3.8, checked against each
-      `[tool.mutmut]` workaround.
-- [ ] **Task 163, #375 (P3).** `astral-sh/setup-uv` v10.2.0.
+- [x] **Task 162, #374 (P3).** `mutmut` 3.8, checked against each
+      `[tool.mutmut]` workaround. 3.8 mutates dataclass methods, so
+      `Config`'s refusals were swept for the first time: #377, Backlog.
+- [x] **Task 163, #375 (P3).** `astral-sh/setup-uv` v10.2.0.
 
 ## Done looks like
 
