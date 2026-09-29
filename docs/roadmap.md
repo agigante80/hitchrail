@@ -86,9 +86,10 @@ authored on the machine only, sent only on a tapped Stop, and sent with
 `send-keys -l`.
 
 A phase rather than a ticket for the reason Phase 16 is one: what it changes,
-not how big it is. It changes design section 4.3, the stop sequence, and it
-carries an open sub decision, the order in which the interrupt and the prompt
-are sent, that is the operator's to make.
+not how big it is. It changes design section 4.3, the stop sequence. The
+order the interrupt and the prompt are sent in was the operator's to decide,
+and was decided on 2026-09-29: Stop queues the prompt behind the task in
+flight, and Kill, available throughout the wait, is the interrupt.
 
 Moved ahead of 16, 17 and 18 on 2026-09-16, on the third ordering rule, cost
 of delay, invoked for the second time. Every stop tapped from a phone today
