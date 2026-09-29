@@ -1010,21 +1010,37 @@ def test_a_kill_mid_update_ends_that_plugin_and_never_spawns_the_next(
     (`handle._set(None)`), passed all of them while b spawned 41ms after the
     shutdown.
 
-    Each update writes a marker holding its own pid before it hangs, so
-    "b never started" is read from the filesystem rather than from the
-    outcomes, which a broken latch would still report plausibly.
+    Two different assertions say "b never started", and neither alone is
+    enough (#383). The marker says b's interpreter never ran its first line.
+    `abandoned` says `Popen` was never called: with `raise_if_closed()`
+    removed, b IS spawned and `_set` kills it before it writes anything, so
+    only the result tells that apart.
+
+    Plugin a's update starts a grandchild in its own process group, the shape
+    an install command approved by `-y` takes, and the grandchild must die
+    with it: `os.kill` in place of `os.killpg` ends a and leaves it running.
     """
     agent = tmp_path / "agent"
+    grandchild = tmp_path / "grandchild.pid"
     listing = json.dumps([row("a@m"), row("b@m")])
     agent.write_text(
         f"#!{sys.executable}\n"
-        "import os, sys, time\n"
+        "import os, subprocess, sys, time\n"
         "args = sys.argv[1:]\n"
         "if args[:2] == ['plugin', 'list']:\n"
         f"    print({listing!r})\n"
         "elif args[:2] == ['plugin', 'update']:\n"
-        f"    open(os.path.join({str(tmp_path)!r}, 'started-' + args[2]), 'w')"
-        ".write(str(os.getpid()))\n"
+        "    if args[2] == 'a@m':\n"
+        "        g = subprocess.Popen(['sleep', '30'], stdout=subprocess.DEVNULL,"
+        " stderr=subprocess.DEVNULL)\n"
+        f"        with open({str(grandchild)!r}, 'w') as f:\n"
+        "            f.write(str(g.pid))\n"
+        # Written complete, then renamed: the test polls for the name and
+        # must never read a marker that exists but is still empty.
+        f"    marker = os.path.join({str(tmp_path)!r}, 'started-' + args[2])\n"
+        "    with open(marker + '.tmp', 'w') as f:\n"
+        "        f.write(str(os.getpid()))\n"
+        "    os.rename(marker + '.tmp', marker)\n"
         "    time.sleep(30)\n"
     )
     agent.chmod(0o755)
@@ -1038,24 +1054,67 @@ def test_a_kill_mid_update_ends_that_plugin_and_never_spawns_the_next(
         daemon=True,
     )
     started_a = tmp_path / "started-a@m"
+    killed = False
     try:
         worker.start()
         deadline = time.monotonic() + 10
         while not started_a.exists() and time.monotonic() < deadline:
             time.sleep(0.02)
         assert started_a.exists(), "plugin a's update never started"
-        handle.kill()
-        worker.join(10)
-        assert not worker.is_alive(), "the kill did not end plugin a's update"
-        assert not (tmp_path / "started-b@m").exists(), "plugin b spawned after the kill"
+        # Opened before the kill, while the grandchild is certainly alive, so
+        # the fd names this process and not whatever later reuses its pid.
+        grandchild_fd = os.pidfd_open(int(grandchild.read_text()))
+        try:
+            handle.kill()
+            killed = True
+            worker.join(10)
+            assert not worker.is_alive(), "the kill did not end plugin a's update"
+            exited = select.select([grandchild_fd], [], [], 5)[0]
+            if not exited:
+                signal.pidfd_send_signal(grandchild_fd, signal.SIGKILL)
+            assert exited, (
+                "the grandchild outlived the kill: only the direct child was signalled"
+            )
+        finally:
+            os.close(grandchild_fd)
+        assert not (tmp_path / "started-b@m").exists(), (
+            "plugin b's interpreter ran after the kill"
+        )
         assert results(outcomes) == [("a@m", "user", "failed"), ("b@m", "user", "abandoned")]
         assert outcomes[0].detail == f"exited {-signal.SIGKILL}"
     finally:
-        # A broken latch leaves an update sleeping for 30 seconds: end it here
-        # rather than let it outlive the test.
-        for marker in tmp_path.glob("started-*"):
-            with contextlib.suppress(ProcessLookupError, ValueError):
-                os.kill(int(marker.read_text()), signal.SIGKILL)
+        # Latch first, so nothing further spawns, then wait for the worker.
+        # Never a second `kill()`: a closed handle keeps the last pid it
+        # recorded (#384), so it would signal a group that may since have
+        # been given to another process. Only a worker that is STILL alive
+        # has children left to end, and while it is blocked in `communicate`
+        # their pids are unreaped and cannot have been reused.
+        if not killed:
+            handle.kill()
+        worker.join(10)
+        if worker.is_alive():
+            for marker in tmp_path.glob("started-*@m"):
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(int(marker.read_text()), signal.SIGKILL)
+
+
+def test_kill_on_a_group_that_is_already_gone_still_latches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#383. The recorded child and its whole group can be gone by the time
+    the shutdown reaches `kill()`: that is not a failure, and the handle must
+    still close. `suppress(None)` in place of `suppress(ProcessLookupError)`
+    lets the error escape the server's lifespan."""
+
+    def gone(pgid: int, sig: int) -> None:
+        raise ProcessLookupError
+
+    monkeypatch.setattr("os.killpg", gone)
+    handle = claude_ipc.RunningChild()
+    handle._set(4242)
+    handle.kill()
+    with pytest.raises(claude_ipc.RunnerClosed):
+        handle.raise_if_closed()
 
 
 # -- the quarantine ---------------------------------------------------------------
