@@ -387,10 +387,13 @@ Both are kept in `~/.config/hitchrail/state.toml`, which is Hitchrail's own.
 Everything else is the perimeter and changes only in the config file or on
 the command line, on the machine.
 
-<img src="docs/screenshots/phone-settings-plugins.png" alt="The settings page having just finished a plugin update: three outcomes listed and a status line noting the running session keeps the old versions until restarted" width="300">
+| | |
+|---|---|
+| <img src="docs/screenshots/phone-settings-plugins.png" alt="The settings page having just finished a plugin update: three outcomes listed and a status line noting the running session keeps the old versions until restarted" width="300"> | <img src="docs/screenshots/phone-settings-instance.png" alt="The settings page's This instance list: the bind address, port, allowlists, token, agent and session prefix, each with where its value came from" width="300"> |
 
-The picture above is the update below, finished: see "Updating the agent's
-plugins".
+The left picture is the update below, finished: see "Updating the agent's
+plugins". The right one is the same page further down, listing what this
+instance is pointed at.
 
 `journalctl --user -u hitchrail` shows the startup banner, which lists every
 address the server will answer to. It prints the links without the `#token=`
