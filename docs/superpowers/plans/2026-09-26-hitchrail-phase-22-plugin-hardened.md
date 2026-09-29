@@ -189,7 +189,7 @@ two mediums in task 157, fixed in `0ea8706` (the handle latches); round 2
 found no high, and its one medium is a missing regression test for that
 latch, so it stays here. Its lows went to Backlog as #365 to #368 and #370.
 
-- [ ] **Task 158, #369 (P2).** A real runner test kills the handle mid
+- [x] **Task 158, #369 (P2).** A real runner test kills the handle mid
       update and asserts the next plugin never spawns.
 
 ### Batch 6: the dependency updates, tasks 159 to 163
@@ -215,7 +215,7 @@ no ticket, since `develop` already locks newer versions.
 
 ## Done looks like
 
-- [ ] Every task above is ticked, or marked MOVED OUT or NOT BUILT with the
+- [x] Every task above is ticked, or marked MOVED OUT or NOT BUILT with the
       issue number that carries it.
 - [x] No spawn site resolves the agent binary a second time, and a test says
       so for every site at once:

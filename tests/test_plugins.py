@@ -16,6 +16,7 @@ import select
 import signal
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -996,6 +997,65 @@ def test_a_kill_landing_between_popen_and_registration_kills_the_late_pid(
     handle.kill()  # closes the handle before any pid is ever recorded
     handle._set(4242)
     assert killed == [(4242, signal.SIGKILL)]
+
+
+def test_a_kill_mid_update_ends_that_plugin_and_never_spawns_the_next(
+    tmp_path: Path,
+) -> None:
+    """#369. The scenario #361's round 1 review reproduced, end to end with
+    real processes: plugin a is killed while its update runs, and plugin b
+    must never start. Every test above kills with no child recorded, so a
+    `kill()` that signals the live child but forgets to latch
+    (`self._closed = pid is None`), or a runner that never records the pid
+    (`handle._set(None)`), passed all of them while b spawned 41ms after the
+    shutdown.
+
+    Each update writes a marker holding its own pid before it hangs, so
+    "b never started" is read from the filesystem rather than from the
+    outcomes, which a broken latch would still report plausibly.
+    """
+    agent = tmp_path / "agent"
+    listing = json.dumps([row("a@m"), row("b@m")])
+    agent.write_text(
+        f"#!{sys.executable}\n"
+        "import os, sys, time\n"
+        "args = sys.argv[1:]\n"
+        "if args[:2] == ['plugin', 'list']:\n"
+        f"    print({listing!r})\n"
+        "elif args[:2] == ['plugin', 'update']:\n"
+        f"    open(os.path.join({str(tmp_path)!r}, 'started-' + args[2]), 'w')"
+        ".write(str(os.getpid()))\n"
+        "    time.sleep(30)\n"
+    )
+    agent.chmod(0o755)
+    handle = claude_ipc.RunningChild()
+    runner = claude_ipc.plugin_runner(withhold=(), handle=handle)
+    outcomes: list[PluginOutcome] = []
+    worker = threading.Thread(
+        target=lambda: outcomes.extend(
+            update_plugins(str(agent), run=runner, report=lambda _: None)
+        ),
+        daemon=True,
+    )
+    started_a = tmp_path / "started-a@m"
+    try:
+        worker.start()
+        deadline = time.monotonic() + 10
+        while not started_a.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert started_a.exists(), "plugin a's update never started"
+        handle.kill()
+        worker.join(10)
+        assert not worker.is_alive(), "the kill did not end plugin a's update"
+        assert not (tmp_path / "started-b@m").exists(), "plugin b spawned after the kill"
+        assert results(outcomes) == [("a@m", "user", "failed"), ("b@m", "user", "abandoned")]
+        assert outcomes[0].detail == f"exited {-signal.SIGKILL}"
+    finally:
+        # A broken latch leaves an update sleeping for 30 seconds: end it here
+        # rather than let it outlive the test.
+        for marker in tmp_path.glob("started-*"):
+            with contextlib.suppress(ProcessLookupError, ValueError):
+                os.kill(int(marker.read_text()), signal.SIGKILL)
 
 
 # -- the quarantine ---------------------------------------------------------------
