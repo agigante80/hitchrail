@@ -217,10 +217,13 @@ no ticket, since `develop` already locks newer versions.
 
 - [ ] Every task above is ticked, or marked MOVED OUT or NOT BUILT with the
       issue number that carries it.
-- [ ] No spawn site resolves the agent binary a second time, and a test says
-      so for every site at once.
-- [ ] No from-review ticket about the plugin update or the agent binary is
-      open without a decision.
+- [x] No spawn site resolves the agent binary a second time, and a test says
+      so for every site at once:
+      `test_every_read_of_agent_binary_is_the_resolved_property_or_allowlisted`,
+      tightened by #345 and #346.
+- [x] No from-review ticket about the plugin update or the agent binary is
+      open without a decision. Checked 2026-09-29: #369 is this phase's; every
+      other one filed by its reviews sits in Backlog with a P3 priority.
 - [x] The mutation survivors in `claude_ipc.py`'s plugin section have been
       read, not counted: `495e6da` and `ed04093`, dispositions on #304.
 - [ ] A plugin update started from the phone has been watched finishing on
