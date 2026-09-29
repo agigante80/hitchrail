@@ -113,9 +113,14 @@ The deferral under "Deliberately later" still binds, and this phase is written
 against it rather than around it: the prompt is configuration on the machine,
 never text from the page, and the page's only verb is still Stop.
 
+Two tickets joined it from Backlog on 2026-09-29, each because this is the
+next phase to change the file it names: the split of `claude_ipc.py`, which
+this phase adds the wrap up to before Phase 23 adds anything, so the split goes
+first; and `Config`'s surviving mutants, which are pinned before this phase
+adds `stop_prompt`'s refusals beside them.
+
 ## Phase: Phase 23: Decide on more than one agent
 state: planned
-plan: 
 
 Answer design section 3.1 before anybody builds against it. The spec says more
 than one agent is "not built, not closed off". An epic filed on 2026-09-22
@@ -170,7 +175,6 @@ than quietly outgrown.
 
 ## Phase: Phase 24: The interface, found
 state: planned
-plan: 
 
 Everything the phone offers can be found by looking at it. Filed together from
 using it: settings is a text link at the end of the footer, the button that
