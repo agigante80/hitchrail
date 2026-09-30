@@ -139,6 +139,15 @@ def foreign_name(name: str) -> str:
       thousands of characters in a session name, and this is the only string
       the interface renders that no allowlist of ours constrains.
 
+    **Escaped, then cut: the reverse of `claude_ipc._shown`, deliberately
+    (#357).** That cap keeps a record of what `-y` ran, so it bounds the
+    vendor's own text and lets escaping lengthen it (#305). This one bounds
+    what a row RENDERS, and cutting first would let a name of controls reach
+    six times the cap once escaped, which is the layout the cap exists to
+    stop. The price is that a name padded with controls can push its own
+    tail out of view, and this is another program's session, not a record
+    anything relies on.
+
     **Neither of them is what makes this safe in a browser.** What stops markup
     is the interface writing it through `textContent`. Crediting the escaping
     with that job is how a later refactor moves the sink to `innerHTML`
