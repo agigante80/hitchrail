@@ -16,6 +16,7 @@ starts processes rather than reporting on them.
 
 from __future__ import annotations
 
+import logging
 import secrets
 
 from starlette.middleware import Middleware
@@ -25,6 +26,9 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from hitchrail.config import Config
 from hitchrail.hostnames import normalise_origin
+from hitchrail.logs import shown
+
+logger = logging.getLogger(__name__)
 
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 # The cookie NAME, not a secret. S105 pattern matches on the word "token".
@@ -218,8 +222,13 @@ class HostAllowlistMiddleware:
             await self.app(scope, receive, send)
             return
 
-        host = parse_host(header_map(scope).get("host", ""))
+        raw = header_map(scope).get("host", "")
+        host = parse_host(raw)
         if host not in self.allowed:
+            # #167. The one line a DNS rebinding attempt leaves: a page on
+            # another name, resolved to this address, sends that name here.
+            # The header as sent, escaped, since it is the sender's to fill.
+            logger.warning("rejected Host %s: not a name this server answers to", shown(raw))
             await deny(400, "host_rejected", "unrecognised Host header")(scope, receive, send)
             return
         await self.app(scope, receive, send)
@@ -261,6 +270,11 @@ class OriginCheckMiddleware:
 
         origin = header_map(scope).get("origin", "")
         if not origin:
+            logger.warning(
+                "rejected %s %s: no Origin header",
+                scope.get("method", ""),
+                shown(route_path(scope)),
+            )
             await deny(403, "origin_missing", "this request needs an Origin header")(
                 scope, receive, send
             )
@@ -269,6 +283,9 @@ class OriginCheckMiddleware:
         # append a slash that is not part of an origin. Normalise both rather
         # than turn either into a refusal nobody can explain.
         if normalise_origin(origin) not in self.allowed:
+            logger.warning(
+                "rejected Origin %s: not an origin this server serves", shown(origin)
+            )
             await deny(403, "origin_rejected", f"origin not allowed: {origin}")(
                 scope, receive, send
             )
@@ -393,6 +410,16 @@ class TokenMiddleware:
             await self.app(scope, receive, send)
             return
 
+        # Which kind of failure, and never what was presented: a wrong token
+        # in a journal is a token somebody can read, and a near miss is worse.
+        logger.info(
+            "unauthorized %s %s: %s",
+            method,
+            shown(path),
+            "a credential was offered and did not match"
+            if presented or offered is not None
+            else "no credential was offered",
+        )
         await deny(401, "unauthorized", "a valid token is required")(scope, receive, send)
 
 

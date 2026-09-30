@@ -28,7 +28,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 import hitchrail
-from hitchrail import discovery, pages
+from hitchrail import discovery, logs, pages
 from hitchrail import engine as eng
 from hitchrail import security as sec
 from hitchrail.config import Config
@@ -104,6 +104,20 @@ async def in_thread(fn: Callable[..., T], *args: object, **kwargs: object) -> T:
 
 
 def _error(status: int, code: str, message: str, **extra: object) -> JSONResponse:
+    """Every refusal a route makes, and the one place each is logged (#167).
+
+    The code and message only. `extra` is the caller's, and on `start_died`
+    it is the dead pane's output, which never enters a log. The message can
+    carry a name straight from the request path, so it goes through
+    `logs.shown`. The access line uvicorn writes next says which route.
+    """
+    logger.log(
+        logging.WARNING if status >= 500 else logging.INFO,
+        "refused %s %s: %s",
+        status,
+        code,
+        logs.shown(message),
+    )
     return JSONResponse({"code": code, "message": message, **extra}, status_code=status)
 
 

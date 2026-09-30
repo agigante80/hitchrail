@@ -374,6 +374,12 @@ it can still find the agent. An interactive test will pass either way, because
 starting the unit by hand happens after a login has already fixed the PATH,
 which is what makes this show up only after a reboot.
 
+**When something did not do what you expected, read its log:**
+`journalctl --user -u hitchrail` under the unit, or the terminal it runs in.
+It says what it is serving at startup, and a line for each start, stop and
+refusal. Add `--verbose` to the `ExecStart` for more, and attach those lines
+to a bug report: they never contain the token or anything a session printed.
+
 If your agent needs something outside those directories, add it to that line,
 and prefer a stable path over a version pinned one: a pinned one goes stale at
 the next upgrade and fails at the next boot rather than at the upgrade.

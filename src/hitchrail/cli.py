@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
+import platform
 import secrets
 import shutil
 import ssl
@@ -18,7 +20,7 @@ from urllib.parse import quote
 import uvicorn
 from starlette.applications import Starlette
 
-from hitchrail import __version__, claude_ipc, gateway, settings
+from hitchrail import __version__, claude_ipc, gateway, logs, settings
 from hitchrail.config import (
     TOKEN_ENV,
     Config,
@@ -238,6 +240,24 @@ def build_parser(*, mention_update_plugins: bool = True) -> argparse.ArgumentPar
         default=30,
         type=int,
         help="seconds to wait for a graceful stop before reporting it timed out; default 30",
+    )
+    # #167. Hitchrail's own lines only: uvicorn's stay at info below that,
+    # since its debug is protocol tracing. `--verbose` exists so that "run it
+    # with --verbose and send me the output" is a sentence, which is the
+    # whole reason for the ticket.
+    loudness = parser.add_mutually_exclusive_group()
+    loudness.add_argument(
+        "--log-level",
+        choices=logs.LEVELS,
+        default=logs.DEFAULT_LEVEL,
+        help=f"how much Hitchrail writes to stderr; default {logs.DEFAULT_LEVEL}",
+    )
+    loudness.add_argument(
+        "--verbose",
+        dest="log_level",
+        action="store_const",
+        const="debug",
+        help="the same as --log-level debug",
     )
     parser.add_argument(
         "--version",
@@ -476,6 +496,38 @@ def banner(config: Config) -> str:
     return "\n".join(lines)
 
 
+def startup_block(config: Config, found: Preflight, level: str) -> list[str]:
+    """What a bug report needs to be a diagnosis, one fact per line (#167).
+
+    Logged once, after the preflight and before the bind, so every line
+    describes the configuration that is about to serve. The token's SOURCE and
+    never its value: this is written to the journal, which `banner()`
+    already refuses to put a token in for the reasons it gives.
+
+    Not the account it runs as, though #148 shows it on the page: under a
+    unit the journal records the uid on every entry, and in a terminal the
+    person reading this is that account.
+    """
+    if config.token is None:
+        credential = "none, so only this machine can reach it"
+    else:
+        credential = f"from {config.sources.get('token', 'the caller')}"
+    lines = [
+        f"hitchrail {__version__} on Python {platform.python_version()}, pid {os.getpid()}",
+        *(f"root {root.label}={root.path}" for root in config.roots),
+        f"serving {config.scheme}://{config.host}:{config.port}, "
+        f"TLS {'on' if config.tls_cert else 'off'}, token {credential}",
+        f"answers to Host {', '.join(config.allowed_hosts)}",
+        f"agent {config.agent_binary!r} at {config.spawn_agent_binary}",
+        f"tmux {found.tmux_binary}, socket {config.tmux_socket or 'the default'}",
+        f"sessions prefixed {config.session_prefix!r}, stop timeout {config.stop_timeout:g}s",
+        f"config file {config.config_path or 'none'}, log level {level}",
+    ]
+    if config.self_project:
+        lines.append(f"self project {config.self_project}, never stopped from here")
+    return lines
+
+
 # The prerequisites Hitchrail drives but does not install. Neither is a Python
 # dependency, so every documented install route succeeds on a machine that
 # cannot run a single session. See #28.
@@ -491,6 +543,9 @@ class Preflight(NamedTuple):
 
     problems: list[str]
     agent_binary: str | None
+    # #167. Where tmux was found, for the startup block; the adapter still
+    # runs the bare name, as it always has.
+    tmux_binary: str | None = None
 
 
 def preflight(
@@ -522,7 +577,8 @@ def preflight(
     # that never runs. Looked up per call, the patch lands.
     look = which if which is not None else shutil.which
     problems = []
-    if look("tmux") is None:
+    tmux = look("tmux")
+    if tmux is None:
         problems.append(
             "tmux is not on PATH. Hitchrail runs every session inside tmux, so "
             "there is nothing it can do without it. Install it with your "
@@ -563,7 +619,7 @@ def preflight(
             "rather than run without the check that stops it filling the "
             "machine with agents"
         )
-    return Preflight(problems, found if not problems else None)
+    return Preflight(problems, found if not problems else None, tmux)
 
 
 EXIT_REFUSED = 2
@@ -672,7 +728,12 @@ def _serve(app: Starlette, config: Config, tls: ssl.SSLContext | None) -> int:
         app,
         host=config.host,
         port=config.port,
-        log_level="info",
+        # #167. `None`: `logs.configure` already set up uvicorn's loggers,
+        # and uvicorn's own dictConfig would replace them with a second
+        # format on a second stream. The level is still applied, since
+        # uvicorn sets it on its loggers after this.
+        log_config=None,
+        log_level=logs.uvicorn_level(),
         ssl_context_factory=None if tls is None else (lambda _config, _default: tls),
     )
     return 0
@@ -760,6 +821,14 @@ def main(argv: list[str] | None = None) -> int:
     if argv[:1] == [UPDATE_PLUGINS]:
         return update_plugins_command(argv[1:])
     args = parse_args(argv)
+    # #167. First, before the config is built, so every module shares one
+    # configuration from its first line.
+    #
+    # The refusals below stay `print`s to stderr rather than becoming log
+    # records: they are this command's answer to a person at a terminal, in
+    # the `hitchrail: ...` form the README and the CLI tier quote, and under
+    # the unit stderr reaches the journal either way.
+    logs.configure(args.log_level)
     # #326. Before build_config(): identity_banner() carries nothing derived
     # from a Config, so it still appears when a later config, preflight or
     # gateway check refuses to start. flush=True for the same #145 reason
@@ -838,6 +907,11 @@ def main(argv: list[str] | None = None) -> int:
         # is the journal.
         print(text, flush=True)
 
+    log = logging.getLogger(__name__)
+    for line in startup_block(config, found, args.log_level):
+        log.info("%s", line)
+
     engine = Engine(config=config)
     # One bus, built here and owned here, because the CLI owns the process.
-    return _serve(create_app(engine=engine, config=config, bus=EventBus()), config, tls)
+    app = create_app(engine=engine, config=config, bus=EventBus())
+    return _serve(app, config, tls)

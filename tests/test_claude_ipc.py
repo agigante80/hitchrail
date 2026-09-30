@@ -8,6 +8,7 @@ literal or a usage pattern.
 from __future__ import annotations
 
 import inspect
+import logging
 from pathlib import Path
 
 import pytest
@@ -964,3 +965,39 @@ def test_the_pane_is_read_inside_the_send_not_handed_in() -> None:
     """
     params = list(inspect.signature(send_answer).parameters)
     assert params == ["pane", "project", "key"]
+
+
+def test_an_answer_is_logged_with_the_key_that_went_out(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    pane = FakePane([pane_text(MODAL_BOX)])
+    with caplog.at_level(logging.INFO, logger="hitchrail.claude_ipc"):
+        send_answer(pane, "proj", "Enter")
+    assert "answer proj: the pane showed a question, sent Enter" in caplog.text
+
+
+def test_a_refused_answer_logs_no_key_as_sent(caplog: pytest.LogCaptureFixture) -> None:
+    """The line is written after the send, so a refusal cannot leave one
+    claiming a key reached the pane."""
+    pane = FakePane([pane_text(DRAFT_BOX)])
+    with (
+        caplog.at_level(logging.DEBUG, logger="hitchrail.claude_ipc"),
+        pytest.raises(AnswerNotSafe),
+    ):
+        send_answer(pane, "proj", "Enter")
+    assert "sent" not in caplog.text
+
+
+def test_the_stop_logs_verdicts_and_never_the_screen(caplog: pytest.LogCaptureFixture) -> None:
+    """At debug, every look at the input box is a line, and none of them
+    carries what the box held: a draft is the operator's unsent text."""
+    draft = DRAFT_BOX.replace("draft text here", "DRAFT-ONLY-91c")
+    assert draft != DRAFT_BOX, "the fixture changed and this test looks for nothing"
+    pane = FakePane([pane_text(draft)])
+    with (
+        caplog.at_level(logging.DEBUG, logger="hitchrail.claude_ipc"),
+        pytest.raises(StopNotSafe),
+    ):
+        request_stop(pane, "vessel", settle=lambda _s: None)
+    assert "looked at the input box, clear is False" in caplog.text
+    assert "DRAFT-ONLY-91c" not in caplog.text

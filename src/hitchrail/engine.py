@@ -341,7 +341,13 @@ class Engine:
             # as a timeout thirty seconds later, telling the user their agent
             # would not stop when it had already gone.
             with self._stopping_guard:
-                self._stopping.pop(name, None)
+                began = self._stopping.pop(name, None)
+            # Only the call that removed the marker says so, since two
+            # listings can both see STOPPED and race to this line.
+            if began is not None:
+                logger.info(
+                    "stop %s: the agent exited after %.1fs", name, self._clock() - began
+                )
         return session
 
     def list(self, listing: discovery.Listing | None = None) -> list[Session]:
@@ -602,14 +608,16 @@ class Engine:
         # fifteen seconds, so a claim left standing here is one nothing would
         # correct.
         self._forget_attention(name)
+        argv = claude_ipc.launch_argv(self.config.spawn_agent_binary, name)
+        # The argv the scrub left (#113): the environment is withheld from
+        # the child, never the arguments, so there is nothing in it to hide.
+        logger.info("start %s: in %s, running %s", name, path_str, argv)
         try:
             if current.state is State.STALE:
                 # A terminal with no agent in it. Reusing it would start the
                 # new session in a pane already holding old scrollback.
                 self.tmux.kill_session(name)
-            self.tmux.new_session(
-                name, path_str, claude_ipc.launch_argv(self.config.spawn_agent_binary, name)
-            )
+            self.tmux.new_session(name, path_str, argv)
         except TmuxUnavailable as exc:
             self._abandon_partial_session(name)
             raise MachineUnreadable(str(exc)) from exc
@@ -669,9 +677,22 @@ class Engine:
                 # pane and the session would linger, so the engine would derive
                 # `stale` where the truth is `stopped`. See #66.
                 self._release_pane(name)
+                logger.info("start %s: the agent is running as pid %s", name, started.pid)
+                if started.awaiting_trust:
+                    # One of the two states that make a correct system look
+                    # broken: the agent is up, and asking whether to trust
+                    # the folder, so the row looks idle and nothing happens.
+                    logger.info(
+                        "start %s: the agent is waiting for its folder to be trusted", name
+                    )
                 self._announce(started)
                 return started
             if self._clock() >= deadline:
+                # The output goes to the caller, never here: it is pane
+                # content, and a journal is persistent (#167).
+                logger.warning(
+                    "start %s: no agent appeared within %.0fs", name, self.start_grace
+                )
                 raise StartFailed(self._dead_start_output(name))
             self._sleep(self.poll_interval)
 
@@ -749,6 +770,7 @@ class Engine:
     def stop(self, name: str) -> Session:
         """Ask the agent to finish. Nothing is killed."""
         session = self._require_live(name)
+        logger.info("stop %s: requested, the row reads %s", name, session.state)
         # A fresh attempt starts from nothing (#101). The flag describes ONE
         # stop, and a prompt the person has since answered would otherwise go
         # on being reported at them.
@@ -796,6 +818,7 @@ class Engine:
                 self._stopping.pop(name, None)
             raise MachineUnreadable(str(exc)) from exc
         except claude_ipc.StopNotSafe as exc:
+            logger.info("stop %s: refused, %s", name, exc)
             # The marker goes back for the same reason a vanished tmux takes it
             # back: a wait must not outlive a request that was never sent. The
             # adapter looked at the pane and declined to ask the agent to exit,
@@ -811,6 +834,9 @@ class Engine:
             with self._stopping_guard:
                 self._stopping.pop(name, None)
             raise StopRefused(str(exc)) from exc
+        logger.info(
+            "stop %s: exit requested, waiting up to %gs", name, self.prefs.stop_timeout()
+        )
         updated = self.get(name)
         self._announce(updated)
         return updated
@@ -1310,6 +1336,11 @@ class Engine:
         # decision came from rather than from a newer one that may disagree.
         by_name = {row.name: row for row in rows}
         for name in changed:
+            if name in stuck:
+                logger.info("%s: its screen is waiting on a person", name)
+            else:
+                logger.debug("%s: no longer waiting on a person", name)
+        for name in changed:
             row = by_name.get(name)
             if row is not None:
                 self._announce(replace(row, awaiting_input=name in stuck))
@@ -1408,7 +1439,14 @@ class Engine:
         # that dialog decide what happens to work the operator did not ask to
         # end, and choosing for them is the power #88 declined to take.
         for name in expired:
-            if self._pane_needs_a_person(name):
+            waiting = self._pane_needs_a_person(name)
+            logger.info(
+                "stop %s: gave up waiting after %gs, and the agent is still running%s",
+                name,
+                self.prefs.stop_timeout(),
+                "; its screen is waiting on a person" if waiting else "",
+            )
+            if waiting:
                 with self._stopping_guard:
                     self._awaiting_input.add(name)
         for name in expired:

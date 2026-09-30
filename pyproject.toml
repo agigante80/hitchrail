@@ -174,6 +174,7 @@ source_modules = [
   "hitchrail.derive",
   "hitchrail.engine",
   "hitchrail.plugin_runs",
+  "hitchrail.logs",
 ]
 forbidden_modules = [
   "hitchrail.server",
@@ -309,6 +310,11 @@ also_copy = [
   "src/hitchrail/engine.py",
   "src/hitchrail/events.py",
   "src/hitchrail/headers.py",
+  # #167. Copied, not mutated: `security.py` escapes request values through
+  # `logs.shown` before logging them, so the tree cannot import without it,
+  # but nothing in it reaches a shell. What it must never write is pinned by
+  # `tests/test_logs.py` directly.
+  "src/hitchrail/logs.py",
   "src/hitchrail/pages.py",
   "src/hitchrail/plugin_runs.py",
   "src/hitchrail/procs.py",

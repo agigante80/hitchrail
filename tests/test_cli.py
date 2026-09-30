@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import argparse
 import ast
+import logging
+import re
 import shutil
 import sys
 from pathlib import Path
 
 import pytest
 
-from hitchrail import __version__, cli
+from hitchrail import __version__, cli, logs
 from hitchrail.cli import (
     JOURNAL_ENV,
     banner,
@@ -1299,3 +1301,97 @@ def test_the_server_help_names_the_subcommand(capsys: pytest.CaptureFixture[str]
     with pytest.raises(SystemExit):
         parse_args(["--help"])
     assert "update-plugins" in capsys.readouterr().out
+
+
+# -- #167: the log --------------------------------------------------------
+
+
+def _log_lines(err: str) -> list[str]:
+    """Lines in `logs.FORMAT`, told apart from the banner's prints by shape."""
+    return [line for line in err.splitlines() if " hitchrail." in line and ": " in line]
+
+
+def test_the_log_level_defaults_to_info(tmp_path: Path) -> None:
+    assert parse_args(["--root", f"main={tmp_path}"]).log_level == "info"
+
+
+@pytest.mark.parametrize("flags", [["--verbose"], ["--log-level", "debug"]])
+def test_verbose_is_the_debug_level(tmp_path: Path, flags: list[str]) -> None:
+    assert parse_args(["--root", f"main={tmp_path}", *flags]).log_level == "debug"
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        ["--log-level", "loud"],
+        # Never offered: uvicorn's trace logs whole ASGI scopes, headers and
+        # all, and the token travels in a header.
+        ["--log-level", "trace"],
+        ["--verbose", "--log-level", "warning"],
+    ],
+)
+def test_a_level_it_does_not_offer_is_a_usage_error(
+    tmp_path: Path, flags: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as caught:
+        parse_args(["--root", f"main={tmp_path}", *flags])
+    assert caught.value.code == 2
+    assert "--log-level" in capsys.readouterr().err
+
+
+def test_the_startup_block_is_logged_in_the_format(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """One configuration, written once, to stderr: a line that falls through
+    to Python's last resort handler has no timestamp, level or name."""
+    monkeypatch.setattr(cli, "_serve", lambda *a: 0)
+    assert main(["--root", f"main={tmp_path}"]) == 0
+    lines = _log_lines(capsys.readouterr().err)
+    assert any(
+        re.match(r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} INFO hitchrail\.cli: serving ", line)
+        for line in lines
+    ), lines
+    assert any(f"root main={tmp_path}" in line for line in lines)
+    assert any("agent 'claude' at /usr/bin/claude" in line for line in lines)
+    assert any("tmux /usr/bin/tmux" in line for line in lines)
+
+
+def test_the_token_never_reaches_a_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """At the highest level offered, the startup block says where the token
+    came from and nothing else. `banner()` printing it for the operator to
+    copy is a print, not a log line, and is its own decision."""
+    secret = "s3cret-log-probe-value"
+    monkeypatch.setattr(cli, "_serve", lambda *a: 0)
+    code = main(
+        ["--root", f"main={tmp_path}", "--host", "0.0.0.0", "--token", secret, "--verbose"]
+    )
+    assert code == 0
+    lines = _log_lines(capsys.readouterr().err)
+    assert any("token from" in line for line in lines), lines
+    assert not [line for line in lines if secret in line]
+
+
+def test_the_config_repr_never_carries_the_token(tmp_path: Path) -> None:
+    """A `Config` in a traceback or a `%r` is a log line nobody wrote on purpose."""
+    cfg = make_config(tmp_path, host="0.0.0.0", token="s3cret-repr-probe")
+    assert "s3cret-repr-probe" not in repr(cfg)
+
+
+def test_a_quieter_level_quietens_uvicorn_and_a_louder_one_does_not(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """uvicorn's debug is protocol tracing, so `--verbose` leaves it at info;
+    `warning` is a request for less, and applies to the access log too."""
+    monkeypatch.setattr(cli, "_serve", lambda *a: 0)
+    main(["--root", f"main={tmp_path}", "--verbose"])
+    assert logs.uvicorn_level() == "info"
+    assert logging.getLogger("hitchrail").getEffectiveLevel() == logging.DEBUG
+
+    main(["--root", f"main={tmp_path}", "--log-level", "warning"])
+    assert logs.uvicorn_level() == "warning"
+    assert logging.getLogger("uvicorn.access").getEffectiveLevel() == logging.WARNING
+    capsys.readouterr()
+    main(["--root", f"main={tmp_path}", "--log-level", "warning"])
+    assert _log_lines(capsys.readouterr().err) == [], "info lines at warning"

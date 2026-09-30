@@ -180,7 +180,10 @@ class Config:
     roots: tuple[Root, ...]
     host: str = "127.0.0.1"
     port: int = 8787
-    token: str | None = None
+    # #167. Out of the repr: a `Config` is exactly what somebody logs while
+    # debugging, `%r` of a dataclass prints every field, and this one is the
+    # security boundary. `test_the_token_never_reaches_a_log` holds it.
+    token: str | None = field(default=None, repr=False)
     extra_hosts: tuple[str, ...] = ()
     extra_origins: tuple[str, ...] = ()
     session_prefix: str = "hr-"

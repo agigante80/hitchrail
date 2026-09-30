@@ -83,13 +83,15 @@ Tasks continue from Phase 22's 163. Batches run in order.
 
 ### Batch 1: the journal can answer "what did Stop do", tasks 164 to 165
 
-- [ ] **Task 164, #167 (P1).** Logging configured once at startup for
+- [x] **Task 164, #167 (P1).** Logging configured once at startup for
       `hitchrail.*`, formatted like uvicorn's, with `--log-level`; the stop
       sequence emits its moments; the token and pane content never reach a
       log line.
-- [ ] **Task 165.** The live tier proves a start and a stop are readable end
+- [x] **Task 165.** The live tier proves a start and a stop are readable end
       to end from captured stderr, and a unit's journal receives them (#145's
-      flush).
+      flush). Built as the cli tier (the real console script's startup block
+      and access line, one format) and the e2e tier (a tapped stop's trace in
+      order). The journal itself is Andrea's manual check under the unit.
 
 ### Batch 2: `claude_ipc` split along its seam, task 166
 

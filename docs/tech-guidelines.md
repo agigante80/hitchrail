@@ -162,6 +162,18 @@ non negotiable and each has a test that asserts the refusal.
    that was meant to observe it. A tier that quiets its subject proves less
    than it appears to.
 
+9. **The token and pane content never enter a log line, at any level,**
+   and every value that arrived in a request is escaped through
+   `logs.shown` before it does (#167). The journal is persistent and read in
+   a terminal: a token there is a token anyone in `systemd-journal` can use, a
+   pane is whatever an agent printed while reading private code, and a
+   control character from a forged `Host` is an escape sequence aimed at
+   whoever reads the journal. A refusal names its code and whether a
+   credential was offered, never what was offered, since a wrong token one
+   character off is a token. `Config.token` is out of the dataclass `repr`
+   for the same reason. There is no `trace` level: uvicorn's logs whole ASGI
+   scopes, headers included.
+
 ## 6. Dependencies
 
 The runtime budget is three: `starlette`, `uvicorn`, `sse-starlette`. A fourth

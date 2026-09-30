@@ -10,6 +10,8 @@ neighbours.
 from __future__ import annotations
 
 import json
+import logging
+import re
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -3536,3 +3538,70 @@ def test_a_visible_owner_wins_over_the_ancestry(root: Path) -> None:
     session = engine.get(proj("vessel"))
     assert session.foreign_session == f"cc-{proj('vessel')}"
     assert session.foreign_server_pid is None
+
+
+def test_a_stop_reads_end_to_end_in_the_log(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#167's reason to exist: "what did Stop do" answered from the journal.
+
+    Captured on the `hitchrail` parent, so the quarantine's lines and the
+    engine's arrive in one list, in the order they were written.
+    """
+    engine, tmux, clock = live_engine(root)
+    with caplog.at_level(logging.INFO, logger="hitchrail"):
+        engine.stop(proj("vessel"))
+        engine._procs_fn = procs_from("")
+        tmux.sessions.pop(proj("vessel"))
+        clock.advance(4)
+        engine.list()
+
+    lines = [r.getMessage() for r in caplog.records]
+    expected = [
+        "requested, the row reads",
+        "to clear the input box",
+        "to interrupt",
+        "box still clear, sent",
+        "exit requested, waiting up to",
+        "the agent exited after ",
+    ]
+    found = [next(i for i, line in enumerate(lines) if part in line) for part in expected]
+    assert found == sorted(found), f"out of order: {lines}"
+    assert all(proj("vessel") in lines[i] for i in found), "a line that does not say which"
+    # The duration is the point of the last line: a one second wrap up that did
+    # nothing is only visible as a number (Phase 19's premortem).
+    assert re.search(r"exited after \d+\.\ds$", lines[found[-1]])
+
+
+def test_a_stop_that_gives_up_says_so_in_the_log(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    engine, _, clock = live_engine(root)
+    engine.stop(proj("vessel"))
+    clock.advance(engine.config.stop_timeout + 1)
+    with caplog.at_level(logging.INFO, logger="hitchrail.engine"):
+        engine.expire_stops()
+    assert "gave up waiting after" in caplog.text
+    assert "still running" in caplog.text
+
+
+def test_a_refused_stop_says_why_in_the_log(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    engine, tmux, _ = live_engine(root)
+    tmux.pane_text[proj("vessel")] = "not a box anyone can read"
+    with caplog.at_level(logging.INFO, logger="hitchrail.engine"), pytest.raises(StopRefused):
+        engine.stop(proj("vessel"))
+    assert f"stop {proj('vessel')}: refused" in caplog.text
+
+
+def test_pane_output_never_reaches_a_log(root: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """A pane is whatever the agent printed while reading private code, and a
+    journal keeps it. The caller gets the output; no log line does, at any
+    level."""
+    engine, tmux, _ = start_engine(root, table=procs_from(ps_row(1001, 1)))
+    tmux.pane_text[proj("vessel")] = "PANE-ONLY-7f3a private diff"
+    with caplog.at_level(logging.DEBUG, logger="hitchrail"), pytest.raises(StartFailed):
+        engine.start(proj("vessel"))
+    assert "no agent appeared" in caplog.text, "the failure itself must be logged"
+    assert "PANE-ONLY-7f3a" not in caplog.text

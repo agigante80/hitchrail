@@ -1101,7 +1101,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # rather than a per-plugin failure or a dropped row. Most of the
         # growth is the docstrings saying why the latch exists and which race
         # each of its two checks closes.
-        "claude_ipc.py": 1341,
+        # 1351 for #167: each key group Stop sends, each look's verdict and the
+        # answer typed, as log lines. Never the pane text. #368 is the split,
+        # and it is Phase 19's next batch.
+        "claude_ipc.py": 1351,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.
@@ -1207,7 +1210,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # send, with the man page's error list as the reason, and the
         # paragraph saying which of this route's ownership checks is the
         # property and which is advisory. Phase 18 carries the split.
-        "engine.py": 1516,
+        # 1554 for #167: a start, a stop and its ending, and the stuck scan's
+        # changes, as log lines, each with the comment saying why pane output
+        # is never one of them.
+        "engine.py": 1554,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -1357,7 +1363,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # arrived to carry what `cli.preflight` resolved through to every
         # spawn site without a second, less careful resolution. New
         # behaviour and a new refusal, not the growth of one job into two.
-        "config.py": 735,
+        # 738 for #167: `token` leaves the dataclass repr, which put it in any
+        # log line or traceback that printed a `Config`.
+        "config.py": 738,
         # 460 for #123, #154 and #238: `--config`, `--session-prefix` and the
         # source tagging the settings page shows, which is one function
         # reading the flags back out of argv. Nothing here parses a value
@@ -1406,7 +1414,11 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # `update_plugins_command` shares `check_agent_binary` and resolves
         # its own relative `--agent-binary` against this process's cwd before
         # spawning, so the file it checked is the file it runs.
-        "cli.py": 843,
+        # 917 for #167: `--log-level` and `--verbose`, and the startup block
+        # that says what this process is serving and with what, one fact a
+        # line and the token only as its source. The configuration itself
+        # is `logs.py`, so what grew here is the flags and the facts.
+        "cli.py": 917,
         # 409, nine lines over, down from 542. #115 deleted the `?token=`
         # carrier: 135 lines once the two blocks inside `TokenMiddleware`
         # that only served it are counted.
@@ -1441,7 +1453,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # between, written where the cookie is set rather than in a ticket.
         # 453 after round 2 of that batch's review: the bind clause, which
         # arrived a day after the rule, said where the rule is read.
-        "security.py": 453,
+        # 480 for #167: a line for each refusal, every request value escaped
+        # through `logs.shown` and the credential only as offered or not.
+        "security.py": 480,
         # #154, #238: the operator's file and Hitchrail's state file, one
         # module because the split between them IS the security argument in
         # its docstring; over by the ceiling's four lines (#265).
@@ -1508,7 +1522,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # `plugin_updates.handle`, and the lifespan's `finally` kills it
         # before cancelling the sweep task, both with the comment saying why
         # a daemon thread never sees the shutdown's `KeyboardInterrupt`.
-        "server.py": 969,
+        # 983 for #167: `_error` logs every refusal it builds, with the
+        # docstring saying why `extra` never enters the line.
+        "server.py": 983,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"
@@ -1740,6 +1756,10 @@ def test_every_read_of_agent_binary_is_the_resolved_property_or_allowlisted() ->
         # object from `Config`, but the attribute name is the same string,
         # which is exactly why this guard cannot key on the object either.
         ("cli.py", "main", "found.agent_binary"),
+        # The startup block (#167) prints what the operator typed beside
+        # what it resolved to, `spawn_agent_binary`, so a journal shows both.
+        # A display, never a spawn.
+        ("cli.py", "startup_block", "config.agent_binary"),
         # The settings page shows the operator's raw setting, with `source`
         # saying where it came from; showing the resolved absolute path here
         # while `source` still said "default" would misrepresent provenance.

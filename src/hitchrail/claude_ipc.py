@@ -596,13 +596,19 @@ def request_stop(pane: Pane, project: str, settle: Callable[[float], None]) -> N
     # unpack raises at the one place that has to change, which is the point.
     clear, interrupt, quit_keys = GRACEFUL_STOP_KEYS
 
+    # #167. The keys by name, logged HERE because naming them anywhere else
+    # is the quarantine breach, and every checkpoint by its verdict alone:
+    # what the pane showed is never written to a log.
     pane.send_keys(project, *clear)
+    logger.info("stop %s: sent %s to clear the input box", project, " ".join(clear))
     _require_clear(pane, project, wait, f"the input box in {project} did not come back empty")
     pane.send_keys(project, *interrupt)
+    logger.info("stop %s: box clear, sent %s to interrupt", project, " ".join(interrupt))
     _require_clear(
         pane, project, wait, f"the input box in {project} filled after the interrupt"
     )
     pane.send_keys(project, *quit_keys)
+    logger.info("stop %s: box still clear, sent %s", project, " ".join(quit_keys))
 
 
 def send_answer(pane: Pane, project: str, key: str) -> None:
@@ -634,6 +640,9 @@ def send_answer(pane: Pane, project: str, key: str) -> None:
             f"the pane in {project} is not showing a question, so {_NOT_SENT}. {_LOOK_YOURSELF}"
         )
     pane.send_keys(project, key)
+    # After the send, so the line records a key that went out rather than
+    # one that was about to. `key` is one of `ANSWER_KEYS`, checked above.
+    logger.info("answer %s: the pane showed a question, sent %s", project, key)
 
 
 def _require_clear(pane: Pane, project: str, wait: Callable[[], None], complaint: str) -> None:
@@ -664,6 +673,7 @@ def _require_clear(pane: Pane, project: str, wait: Callable[[], None], complaint
         wait()
         text = pane.capture_pane(project, escapes=True)
         verdict = input_is_clear(text)
+        logger.debug("stop %s: looked at the input box, clear is %s", project, verdict)
         if verdict is True:
             return
         # STICKY, both of them. An earlier version kept only the last attempt's
