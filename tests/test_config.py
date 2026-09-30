@@ -67,7 +67,20 @@ def test_loopback_bind_needs_no_token(tmp_path: Path) -> None:
     assert cfg.token is None
 
 
-@pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "::1", "127.0.0.5"])
+@pytest.mark.parametrize(
+    "host",
+    [
+        "127.0.0.1",
+        "localhost",
+        "::1",
+        "127.0.0.5",
+        # #283: what the bind makes of these is loopback, so the answer is too.
+        "127.1",
+        "0177.0.0.1",
+        "::ffff:127.0.0.1",
+        "[::ffff:127.0.0.1]",
+    ],
+)
 def test_loopback_forms_are_recognised(tmp_path: Path, host: str) -> None:
     assert Config(roots=_r(tmp_path), host=host).is_loopback
 
@@ -308,7 +321,23 @@ def test_the_config_is_frozen(tmp_path: Path) -> None:
         cfg.token = "sneaked in"  # type: ignore[misc]
 
 
-@pytest.mark.parametrize("host", ["box.lan", "example.com", "not-an-ip", "localhos"])
+@pytest.mark.parametrize(
+    "host",
+    [
+        "box.lan",
+        "example.com",
+        "not-an-ip",
+        "localhos",
+        # #283's short forms, each a spelling that must NOT come out loopback:
+        # 0.0.0.127, octal 8.0.0.1, a mapped LAN address, hex refused outright,
+        # and a number too large for `inet_aton`.
+        "127",
+        "010.1",
+        "::ffff:10.0.0.1",
+        "0x7f.1",
+        "99999999999",
+    ],
+)
 def test_a_hostname_that_is_not_an_ip_is_not_loopback(host: str) -> None:
     # The ValueError path in is_loopback_host. If this ever answered True, a
     # bind to a named host would skip the token requirement entirely, so it
@@ -1423,7 +1452,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 949 for #341: `preflight` tells a typed path from a bare name, since
         # neither PATH message is true of a value `which` never searched for,
         # and `update_plugins_command` says why it resolves what serve refuses.
-        "cli.py": 949,
+        # 956 for #283: the startup line saying an https origin in front of
+        # a bind off loopback gets no `Secure` cookie, and how to get it.
+        "cli.py": 956,
         # 409, nine lines over, down from 542. #115 deleted the `?token=`
         # carrier: 135 lines once the two blocks inside `TokenMiddleware`
         # that only served it are counted.

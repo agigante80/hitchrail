@@ -525,6 +525,13 @@ def startup_block(config: Config, found: Preflight, level: str) -> list[str]:
     ]
     if config.self_project:
         lines.append(f"self project {config.self_project}, never stopped from here")
+    # #283: the mirror of #268's refusal. It works, so it is a line, not a refusal.
+    proxied = any(o.strip().lower().startswith("https://") for o in config.extra_origins)
+    if proxied and not config.cookie_is_secure and not config.is_loopback:
+        lines.append(
+            "token cookie not Secure: an https origin is set but this plain http bind "
+            "is off loopback; bind loopback behind the proxy to get the flag"
+        )
     return lines
 
 

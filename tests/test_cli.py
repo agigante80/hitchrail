@@ -1416,6 +1416,30 @@ def test_the_startup_block_is_logged_in_the_format(
     assert any("tmux /usr/bin/tmux" in line for line in lines)
 
 
+@pytest.mark.parametrize(
+    ("host", "origins", "said"),
+    [
+        ("0.0.0.0", ("https://box.lan",), True),
+        ("0.0.0.0", ("http://box.lan",), False),
+        ("127.0.0.1", ("https://box.lan",), False),
+        ("0.0.0.0", (), False),
+    ],
+    ids=["https-origin-off-loopback", "plain-origin", "loopback-bind", "no-origin"],
+)
+def test_the_startup_block_says_when_a_proxy_origin_gets_no_secure_cookie(
+    tmp_path: Path, host: str, origins: tuple[str, ...], said: bool
+) -> None:
+    """#283 item 4. The deployment works and only loses a hardening flag, so
+    #268's refusal would be wrong here; silence left the operator no way to
+    learn why the flag was missing. A plain origin is not a proxy, and a
+    loopback bind already gets the flag, so neither is told anything."""
+    config = make_config(tmp_path, host=host, token="t" * 24, extra_origins=origins)
+    lines = cli.startup_block(
+        config, cli.Preflight([], "/usr/bin/claude", "/usr/bin/tmux"), "info"
+    )
+    assert any(line.startswith("token cookie not Secure") for line in lines) is said, lines
+
+
 def test_the_token_never_reaches_a_log(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
