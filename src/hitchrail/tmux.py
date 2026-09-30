@@ -400,9 +400,9 @@ class Tmux:
                 continue
             if server_pid is None:
                 server_pid = server
-            # An EMPTY name is a session, not a malformed record. Up to 3.7
-            # tmux refused one at creation and this branch dropped the
-            # record as a guard against a format change; 3.7a admits the
+            # An EMPTY name is a session, not a malformed record. Some tmux
+            # versions refuse one (which, #278 found once misstated), so this
+            # branch dropped the record as a format guard; 3.7a admits the
             # empty name, and a dropped record put its pane in neither map,
             # so an agent inside it derived as an orphan under our own
             # server, said "no session Hitchrail can address" and was

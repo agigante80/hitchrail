@@ -97,11 +97,11 @@ def _is_tmux_binary(name: str) -> bool:
 
     **Not `display-message -p '#{pid}'`, which the ticket suggested and which is
     exact.** It asks the server we are talking to, so it covers our own socket
-    only and could not see the foreign server that is the whole case here. It
-    also costs a tmux call per listing, and
-    `test_list_issues_one_tmux_call_and_one_ps_call` asserts there is exactly
-    one, because a call per row is a subprocess spawn per row. Exactness that
-    does not cover the case, at a price a test forbids, is not the trade.
+    only and could not see the foreign server that is the whole case here.
+    The adapter does make that call now, once per listing and only when no
+    session answered `list-panes` (a9ffa7f), to learn our own server's pid;
+    it still cannot name a server on another socket, which is why ancestry
+    decides here.
     """
     if not name.startswith(BINARY):
         return False
@@ -153,7 +153,10 @@ def foreign_name(name: str) -> str:
     with that job is how a later refactor moves the sink to `innerHTML`
     believing it is covered.
     """
-    if not name:
+    if not name.strip():
+        # A name of only spaces renders just as blank, and 3.4 admits one
+        # (#278), so it gets the placeholder too.
+        #
         # tmux 3.7a admits an empty session name. `docs/api.md` promises a
         # name or null, and `""` is neither: `app.js` reads it as falsy and
         # renders "no session Hitchrail can address", the claim this field

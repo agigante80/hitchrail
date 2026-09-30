@@ -462,6 +462,21 @@ def test_the_socket_is_carried_on_every_call() -> None:
         assert argv[:3] == ["tmux", "-S", "/run/hr/hr.sock"], argv
 
 
+def test_the_server_pid_call_carries_the_socket() -> None:
+    """#278. The sweep above drives `panes()` with a `list-panes` that
+    succeeds, so `_server_pid`'s `display-message` never runs in it. That is
+    the one call whose socket matters most: answered by a different server,
+    its pid would make an agent under OUR server look held by another, and
+    End would be offered on it. Driven here with `list-panes` failing, the
+    no-session state that makes the adapter ask."""
+    runner = FakeRunner(rc={"list-panes": 1})
+    Tmux(prefix="hr-", socket="/run/hr/hr.sock", run=runner).panes()
+    asked = [argv for argv in runner.calls if "display-message" in argv]
+    assert asked, "the no-session state never asked the server for its pid"
+    for argv in asked:
+        assert argv[:3] == ["tmux", "-S", "/run/hr/hr.sock"], argv
+
+
 def test_no_socket_means_no_socket_flag() -> None:
     """`-S` is two different flags in tmux, told apart only by position.
 
@@ -861,7 +876,7 @@ def test_an_unnamed_session_is_foreign_under_a_placeholder() -> None:
     or null, and `""` is neither: `app.js` reads it as falsy and says "no
     session Hitchrail can address".
 
-    Up to 3.7 tmux refused an empty session name and this record was
+    Some tmux versions refuse an empty session name, and this record was
     DROPPED as a guard against a format change. 3.7a admits the empty name
     (CHANGES "3.7 to 3.7a"), and a dropped record put the pane in neither
     map: the agent inside it derived as an orphan under our own server and

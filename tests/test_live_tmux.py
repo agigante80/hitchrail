@@ -268,8 +268,9 @@ def test_a_colon_in_a_session_name_never_breaks_a_pane_record(server: PrivateTmu
 
 
 def test_an_unnamed_session_is_refused_or_named_as_such(server: PrivateTmux) -> None:
-    """3.7a admits an empty session name; up to 3.7 refuse it. Both are
-    answers, and CI's tmux gives the second, so this asserts whichever this
+    """3.7a admits an empty session name and some earlier versions refuse
+    it; which ones is deliberately not listed, since #278 found the list
+    wrong. Both are answers, and CI's tmux has refused, so this asserts whichever this
     server gives rather than skipping: a refusal creates nothing, and an
     admitted one is foreign under the placeholder, never a pane in neither
     map (round 1 review of #189)."""
@@ -1251,11 +1252,17 @@ def test_an_agent_that_outlived_its_pane_under_our_own_server_keeps_end(
             time.sleep(0.05)
         assert not Path(f"/proc/{row.pid}").exists(), "End did not end it"
     finally:
-        # Back on, so the session-less server exits on its next loop and the
-        # fixture's leak check finds a dead socket rather than a live server.
+        # Back on, so the session-less server exits on its next loop rather
+        # than outliving the run. Waited on by asking the SERVER, not by
+        # watching the socket file (#278): tmux never unlinks its socket at
+        # exit, so that wait always ran to its deadline and proved nothing.
+        # `close()`'s `rmtree` removes the file either way.
         server.run("set-option", "-g", "exit-empty", "on")
         deadline = time.monotonic() + 5
-        while Path(server.socket).exists() and time.monotonic() < deadline:
+        while (
+            server.run("display-message", "-p", "#{pid}").returncode == 0
+            and time.monotonic() < deadline
+        ):
             time.sleep(0.05)
 
 

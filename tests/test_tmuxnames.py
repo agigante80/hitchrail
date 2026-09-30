@@ -250,6 +250,13 @@ def test_an_empty_foreign_name_is_a_placeholder_not_an_empty_string() -> None:
     assert UNNAMED_SESSION
 
 
+@pytest.mark.parametrize("name", [" ", "   ", "\t"])
+def test_a_blank_foreign_name_is_a_placeholder_too(name: str) -> None:
+    """#278. A name of only whitespace reads on the row exactly as the
+    empty one did, "in tmux session " with nothing after it."""
+    assert foreign_name(name) == UNNAMED_SESSION
+
+
 def test_a_foreign_name_at_the_cap_is_not_truncated() -> None:
     """The boundary, because an off by one here silently renames a session."""
     name = "c" * FOREIGN_NAME_MAX
