@@ -46,7 +46,8 @@ the running application, on the phone it is for. See
 [`tech-guidelines.md`](tech-guidelines.md) section 7.
 
 ## Phase: Phase 19: Stop means wrap up, and says so
-state: planned
+state: open
+plan: docs/superpowers/plans/2026-09-29-hitchrail-phase-19-stop-wrap-up.md
 
 A session stopped from a phone leaves the same record as one closed by hand.
 Cut out of Phase 11 on 2026-09-11.
@@ -75,15 +76,17 @@ the new stop sequence diagnosable when it is first watched on a real
 session: "was the prompt sent, and did the pane go idle" has to have an
 answer in the journal before the sequence is trusted.
 
-Delivers: a configured prompt sent before the exit sequence, the closing skill
-by default, with a per session wait for the pane to show an idle input box
-under a ceiling; and an opt in, off by default, that lets a stop ending on a
-prompt end the session anyway because the operator said so ahead of time.
+Delivers: a configured prompt sent before the exit sequence, with no default so
+an unconfigured Stop is today's (decided 2026-10-01: the closing skill is a
+plugin most installs do not have), and a per session wait for the pane to show
+an idle input box under a ceiling; and an opt in, off by default, that lets a
+stop ending on a prompt end the session anyway because the operator said so
+ahead of time.
 
-Done when a session stopped from the interface has run the closing skill
-before it exits, a stop that ends on a prompt still does nothing on its own
-unless the operator opted in before tapping, and `stop_prompt` cannot be set
-through any HTTP route.
+Done when a session with a prompt configured, stopped from the interface, has
+run the closing skill before it exits, a stop that ends on a prompt still does
+nothing on its own unless the operator opted in before tapping, and
+`stop_prompt` cannot be set through any HTTP route.
 
 The deferral under "Deliberately later" still binds, and this phase is written
 against it rather than around it: the prompt is configuration on the machine,

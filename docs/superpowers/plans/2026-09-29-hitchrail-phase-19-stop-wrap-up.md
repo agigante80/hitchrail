@@ -3,10 +3,11 @@
 **Objective: a session stopped from a phone leaves the same record as one
 closed by hand.**
 
-**DRAFT, written 2026-09-29 while Phase 22 is still open.** The phase stays
-`planned` until Phase 22 closes and Andrea has read this. Two things in it
-are theirs to settle before it opens, and each is marked **DECISION** where
-it sits: how many Backlog tickets the phase takes, and the premortem.
+**Written 2026-09-29 while Phase 22 was still open; opened 2026-10-01**, the
+day 22 closed. Three things were Andrea's to settle before it opened, and
+each is recorded as **Decided** where it sits: no default prompt, all 25
+Backlog tickets in the last batch, and the premortem as written. Kill is
+unchanged, confirmed the same day.
 
 ## Goal
 
@@ -116,8 +117,12 @@ Tasks continue from Phase 22's 163. Batches run in order.
 - [ ] **Task 170, #242 rewritten.** The body rewritten for order B from task
       169's bytes, the old body preserved as a comment, and re-gated.
 - [ ] **Task 171, #242.** `Config.stop_prompt` and `stop_prompt_timeout`, with
-      refusals for a newline or control character; the default supplied by
-      the quarantine; empty disables the step.
+      refusals for a newline or control character. **No default: unset or
+      empty is today's Stop**, decided 2026-10-01 because the obvious
+      default, `/forge-kit-governance:closing-sessions`, is a skill most
+      installs do not have. The operator sets it once in the config file,
+      and the startup block says which prompt Stop will send, or that it
+      sends none.
 - [ ] **Task 172, #242.** `Tmux.send_text` through `send-keys -l`;
       `claude_ipc.request_wrap_up` (no `Escape`) and `wrap_up_finished`; the
       grep guard widened to name both typing functions.
@@ -138,8 +143,8 @@ Tasks continue from Phase 22's 163. Batches run in order.
 
 ### Batch 6: the Backlog's first rule, tasks from 177
 
-**DECISION (Andrea).** The Backlog's first rule hands an opening phase "every
-open `from-review` ticket about a file it changes", by rule rather than
+**Decided 2026-10-01: all 25.** The Backlog's first rule hands an opening phase
+"every open `from-review` ticket about a file it changes", by rule rather than
 judgement. This phase changes `claude_ipc.py` (all of it, by the split),
 `config.py`, `engine.py`, `tmux.py`, `tmuxnames.py`, `server.py`, `cli.py`,
 `settings.py`, `web/app.js`, `web/settings.js` and `docs/api.md`. Read
@@ -158,31 +163,33 @@ Left in Backlog because the phase does not change their file: #342
 #360 (`procs.py`), #376 (`plugin_runs.py`), #277 (`tests/support.py`), and the
 four infrastructure tickets.
 
-**Recommendation: take all 25, as the rule says, in this last batch**, so the
-stop work in batches 1 to 5 is never waiting on a low. If batch 6 is still
-open when batches 1 to 5 are done, the phase closes re-shaped and the rest go
-back to Backlog: re-shape, never extend. The milestones move when the phase
-opens, not before.
+All 25 are taken, as the rule says, in this last batch, so the stop work in
+batches 1 to 5 is never waiting on a low. If batch 6 is still open when
+batches 1 to 5 are done, the phase closes re-shaped and the rest go back to
+Backlog: re-shape, never extend. Their milestones moved when the phase
+opened. Each is ticked here by number as it closes.
 
 ## Done looks like
 
-- [ ] A session stopped from the interface ran the closing skill before it
-      exited, observed on a real session by Andrea, and the journal shows
-      the prompt sent, the wait, and the exit
+- [ ] A session with `stop_prompt` configured, stopped from the interface,
+      ran the closing skill before it exited, observed on a real session by
+      Andrea, and the journal shows the prompt sent, the wait, and the exit
 - [ ] A stop that ends on a prompt does nothing on its own unless the operator
       opted in before tapping
 - [ ] `stop_prompt` cannot be set through any HTTP route, and a test says so
-- [ ] With `stop_prompt` empty, Stop is byte for byte today's sequence
+- [ ] With `stop_prompt` unset, which is the default, Stop is byte for byte
+      today's sequence
 - [ ] Every task ticked, or marked MOVED OUT or NOT BUILT with an issue number
 - [ ] No `from-review` ticket open in the milestone without a decision
 - [ ] Roadmap says done, milestone closed, `check-phases.sh` passes
 
 ## Fails if
 
-**DRAFT premortem for Andrea to replace or confirm.** It is the end of this
-phase and it failed badly; what happened? These are mine; the plan's
-template asks for the person running it, and the phase does not open on
-them alone.
+Written as a premortem on 2026-09-29: it is the end of this phase and it
+failed badly; what happened? Drafted by the agent and **confirmed by Andrea
+as written on 2026-10-01**, with the second one settled by removing the
+default rather than choosing a better one. They added none of their own, so
+the list is the agent's view of the risk rather than the operator's.
 
 **The skill never ran and the journal said it had.** The pane showed an idle
 box in the gap between the task in flight ending and the queued prompt
@@ -190,11 +197,12 @@ starting, `wrap_up_finished` read it as done, and `/exit` went in first.
 Rule: task 169 names the evidence of consumption before task 172 builds the
 check, and a unit test drives a capture sequence with that gap.
 
-**The default named a skill most installs do not have.** The closing skill
-is a forge-kit plugin's; on a machine without it, Stop typed an unknown
-command, the agent answered with an error, and the wrap up "finished" in a
-second having done nothing. Rule: task 171 decides the default knowing this,
-and the startup block says which prompt Stop will send.
+**The prompt named a skill the machine did not have.** On a machine without
+forge-kit, Stop typed an unknown command, the agent answered with an error,
+and the wrap up "finished" in a second having done nothing. Rule: there is
+no default (task 171), and the startup block says which prompt Stop will
+send. A configured skill that is missing is still possible, and the journal
+line for the wait says how long it took, so a one second wrap up is visible.
 
 **The ceiling cut the work it was protecting.** A task in flight ran past
 300 seconds, the ceiling fired, and the exit's `Escape` interrupted the very
