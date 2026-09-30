@@ -103,11 +103,15 @@ Tasks continue from Phase 22's 163. Batches run in order.
 
 ### Batch 3: `Config`'s refusals pinned, tasks 167 to 168
 
-- [ ] **Task 167, #377 (P2).** Each of the 46 logic survivors killed or
-      written down as equivalent; the test selection gap (`tests/test_tls.py`)
-      checked first, since a selection gap is not a suite gap.
-- [ ] **Task 168.** Each killing test verified by reapplying its mutant by
-      hand, bytecode caching off.
+- [x] **Task 167, #377 (P2).** The 46 counted were 38 with a changed
+      condition and 8 that change only a message. 29 of the 38 are killed in
+      `tests/test_config_mutants.py`, along with all 8 message mutants. The
+      other 9 are equivalent, and the file's docstring says why for each.
+      `tests/test_tls.py` stays out of the mutmut selection because it runs
+      `openssl`. Its refusals are pinned with plain files instead.
+- [x] **Task 168.** All 37 killable mutants were reapplied by hand with
+      bytecode caching off. Each one fails the new file on a refusal or an
+      acceptance, and none fails on an import error.
 
 ### Batch 4: Stop queues the closing skill, tasks 169 to 174
 

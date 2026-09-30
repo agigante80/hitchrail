@@ -389,6 +389,8 @@ pytest_add_cli_args_test_selection = [
   # The assertions this check produced. They belong in the selection or the
   # next run reports the mutants they kill as surviving again.
   "tests/test_mutation_survivors.py",
+  # #377's kills in `config.py`, in their own file for the same reason.
+  "tests/test_config_mutants.py",
   # The 26 tests that kill mutants in `roots.py`, and some in `config` and
   # `discovery` that only these reach. Without them the run reports gaps in
   # the suite that are really gaps in this list.
