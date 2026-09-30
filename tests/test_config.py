@@ -11,6 +11,7 @@ import ast
 import re
 import socket
 import tomllib
+from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 
@@ -1693,20 +1694,50 @@ class _FunctionScopedAttributeReads(ast.NodeVisitor):
         self.hits: list[tuple[str, int, str]] = []
         self._stack: list[str] = ["<module>"]
 
-    def _function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
-        self._stack.append(node.name)
+    def _scope(self, node: ast.AST, name: str) -> None:
+        self._stack.append(name)
         self.generic_visit(node)
         self._stack.pop()
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self._function(node)
+        self._scope(node, node.name)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        self._function(node)
+        self._scope(node, node.name)
+
+    # A lambda, a comprehension and a class body are scopes of their own
+    # (#347): tagged with the enclosing function's name, a lambda written
+    # inside an exempt function inherited that function's exemption.
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        self._scope(node, "<lambda>")
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self._scope(node, node.name)
+
+    def visit(self, node: ast.AST) -> None:
+        if isinstance(node, ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp):
+            self._scope(node, f"<{type(node).__name__.lower()}>")
+        else:
+            super().visit(node)
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
         if node.attr == self.attr and isinstance(node.ctx, ast.Load):
             self.hits.append((self._stack[-1], node.lineno, ast.unparse(node)))
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        """`getattr(config, "agent_binary")` and
+        `operator.attrgetter("agent_binary")` read the attribute without an
+        `ast.Attribute` node (#347), so a name given as a string constant to
+        either is a read too. A dotted `attrgetter("config.agent_binary")`
+        counts, since its last part is the attribute read."""
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+        if name in {"getattr", "attrgetter"}:
+            for arg in node.args:
+                value = arg.value if isinstance(arg, ast.Constant) else None
+                if isinstance(value, str) and value.rsplit(".", 1)[-1] == self.attr:
+                    self.hits.append((self._stack[-1], node.lineno, ast.unparse(node)))
         self.generic_visit(node)
 
 
@@ -1739,50 +1770,59 @@ def test_every_read_of_agent_binary_is_the_resolved_property_or_allowlisted() ->
     only that one line is exempt and a second read in the same function is
     caught like any other offender.
     """
-    allowed: set[tuple[str, str, str]] = {
+    # Each entry carries how many reads it exempts (#358): an entry exempts
+    # that many occurrences of its expression in its function, not every one,
+    # so a second raw read beside an allowed one fails like any other. And
+    # the count is exact both ways, so an entry whose read was removed is
+    # reported as stale rather than left waiting to exempt the next one.
+    allowed: dict[tuple[str, str, str], int] = {
         # The one shape check itself (#302): normalises and validates the
         # operator's raw value before anything is derived from it.
-        ("config.py", "__post_init__", "self.agent_binary"),
+        ("config.py", "__post_init__", "self.agent_binary"): 1,
         # `spawn_agent_binary` IS the safe read every spawn site must use
         # instead; its own fallback to the raw field, for a Config built
         # outside `cli.main`, is what it exists to hold in one place.
-        ("config.py", "spawn_agent_binary", "self.agent_binary"),
+        ("config.py", "spawn_agent_binary", "self.agent_binary"): 1,
         # Builds a Config from the operator's own flags: `args.agent_binary`
         # is what they typed, becoming `Config.agent_binary`, not a spawn.
-        ("cli.py", "build_config", "args.agent_binary"),
+        ("cli.py", "build_config", "args.agent_binary"): 1,
         # What preflight is resolving. This function's whole job is finding
-        # the absolute path from the raw name.
-        ("cli.py", "preflight", "config.agent_binary"),
+        # the absolute path from the raw name: one lookup, one `dirname`, and
+        # three messages quoting what the operator typed (#341).
+        ("cli.py", "preflight", "config.agent_binary"): 5,
         # `hitchrail update-plugins`: no Config exists yet, so this resolves
         # and checks its OWN copy of the raw `--agent-binary` flag before it
         # ever calls `claude_ipc.update_plugins` with the resolved value.
-        ("cli.py", "update_plugins_command", "args.agent_binary"),
+        ("cli.py", "update_plugins_command", "args.agent_binary"): 1,
         # Threads `Preflight.agent_binary`, the field preflight resolved,
         # into `Config.resolved_agent_binary`. `Preflight` is a different
         # object from `Config`, but the attribute name is the same string,
         # which is exactly why this guard cannot key on the object either.
-        ("cli.py", "main", "found.agent_binary"),
+        ("cli.py", "main", "found.agent_binary"): 1,
         # The startup block (#167) prints what the operator typed beside
         # what it resolved to, `spawn_agent_binary`, so a journal shows both.
         # A display, never a spawn.
-        ("cli.py", "startup_block", "config.agent_binary"),
+        ("cli.py", "startup_block", "config.agent_binary"): 1,
         # The settings page shows the operator's raw setting, with `source`
         # saying where it came from; showing the resolved absolute path here
         # while `source` still said "default" would misrepresent provenance.
-        ("server.py", "_config_view", "config.agent_binary"),
+        ("server.py", "_config_view", "config.agent_binary"): 1,
     }
 
     src = Path(__file__).resolve().parents[1] / "src" / "hitchrail"
     offenders: dict[str, str] = {}
+    seen: Counter[tuple[str, str, str]] = Counter()
     found_a_read = False
     for path in src.glob("*.py"):
         finder = _FunctionScopedAttributeReads("agent_binary")
         finder.visit(ast.parse(path.read_text()))
         for func, lineno, text in finder.hits:
             found_a_read = True
-            if (path.name, func, text) in allowed:
-                continue
-            offenders[f"{path.name}:{lineno} ({func})"] = text
+            key = (path.name, func, text)
+            seen[key] += 1
+            if seen[key] > allowed.get(key, 0):
+                offenders[f"{path.name}:{lineno} ({func})"] = text
+    stale = {key: (count, seen[key]) for key, count in allowed.items() if seen[key] < count}
 
     # Guard the guard, the same way test_every_environment_variable... does:
     # if the parser stops matching at all, every assertion below is
@@ -1798,6 +1838,48 @@ def test_every_read_of_agent_binary_is_the_resolved_property_or_allowlisted() ->
         f"the operator's raw setting rather than a spawn site, add it to "
         f"`allowed` above with the reason."
     )
+    assert not stale, (
+        f"allowlist entries exempting more reads than exist, as (allowed, "
+        f"found): {stale}. Lower each count to what is there, so the spare "
+        f"exemption cannot quietly admit the next raw read."
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        # #347: neither is an `ast.Attribute`, and both read the field.
+        (
+            "def f(c):\n    return getattr(c, 'agent_binary')",
+            ("f", "getattr(c, 'agent_binary')"),
+        ),
+        (
+            "def f(c):\n    return operator.attrgetter('config.agent_binary')(c)",
+            ("f", "operator.attrgetter('config.agent_binary')"),
+        ),
+        # #347: a lambda inside an exempt function is its own scope, so it
+        # cannot borrow that function's exemption.
+        ("def preflight(c):\n    g = lambda: c.agent_binary", ("<lambda>", "c.agent_binary")),
+        (
+            "def preflight(cs):\n    [c.agent_binary for c in cs]",
+            ("<listcomp>", "c.agent_binary"),
+        ),
+    ],
+    ids=["getattr", "attrgetter", "lambda", "comprehension"],
+)
+def test_the_agent_binary_guard_sees_reads_that_are_not_plain_attributes(
+    source: str, expected: tuple[str, str]
+) -> None:
+    finder = _FunctionScopedAttributeReads("agent_binary")
+    finder.visit(ast.parse(source))
+    assert [(func, text) for func, _, text in finder.hits] == [expected]
+
+
+def test_the_agent_binary_guard_ignores_other_names_given_as_strings() -> None:
+    """The negative half: `getattr` of another field is not a read of this one."""
+    finder = _FunctionScopedAttributeReads("agent_binary")
+    finder.visit(ast.parse("def f(c):\n    return getattr(c, 'spawn_agent_binary')"))
+    assert finder.hits == []
 
 
 # -- #48: a protection that cannot match is not a protection ----------------
