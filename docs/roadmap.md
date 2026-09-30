@@ -45,31 +45,6 @@ suite is green. It is finished when the behaviour has been watched working in
 the running application, on the phone it is for. See
 [`tech-guidelines.md`](tech-guidelines.md) section 7.
 
-## Phase: Phase 22: The plugin update, hardened
-state: open
-plan: docs/superpowers/plans/2026-09-26-hitchrail-phase-22-plugin-hardened.md
-
-The plugin update from a phone, made as careful as the rest of the spawn path.
-Phase 21 shipped it and closed on its own review loop's trip wire, so its last
-round's findings were filed rather than fixed, and several of them sit on the
-path between a web page and a shell.
-
-Delivers: the agent binary resolved once, checked from the directory it runs
-in, and spawned exactly as checked. Three tickets describe that one defect from
-three sides and are built together rather than closed as duplicates, because
-each names a different place the second resolution happens. Every other
-finding from Phase 21's review is fixed or closed with its reason.
-
-Done when no from-review ticket about the plugin update or the agent binary is
-open without a decision, and a mutation run over `claude_ipc.py` and
-`plugin_runs.py` has been read.
-
-Placed first after Phase 15 by the Backlog's second rule: a phase that ships
-new surface is followed by the one that hardens it, as Phase 20 followed 14.
-Ahead of 19 because both change how a spawned agent is found and started, and
-a stop sequence watched on an unhardened spawn path is watched on the wrong
-thing.
-
 ## Phase: Phase 19: Stop means wrap up, and says so
 state: planned
 
@@ -231,7 +206,7 @@ Every time a phase opens, this is read for what now belongs in it, by two
 rules rather than by judgement. The opening phase takes every open
 `from-review` ticket about a file it changes, because that is when fixing it
 is cheapest. And a phase that ships new surface is followed by one that
-hardens it, as Phase 20 followed 14 and Phase 22 follows 21: a review loop that
+hardens it, as Phase 20 followed 14 and Phase 22 followed 21: a review loop that
 stops on its trip wire files its findings here, and without the second rule
 they stay here.
 

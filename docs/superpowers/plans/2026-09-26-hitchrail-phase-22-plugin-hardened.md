@@ -226,10 +226,20 @@ no ticket, since `develop` already locks newer versions.
       other one filed by its reviews sits in Backlog with a P3 priority.
 - [x] The mutation survivors in `claude_ipc.py`'s plugin section have been
       read, not counted: `495e6da` and `ed04093`, dispositions on #304.
-- [ ] A plugin update started from the phone has been watched finishing on
-      the phone, after batch 2, against a private test root.
-- [ ] The roadmap's Phase 22 block says `state: done`, the milestone is
-      closed, and `scripts/check-phases.sh` passes.
+- [x] A plugin update started from the phone has been watched finishing on
+      the phone, after batch 2, against a private test root. Watched
+      2026-10-01 on the Pixel 2 in Chrome, over `adb reverse` to a loopback
+      instance with an empty root and an empty config file: 16 updated, 0
+      failed, 7 left alone, in 33 seconds, the button disabled while it ran
+      and the summary and every row painted when it finished. The six
+      identical `local` rows it showed are #312, in Phase 24. The device
+      tier was run first and was red on a label renamed on 2026-09-11,
+      unnoticed because nothing selects that tier; fixed the same day.
+- [x] The roadmap's Phase 22 block says `state: done`, the milestone is
+      closed, and `scripts/check-phases.sh` passes. Closed 2026-10-01 as
+      **done**: every ticket in the milestone landed, and every review
+      finding outside it sits in Backlog with a priority. The block then
+      left the roadmap under the 2026-09-26 rule.
 
 ## Fails if
 
