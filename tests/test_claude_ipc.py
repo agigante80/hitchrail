@@ -28,8 +28,22 @@ from hitchrail.claude_ipc import (
     shows_input_box,
     trusted_folders,
 )
+from support import in_claude_ipc, source_modules
 
 SRC = Path(__file__).parent.parent / "src" / "hitchrail"
+
+
+def _outside_the_quarantine() -> dict[str, Path]:
+    """Every module but the quarantine, keyed by its path under `SRC` (#368).
+
+    A flat glob would not see into a `claude_ipc` package, and a test that
+    excluded `claude_ipc.py` by name would then scan every one of its files
+    as if they were outside it. The walk has to see the quarantine for the
+    exclusion to mean anything, so that is asserted rather than assumed.
+    """
+    modules = source_modules(SRC)
+    assert any(in_claude_ipc(rel) for rel in modules), "the walk saw no claude_ipc module"
+    return {rel: p for rel, p in modules.items() if not in_claude_ipc(rel)}
 
 
 # Exact input rows captured from a real Claude Code session on 2026-09-02,
@@ -323,19 +337,15 @@ def test_request_stop_takes_anything_shaped_like_a_pane() -> None:
 
 def test_the_stop_keys_live_only_here() -> None:
     """`lint-imports` cannot catch a string, so this is a grep."""
-    leaked = [
-        p.name
-        for p in SRC.glob("*.py")
-        if p.name != "claude_ipc.py" and "/exit" in p.read_text()
-    ]
+    leaked = [rel for rel, p in _outside_the_quarantine().items() if "/exit" in p.read_text()]
     assert leaked == []
 
 
 def test_the_marker_lives_only_here() -> None:
     leaked = [
-        p.name
-        for p in SRC.glob("*.py")
-        if p.name != "claude_ipc.py" and REMOTE_CONTROL_MARKER in p.read_text()
+        rel
+        for rel, p in _outside_the_quarantine().items()
+        if REMOTE_CONTROL_MARKER in p.read_text()
     ]
     assert leaked == []
 
@@ -364,9 +374,8 @@ def test_the_launch_flags_live_only_here() -> None:
     ]
     assert flags, "launch_argv grew no flags, so this guard checks nothing"
     leaked = {
-        p.name: f
-        for p in SRC.glob("*.py")
-        if p.name != "claude_ipc.py"
+        rel: f
+        for rel, p in _outside_the_quarantine().items()
         for f in flags
         if f in p.read_text()
     }
@@ -707,9 +716,7 @@ def test_only_the_quarantine_types_into_a_pane() -> None:
     agent is. A grep is the control that fits.
     """
     callers = sorted(
-        p.name
-        for p in SRC.glob("*.py")
-        if p.name != "claude_ipc.py" and ".send_keys(" in p.read_text()
+        rel for rel, p in _outside_the_quarantine().items() if ".send_keys(" in p.read_text()
     )
     assert callers == [], (
         f"{callers} types into a pane. What goes to an agent's stdin is "

@@ -29,6 +29,7 @@ from hitchrail.config import (
     origin_forms,
 )
 from hitchrail.roots import Root
+from support import in_claude_ipc, module_name, source_modules
 
 
 def _r(path: Path, label: str = "main") -> tuple[Root, ...]:
@@ -1568,8 +1569,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         "server.py": 990,
     }
 
-    src = Path(__file__).parent.parent / "src" / "hitchrail"
-    sizes = {p.name: len(p.read_text().splitlines()) for p in sorted(src.glob("*.py"))}
+    # Keyed by the path under `src/hitchrail` (#368), so a package's
+    # `__init__.py` is never merged with the top level one.
+    sizes = {rel: len(p.read_text().splitlines()) for rel, p in source_modules().items()}
+    assert any(in_claude_ipc(rel) for rel in sizes), "the walk saw no claude_ipc module"
 
     over = {n: c for n, c in sizes.items() if c >= 400 and c > caps.get(n, 399)}
     assert not over, (
@@ -1640,12 +1643,18 @@ def test_the_import_contract_covers_every_engine_layer_module() -> None:
     than inferred, so adding a module to it is a deliberate act.
     """
     web = {"server.py", "pages.py", "cli.py", "security.py", "headers.py", "__init__.py"}
-    src = Path(__file__).resolve().parents[1] / "src" / "hitchrail"
-    engine_layer = {f"hitchrail.{p.stem}" for p in src.glob("*.py") if p.name not in web}
+    modules = source_modules()
+    assert any(in_claude_ipc(rel) for rel in modules), "the walk saw no claude_ipc module"
+    engine_layer = {module_name(rel) for rel in modules if rel not in web}
     contract = tomllib.loads(
         (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text()
     )["tool"]["importlinter"]["contracts"][0]
-    missing = engine_layer - set(contract["source_modules"])
+    listed = set(contract["source_modules"])
+    # A submodule is covered by its package's entry: import-linter's forbidden
+    # contracts include descendants unless told otherwise (#368).
+    missing = {
+        m for m in engine_layer - listed if not any(m.startswith(f"{pkg}.") for pkg in listed)
+    }
     assert not missing, (
         f"engine layer modules outside the import contract: {sorted(missing)}. "
         "Add them to `source_modules` in pyproject.toml, or to `web` here if "
@@ -1667,9 +1676,10 @@ def test_every_environment_variable_the_product_reads_is_scrubbed() -> None:
     the failure mode `test_the_engine_never_iterates_the_stop_keys` already
     documents about greps that describe what they forbid.
     """
-    src = Path(__file__).resolve().parents[1] / "src" / "hitchrail"
     read: dict[str, str] = {}
-    for path in src.glob("*.py"):
+    modules = source_modules()
+    assert any(in_claude_ipc(rel) for rel in modules), "the walk saw no claude_ipc module"
+    for rel, path in modules.items():
         tree = ast.parse(path.read_text())
         # `ast.walk`, not `tree.body`: these live inside functions.
         for node in ast.walk(tree):
@@ -1678,14 +1688,14 @@ def test_every_environment_variable_the_product_reads_is_scrubbed() -> None:
                 target = ast.unparse(node.func)
                 if target in {"os.environ.get", "os.getenv"}:
                     first = node.args[0]
-                    read[ast.unparse(first)] = path.name
+                    read[ast.unparse(first)] = rel
             # "X" in os.environ
             if (
                 isinstance(node, ast.Compare)
                 and isinstance(node.ops[0], ast.In)
                 and ast.unparse(node.comparators[0]) == "os.environ"
             ):
-                read[ast.unparse(node.left)] = path.name
+                read[ast.unparse(node.left)] = rel
 
     # Guard the guard. If the parser stops matching, every assertion below is
     # vacuously true and the next variable walks straight past it.
@@ -1843,19 +1853,20 @@ def test_every_read_of_agent_binary_is_the_resolved_property_or_allowlisted() ->
         ("server.py", "_config_view", "config.agent_binary"): 1,
     }
 
-    src = Path(__file__).resolve().parents[1] / "src" / "hitchrail"
     offenders: dict[str, str] = {}
     seen: Counter[tuple[str, str, str]] = Counter()
     found_a_read = False
-    for path in src.glob("*.py"):
+    modules = source_modules()
+    assert any(in_claude_ipc(rel) for rel in modules), "the walk saw no claude_ipc module"
+    for rel, path in modules.items():
         finder = _FunctionScopedAttributeReads("agent_binary")
         finder.visit(ast.parse(path.read_text()))
         for func, lineno, text in finder.hits:
             found_a_read = True
-            key = (path.name, func, text)
+            key = (rel, func, text)
             seen[key] += 1
             if seen[key] > allowed.get(key, 0):
-                offenders[f"{path.name}:{lineno} ({func})"] = text
+                offenders[f"{rel}:{lineno} ({func})"] = text
     stale = {key: (count, seen[key]) for key, count in allowed.items() if seen[key] < count}
 
     # Guard the guard, the same way test_every_environment_variable... does:
@@ -2128,36 +2139,55 @@ def _mutmut_config() -> dict[str, list[str]]:
     return section
 
 
+def _module_files(dotted: str) -> set[str]:
+    """The files importing `dotted` loads, relative to `src/hitchrail`, or an
+    empty set when no file is behind the name.
+
+    #368. A name resolved as `<name>.py` only, which after `claude_ipc`
+    became a package resolved to nothing, so the guard below checked nothing
+    for the quarantine. Importing a submodule runs every package's
+    `__init__.py` above it, so each of those is needed in the tree too.
+    """
+    src = _REPO / "src" / "hitchrail"
+    parts = dotted.split(".")[1:]
+    files = {"__init__.py"}
+    for depth in range(1, len(parts) + 1):
+        stem = "/".join(parts[:depth])
+        if (src / stem / "__init__.py").exists():
+            files.add(f"{stem}/__init__.py")
+        elif depth == len(parts) and (src / f"{stem}.py").exists():
+            files.add(f"{stem}.py")
+        else:
+            return set()
+    return files
+
+
 def _first_party_imports(path: Path) -> set[str]:
-    """Every `hitchrail` module this file imports, by module name.
+    """Every `hitchrail` file this file's imports load, relative to `src/hitchrail`.
 
     `ast.walk`, not `tree.body`: an import inside a function fails a mutmut run
     just as hard as a top level one, and later.
     """
-    import ast
-
     found: set[str] = set()
     for node in ast.walk(ast.parse(path.read_text())):
-        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("hitchrail"):
-            parts = (node.module or "").split(".")
-            if len(parts) > 1:
-                found.add(parts[1] + ".py")
+        if (
+            isinstance(node, ast.ImportFrom)
+            and (node.module or "").split(".")[0] == "hitchrail"
+        ):
+            module = node.module or ""
+            found |= _module_files(module)
             # `from hitchrail import claude_ipc, discovery`, where a name is a
             # MODULE only if there is a file behind it. `from hitchrail import
             # __version__` binds a string in `__init__.py`, and reading it as a
             # module asked for `__version__.py` to be copied. Checked against
             # the source tree rather than by pattern: a dunder rule would still
             # be wrong about any other re-exported name.
-            found |= {
-                a.name + ".py"
-                for a in node.names
-                if len(parts) == 1 and (_REPO / "src" / "hitchrail" / f"{a.name}.py").exists()
-            }
+            for alias in node.names:
+                found |= _module_files(f"{module}.{alias.name}")
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                bits = alias.name.split(".")
-                if bits[0] == "hitchrail" and len(bits) > 1:
-                    found.add(bits[1] + ".py")
+                if alias.name.split(".")[0] == "hitchrail":
+                    found |= _module_files(alias.name)
     return found
 
 
@@ -2182,7 +2212,16 @@ def test_every_mutated_module_can_be_imported_from_the_mutants_tree() -> None:
     """
     section = _mutmut_config()
     entries = section["source_paths"] + section.get("also_copy", [])
-    copied = {Path(p).name for p in entries}
+    src = _REPO / "src" / "hitchrail"
+    # Relative to `src/hitchrail`, never a bare name (#368): two
+    # `__init__.py` would otherwise stand in for each other.
+    copied: set[str] = set()
+    for entry in entries:
+        path = _REPO / entry
+        if path.is_relative_to(src):
+            found = sorted(path.rglob("*.py")) if path.is_dir() else [path]
+            copied |= {f.relative_to(src).as_posix() for f in found}
+    assert any(in_claude_ipc(rel) for rel in copied), "no claude_ipc module is copied"
 
     # **Every copied file, not only the mutated ones, and #221 is why.** This
     # walked `source_paths` alone, so it checked seven modules and ignored the

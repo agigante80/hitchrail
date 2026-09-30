@@ -25,6 +25,7 @@ import pytest
 
 from hitchrail import claude_ipc
 from hitchrail.claude_ipc import PluginOutcome, PluginsFailed, update_plugins
+from support import in_claude_ipc, source_modules
 
 SRC = Path(__file__).parent.parent / "src" / "hitchrail"
 
@@ -1150,13 +1151,20 @@ def test_the_plugin_vocabulary_lives_only_in_the_quarantine() -> None:
     # `-s` is not in the set: tmux uses it for its own socket and session
     # flags, so it names nothing vendor specific outside this module.
     vocabulary = {"plugin", "marketplace", "--json", "-y", "shownCommand"}
-    assert vocabulary <= _string_constants(SRC / "claude_ipc.py"), (
+    # Keyed by the path under `SRC` (#368), so the quarantine is found and
+    # excluded whether it is one file or a package.
+    modules = source_modules(SRC)
+    inside: set[str] = set()
+    for rel, p in modules.items():
+        if in_claude_ipc(rel):
+            inside |= _string_constants(p)
+    assert vocabulary <= inside, (
         "the quarantine no longer holds this vocabulary, so this guard checks nothing"
     )
     leaked = {
-        p.name: sorted(vocabulary & _string_constants(p))
-        for p in SRC.glob("*.py")
-        if p.name != "claude_ipc.py" and vocabulary & _string_constants(p)
+        rel: sorted(vocabulary & _string_constants(p))
+        for rel, p in modules.items()
+        if not in_claude_ipc(rel) and vocabulary & _string_constants(p)
     }
     assert leaked == {}, f"plugin vocabulary outside the quarantine: {leaked}"
 

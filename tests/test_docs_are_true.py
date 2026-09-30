@@ -34,7 +34,7 @@ import pytest
 
 from hitchrail import claude_ipc
 from hitchrail.cli import parse_args
-from support import make_config
+from support import make_config, source_modules
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src" / "hitchrail"
@@ -51,7 +51,9 @@ PLACEHOLDER_LINES = 5
 
 
 def _modules() -> dict[str, int]:
-    return {p.name: len(p.read_text().splitlines()) for p in SRC.glob("*.py")}
+    """Keyed by the path under `src/hitchrail`, which is how a document names
+    a module inside a package (#368)."""
+    return {rel: len(p.read_text().splitlines()) for rel, p in source_modules(SRC).items()}
 
 
 @pytest.mark.parametrize("doc", [CLAUDE_MD, ROADMAP], ids=lambda p: p.name)
@@ -111,15 +113,34 @@ def test_no_document_hardcodes_a_test_count(doc: Path) -> None:
 
 
 def _named_in_claude_md() -> set[str]:
-    """The modules the architecture block claims exist, by their listed name."""
-    return set(re.findall(r"^\s{2}(\w+\.py)\s", _conventions(), re.M))
+    """The modules the architecture block claims exist, by their path under
+    `src/hitchrail`.
+
+    A package is a `name/` line at the block's indent with its modules one
+    level further in (#368), so `claude_ipc/` then `    keys.py` names
+    `claude_ipc/keys.py`. `web/` is the same shape and lists no module.
+    """
+    named: set[str] = set()
+    package = ""
+    for line in _conventions().splitlines():
+        top = re.match(r"^\s{2}(\w+)(\.py|/)(?:\s|$)", line)
+        if top:
+            name, kind = top.groups()
+            package = f"{name}/" if kind == "/" else ""
+            if kind == ".py":
+                named.add(f"{name}.py")
+            continue
+        nested = re.match(r"^\s{4}(\w+\.py)(?:\s|$)", line)
+        if nested and package:
+            named.add(package + nested.group(1))
+    return named
 
 
 # `__init__.py` is a package marker rather than a module anybody navigates to,
 # and listing it in the architecture block would be noise. Named here, and kept
 # short on purpose: a broad pattern in this exemption is how the NEXT module
 # goes missing, which is the whole failure below.
-_NOT_ON_THE_MAP = {"__init__.py"}
+_NOT_ON_THE_MAP = {"__init__.py", "claude_ipc/__init__.py"}
 
 
 def test_every_module_named_in_claude_md_exists() -> None:
@@ -144,7 +165,7 @@ def test_every_module_that_exists_is_named_in_claude_md() -> None:
     that reads a file chosen by a URL. The map told a reader deciding what it
     was safe to touch that neither existed.
     """
-    on_disk = {p.name for p in SRC.glob("*.py")} - _NOT_ON_THE_MAP
+    on_disk = set(source_modules(SRC)) - _NOT_ON_THE_MAP
     unlisted = on_disk - _named_in_claude_md()
     assert not unlisted, (
         ".claude/CLAUDE.md does not name "
