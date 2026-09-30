@@ -88,7 +88,14 @@ def _read_private(path: Path) -> str:
     # descriptor for "the directory this name resolved through", and the
     # window between the two stats is the same one the rename needs anyway.
     _refuse_if_shared(path.parent, path.parent.stat(), "the directory holding it")
-    fd = os.open(path, os.O_RDONLY)
+    # And the directory the NAME resolves into (#281): a config path that is
+    # a symlink is opened at its target, so a 0777 directory there let anyone
+    # rename a file over the target. Both, since the lexical one holds the
+    # link and whoever can replace the link chooses the target.
+    real = path.resolve()
+    if real.parent != path.parent:
+        _refuse_if_shared(real.parent, real.parent.stat(), "the directory it resolves into")
+    fd = os.open(real, os.O_RDONLY)
     try:
         info = os.fstat(fd)
         _refuse_if_shared(path, info, "it")
@@ -258,10 +265,15 @@ def read_state(path: Path) -> State:
     """An unreadable file chooses nothing: hiding a running session is the
     dangerous direction, and the operator's file is the perimeter either
     way. Each field is read on its own, so a bad timeout does not lose the
-    hidden set beside it."""
+    hidden set beside it.
+
+    Read by the operator file's rule, `_read_private`, decided rather than
+    exempted (#281): a hidden root is the dangerous direction, so a state
+    file somebody else could write hides nothing. Refused or not UTF-8, it
+    is unreadable, and chooses nothing."""
     try:
-        data = tomllib.loads(path.read_text())
-    except (OSError, tomllib.TOMLDecodeError):
+        data = tomllib.loads(_read_private(path))
+    except (OSError, SettingsError, tomllib.TOMLDecodeError):
         return State()
     disabled = data.get("disabled", [])
     hidden = (

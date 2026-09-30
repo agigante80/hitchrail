@@ -40,21 +40,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src" / "hitchrail"
 CLAUDE_MD = ROOT / ".claude" / "CLAUDE.md"
 
-# **These guards used to skip on a clone, and now they do not.**
-#
-# The conventions lived in `.claude/CLAUDE.md` while `.gitignore` excluded the
-# whole of `.claude/`, so every check below ran only in the maintainer's
-# checkout: CI validated the roadmap and not the file an agent reads first. #60
-# moved them to `AGENTS.md` at the root for that reason. On 2026-09-11 they
-# moved back, because Claude Code reads `CLAUDE.md` and not `AGENTS.md`, and
-# `.gitignore` now excludes `.claude/*` and re-admits this one file, which is
-# the git spelling that lets a file under an ignored directory be tracked. The
-# guard that caught a reversed middleware order still runs on every push, for
-# every contributor, and `test_the_conventions_file_is_tracked` is what keeps
-# a `.gitignore` edit from quietly taking it back out of CI.
-#
-# There is no skip mark any more. A missing `.claude/CLAUDE.md` is a failure,
-# not a reason to pass quietly.
+# The checks below that read `.claude/CLAUDE.md` skip where it is absent,
+# which is a clone and every CI leg: `_conventions()` says why (#281).
 ROADMAP = ROOT / "docs" / "roadmap.md"
 README = ROOT / "README.md"
 

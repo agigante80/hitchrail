@@ -731,3 +731,48 @@ def test_a_symlink_left_at_the_state_files_tmp_name_is_not_written_through(
         "state.tmp",
         "state.toml",
     ], "a temporary name was left behind"
+
+
+def test_a_state_file_that_is_not_utf8_disables_nothing(tmp_path: Path) -> None:
+    """#281: `read_text` raised `UnicodeDecodeError`, a `ValueError` neither
+    arm caught, out of `Preferences` and so out of `Engine.__init__`."""
+    state = tmp_path / "state.toml"
+    state.write_bytes(b'disabled = ["w\xff"]\n')
+    assert settings.read_state(state) == settings.State()
+
+
+def test_a_state_file_others_can_write_disables_nothing(tmp_path: Path) -> None:
+    """#281: the operator file's rule, decided for the state file too. A
+    hidden root is the dangerous direction, so a file somebody else could
+    have written hides nothing; the same file made private is read."""
+    state = tmp_path / "state.toml"
+    state.write_text('disabled = ["work"]\n')
+    state.chmod(0o666)
+    assert settings.read_state(state) == settings.State()
+    state.chmod(0o600)
+    assert settings.read_state(state).hidden == {"work"}
+
+
+def test_a_config_symlinked_into_a_shared_directory_is_refused_naming_it(
+    tmp_path: Path,
+) -> None:
+    """#281: the directory rule looked at the link's parent, which was
+    private, while `os.open` followed the link into a 0777 one where anybody
+    could rename a file over the target."""
+    (tmp_path / "work").mkdir()
+    shared = tmp_path / "srv"
+    shared.mkdir()
+    target = _write(shared, ROOTS_TOML.format(label="work", path=tmp_path / "work"))
+    home = tmp_path / "home"
+    home.mkdir()
+    link = home / "config.toml"
+    link.symlink_to(target)
+    shared.chmod(0o777)
+    try:
+        with pytest.raises(ConfigError, match=r"srv: is writable by group or others"):
+            build_config(parse_args(["--config", str(link)]))
+    finally:
+        shared.chmod(0o755)
+    assert [r.label for r in build_config(parse_args(["--config", str(link)])).roots] == [
+        "work"
+    ]

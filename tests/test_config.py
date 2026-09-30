@@ -1473,7 +1473,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 460 for #256: `hidden_roots_a_request_can_show`, the operator's
         # `enabled` asked where the listing needs it rather than only where
         # the settings page does.
-        "settings.py": 460,
+        # 472 for #281: the resolved directory checked beside the lexical
+        # one, and the state file read by the operator file's rule, each
+        # with the decision written where a reader would undo it.
+        "settings.py": 472,
         # rather than one. A refusal handler is the shape this file is made of.
         # 513 to 517 for #120. The listing payload reports every configured
         # root as a labelled list rather than one path string, and the comment

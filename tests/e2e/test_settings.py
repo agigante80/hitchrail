@@ -174,6 +174,27 @@ async def test_a_refused_toggle_keeps_its_reason_through_the_repaint(
         state.chmod(0o700)
 
 
+async def test_a_local_refusal_does_not_outlive_a_toggle_that_worked(
+    page: Page, server: Harness, tmp_path: Path
+) -> None:
+    """#281. A wait out of range is refused in the page with no request, so
+    no repaint consumed the refusal's flag, and the next toggle's success
+    spent it clearing nothing: "Not changed" stood over a change that was
+    made."""
+    server.seed(stopped=["vessel"], also_in=TWO_ROOTS, state_path=tmp_path / "s" / "state.toml")
+    await page.goto(f"{server.base}/settings")
+    await page.locator("[data-stop-timeout]").fill("0")
+    await page.locator("[data-stop-save]").click()
+    note = page.locator("[data-note]")
+    await expect(note).to_contain_text("Not changed.")
+    box = page.locator('[data-root-toggle="personal"]')
+    await box.click()
+    await expect(
+        page.locator('[data-roots] li[data-label="personal"] .settings-source')
+    ).to_have_text("hidden here")
+    await expect(note).to_be_hidden()
+
+
 async def test_the_wait_dialog_keeps_the_servers_stop_timeout(
     page: Page, server: Harness
 ) -> None:

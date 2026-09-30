@@ -89,6 +89,15 @@ function settle(owner) {
   }
 }
 
+// A new action by the person retires a settings refusal's owed repaint
+// (#281): the flag belonged to the repaint after THAT refusal, and a local
+// refusal or an offline one gets none, so it was spent by the next success
+// instead and "Not changed" stood over a change that was made. Never the
+// other flow's flag, by #315's rule.
+function begin() {
+  if (noteOwner !== "plugins") keepNote = false;
+}
+
 async function call(method, body) {
   const mine = ++generation;
   let response;
@@ -186,6 +195,7 @@ function renderRoots(config) {
 }
 
 async function toggle(label, enabled, box) {
+  begin();
   box.disabled = true;
   const config = await call("PATCH", { roots: { [label]: { enabled } } });
   box.disabled = false;
@@ -212,6 +222,7 @@ function renderStop(config) {
 }
 
 async function saveStop() {
+  begin();
   const input = $("[data-stop-timeout]");
   const seconds = Number(input.value);
   const ceiling = Number(input.max);
