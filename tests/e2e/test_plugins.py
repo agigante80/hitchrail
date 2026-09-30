@@ -841,7 +841,9 @@ async def test_visibility_regained_refreshes_a_run_the_stream_missed(
     is exactly the frame the server's bus drops for a slow client, which is
     what a phone that sleeps mid run looks like: the connection never
     notices anything is wrong, so no reconnect ever fires to correct the
-    screen. Coming back from that is what `visibilitychange` is for, and it
+    screen. The test models it with a stream that cannot reconnect at all,
+    since Playwright cannot drop one SSE frame and keep the connection.
+    Coming back from either is what `visibilitychange` is for, and it
     must go through the same `loadPlugins` a reconnect uses, gated by the
     same staleness check (#314), rather than paint anything directly."""
     server.seed_plugins([{"id": "alpha@m", "scope": "user"}])
@@ -852,8 +854,12 @@ async def test_visibility_regained_refreshes_a_run_the_stream_missed(
         "Refreshing the marketplaces."
     )
 
-    # The stream stays open, but its next frame (the run finishing) never
-    # reaches the page: the stand in for a dropped SSE frame.
+    # The run's finishing frame never reaches the page. This does not keep
+    # the stream open, as a dropped frame would: it drops the connection and
+    # aborts every reconnect, the harsher case of a reconnect that keeps
+    # failing (#343). Either way no frame corrects the screen, which is the
+    # state `visibilitychange` must recover from, so the test fails without
+    # the handler all the same.
     await page.route("**/api/events", lambda route: route.abort())
     server.drop_connections()
     server.release_plugin("alpha@m")
