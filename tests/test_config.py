@@ -1419,7 +1419,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # that says what this process is serving and with what, one fact a
         # line and the token only as its source. The configuration itself
         # is `logs.py`, so what grew here is the flags and the facts.
-        "cli.py": 917,
+        # 949 for #341: `preflight` tells a typed path from a bare name, since
+        # neither PATH message is true of a value `which` never searched for,
+        # and `update_plugins_command` says why it resolves what serve refuses.
+        "cli.py": 949,
         # 409, nine lines over, down from 542. #115 deleted the `?token=`
         # carrier: 135 lines once the two blocks inside `TokenMiddleware`
         # that only served it are counted.

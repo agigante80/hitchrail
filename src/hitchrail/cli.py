@@ -585,7 +585,20 @@ def preflight(
             "package manager, for example: sudo apt install tmux"
         )
     found = look(config.agent_binary)
-    if found is None:
+    # #341. A value with a directory in it is a path the operator TYPED, and
+    # `shutil.which` does not search PATH for one: it checks that exact file
+    # and hands it back unchanged. So neither PATH message below is true of
+    # it, and each would send the operator to fix a PATH that was never read.
+    # `os.path.dirname` and not `Path.parent`: `Path("./claude")` normalises
+    # the "./" away, and `which` decides by the same `dirname` test this is.
+    typed = bool(os.path.dirname(config.agent_binary))  # noqa: PTH120
+    if found is None and typed:
+        problems.append(
+            f"{config.agent_binary!r} is not an executable file. That is the "
+            "agent Hitchrail starts, and a value containing a directory is "
+            "taken as a path to that file, not searched for on PATH"
+        )
+    elif found is None:
         # **"Install it" is the wrong first remedy, and #195 is why.** The case
         # this actually fires in is a lingering systemd unit at boot: the agent
         # IS installed, in `~/.local/bin`, and the user manager's PATH before
@@ -600,6 +613,18 @@ def preflight(
             "THIS process has: under a systemd unit that is the unit's own "
             "Environment=PATH rather than your login's"
         )
+    elif not Path(found).is_absolute() and typed:
+        # Refused for the same reason as the relative PATH entry below: the
+        # child's cwd would decide which file runs. `update-plugins` accepts
+        # this shape instead, resolving it at once (#298), because there the
+        # check and the spawn are one command in one directory; a server
+        # spawns for as long as it runs.
+        problems.append(
+            f"{config.agent_binary!r} is a relative path, which would be "
+            "looked up from wherever each agent is started. Give "
+            "--agent-binary an absolute path, or a bare name found on PATH"
+        )
+        found = None
     elif not Path(found).is_absolute():
         # A PATH entry given as a relative directory, "." most often, is the
         # one shape `shutil.which` will hand back unresolved: everything else
@@ -789,6 +814,13 @@ def update_plugins_command(argv: list[str]) -> int:
     # directory. `resolve()` against THIS process's cwd, before
     # `plugin_runner` starts the child in `Path.home()`, is what makes the
     # program checked and the program run the same file.
+    #
+    # **Serve's `preflight` refuses the same typed relative path, and the
+    # difference is deliberate (#341).** Here the check and the spawn happen
+    # in one command, from one directory, so resolving once is exact. A
+    # server spawns agents for as long as it runs, and asks the operator for
+    # an absolute path instead. `resolve()` also follows a symlink, which
+    # `preflight` leaves alone; either names the same executable.
     resolved = str(Path(resolved).resolve())
 
     def show(outcome: claude_ipc.PluginOutcome) -> None:

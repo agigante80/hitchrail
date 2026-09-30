@@ -368,8 +368,68 @@ def test_a_relative_path_on_path_is_refused_rather_than_spawned(tmp_path: Path) 
         meminfo=tmp_path,
     )
     assert len(found.problems) == 1
-    assert "relative" in found.problems[0]
+    assert "relative PATH entry" in found.problems[0]
     assert found.agent_binary is None
+
+
+@pytest.mark.parametrize("typed", ["bin/claude", "./claude"])
+def test_a_typed_relative_agent_binary_is_refused_as_typed(tmp_path: Path, typed: str) -> None:
+    """#341. A value with a directory in it is never searched on PATH, so
+    blaming a "relative PATH entry" sent the operator to fix a PATH that was
+    never read. `which` hands a typed path back unchanged, as the premise
+    pin below shows against the real one."""
+    found = preflight(
+        make_config(tmp_path, agent_binary=typed),
+        which=lambda n: typed if n == typed else "/usr/bin/tmux",
+        meminfo=tmp_path,
+    )
+    assert len(found.problems) == 1
+    assert repr(typed) in found.problems[0]
+    assert "absolute" in found.problems[0]
+    assert "PATH entry" not in found.problems[0]
+    assert found.agent_binary is None
+
+
+def test_a_typed_path_that_is_not_there_is_not_blamed_on_path(tmp_path: Path) -> None:
+    """#341. The other half: "is not on PATH" is false of a path that was
+    never looked up there, whatever else is wrong with it."""
+    found = preflight(
+        make_config(tmp_path, agent_binary="bin/claude"),
+        which=lambda n: None if n == "bin/claude" else "/usr/bin/tmux",
+        meminfo=tmp_path,
+    )
+    assert len(found.problems) == 1
+    assert "not an executable file" in found.problems[0]
+    assert "is not on PATH" not in found.problems[0]
+    assert found.agent_binary is None
+
+
+def test_an_absolute_agent_binary_is_accepted_as_typed(tmp_path: Path) -> None:
+    """The positive side: a typed ABSOLUTE path is the remedy both refusals
+    above name, so it must pass untouched."""
+    found = preflight(
+        make_config(tmp_path, agent_binary="/opt/claude"),
+        which=lambda n: "/opt/claude" if n == "/opt/claude" else "/usr/bin/tmux",
+        meminfo=tmp_path,
+    )
+    assert found.problems == []
+    assert found.agent_binary == "/opt/claude"
+
+
+def test_which_hands_a_typed_relative_path_back_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The premise #341 rests on, pinned against the real `shutil.which`: a
+    name with a directory component is checked where it stands and returned
+    as given, never searched on PATH or made absolute. If a Python release
+    changes that, the typed branch in `preflight` needs rethinking."""
+    (tmp_path / "bin").mkdir()
+    agent = tmp_path / "bin" / "claude"
+    agent.write_text("#!/bin/sh\n")
+    agent.chmod(0o755)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PATH", "/nonexistent")
+    assert _REAL_SHUTIL_WHICH("bin/claude") == "bin/claude"
 
 
 def test_an_unreadable_meminfo_refuses_rather_than_running_unguarded(
