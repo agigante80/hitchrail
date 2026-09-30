@@ -1212,8 +1212,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # property and which is advisory. Phase 18 carries the split.
         # 1554 for #167: a start, a stop and its ending, and the stuck scan's
         # changes, as log lines, each with the comment saying why pane output
-        # is never one of them.
-        "engine.py": 1554,
+        # is never one of them. 1569 for #167's review: the timeout line
+        # worded from the row read after the timer, and why it must be.
+        "engine.py": 1569,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon

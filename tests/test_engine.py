@@ -3585,6 +3585,24 @@ def test_a_stop_that_gives_up_says_so_in_the_log(
     assert "still running" in caplog.text
 
 
+def test_a_stop_that_worked_unwatched_is_not_logged_as_given_up(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#167 review, round 1: with no browser connected nothing reads the row,
+    so the marker of a stop that WORKED survives to the timer. The line has
+    to come from the row read after it, or the journal says the stop failed."""
+    engine, tmux, clock = live_engine(root)
+    engine.stop(proj("vessel"))
+    engine._procs_fn = procs_from("")
+    tmux.sessions.pop(proj("vessel"))
+    clock.advance(engine.config.stop_timeout + 1)
+    with caplog.at_level(logging.INFO, logger="hitchrail.engine"):
+        assert engine.expire_stops() == [proj("vessel")]
+    assert "still running" not in caplog.text
+    assert "gave up" not in caplog.text
+    assert "after the agent had already exited" in caplog.text
+
+
 def test_a_refused_stop_says_why_in_the_log(
     root: Path, caplog: pytest.LogCaptureFixture
 ) -> None:

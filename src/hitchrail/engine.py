@@ -1438,26 +1438,41 @@ class Engine:
         # It only ever ADDS. Nothing here answers the prompt: the options in
         # that dialog decide what happens to work the operator did not ask to
         # end, and choosing for them is the power #88 declined to take.
+        waiting = {name: self._pane_needs_a_person(name) for name in expired}
         for name in expired:
-            waiting = self._pane_needs_a_person(name)
-            logger.info(
-                "stop %s: gave up waiting after %gs, and the agent is still running%s",
-                name,
-                self.prefs.stop_timeout(),
-                "; its screen is waiting on a person" if waiting else "",
-            )
-            if waiting:
+            if waiting[name]:
                 with self._stopping_guard:
                     self._awaiting_input.add(name)
         for name in expired:
             try:
-                self._announce(self.get(name))
+                session = self.get(name)
             except MachineUnreadable:
                 logger.warning(
                     "stop timer for %s expired but the machine could not be "
                     "read, so no event was sent; the marker is already dropped",
                     name,
                 )
+                continue
+            # Worded from the state read AFTER the timer, never assumed (#167
+            # review). Only `get` clears the marker on a clean exit, and with
+            # no browser connected nothing calls it, so an agent that exited at
+            # 12s still reaches this line at 30s. Saying "still running" there
+            # is the journal calling a stop that worked a failure.
+            if session.state is State.STOPPED:
+                logger.info(
+                    "stop %s: the %gs wait ran out after the agent had already exited",
+                    name,
+                    self.prefs.stop_timeout(),
+                )
+            else:
+                logger.info(
+                    "stop %s: gave up waiting after %gs, and the row is still %s%s",
+                    name,
+                    self.prefs.stop_timeout(),
+                    session.state.value,
+                    "; its screen is waiting on a person" if waiting[name] else "",
+                )
+            self._announce(session)
         return expired
 
     def locate(self, name: str) -> Session:
