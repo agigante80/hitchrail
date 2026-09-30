@@ -284,7 +284,6 @@ def test_the_private_group_convention_is_read_from_the_passwd_database(
     assert not settings._group_is_private(1000, 1000)
     monkeypatch.setattr(grp, "getgrgid", lambda gid: group("alice"))
     assert not settings._group_is_private(1001, 1000)
-    monkeypatch.setattr(grp, "getgrgid", getgrgid_alice)
     # `usermod -aG alice bob`: private in name only, and the audit's case.
     monkeypatch.setattr(grp, "getgrgid", lambda gid: group("alice", ["bob"]))
     assert not settings._group_is_private(1000, 1000)

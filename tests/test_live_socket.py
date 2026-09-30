@@ -19,6 +19,7 @@ import socket
 import ssl
 import threading
 import time
+import warnings
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -376,6 +377,20 @@ def test_a_query_token_now_reaches_the_access_log_and_that_is_correct(tmp_path: 
     )
 
 
+def _tls11_client() -> ssl.SSLContext:
+    """A client that offers TLS 1.1 and nothing else. `@SECLEVEL=0` lets
+    OpenSSL 3 offer it at all; without it the handshake fails on the CLIENT
+    side and the test would pass against any server."""
+    client = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    client.check_hostname = False
+    client.verify_mode = ssl.CERT_NONE
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        client.minimum_version = client.maximum_version = ssl.TLSVersion.TLSv1_1
+    client.set_ciphers("DEFAULT:@SECLEVEL=0")
+    return client
+
+
 # -- #152: TLS from the server itself, on a real socket ----------------------
 
 
@@ -453,13 +468,19 @@ def test_a_grant_and_a_start_go_through_our_own_tls(tmp_path: Path) -> None:
             started = client.post(f"{base}/api/sessions/main~network", headers=origin)
             assert started.status_code == 201, started.text
             assert started.json()["state"] == "running"
-            # The floor held on the wire: what the socket negotiated is at
-            # least 1.2, which is the assertion premortem 1 names.
+            # What the socket SERVES refuses a client capped at 1.1 (#275).
+            # This proves the property and not its cause: under OpenSSL 3 at
+            # the distribution's default security level a server with no
+            # floor refuses 1.1 as well, measured on 3.0.13, so the floor
+            # itself is guarded by `minimum_version` in `test_tls.py`. The
+            # assertion this replaced read the negotiated version, which is
+            # 1.3 with or without a floor and so could not fail.
             with (
+                pytest.raises(ssl.SSLError),
                 socket.create_connection(("127.0.0.1", port), timeout=TIMEOUT) as raw,
-                trust.wrap_socket(raw, server_hostname="localhost") as tls,
+                _tls11_client().wrap_socket(raw, server_hostname="localhost"),
             ):
-                assert tls.version() in {"TLSv1.2", "TLSv1.3"}, tls.version()
+                pass
     finally:
         server.should_exit = True
         thread.join(timeout=10)

@@ -411,9 +411,9 @@ class Preferences:
         Phase 14 review found the halves applied in sequence, with the
         first written before the second was refused.
 
-        The timeout passes the refusal it would pass on the command line, by
-        building the `Config` it would have built: one validator (premortem
-        2), and `InvalidValue` carries its words.
+        The timeout meets the command line's refusal, `check_stop_timeout`,
+        not a whole `Config`, which re-read the TLS key per PATCH (#267): one
+        validator (premortem 2), and `InvalidValue` carries its words.
         """
         configured = {r.label: r for r in self._roots}
         for label in roots:
