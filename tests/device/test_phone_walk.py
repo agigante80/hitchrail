@@ -50,7 +50,7 @@ async def test_a_running_rows_controls_fit_the_phone(
 
     row = phone_page.locator(f'[data-project="{device_server.project("vessel")}"]')
     await expect(row).to_be_visible(timeout=20_000)
-    for control in ("Open", "Get link", "Stop"):
+    for control in ("Logs", "Open session", "Stop"):
         await expect(row.get_by_role("button", name=control)).to_be_visible()
 
     box = await row.bounding_box()
