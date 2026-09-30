@@ -275,7 +275,10 @@ def test_a_forgetful_test_errors_at_teardown_not_silently(pytester: pytest.Pytes
                 pass
         """
     )
-    result = pytester.runpytest()
+    # `-p no:asyncio` (#364): the inner session has no project config, so
+    # pytest-asyncio warned that its loop scope was unset, the default run's
+    # only warning. Nothing in the inner test is async.
+    result = pytester.runpytest("-p", "no:asyncio")
     result.assert_outcomes(passed=1, errors=1)
 
 

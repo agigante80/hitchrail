@@ -253,8 +253,8 @@ class Tmux:
     def _try(self, argv: list[str]) -> subprocess.CompletedProcess[str]:
         """Run, turning "could not be executed" into a distinct failure.
 
-        `subprocess.run` raises before there is a returncode when tmux is
-        absent or not executable. An earlier version of this method turned that
+        The runner's `Popen` raises before there is a returncode when tmux
+        is absent or not executable. An earlier version of this method turned that
         into a non zero return, on the reasoning that every caller already
         treats non zero as "no".
 
