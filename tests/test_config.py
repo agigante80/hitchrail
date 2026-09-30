@@ -1528,7 +1528,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # a daemon thread never sees the shutdown's `KeyboardInterrupt`.
         # 983 for #167: `_error` logs every refusal it builds, with the
         # docstring saying why `extra` never enters the line.
-        "server.py": 983,
+        # 990 for #365: the lifespan's kill is wrapped in `try`, so a kill
+        # that raises still cancels the sweep and the scan in its `finally`.
+        "server.py": 990,
     }
 
     src = Path(__file__).parent.parent / "src" / "hitchrail"

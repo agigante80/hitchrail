@@ -921,29 +921,36 @@ def create_app(
             # does not itself need bounding. What follows it is bounded
             # already, inside `plugin_runner`'s own `communicate()`, on the
             # daemon thread this call does not wait for.
-            plugin_updates.handle.kill()
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
-            # #180. **This cancels the AWAIT, not the thread, and the
-            # difference matters.** `in_thread` is `run_in_executor`, so
-            # `scan_for_stuck` goes on running in its worker whatever happens
-            # here. Measured: teardown returns in about 3ms with the thread
-            # still working, and the process then blocks for the rest of the
-            # capture at `shutdown_default_executor()`.
-            #
-            # So what this buys is that the lifespan does not HANG, not that the
-            # scan stops. An earlier version of this note claimed the second and
-            # was wrong, which is the defect #178 in this same commit is about:
-            # a comment contradicted by its own code.
-            #
-            # A capture bounded at `_CALL_TIMEOUT_S` is the worst case, so the
-            # process waits up to ten seconds on shutdown. That is the cost of
-            # not being able to cancel a thread, and it is bounded.
-            if scanning is not None:
-                scanning.cancel()
+            # #365. `kill()` is an `os.killpg`, and a group that has become
+            # another user's, or a kernel refusing it, raises. Everything
+            # after it is in the `finally` so that raise cannot leave the
+            # sweep ticking, or a scan awaited by nobody, while the error
+            # goes up: the error is still reported, just not instead.
+            try:
+                plugin_updates.handle.kill()
+            finally:
+                task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
-                    await scanning
+                    await task
+                # #180. **This cancels the AWAIT, not the thread, and the
+                # difference matters.** `in_thread` is `run_in_executor`, so
+                # `scan_for_stuck` goes on running in its worker whatever happens
+                # here. Measured: teardown returns in about 3ms with the thread
+                # still working, and the process then blocks for the rest of the
+                # capture at `shutdown_default_executor()`.
+                #
+                # So what this buys is that the lifespan does not HANG, not that the
+                # scan stops. An earlier version of this note claimed the second and
+                # was wrong, which is the defect #178 in this same commit is about:
+                # a comment contradicted by its own code.
+                #
+                # A capture bounded at `_CALL_TIMEOUT_S` is the worst case, so the
+                # process waits up to ten seconds on shutdown. That is the cost of
+                # not being able to cancel a thread, and it is bounded.
+                if scanning is not None:
+                    scanning.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await scanning
 
     return Starlette(
         routes=[
