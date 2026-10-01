@@ -1441,6 +1441,32 @@ def test_the_startup_block_says_when_a_proxy_origin_gets_no_secure_cookie(
     assert any(line.startswith("token cookie not Secure") for line in lines) is said, lines
 
 
+@pytest.mark.parametrize(
+    ("prompt", "said"),
+    [
+        (None, "stop prompt none"),
+        ("/wrapup now-distinctive", "stop prompt set (a slash command), waits up to 120s"),
+        (
+            "please wrap up now-distinctive",
+            "stop prompt set (plain text: delivered at the agent's next tool boundary, "
+            "inside its current task), waits up to 120s",
+        ),
+    ],
+    ids=["none", "slash", "plain"],
+)
+def test_the_startup_block_says_what_kind_of_stop_prompt_and_never_the_prompt(
+    tmp_path: Path, prompt: str | None, said: str
+) -> None:
+    """#242: plain text lands mid task, which is worth knowing when a wrap up
+    surprises; the text is the operator's and the journal is not theirs alone."""
+    config = make_config(tmp_path, stop_prompt=prompt, stop_prompt_timeout=120.0)
+    lines = cli.startup_block(
+        config, cli.Preflight([], "/usr/bin/claude", "/usr/bin/tmux"), "info"
+    )
+    assert said in lines, lines
+    assert not any("distinctive" in line for line in lines)
+
+
 def test_the_token_never_reaches_a_log(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

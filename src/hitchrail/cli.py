@@ -528,6 +528,18 @@ def banner(config: Config) -> str:
     return "\n".join(lines)
 
 
+def _stop_prompt_line(config: Config) -> str:
+    if not config.stop_prompt:
+        return "stop prompt none"
+    if config.stop_prompt.startswith("/"):
+        kind = "a slash command"
+    else:
+        kind = (
+            "plain text: delivered at the agent's next tool boundary, inside its current task"
+        )
+    return f"stop prompt set ({kind}), waits up to {config.stop_prompt_timeout:g}s"
+
+
 def startup_block(config: Config, found: Preflight, level: str) -> list[str]:
     """What a bug report needs to be a diagnosis, one fact per line (#167).
 
@@ -554,9 +566,10 @@ def startup_block(config: Config, found: Preflight, level: str) -> list[str]:
         f"tmux {found.tmux_binary}, socket {config.tmux_socket or 'the default'}",
         f"sessions prefixed {config.session_prefix!r}, stop timeout {config.stop_timeout:g}s",
         # Whether a prompt is set, never the prompt: what an operator tells
-        # their agent is theirs, and this line goes to the journal.
-        f"stop prompt {'set' if config.stop_prompt else 'none'}"
-        + (f", given {config.stop_prompt_timeout:g}s" if config.stop_prompt else ""),
+        # their agent is theirs, and this line goes to the journal. #242 asked
+        # for the text itself; the kind is what an operator needs to debug a
+        # wrap up that ran inside the current task, and it reveals nothing.
+        _stop_prompt_line(config),
         f"config file {config.config_path or 'none'}, log level {level}",
     ]
     if config.self_project:
