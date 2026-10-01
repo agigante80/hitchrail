@@ -150,6 +150,9 @@ Tasks continue from Phase 22's 163. Batches run in order.
       else reports; the self project is never killed.
 - [x] **Task 176, #239.** Design 4.3 step 4 and "Deliberately later" amended;
       E2E where a shim answering `/exit` with a prompt ends `stopped`.
+- [ ] **#239's settings page control.** MOVED OUT to #409, Backlog: shipped
+      read only there, since `end_anyway` is a kill nobody tapped and a page
+      the token reaches is a weaker choice than a flag; Andrea decides.
 
 ### Batch 6: the Backlog's first rule, tasks from 177
 
@@ -239,3 +242,4 @@ the loop and the remainder is filed.
 - Text from the page into a session: "Deliberately later"
 - More than one agent's wrap up: Phase 23
 - The settings page's layout: Phase 24
+- Editing `stop_policy` from the settings page: Backlog, #409
