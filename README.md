@@ -537,10 +537,44 @@ install it first.
 | `--expect-gateway-mac` | none | Refuse to start unless the default gateway has this MAC address, read from `/proc/net/route` and `/proc/net/arp`. A guard against a laptop serving on a network it joined by accident; a MAC is spoofable, so not against an attacker on the LAN. Checked once at start. A mismatch is exit 2, which the unit keeps stopped; "cannot tell" (no route yet, no ARP entry, a pinned entry) is exit 3, which it retries |
 | `--session-prefix` | `hr-` | What every tmux session this instance creates is named with, and the only sessions it will ever stop. Two instances on one tmux server need two prefixes: with one, each reads the other's agent in a same named folder as its own and can stop it. Also `session_prefix` in the config file |
 | `--stop-timeout` | `30` | Seconds to wait for a graceful stop before reporting that it timed out, at most 3600. It reports; it does not escalate |
+| `--stop-prompt` | none | One line Stop types to the agent before asking it to exit, such as a slash command that commits and writes notes. See "Wrapping up on Stop" below. Also `stop_prompt` in the config file |
+| `--stop-prompt-timeout` | `300` | Seconds the agent has to finish its task and the prompt before Stop exits anyway, 10 to 3600. Also `stop_prompt_timeout` in the config file |
 | `--version` | | Print the version and exit |
 | `-h`, `--help` | | Print the options and exit |
 
 One subcommand, and bare `hitchrail` still means the server.
+
+### Wrapping up on Stop
+
+By default Stop interrupts the agent and asks it to exit, so work in flight
+can be lost. Set `stop_prompt` and Stop asks it to wrap up first:
+
+```toml
+stop_prompt = "/wrapup"
+stop_prompt_timeout = 300
+```
+
+There is no default prompt: what an agent should do before it stops is
+yours to say. Hitchrail clears the agent's input box, types the prompt behind
+the task in flight, waits until the agent is idle again, then asks it to exit.
+The dialog says which of the two it is waiting on and offers **Exit now**,
+which skips the rest of the wait without killing anything. Kill is unchanged
+and still interrupts.
+
+- **A slash command** waits for the current turn to end. **Plain text** is
+  delivered at the agent's next tool boundary, so it reaches the agent inside
+  its current task. The startup log says which you have.
+- **A draft in the terminal is cleared** when Stop types the prompt. Stop
+  refuses when a message is already queued, since that would run first.
+- **The ceiling interrupts the task, not the wrap up.** When
+  `stop_prompt_timeout` passes, the exit's interrupt cuts the task, the queued
+  prompt then runs, and the exit follows it. So `stop_timeout` has to cover
+  one run of the prompt; raise it for a long one.
+- **No secrets in the prompt.** It is typed into a pane, shown on the settings
+  page and readable by anyone who can attach to the session. The log never
+  records it.
+- Neither setting can be changed from the phone: a request that could set
+  what Stop types would be a route that types arbitrary text.
 
 ### Updating the agent's plugins
 

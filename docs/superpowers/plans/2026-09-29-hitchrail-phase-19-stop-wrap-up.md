@@ -119,27 +119,27 @@ Tasks continue from Phase 22's 163. Batches run in order.
 
 ### Batch 4: Stop queues the closing skill, tasks 169 to 174
 
-- [ ] **Task 169.** Measure, on a real `claude` in a private tmux: the pane
+- [x] **Task 169.** Measure, on a real `claude` in a private tmux: the pane
       bytes while a typed message waits behind a running task, the moment it
       is dequeued, and what `C-u` does to a queued message. Recorded in memory
       and on #242 as #101 recorded the modal. Nothing after this task is
       built until it is.
-- [ ] **Task 170, #242 rewritten.** The body rewritten for order B from task
+- [x] **Task 170, #242 rewritten.** The body rewritten for order B from task
       169's bytes, the old body preserved as a comment, and re-gated.
-- [ ] **Task 171, #242.** `Config.stop_prompt` and `stop_prompt_timeout`, with
+- [x] **Task 171, #242.** `Config.stop_prompt` and `stop_prompt_timeout`, with
       refusals for a newline or control character. **No default: unset or
       empty is today's Stop**, decided 2026-10-01 because the obvious
       default, `/forge-kit-governance:closing-sessions`, is a skill most
       installs do not have. The operator sets it once in the config file,
       and the startup block says which prompt Stop will send, or that it
       sends none.
-- [ ] **Task 172, #242.** `Tmux.send_text` through `send-keys -l`;
+- [x] **Task 172, #242.** `Tmux.send_text` through `send-keys -l`;
       `claude_ipc.request_wrap_up` (no `Escape`) and `wrap_up_finished`; the
       grep guard widened to name both typing functions.
-- [ ] **Task 173, #242.** `Engine.stop()` gains the `closing` phase, the sweep
+- [x] **Task 173, #242.** `Engine.stop()` gains the `closing` phase, the sweep
       advances it to `exiting`, `Session.stopping_phase`, `docs/api.md`, and
       design 4.3 step 2 amended.
-- [ ] **Task 174, #242.** The wait dialog names the phase; E2E with a fake
+- [x] **Task 174, #242.** The wait dialog names the phase; E2E with a fake
       `claude` shim that queues a line while busy and writes a handoff when it
       reads the prompt, driven on events (#70).
 

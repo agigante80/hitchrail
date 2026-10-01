@@ -227,13 +227,19 @@ the user's own tmux server, which this project drives by default.
 Stopping is a sequence, not a button:
 
 1. **Confirm.** Cheap to reverse, so it is one tap away from nothing happening.
-2. **Graceful request.** Hitchrail asks the agent to finish and exit, and the row
-   enters `stopping`. Nothing has been killed. The user watches it happen.
+2. **Graceful request.** Hitchrail asks the agent to exit, and the row enters
+   `stopping`. Nothing has been killed. The user watches it happen. With a
+   `stop_prompt` configured (#242) this is a request and a wait: the prompt is
+   typed behind the task in flight, the row reads `closing` until the agent is
+   idle again or `stop_prompt_timeout` passes, and only then is the exit sent
+   and the row reads `exiting`. A second Stop during `closing` skips to the
+   exit and never retypes the prompt.
 3. **Escalation, available throughout.** A kill control is present for the whole
    wait, so a user who does not want to wait never has to. It is styled as the
    secondary, destructive path, never as the way out of a stuck dialog.
 4. **Timeout.** After 30 seconds with no reply, Hitchrail stops waiting and says
-   so. It does **not** escalate on its own. The session is still running, and
+   so. With a prompt set, the 30 seconds count from the exit phase, not from
+   the tap. It does **not** escalate on its own. The session is still running, and
    the choice to kill it stays the user's.
 
 Kill is deliberately unreachable before a graceful attempt has been made. Not
@@ -244,8 +250,9 @@ otherwise sit under the thumb at the same size as the safe one.
 "ask the agent to finish", and what that ASK physically is belongs entirely to
 `claude_ipc`. For Claude Code it is a key sequence typed into the pane. For
 something else it could be a signal, a subcommand, or an HTTP call. The engine
-therefore calls one function, `claude_ipc.request_stop(...)`, and never iterates
-a key sequence or reaches for `tmux.send_keys` itself.
+therefore calls `claude_ipc.request_wrap_up(...)` when a prompt is set and
+`claude_ipc.request_stop(...)` for the exit, and never iterates a key sequence
+or reaches for `tmux.send_keys` or `tmux.send_text` itself.
 
 This split is worth stating because the obvious implementation gets it wrong.
 Writing `for keys in GRACEFUL_STOP_KEYS: tmux.send_keys(...)` in the engine puts
@@ -568,9 +575,13 @@ is where that distinction reversed the design.
 
 The honest framing is **relay, not impersonation**: a person tapped Stop, and
 Hitchrail passed that to the pane the way a keyboard would. It holds exactly as
-long as the relayed content is what the person asked for. Today there is one
-call site, `claude_ipc.request_stop`, which sends only the stop keys, and
-nothing structural keeps it that narrow. A future feature that sent a typed
+long as the relayed content is what the person asked for. The call sites are
+the quarantine's three typing functions, each typing a fixed string the
+operator authored or a fixed key sequence: `request_stop` the stop keys,
+`send_answer` one key from a literal set, and `request_wrap_up` (#242) the
+`stop_prompt` from the config file or the command line, which no request can
+set. A grep test keeps every `send_keys` and `send_text` call inside
+`claude_ipc`; nothing structural keeps what those functions type that narrow. A future feature that sent a typed
 instruction on the user's behalf would be a different product with a different
 risk and would not look different from here.
 

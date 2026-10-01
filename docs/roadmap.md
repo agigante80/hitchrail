@@ -254,6 +254,10 @@ Not scheduled, and not to be smuggled into an earlier phase:
   without re-reading the pane ever appears, this becomes the deferred item and
   the deferral binds.
 
+  #242's `stop_prompt` is not the deferred item either: a fixed string the
+  operator configured on the machine, typed on Stop. A string arriving through
+  the API would be, which is why no route can set it.
+
 ## Notes
 
 - **Deleted, 2026-09-26: "Phase 18: Modules that do one thing".** Its splits

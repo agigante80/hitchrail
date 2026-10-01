@@ -1126,7 +1126,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 1584 for #279: the signal is bound to the pid the person confirmed,
         # with the docstring saying why a second agent for the folder is ours
         # and still not the one asked about.
-        "engine.py": 1584,
+        # 1734 for #242: the wrap up phase, claimed under the lock so the
+        # sweep never types into the middle of the prompt, its ceiling, and
+        # the sentence on why a second Stop skips to the exit.
+        "engine.py": 1734,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -1226,7 +1229,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # the reap after the kill by closing the pipes rather than a second
         # unbounded `communicate()` (H1). 680 for #363's pointer to why the
         # group is killed even after the child was reaped.
-        "tmux.py": 680,
+        # 693 for #242: `send_text` through `send-keys -l`, with why the
+        # flag is what keeps a prompt from being read as key names.
+        "tmux.py": 693,
         # 413, and thirteen lines over the guideline is not a second job. #18
         # already took the host vocabulary out of this file, and what is left
         # is one dataclass and its startup refusals, which is one thing. The
@@ -1279,7 +1284,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # behaviour and a new refusal, not the growth of one job into two.
         # 738 for #167: `token` leaves the dataclass repr, which put it in any
         # log line or traceback that printed a `Config`.
-        "config.py": 738,
+        # 789 for #242: `stop_prompt` and its ceiling, with the refusals for
+        # a newline or a control character and the 10s floor.
+        "config.py": 789,
         # 460 for #123, #154 and #238: `--config`, `--session-prefix` and the
         # source tagging the settings page shows, which is one function
         # reading the flags back out of argv. Nothing here parses a value
@@ -1337,7 +1344,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # and `update_plugins_command` says why it resolves what serve refuses.
         # 956 for #283: the startup line saying an https origin in front of
         # a bind off loopback gets no `Secure` cookie, and how to get it.
-        "cli.py": 956,
+        # 1005 for #242: the two flags, and the startup line naming the kind
+        # of prompt Stop sends without echoing the prompt itself.
+        "cli.py": 1005,
         # 409, nine lines over, down from 542. #115 deleted the `?token=`
         # carrier: 135 lines once the two blocks inside `TokenMiddleware`
         # that only served it are counted.
@@ -1390,7 +1399,8 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 472 for #281: the resolved directory checked beside the lexical
         # one, and the state file read by the operator file's rule, each
         # with the decision written where a reader would undo it.
-        "settings.py": 472,
+        # 488 for #242: the two file keys, read by the same rule as the rest.
+        "settings.py": 488,
         # rather than one. A refusal handler is the shape this file is made of.
         # 513 to 517 for #120. The listing payload reports every configured
         # root as a labelled list rather than one path string, and the comment
@@ -1453,7 +1463,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 1009 for #370: the plugin route names all five record codes.
         # 1021 for #399 and #400: one catch for what an unparseable body
         # raises, and the signal body refuses a key it does not take.
-        "server.py": 1021,
+        # 1052 for #242: the sweep starts the wrap up watch, at most one in
+        # flight like the scan, and the listing says whether a prompt is set,
+        # never which.
+        "server.py": 1052,
     }
 
     # Keyed by the path under `src/hitchrail` (#368), so a package's
