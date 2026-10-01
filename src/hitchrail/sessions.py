@@ -272,6 +272,13 @@ class Session:
     uptime_s: int = 0
     url: str | None = None
     stopping: bool = False
+    # #242. Which half of a graceful stop this row is in, while `stopping`:
+    # `closing` while the wrap up prompt runs, `exiting` once the exit
+    # sequence is sent. `stop_ceiling` says the exit was sent because the
+    # wrap up ran out of time, so the dialog can say so rather than infer it
+    # from a clock in the browser.
+    stopping_phase: str | None = None
+    stop_ceiling: bool = False
     protected: bool = False
     # An OVERLAY on the four states, like `stopping`, and not a fifth one (#88).
     # The session really is running: the tmux session is alive and owns a live
@@ -338,6 +345,8 @@ class Session:
             "uptime_s": self.uptime_s,
             "url": self.url,
             "stopping": self.stopping,
+            "stopping_phase": self.stopping_phase,
+            "stop_ceiling": self.stop_ceiling,
             "protected": self.protected,
             "awaiting_trust": self.awaiting_trust,
             "awaiting_input": self.awaiting_input,

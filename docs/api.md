@@ -100,6 +100,15 @@ client that meant to be gentle is never one query parameter away from a kill.
 The graceful call returns as soon as the request is sent and reports progress
 over the event stream like every other state change.
 
+With `stop_prompt` set (#242), the graceful call first types that prompt into
+the agent's box WITHOUT interrupting it, so it runs after the task in flight;
+the row reads `stopping_phase: "closing"`. When the agent has finished both,
+or `stop_prompt_timeout` has passed, the server sends the exit and the row
+reads `exiting`. A second `DELETE` during `closing` skips to the exit at once
+and never retypes the prompt; one that arrives while the prompt is still being
+typed answers 202 and types nothing. If a message is already queued in the
+box, the call is 409 `stop_unsafe` and nothing is typed after the clear.
+
 ### The listing payload
 
 `GET /api/projects` answers one object. The fields, checked against the server
@@ -119,6 +128,8 @@ in both directions by the suite:
 | `server.user` | the account this server runs as, which is the account every session it starts runs as; the numeric uid when the account has no passwd entry |
 | `server.started_at` | when this process started, Unix seconds; format it in the viewer's timezone, never the server's |
 | `server.stop_timeout` | seconds the server waits for a graceful stop before reporting it timed out; the browser's own patience is this number, read here rather than assumed |
+| `server.stop_prompt_set` | whether Stop types a wrap up prompt before the exit (#242); the prompt itself is only in `GET /api/config` |
+| `server.stop_prompt_timeout` | seconds the agent has to finish its task and the wrap up before Stop sends the exit anyway; `stop_timeout` counts from that exit |
 
 ### The session payload
 
@@ -135,6 +146,8 @@ One project, as `projects` lists it, as `POST` and `DELETE` on
 | `uptime_s` | how long the agent has run |
 | `url` | the session link once the agent has published one, else null |
 | `stopping` | a graceful stop is in flight |
+| `stopping_phase` | while `stopping`: `closing` while the wrap up prompt runs behind the agent's task, `exiting` once the exit is sent; null otherwise |
+| `stop_ceiling` | the exit was sent because the wrap up ran out of `stop_prompt_timeout`, not because it finished |
 | `protected` | the self project; refuses every mutating route |
 | `awaiting_trust` | the agent is sitting on its trust prompt |
 | `awaiting_input` | the agent is sitting on a question only a person can answer |
@@ -223,7 +236,8 @@ The effective configuration, for a person on a phone asking "what is this
 instance pointed at" without SSH. Every value is `{value, source}` where
 `source` is `flag`, `file`, `env` or `default`: `host`, `port`,
 `allow_hosts`, `allow_origins`, `self_project`, `agent_binary`,
-`session_prefix`, `tls` (the certificate's path, or null),
+`session_prefix`, `stop_prompt` and `stop_prompt_timeout` (read only, #242),
+`tls` (the certificate's path, or null),
 `expect_gateway_mac` (the flag's value, normalised, or null), the three
 memory figures, `config_file` and `state_file`.
 `roots` is every configured root as `{label, path, enabled, editable,

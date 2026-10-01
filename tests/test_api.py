@@ -11,6 +11,7 @@ import signal
 import threading
 import time
 from collections.abc import AsyncIterator, Callable
+from dataclasses import replace
 
 import httpx
 import pytest
@@ -2147,6 +2148,164 @@ async def test_a_scan_still_running_at_shutdown_does_not_hang_the_lifespan(
         f"returned: {left_behind}. The scan must be cancelled at teardown, or it "
         f"outlives the engine it runs against. See #180."
     )
+
+
+async def test_a_wedged_wrap_up_holds_back_neither_expiry_nor_itself(
+    config: Config, tmux: FakeTmux, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#242. `advance_wrap_ups` captures a pane per closing row and may type
+    the exit with its settles, so it is started, never awaited, and at most
+    one runs: the scan's shape, for the scan's reasons. Awaited, a hung
+    capture would stop every other row's expiry; unguarded, a wedged tmux
+    fills the executor that serves the operator's stop. And it must start
+    again once the first finishes, or a wrap up never moves on."""
+    monkeypatch.setattr(srv, "SWEEP_INTERVAL_S", 0.02)
+
+    started = 0
+    expiries = 0
+    release = threading.Event()
+
+    class Wedged(Engine):
+        def expire_stops(self) -> list[str]:
+            nonlocal expiries
+            expiries += 1
+            return []
+
+        def scan_for_stuck(self) -> list[str]:
+            return []
+
+        def advance_wrap_ups(self) -> list[str]:
+            nonlocal started
+            started += 1
+            release.wait(timeout=5)
+            return []
+
+    clock = FakeClock()
+    engine = Wedged(
+        config=config,
+        tmux=tmux,
+        procs_fn=procs_from(""),
+        meminfo_fn=lambda: PLENTY,
+        clock=clock,
+        sleep=clock.sleep,
+    )
+
+    app = create_app(engine=engine, config=config, bus=EventBus())
+    before = asyncio.all_tasks()
+    try:
+        async with app.router.lifespan_context(app):
+            await asyncio.sleep(0.3)
+            concurrent, expired_meanwhile = started, expiries
+            release.set()
+            for _ in range(200):
+                if started > concurrent:
+                    break
+                await asyncio.sleep(0.02)
+            resumed = started
+        left_behind = [t for t in asyncio.all_tasks() - before if not t.done()]
+    finally:
+        release.set()
+
+    assert concurrent == 1, f"{concurrent} wrap up sweeps ran at once"
+    assert expired_meanwhile > 3, "a wedged wrap up held back expiry"
+    assert resumed > concurrent, "the wrap up sweep never started again"
+    assert not left_behind, f"pending after the lifespan: {left_behind}"
+
+
+async def test_a_wrap_up_still_running_at_shutdown_is_cancelled(
+    config: Config, tmux: FakeTmux, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The teardown half, which the test above cannot reach because it
+    releases inside the lifespan. Same assertion as the scan's: nothing left
+    pending against an engine the lifespan has finished with."""
+    monkeypatch.setattr(srv, "SWEEP_INTERVAL_S", 0.02)
+
+    wrapping = threading.Event()
+    release = threading.Event()
+
+    class Wedged(Engine):
+        def expire_stops(self) -> list[str]:
+            return []
+
+        def scan_for_stuck(self) -> list[str]:
+            return []
+
+        def advance_wrap_ups(self) -> list[str]:
+            wrapping.set()
+            release.wait(timeout=5)
+            return []
+
+    clock = FakeClock()
+    engine = Wedged(
+        config=config,
+        tmux=tmux,
+        procs_fn=procs_from(""),
+        meminfo_fn=lambda: PLENTY,
+        clock=clock,
+        sleep=clock.sleep,
+    )
+
+    app = create_app(engine=engine, config=config, bus=EventBus())
+    before = asyncio.all_tasks()
+    started = time.monotonic()
+    try:
+        async with app.router.lifespan_context(app):
+            assert await asyncio.to_thread(wrapping.wait, 5), "the wrap up never started"
+        teardown_took = time.monotonic() - started
+        left_behind = [t for t in asyncio.all_tasks() - before if not t.done()]
+    finally:
+        release.set()
+
+    assert teardown_took < 2.0, f"teardown waited {teardown_took:.2f}s on a wrap up"
+    assert not left_behind, f"pending after the lifespan: {left_behind}"
+
+
+async def test_a_wrap_up_moves_on_with_no_browser_connected(
+    config: Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#242. The phase advances from the sweep's always on path, not from
+    `scan_for_stuck`, which does nothing while nobody is watching: a wrap up
+    has to finish with the phone in a pocket. A second DELETE during the wait
+    is Exit now, and answers 202 as a stop always has."""
+    monkeypatch.setattr(srv, "SWEEP_INTERVAL_S", 0.02)
+    wrapped = replace(config, stop_prompt="/wrapup")
+    tmux = FakeTmux(sessions={proj("vessel"): 500})
+    engine = make_engine(wrapped, tmux, procs_from(RUNNING_PS))
+    clock = engine._clock
+    assert isinstance(clock, FakeClock)
+    bus = EventBus()
+    app = create_app(engine=engine, config=wrapped, bus=bus)
+    path = f"/api/sessions/{proj('vessel')}"
+    transport = httpx.ASGITransport(app=app)
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url="http://localhost") as c,
+    ):
+        r = await c.delete(path, headers=HEADERS)
+        assert r.status_code == 202, r.text
+        assert r.json()["stopping_phase"] == "closing"
+        phase = "closing"
+        for _ in range(200):
+            clock.advance(1)
+            await asyncio.sleep(0.02)
+            rows = (await c.get("/api/projects", headers=HEADERS)).json()["projects"]
+            (row,) = [p for p in rows if p["name"] == proj("vessel")]
+            phase = row["stopping_phase"]
+            if phase != "closing":
+                break
+        assert bus.subscriber_count == 0
+        assert phase == "exiting", "the sweep never moved the wrap up on"
+
+    # And Exit now, on a fresh engine still in `closing`.
+    engine = make_engine(
+        wrapped, FakeTmux(sessions={proj("vessel"): 500}), procs_from(RUNNING_PS)
+    )
+    async with client_for(engine, wrapped) as c:
+        first = await c.delete(path, headers=HEADERS)
+        second = await c.delete(path, headers=HEADERS)
+    assert first.json()["stopping_phase"] == "closing"
+    assert second.status_code == 202, second.text
+    assert second.json()["stopping_phase"] == "exiting"
 
 
 # -- #107: the signal route, every refusal with its code ---------------------

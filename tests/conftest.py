@@ -422,6 +422,16 @@ class FakeTmux(Tmux):
     def send_keys(self, project: str, *keys: str) -> None:
         self.sent.append((project, keys))
 
+    def send_text(self, project: str, text: str) -> None:
+        """#242's literal text, in the same list as the keys, because the
+        property under test is the ORDER: clear, text, then `Enter`."""
+        self.sent.append((project, (TYPED, text)))
+
+
+# What `FakeTmux.sent` records ahead of literal text, so a typed prompt of
+# `Enter` cannot read as the key.
+TYPED = "<typed>"
+
 
 class FakeClock:
     """A movable clock, plus the sleep that moves it.

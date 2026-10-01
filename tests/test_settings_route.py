@@ -796,3 +796,34 @@ def test_the_guard_sees_a_path_converter(engine: Engine, config: Config) -> None
     ]
     found = RouteSurfaces(widened, pathlib.Path(server.__file__).read_text())
     assert found.converters == {"name:path"}
+
+
+async def test_the_wrap_up_settings_are_shown_and_never_editable(
+    tmp_path: pathlib.Path, config: Config, engine: Engine
+) -> None:
+    """#242. Read only on the page: a prompt is text Hitchrail types into an
+    agent, and a route that could set it is a route that types arbitrary text,
+    which the deferred terminal is. The operator's file and flags own it."""
+    wrapped = replace(config, stop_prompt="/wrapup", stop_prompt_timeout=120.0)
+    app = create_app(engine=engine, config=wrapped, bus=EventBus())
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as c:
+        body = (await c.get("/api/config", headers=HEADERS)).json()
+        assert body["stop_prompt"] == {"value": "/wrapup", "source": "default"}
+        assert body["stop_prompt_timeout"] == {"value": 120.0, "source": "default"}
+        for key, value in (("stop_prompt", "/rm -rf"), ("stop_prompt_timeout", 10)):
+            r = await c.patch("/api/config", json={key: value}, headers=HEADERS)
+            assert r.status_code == 400, r.text
+            assert r.json()["code"] == "not_editable"
+        listing = await _listing(c)
+    assert listing["server"]["stop_prompt_set"] is True
+    assert listing["server"]["stop_prompt_timeout"] == 120.0
+    assert "/wrapup" not in str(listing), "the listing says whether, never what"
+    assert config.state_path is not None
+    assert not config.state_path.exists()
+
+
+async def test_with_no_prompt_the_listing_says_none_is_set(client: httpx.AsyncClient) -> None:
+    server_facts = (await _listing(client))["server"]
+    assert server_facts["stop_prompt_set"] is False
+    assert server_facts["stop_prompt_timeout"] == 300.0

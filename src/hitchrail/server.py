@@ -50,9 +50,10 @@ SWEEP_INTERVAL_S = 1.0
 # walks a body of `{"roots": {"<label>": {"enabled": bool}}, "stop_timeout":
 # int}` and refuses any key that is not named here, so the perimeter (a
 # root's path, the bind, the allowlists, the token, `agent_binary`,
-# `session_prefix`, `self_project`, and `stop_prompt` when #242 adds it)
-# cannot become editable by an edit elsewhere: adding a name to either set is
-# the only way, and `tests/test_settings_route.py` asserts both sets member by
+# `session_prefix`, `self_project`, and #242's `stop_prompt`, which a
+# request setting would make a route that types arbitrary text) cannot
+# become editable by an edit elsewhere: adding a name to either set is the
+# only way, and `tests/test_settings_route.py` asserts both sets member by
 # member. The test for membership is #238's: does changing this let a request
 # do anything a request with the token cannot already do? A longer wait does
 # not; hiding a configured root does not. The label between the two levels is
@@ -222,7 +223,15 @@ def create_app(
         # to be right before the settings page has ever been opened, and
         # this is the payload the page already fetches first. Read per
         # request because the settings route can change it.
-        return {**server_facts, "stop_timeout": engine.prefs.stop_timeout()}
+        return {
+            **server_facts,
+            "stop_timeout": engine.prefs.stop_timeout(),
+            # #242. Whether Stop wraps up first, and for how long, so the
+            # dialog's deadline is right. Never the prompt itself: that is in
+            # `/api/config`, behind the same token, and not in every listing.
+            "stop_prompt_set": config.stop_prompt is not None,
+            "stop_prompt_timeout": config.stop_prompt_timeout,
+        }
 
     async def list_projects(request: Request) -> Response:
         # ONE scan, one thread hop, one consistent answer.
@@ -421,6 +430,10 @@ def create_app(
             "self_project": shown("self_project", config.self_project),
             "agent_binary": shown("agent_binary", config.agent_binary),
             "session_prefix": shown("session_prefix", config.session_prefix),
+            # #242. Read only: a request that could set what Stop TYPES would
+            # be the free text input the roadmap defers.
+            "stop_prompt": shown("stop_prompt", config.stop_prompt),
+            "stop_prompt_timeout": shown("stop_prompt_timeout", config.stop_prompt_timeout),
             # The certificate's path, or none: what "is this HTTPS" needs.
             "tls": shown("tls", _text(config.tls_cert)),
             "expect_gateway_mac": shown("expect_gateway_mac", config.expect_gateway_mac),
@@ -877,6 +890,8 @@ def create_app(
         # #180. At most one scan in flight, tracked so the expiry loop never
         # waits behind it and so teardown can cancel it.
         scanning: asyncio.Task[list[str]] | None = None
+        # #242. The same shape for the wrap up watch, for the same reason.
+        wrapping: asyncio.Task[list[str]] | None = None
 
         def scan_finished(task: asyncio.Task[list[str]]) -> None:
             """A task nobody awaits swallows its exception, and this one is the
@@ -896,6 +911,14 @@ def create_app(
                     exc_info=task.exception(),
                 )
 
+        def wrap_up_finished(task: asyncio.Task[list[str]]) -> None:
+            """`scan_finished`'s argument, for the wrap up watch (#242)."""
+            if not task.cancelled() and task.exception() is not None:
+                logger.error(
+                    "wrap up watch failed; the sweep continues",
+                    exc_info=task.exception(),
+                )
+
         async def sweep() -> None:
             """Expire stop markers on a timer, so a timeout the user is
             watching resolves without waiting for the next poll.
@@ -909,7 +932,7 @@ def create_app(
             operational case (a machine it cannot read); this catches the
             unexpected one and says so.
             """
-            nonlocal scanning
+            nonlocal scanning, wrapping
             while True:
                 await asyncio.sleep(SWEEP_INTERVAL_S)
                 try:
@@ -935,6 +958,13 @@ def create_app(
                     if scanning is None or scanning.done():
                         scanning = asyncio.create_task(in_thread(engine.scan_for_stuck))
                         scanning.add_done_callback(scan_finished)
+                    # #242. Started, not awaited, at most one in flight, as the
+                    # scan above and for its reason: it captures a pane per
+                    # wrapping row and may type the exit sequence with its
+                    # settles. Unlike the scan it runs with nobody watching.
+                    if wrapping is None or wrapping.done():
+                        wrapping = asyncio.create_task(in_thread(engine.advance_wrap_ups))
+                        wrapping.add_done_callback(wrap_up_finished)
                 except Exception:
                     logger.exception("stop sweep failed; the timer continues")
 
@@ -978,10 +1008,11 @@ def create_app(
                 # A capture bounded at `_CALL_TIMEOUT_S` is the worst case, so the
                 # process waits up to ten seconds on shutdown. That is the cost of
                 # not being able to cancel a thread, and it is bounded.
-                if scanning is not None:
-                    scanning.cancel()
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await scanning
+                for pending in (scanning, wrapping):
+                    if pending is not None:
+                        pending.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await pending
 
     return Starlette(
         routes=[
