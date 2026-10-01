@@ -1119,7 +1119,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # changes, as log lines, each with the comment saying why pane output
         # is never one of them. 1569 for #167's review: the timeout line
         # worded from the row read after the timer, and why it must be.
-        "engine.py": 1569,
+        # 1584 for #279: the signal is bound to the pid the person confirmed,
+        # with the docstring saying why a second agent for the folder is ours
+        # and still not the one asked about.
+        "engine.py": 1584,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -1440,7 +1443,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # docstring saying why `extra` never enters the line.
         # 990 for #365: the lifespan's kill is wrapped in `try`, so a kill
         # that raises still cancels the sweep and the scan in its `finally`.
-        "server.py": 990,
+        # 1008 for #279: the signal route reads an optional pid, and refuses a
+        # body it cannot read rather than signal as if none were sent.
+        "server.py": 1008,
     }
 
     # Keyed by the path under `src/hitchrail` (#368), so a package's
