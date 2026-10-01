@@ -1524,6 +1524,14 @@ class Engine:
             except (claude_ipc.StopNotSafe, TmuxUnavailable) as exc:
                 self._drop(name, marker)
                 logger.info("stop %s: exit refused after wrap up, %s", name, exc)
+                # The stop ends here, so this is `expire_stops`' moment: one
+                # look at the pane, or the page says "no answer" over a
+                # question the person was never shown (#242 review). Only the
+                # report; `end_anyway` kills a stop that expired after its exit
+                # was SENT, and this one never was.
+                if self._pane_needs_a_person(name):
+                    with self._stopping_guard:
+                        self._awaiting_input.add(name)
             moved.append(name)
             try:
                 self._announce(self.get(name))

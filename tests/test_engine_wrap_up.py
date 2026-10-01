@@ -14,7 +14,15 @@ from typing import Any
 
 import pytest
 
-from conftest import TRUST_MODAL, TYPED, FakeClock, FakeTmux, procs_from, ps_row
+from conftest import (
+    DIRTY_INPUT_BOX,
+    TRUST_MODAL,
+    TYPED,
+    FakeClock,
+    FakeTmux,
+    procs_from,
+    ps_row,
+)
 from hitchrail.claude_ipc import GRACEFUL_STOP_KEYS
 from hitchrail.engine import Engine, Protected, StopMarker, StopRefused
 from hitchrail.tmux import TmuxUnavailable
@@ -245,6 +253,31 @@ def test_a_refused_exit_after_the_wrap_up_drops_the_marker(root: Path) -> None:
     assert engine.advance_wrap_ups() == [VESSEL]
     assert engine._stopping.get(VESSEL) is not marker
     assert VESSEL not in engine._stopping
+    # The stop ended on a screen only a person can answer, and the row says
+    # so, or the page reports "no answer" over a question it never showed.
+    assert engine.get(VESSEL).awaiting_input is True
+
+
+def test_a_refused_exit_over_a_draft_is_not_waiting_on_a_person(root: Path) -> None:
+    """Text in an ordinary box is somebody's draft, which refuses the exit and
+    is not a question: the pane look is `expire_stops`' one, not a new one."""
+    engine, tmux, clock = wrap_engine(root)
+    engine.stop(VESSEL)
+    clock.advance(SETTLE)
+    engine.advance_wrap_ups()
+    clock.advance(SETTLE)
+    real = tmux.capture_pane
+    reads = iter(["idle"])
+
+    def capture(project: str, lines: int = 40, escapes: bool = False) -> str:
+        if next(reads, "draft") == "idle":
+            return real(project, lines, escapes)
+        return DIRTY_INPUT_BOX
+
+    tmux.capture_pane = capture  # type: ignore[method-assign]
+    assert engine.advance_wrap_ups() == [VESSEL]
+    assert VESSEL not in engine._stopping
+    assert VESSEL not in engine._awaiting_input
 
 
 def test_a_kill_during_the_wrap_up_ends_it(root: Path) -> None:
