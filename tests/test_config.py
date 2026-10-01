@@ -1006,8 +1006,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # `tests/test_plugins.py` keeps out of every other module, so a second
         # file would put that vocabulary in two places for no reader's benefit.
         # Most of its length is the docstrings saying which race each of
-        # `RunningChild`'s two checks closes. Measured 533 at the split.
-        "claude_ipc/plugins.py": 540,
+        # `RunningChild`'s two checks closes. Measured 533 at the split, and
+        # 550 after #353 gave `_shown` a tail and a backslash rule, each with
+        # the reason a reviewer would otherwise undo.
+        "claude_ipc/plugins.py": 555,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.

