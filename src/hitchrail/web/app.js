@@ -749,7 +749,11 @@ function buildActions(project, actions) {
   // interface that lets you reach a 423 has already failed the person holding
   // the phone: refusing after the tap is worse than not offering the tap.
   if (!project.protected && isRunning(project)) {
-    add("Stop", "").addEventListener("click", () => confirmStop(project));
+    // A row already stopping reopens its wait rather than confirming a second
+    // stop: that DELETE is the Exit now, which interrupts the task, behind a
+    // confirmation promising a wrap up (#242 review).
+    const onStop = project.stopping ? () => reopenStop(project) : () => confirmStop(project);
+    add("Stop", "").addEventListener("click", onStop);
   }
   // A stale session gets Clear, not Stop (#98). Stop asks the agent to exit
   // and there is no agent here, so the API answers `no_agent` every time: the
@@ -1111,10 +1115,39 @@ function confirmClear(project) {
   });
 }
 
-async function beginStop(project) {
-  // One wait per tap. `over` lets Exit now's refusal end the ticker, which
-  // would otherwise paint "no answer" over the refusal it just showed.
+/* The live wait per project, so a second look at a stopping row reuses its
+   ticker. Two tickers for one project read the phase differently, and each
+   repaint then rebuilds the dialog every tick, taking focus (#71). */
+const waits = new Map();
+
+function newWait(project) {
+  // `over` lets Exit now's refusal end the ticker, which would otherwise
+  // paint "no answer" over the refusal it just showed.
+  const previous = waits.get(project.name);
+  if (previous) previous.over = true;
   const wait = { began: Date.now(), over: false, sawClosing: false, exitSeen: false };
+  waits.set(project.name, wait);
+  return wait;
+}
+
+function reopenStop(project) {
+  const live = waits.get(project.name);
+  if (live && !live.over) {
+    showWaiting(project, live, waitingPhase(live, project));
+    return;
+  }
+  // Stopped from another browser, or before this page loaded. The deadline
+  // starts now, later than the server's, which errs long as `stopTimeoutMs`
+  // says it should.
+  const wait = newWait(project);
+  wait.sawClosing = project.stopping_phase === "closing";
+  wait.armed = true;
+  showWaiting(project, wait, waitingPhase(wait, project));
+  awaitStopped(project, wait);
+}
+
+async function beginStop(project) {
+  const wait = newWait(project);
   showWaiting(project, wait, state.server.stop_prompt_set ? "sending" : "waiting");
   const result = await api(`/api/sessions/${encodeURIComponent(project.name)}`, {
     method: "DELETE",
@@ -1125,6 +1158,11 @@ async function beginStop(project) {
     showRefusal(result, project);
     return;
   }
+  // With no prompt the exit's wait starts once the DELETE has answered, as
+  // it did before #242: from the tap it would end before the server's own
+  // expiry most times, and say "no answer" before the server's one look at
+  // the pane could say the agent is waiting on a question (#242 review).
+  if (!state.server.stop_prompt_set) wait.armed = true;
   await refresh();
   awaitStopped(project, wait);
 }
@@ -1228,7 +1266,7 @@ function awaitStopped(project, wait) {
   // the page's patience is both while the row reads `closing`, and the exit's
   // alone from the first `exiting` reading, which is never earlier than the
   // server's `exit_at`: erring long, for the reason `stopTimeoutMs` gives.
-  let deadline = wait.began + stopTimeoutMs() + wrapUpTimeoutMs();
+  let deadline = (wait.armed ? Date.now() : wait.began) + stopTimeoutMs() + wrapUpTimeoutMs();
   // #81. `refresh()` returns whether the listing could be read, and this loop
   // used to discard it. Every listing during the wait could fail and the
   // timeout screen would still state, as fact, that the session has not
@@ -1249,6 +1287,7 @@ function awaitStopped(project, wait) {
     const current = state.projects.find((p) => p.name === project.name);
     if (!current) {
       // Gone from the listing entirely: the folder was removed under us.
+      wait.over = true;
       closeDialog(project.name);
       return;
     }
@@ -1263,6 +1302,7 @@ function awaitStopped(project, wait) {
       // the mistake #81 fixed one branch over. The two timers are independent
       // and either can be the shorter, so this cannot assume its own fires
       // first.
+      wait.over = true;
       if (current.state === "stopped") closeDialog(project.name);
       else showTimedOut(project);
       return;
@@ -1274,11 +1314,20 @@ function awaitStopped(project, wait) {
       deadline = Date.now() + stopTimeoutMs();
     }
     repaintWaiting(project, wait, current);
+    // The marker still being there at the deadline means the server's own
+    // expiry, on a one second sweep, has not run yet, and that expiry is the
+    // one look at the pane that can say the agent is asking a question. Two
+    // sweeps of grace, once, so "no answer" is not said over it (#242 review).
+    if (Date.now() >= deadline && !wait.graced) {
+      wait.graced = true;
+      deadline = Date.now() + 2000;
+    }
     if (Date.now() >= deadline) {
       // The LAST reading, not "did they all fail". At the deadline the question
       // is what is true NOW, and the answer comes from the most recent listing.
       // If that one failed, the page cannot answer, and one blip costing an
       // honest screen instead of a claim is the right way round to be wrong.
+      wait.over = true;
       if (lastReadOk) showTimedOut(project);
       else showLostTrack(project);
       return;
@@ -1594,7 +1643,9 @@ let bulk = null;
 function stoppableRows() {
   // Stale rows get Clear, not Stop (#98), and are left out; the self project
   // never enters the set.
-  return state.projects.filter((p) => isRunning(p) && !p.protected);
+  // A row already stopping is left out too: Stop all would send it the exit,
+  // interrupting a wrap up the confirmation says it is waiting for.
+  return state.projects.filter((p) => isRunning(p) && !p.protected && !p.stopping);
 }
 
 function renderStopAll() {
