@@ -875,6 +875,33 @@ def test_a_key_reaches_a_real_pty_and_the_screen_changes(server: PrivateTmux) ->
     pytest.fail(f"the key never reached the pty; pane was:\n{tmux.capture_pane(project)}")
 
 
+_ECHO_TWO_LINES = (
+    'read -r a; printf "GOT:[%s]\\n" "$a"; read -r b; printf "GOT:[%s]\\n" "$b"; sleep 30'
+)
+
+
+def test_text_that_looks_like_a_key_or_a_flag_arrives_as_text(server: PrivateTmux) -> None:
+    """#242. The wrap up prompt is the operator's free text, and tmux reads a
+    `send-keys` argument as a key name first and a leading `-` as an option.
+    `-l` and `--` are the adapter's answer; a fake can only prove they were
+    passed, and this proves a real tmux honours them."""
+    project = "literal"
+    name = sanitize(f"{PREFIX}{project}")
+    server.run("new-session", "-d", "-s", name, "sh", "-c", _ECHO_TWO_LINES)
+    server.created.append(name)
+    tmux = adapter(server)
+    for text in ("Enter", "-X"):
+        tmux.send_text(project, text)
+        tmux.send_keys(project, "Enter")
+    deadline = time.time() + TIMEOUT
+    while time.time() < deadline:
+        pane = tmux.capture_pane(project)
+        if "GOT:[Enter]" in pane and "GOT:[-X]" in pane:
+            return
+        time.sleep(0.05)
+    pytest.fail(f"the text did not arrive as typed; pane was:\n{tmux.capture_pane(project)}")
+
+
 # #208. The modal row, then the agent moves on and keeps printing: the row is
 # still in the scrollback and nothing newer has drawn an ornament. The loop
 # prints one line a tick so the pane grows while a key could be sent.

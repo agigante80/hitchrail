@@ -678,3 +678,16 @@ class Tmux:
         would mean this module importing the quarantine.
         """
         self._try(self._argv("send-keys", "-t", self.pane_target(project), *keys))
+
+    def send_text(self, project: str, text: str) -> None:
+        """Type `text` as characters, never as key names or flags (#242).
+
+        `-l` makes tmux skip the key name lookup, so `Enter` arrives as five
+        characters. `--` ends the options, and without it a text beginning
+        with `-` is parsed as one: verified on tmux 3.4, `send-keys -l -t
+        =hr-x: -X` answers "not in a mode" and types nothing.
+
+        Attributed to the operator exactly as `send_keys` is, and called from
+        `claude_ipc` alone for the same reason; the grep covers both.
+        """
+        self._try(self._argv("send-keys", "-l", "-t", self.pane_target(project), "--", text))

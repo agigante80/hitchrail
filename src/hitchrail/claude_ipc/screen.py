@@ -260,3 +260,85 @@ def awaits_answer(pane: str) -> bool | None:
     if box is None:
         return None
     return not box
+
+
+# #242, task 169's measurement on Claude Code 2.1.286. The input box stays
+# drawn while the agent works, so `shows_input_box` is True on a busy agent and
+# says nothing about whether a turn ended. What differs is the colour the
+# ornament is drawn in, on the very row `input_is_clear` anchors on:
+#
+#     idle    '\x1b[39m\u276f\xa0                    '
+#     busy    '\x1b[38;5;246m\u276f\xa0\x1b[39m          '
+#     queued  '\x1b[38;5;246m\u276f\xa0\x1b[2m\x1b[39mPress up to edit queued messages\x1b[0m'
+#
+# Read as the escape IMMEDIATELY before the ornament, never by stripping
+# escapes, for `shows_input_box`'s reason: the escape is the whole signal.
+_IDLE_ORNAMENT = "\x1b[39m"
+_BUSY_ORNAMENT = "\x1b[38;5;246m"
+# The queued placeholder's wording. Dim, so `input_is_clear` reads it as clear,
+# which is right for a stop: nothing in it was typed. It is NOT clear for a
+# wrap up: a message the person queued would run first, and two queued
+# messages is a case nobody has measured.
+_QUEUED = "Press up to edit queued messages"
+
+# How long the box must read idle, unbroken, before a wrap up counts as done,
+# and how long after the prompt's `Enter` a reading starts to count. Two
+# seconds against a 0.4 second sampling interval: no idle sample was seen
+# between a task's end and a queued command's start, but the interval cannot
+# exclude a shorter gap, so one idle read is never enough on its own.
+_SETTLE_DONE_S = 2.0
+
+
+def queued_message(pane: str) -> bool:
+    """Whether the live input row shows a message waiting to be sent (#242)."""
+    row = _live_ornament_row(pane)
+    return row is not None and _QUEUED in row
+
+
+def wrap_up_reading(pane: str) -> bool | None:
+    """One look at whether the agent is idle at an empty box (#242).
+
+    True: the live input row is the ordinary box, drawn in the idle colour,
+    with nothing typed and nothing queued. False: drawn in the busy colour, or
+    a message is queued. None: no live input row, a modal, or an ornament in a
+    colour nobody has captured, which is not evidence either way.
+    """
+    row = _live_ornament_row(pane)
+    if row is None:
+        return None
+    before, after = row.split(_PROMPT, 1)
+    if not after.startswith("\xa0"):
+        return None
+    if _QUEUED in after or before.endswith(_BUSY_ORNAMENT):
+        return False
+    if not before.endswith(_IDLE_ORNAMENT):
+        return None
+    return input_is_clear(row) is True
+
+
+class WrapUpWatch:
+    """Whether a wrap up prompt has finished, from readings over time (#242).
+
+    The engine owns the clock and the ceiling; this owns what "finished" looks
+    like, so no Claude Code duration leaks out of the quarantine. Finished is
+    an unbroken run of idle readings spanning `_SETTLE_DONE_S`, the first of
+    them at least `_SETTLE_DONE_S` after the prompt was sent: a turn that has
+    not started yet a moment after `Enter` reads exactly like one that ended.
+    A busy reading or an unreadable one breaks the run, so a pane that cannot
+    be read waits to the engine's ceiling rather than being taken as done.
+    """
+
+    def __init__(self, sent_at: float) -> None:
+        self.sent_at = sent_at
+        self._idle_since: float | None = None
+
+    def observe(self, now: float, pane: str) -> bool:
+        if now - self.sent_at < _SETTLE_DONE_S:
+            return False
+        if wrap_up_reading(pane) is not True:
+            self._idle_since = None
+            return False
+        if self._idle_since is None:
+            self._idle_since = now
+            return False
+        return now - self._idle_since >= _SETTLE_DONE_S

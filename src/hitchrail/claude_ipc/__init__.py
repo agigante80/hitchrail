@@ -32,6 +32,7 @@ from hitchrail.claude_ipc.keys import (
     Pane,
     StopNotSafe,
     request_stop,
+    request_wrap_up,
     send_answer,
 )
 from hitchrail.claude_ipc.launch import (
@@ -54,7 +55,12 @@ from hitchrail.claude_ipc.plugins import (
     plugin_runner,
     update_plugins,
 )
-from hitchrail.claude_ipc.screen import awaits_answer, input_is_clear, shows_input_box
+from hitchrail.claude_ipc.screen import (
+    WrapUpWatch,
+    awaits_answer,
+    input_is_clear,
+    shows_input_box,
+)
 
 __all__ = [
     "ANSWER_KEYS",
@@ -72,12 +78,14 @@ __all__ = [
     "RunningChild",
     "SessionUrl",
     "StopNotSafe",
+    "WrapUpWatch",
     "awaits_answer",
     "bridge_url",
     "input_is_clear",
     "launch_argv",
     "plugin_runner",
     "request_stop",
+    "request_wrap_up",
     "send_answer",
     "session_url",
     "shows_input_box",

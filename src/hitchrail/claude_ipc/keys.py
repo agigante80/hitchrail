@@ -11,7 +11,7 @@ import logging
 from collections.abc import Callable
 from typing import Protocol
 
-from hitchrail.claude_ipc.screen import awaits_answer, input_is_clear
+from hitchrail.claude_ipc.screen import awaits_answer, input_is_clear, queued_message
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +125,10 @@ class Pane(Protocol):
 
     def send_keys(self, project: str, *keys: str) -> None: ...  # pragma: no cover
 
+    # #242. Literal text, never key names: `send_keys("Enter")` is a keystroke,
+    # `send_text("Enter")` is five characters.
+    def send_text(self, project: str, text: str) -> None: ...  # pragma: no cover
+
     def capture_pane(  # pragma: no cover
         self, project: str, lines: int = 40, escapes: bool = False
     ) -> str: ...
@@ -146,11 +150,13 @@ def request_stop(pane: Pane, project: str, settle: Callable[[float], None]) -> N
 
     **Relay, not impersonation** (#91). A person tapped Stop and this passes it
     on the way a keyboard would. The agent cannot tell the difference, so the
-    framing holds only while what is relayed is what the person asked for. This
-    is the sole call site that types into a pane, and a grep keeps it so; a
-    future one that sent a typed instruction on the user's behalf would be a
-    different product with a different risk, and it would not look different
-    from here.
+    framing holds only while what is relayed is what the person asked for.
+    This module holds the only three functions that type into a pane, and a
+    grep keeps it so: this one, `send_answer` (#204) and `request_wrap_up`
+    (#242). The last types free text, which is the case this paragraph once
+    called a different product; it stays a relay because the text is one
+    fixed string the operator wrote on the machine, never one a request
+    carries, and it is typed only as the first half of a Stop they confirmed.
 
     The box is verified TWICE, and both times before the exit command is typed.
 
@@ -216,6 +222,44 @@ def request_stop(pane: Pane, project: str, settle: Callable[[float], None]) -> N
     )
     pane.send_keys(project, *quit_keys)
     logger.info("stop %s: box still clear, sent %s", project, " ".join(quit_keys))
+
+
+def request_wrap_up(
+    pane: Pane, project: str, prompt: str, settle: Callable[[float], None]
+) -> None:
+    """Type the operator's wrap up prompt, WITHOUT interrupting (#242).
+
+    Order B, decided on #242: "If it's close, queue, if it's kill interrupt."
+    So there is no `Escape`. A busy agent queues the prompt behind its task,
+    and a slash command waits for the turn to end (measured on 2.1.286).
+
+    `C-u` first and the same clear check `request_stop` makes, so a modal or a
+    box `C-u` did not clear refuses with `StopNotSafe` and the prompt is not
+    typed. `C-u` spares a message the person QUEUED (measured), but this
+    refuses when one shows anyway: theirs would run first, and two queued
+    messages is a shape nobody has captured.
+
+    The prompt goes through `send_text`, never `send_keys`: tmux reads each
+    `send_keys` argument as a key name first, so a prompt of `C-c` would be a
+    keystroke. `Enter` follows as a key, separately.
+    """
+
+    def wait() -> None:
+        settle(_SETTLE_S)
+
+    clear = GRACEFUL_STOP_KEYS[0]
+    pane.send_keys(project, *clear)
+    logger.info("stop %s: sent %s before the wrap up", project, " ".join(clear))
+    _require_clear(pane, project, wait, f"the input box in {project} did not come back empty")
+    if queued_message(pane.capture_pane(project, escapes=True)):
+        raise StopNotSafe(
+            f"{project} already has a message queued, which would run before the wrap up, "
+            f"so {_NOT_SENT}. {_LOOK_YOURSELF}"
+        )
+    pane.send_text(project, prompt)
+    pane.send_keys(project, "Enter")
+    # Never the prompt itself: it is the operator's text, not the journal's.
+    logger.info("stop %s: box clear, sent the wrap up prompt", project)
 
 
 def send_answer(pane: Pane, project: str, key: str) -> None:

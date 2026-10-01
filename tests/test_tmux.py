@@ -113,6 +113,7 @@ def drive_every_method(tmux: Tmux) -> None:
     tmux.capture_pane("p")
     tmux.new_session("p", "/srv/p", ["claude"])
     tmux.send_keys("p", "C-c")
+    tmux.send_text("p", "-x")
     tmux.keep_pane_on_exit("p", True)
     tmux.pane_is_dead("p")
     tmux.kill_session("p")
@@ -1220,3 +1221,22 @@ def test_capture_panes_default_depth_is_a_tuning_number_not_a_boundary() -> None
 
     assert runner.calls[-1][4] == "-S", "the depth flag moved, so the default reaches nothing"
     assert runner.calls[-1][5].startswith("-"), "the default depth is not a negative line count"
+
+
+def test_send_text_is_literal_and_ends_the_options_before_the_text() -> None:
+    """#242. `-l` so a key name arrives as characters, and `--` so a text
+    beginning with `-` is not parsed as a flag: without it tmux 3.4 reads
+    `-X` as its own option and types nothing.
+    """
+    runner = FakeRunner()
+    Tmux(prefix="hr-", run=runner).send_text("vessel", "-X Enter")
+
+    assert runner.calls[-1] == [
+        "tmux",
+        "send-keys",
+        "-l",
+        "-t",
+        "=hr-vessel:",
+        "--",
+        "-X Enter",
+    ]

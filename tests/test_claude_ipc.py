@@ -90,6 +90,9 @@ class FakePane:
     def send_keys(self, project: str, *keys: str) -> None:
         self.sent.append((project, *keys))
 
+    def send_text(self, project: str, text: str) -> None:
+        self.sent.append((project, "text", text))
+
     def capture_pane(self, project: str, lines: int = 40, escapes: bool = False) -> str:
         self.captured.append(project)
         if not self._captures:
@@ -328,6 +331,10 @@ def test_request_stop_takes_anything_shaped_like_a_pane() -> None:
         # steps, so a pane that cannot be READ cannot be typed into either.
         def capture_pane(self, project: str, lines: int = 40, escapes: bool = False) -> str:
             return pane_text(CLEAR_BOX)
+
+        # Part of the protocol since #242, for the wrap up prompt.
+        def send_text(self, project: str, text: str) -> None:
+            self.count += 1
 
     pane = NotATmux()
     request_stop(pane, "vessel", settle=lambda _s: None)
@@ -716,8 +723,10 @@ def test_only_the_quarantine_types_into_a_pane() -> None:
     attributed to the operator. That is the relay the graceful stop depends on,
     and it holds only while the relayed content is what a person asked for.
 
-    Today the single call site is `claude_ipc.request_stop`, which sends the
-    stop keys and nothing else. Nothing structural kept it that way, and the
+    The call sites are the quarantine's three typing functions:
+    `request_stop` (the stop keys), `send_answer` (one key from a literal set,
+    #204) and `request_wrap_up` (the operator's configured prompt, #242).
+    Nothing structural kept it that way, and the
     design now names keystroke injection as a capability of the API, so the
     narrowness is worth asserting rather than trusting.
 
@@ -726,8 +735,13 @@ def test_only_the_quarantine_types_into_a_pane() -> None:
     inverts the layering: tmux is the lower module and must not know what an
     agent is. A grep is the control that fits.
     """
+    # Both of the adapter's typing methods (#242): `send_text` types free text,
+    # which is the more dangerous of the two, and a grep for one alone would
+    # let a second caller of the other through.
     callers = sorted(
-        rel for rel, p in _outside_the_quarantine().items() if ".send_keys(" in p.read_text()
+        rel
+        for rel, p in _outside_the_quarantine().items()
+        if ".send_keys(" in p.read_text() or ".send_text(" in p.read_text()
     )
     assert callers == [], (
         f"{callers} types into a pane. What goes to an agent's stdin is "
@@ -1059,7 +1073,12 @@ _SURFACE_BEFORE_THE_SPLIT = {
 def test_the_package_still_offers_every_name_the_single_file_did() -> None:
     missing = sorted(n for n in _SURFACE_BEFORE_THE_SPLIT if not hasattr(claude_ipc, n))
     assert not missing, f"`hitchrail.claude_ipc` no longer offers {missing}"
-    assert set(claude_ipc.__all__) == _SURFACE_BEFORE_THE_SPLIT
+    assert set(claude_ipc.__all__) == _SURFACE_BEFORE_THE_SPLIT | _ADDED_SINCE_THE_SPLIT
+
+
+# Public names added after #368, kept apart so the list above stays a record
+# of what the single file offered.
+_ADDED_SINCE_THE_SPLIT = {"WrapUpWatch", "request_wrap_up"}  # #242
 
 
 def _submodule_imports(tree: ast.AST) -> list[str]:
