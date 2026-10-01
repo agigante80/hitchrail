@@ -1125,9 +1125,9 @@ def test_a_kill_mid_update_ends_that_plugin_and_never_spawns_the_next(
     removed, b IS spawned and `_set` kills it before it writes anything, so
     only the result tells that apart.
 
-    Plugin a's update starts a grandchild in its own process group, the shape
-    an install command approved by `-y` takes, and the grandchild must die
-    with it: `os.kill` in place of `os.killpg` ends a and leaves it running.
+    Plugin a's update starts a grandchild, which inherits a's process group,
+    the shape an install command approved by `-y` takes, and it must die with
+    a: `os.kill` in place of `os.killpg` ends a and leaves it running.
     """
     agent = tmp_path / "agent"
     grandchild = tmp_path / "grandchild.pid"
@@ -1180,7 +1180,10 @@ def test_a_kill_mid_update_ends_that_plugin_and_never_spawns_the_next(
             assert not worker.is_alive(), "the kill did not end plugin a's update"
             exited = select.select([grandchild_fd], [], [], 5)[0]
             if not exited:
-                signal.pidfd_send_signal(grandchild_fd, signal.SIGKILL)
+                # It may exit between the select and the send, and the
+                # assertion below is the failure worth reading, not this one.
+                with contextlib.suppress(ProcessLookupError):
+                    signal.pidfd_send_signal(grandchild_fd, signal.SIGKILL)
             assert exited, (
                 "the grandchild outlived the kill: only the direct child was signalled"
             )
@@ -1193,18 +1196,25 @@ def test_a_kill_mid_update_ends_that_plugin_and_never_spawns_the_next(
         assert outcomes[0].detail == f"exited {-signal.SIGKILL}"
     finally:
         # Latch first, so nothing further spawns, then wait for the worker.
-        # Never a second `kill()`: a closed handle keeps the last pid it
-        # recorded (#384), so it would signal a group that may since have
-        # been given to another process. Only a worker that is STILL alive
-        # has children left to end, and while it is blocked in `communicate`
-        # their pids are unreaped and cannot have been reused.
+        # A worker still alive after that is only reachable on a broken latch,
+        # and it is blocked on the NEWEST child, the only marker whose pid is
+        # certainly unreaped: an older one was killed and reaped and its pid
+        # may be anyone's (#385). That one is signalled by group, so its
+        # grandchild goes too, and only after a pidfd says it is still the
+        # process that wrote the marker.
         if not killed:
             handle.kill()
         worker.join(10)
-        if worker.is_alive():
-            for marker in tmp_path.glob("started-*@m"):
-                with contextlib.suppress(ProcessLookupError):
-                    os.kill(int(marker.read_text()), signal.SIGKILL)
+        markers = sorted(tmp_path.glob("started-*@m"), key=lambda m: m.stat().st_mtime_ns)
+        if worker.is_alive() and markers:
+            leader = int(markers[-1].read_text())
+            with contextlib.suppress(ProcessLookupError):
+                leader_fd = os.pidfd_open(leader)
+                try:
+                    if not select.select([leader_fd], [], [], 0)[0]:
+                        os.killpg(leader, signal.SIGKILL)
+                finally:
+                    os.close(leader_fd)
 
 
 def test_kill_on_a_group_that_is_already_gone_still_latches(
