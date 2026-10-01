@@ -441,9 +441,27 @@ def test_a_closed_runner_abandons_the_row_it_interrupted_and_every_row_after() -
     assert agent.updated == ["a@m", "b@m"]
 
 
+def test_a_row_behind_an_abandonment_keeps_its_own_reason_to_be_skipped() -> None:
+    """#370. Abandonment was tested before scope, so a project scope row
+    behind the interruption read "never started", a start it was never
+    going to get; a repeat of an updated plugin likewise."""
+    agent = FakeAgent(
+        [row("a@m"), row("b@m"), row("p@m", "project"), row("a@m"), row("c@m")],
+        **{"b@m": claude_ipc.RunnerClosed()},
+    )
+    assert results(run(agent)) == [
+        ("a@m", "user", "updated"),
+        ("b@m", "user", "abandoned"),
+        ("p@m", "project", "skipped"),
+        ("a@m", "user", "skipped"),
+        ("c@m", "user", "abandoned"),
+    ]
+
+
 def test_a_runner_closed_before_any_row_is_read_reports_shutting_down() -> None:
-    """#361 round 1 review, M1. A shutdown that lands during the refresh or
-    the listing call, before any plugin row exists to mark `abandoned`,
+    """#361 round 1 review, M1. A shutdown that lands between the agent's
+    calls (#370: one that lands DURING a call is reported as that call's own
+    failure), before any plugin row exists to mark `abandoned`,
     fails the whole operation with an honest code rather than
     `internal_error`, which would misreport an expected shutdown as a
     defect in Hitchrail."""

@@ -259,8 +259,12 @@ list does not name. A `user` scope plugin the listing names more than once is
 also `skipped`, with detail `listed more than once`, after the first is updated: the
 count then covers every row the listing returned, not only the ones that
 updated. `abandoned` means the server shut down mid run (#361): that row and
-every one still waiting behind it in the listing never started, which is not
-the same claim as `failed`. `detail` and `approved_command` are the agent's
+every `user` scope row still waiting behind it in the listing never started,
+which is not the same claim as `failed`; a row at another scope, or a repeat,
+is still `skipped` for its own reason. A shutdown that lands DURING one of
+the agent's calls ends that call, and is reported as what that call saw: the
+refresh as `marketplace_refresh_failed`, the listing as `plugins_unreadable`,
+and the plugin being updated as `failed`, exited -9. `detail` and `approved_command` are the agent's
 own words, with control characters escaped and cut to 240 characters: render
 them as text. `approved_command` is what `-y` approved without showing it,
 when the agent reports it; see `SECURITY.md`. Running sessions keep the old
@@ -274,7 +278,7 @@ the operation fails the 202 has been sent.
 | `agent_missing` | the configured agent binary could not be run |
 | `marketplace_refresh_failed` | the marketplaces did not refresh, so no plugin was updated |
 | `plugins_unreadable` | the installed plugin list was not understood, so nothing was updated, including the rows that parsed |
-| `shutting_down` | the server shut down before the listing was even read, so no row exists to mark `abandoned` |
+| `shutting_down` | the server shut down between two of the agent's calls, before the listing was read, so no row exists to mark `abandoned` |
 | `internal_error` | the run stopped on a defect in Hitchrail; the journal has the traceback |
 
 ### `PATCH /api/config`

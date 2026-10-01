@@ -9,15 +9,17 @@ marker cannot outlive a run however the run ends.
 from __future__ import annotations
 
 import itertools
+import re
 import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import get_args
 
 import pytest
 
 from hitchrail import plugin_runs as plugin_runs_module
-from hitchrail.claude_ipc import PluginOutcome, PluginsFailed
+from hitchrail.claude_ipc import PluginFailure, PluginOutcome, PluginResult, PluginsFailed
 from hitchrail.plugin_runs import EVENT_KIND, PluginRuns, RunInFlight, read_boot_id
 
 Report = Callable[[PluginOutcome], None]
@@ -402,3 +404,38 @@ def test_an_unreadable_boot_id_is_a_fresh_token_each_time(
         boot_id.write_bytes(content)
     first, second = read_boot_id(boot_id), read_boot_id(boot_id)
     assert first and second and first != second
+
+
+# -- every reader knows every literal (#370) ---------------------------------
+
+_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _record_codes() -> set[str]:
+    """Every `code` a failed record can carry: the operation's own, plus the
+    one this module adds for a defect."""
+    return {*get_args(PluginFailure), "internal_error"}
+
+
+def test_the_page_names_every_failure_code() -> None:
+    """#370. `shutting_down` reached the page with no entry, and the fallback
+    to the server's message doubled the "so nothing was updated" clause. A
+    code the page has no words for, or words for a code that cannot arrive,
+    fails here."""
+    js = (_ROOT / "src/hitchrail/web/plugins.js").read_text(encoding="utf-8")
+    table = re.search(r"const PLUGIN_FAILURES = \{(.*?)\};", js, re.S)
+    assert table is not None, "PLUGIN_FAILURES not found in plugins.js"
+    keys = set(re.findall(r"^\s*(\w+):", table.group(1), re.M))
+    assert keys == _record_codes()
+
+
+def test_the_api_reference_names_every_failure_code_and_result() -> None:
+    """#370. `docs/api.md`'s both ways guard covers HTTP statuses, not record
+    codes, so nothing tied this table to the literal."""
+    doc = (_ROOT / "docs/api.md").read_text(encoding="utf-8")
+    start = doc.index("| Record `code` | When |")
+    table = doc[start : doc.index("\n\n", start)]
+    assert set(re.findall(r"^\| `(\w+)` \|", table, re.M)) == _record_codes()
+    results_line = next(line for line in doc.splitlines() if line.startswith("| `outcomes` |"))
+    named = set(re.findall(r"`(\w+)`", results_line.split("`result` one of", 1)[1]))
+    assert named == set(get_args(PluginResult))

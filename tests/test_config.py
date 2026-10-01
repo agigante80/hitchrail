@@ -1010,8 +1010,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 550 after #353 gave `_shown` a tail and a backslash rule, each with
         # the reason a reviewer would otherwise undo. 570 after #363 and #384:
         # why the group is killed after a reap, with the kernel rule that
-        # makes it safe, and why `kill()` clears the pid it takes.
-        "claude_ipc/plugins.py": 570,
+        # makes it safe, and why `kill()` clears the pid it takes. 575 for
+        # #370: why scope is decided before abandonment.
+        "claude_ipc/plugins.py": 575,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.
@@ -1448,7 +1449,8 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # that raises still cancels the sweep and the scan in its `finally`.
         # 1008 for #279: the signal route reads an optional pid, and refuses a
         # body it cannot read rather than signal as if none were sent.
-        "server.py": 1008,
+        # 1009 for #370: the plugin route names all five record codes.
+        "server.py": 1009,
     }
 
     # Keyed by the path under `src/hitchrail` (#368), so a package's

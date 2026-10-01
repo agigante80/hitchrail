@@ -393,7 +393,8 @@ def update_plugins(
     `RunningChild.kill()` has latched it shut, which is the server's
     shutdown reaching in for whatever plugin update is in flight. The row
     that raise interrupted, and every row still waiting behind it, is
-    reported `abandoned`: not `failed`, since it never ran, and not dropped
+    reported `abandoned` unless its scope or a repeat already skips it: not
+    `failed`, since it never ran, and not dropped
     silently, which would read the same as task 142's fixed duplicate-row
     bug, a count short of what the listing actually returned. One
     `RunnerClosed` ends the loop for good; nothing later in `rows` is even
@@ -429,15 +430,19 @@ def update_plugins(
     seen: set[str] = set()
     abandoned = False
     for plugin, scope in rows:
-        if abandoned:
-            outcome = PluginOutcome(plugin, scope, "abandoned", _ABANDONED_DETAIL)
-        elif scope != _UPDATABLE_SCOPE:
+        # Scope and repetition first, abandonment after (#370): a row that
+        # would never have been updated is `skipped` for its own reason
+        # whether or not the server was shutting down, and "never started"
+        # would claim a start it was never going to get.
+        if scope != _UPDATABLE_SCOPE:
             outcome = PluginOutcome(plugin, scope, "skipped", f"{scope} scope is not updated")
         elif plugin in seen:
             # Dropping this row silently left the count short of what the
             # listing actually returned (#300): the comment above promises
             # every row is covered, and a duplicate is still a row.
             outcome = PluginOutcome(plugin, scope, "skipped", "listed more than once")
+        elif abandoned:
+            outcome = PluginOutcome(plugin, scope, "abandoned", _ABANDONED_DETAIL)
         else:
             seen.add(plugin)
             try:

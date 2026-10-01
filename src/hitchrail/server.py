@@ -777,8 +777,9 @@ def create_app(
         it to the first network change. The record then arrives on the stream
         as a named `plugins` event, and `GET` below answers a page that opens
         or reconnects in the middle. A failure of the operation itself
-        (`agent_missing`, `marketplace_refresh_failed`, `plugins_unreadable`)
-        is in the record, not in a status: by then this 202 has been sent.
+        (`agent_missing`, `marketplace_refresh_failed`, `plugins_unreadable`,
+        `shutting_down`, or `internal_error`) is in the record, not in a
+        status: by then this 202 has been sent.
 
         `update_in_flight` rather than `locked`: `locked` is documented as a
         start in flight for a PROJECT, and this is machine wide.

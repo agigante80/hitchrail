@@ -35,6 +35,7 @@ const PLUGIN_FAILURES = {
   marketplace_refresh_failed: "The marketplaces did not refresh",
   plugins_unreadable: "The list of installed plugins could not be understood",
   internal_error: "The update stopped on an error in Hitchrail",
+  shutting_down: "The server was shutting down",
 };
 
 // What is on screen: the record's ordering fields, and when it arrived.
@@ -96,7 +97,10 @@ function pluginStatus(record) {
   }
   if (record.state === "failed") return failureText(record);
   const c = record.counts;
-  let text = `${c.updated} updated, ${c.failed} failed, ${c.skipped} left alone.`;
+  // #370: a run the server's shutdown cut short is still `done`, with its
+  // remaining rows counted as never started rather than left out.
+  const cut = c.abandoned ? `, ${c.abandoned} never started` : "";
+  let text = `${c.updated} updated, ${c.failed} failed, ${c.skipped} left alone${cut}.`;
   if (c.updated && runningSessions) {
     text += ` ${runningSessions === 1 ? "The running session keeps" : `The ${runningSessions} running sessions keep`} the old versions until restarted.`;
   }

@@ -32,10 +32,10 @@ import time
 from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import Literal, TypedDict, get_args
 
 from hitchrail import claude_ipc
-from hitchrail.claude_ipc import PluginOutcome, PluginsFailed
+from hitchrail.claude_ipc import PluginOutcome, PluginResult, PluginsFailed
 from hitchrail.config import TOKEN_ENV
 
 logger = logging.getLogger(__name__)
@@ -249,7 +249,9 @@ class PluginRuns:
         if self._state == "done":
             counts = {
                 result: sum(o.result == result for o in self._outcomes)
-                for result in ("updated", "failed", "skipped", "abandoned")
+                # #370: from the literal, so a new result is counted here
+                # without a second list to remember.
+                for result in get_args(PluginResult)
             }
         return {
             "epoch": self._epoch,
