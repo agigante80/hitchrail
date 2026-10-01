@@ -1534,3 +1534,12 @@ def test_without_the_stop_prompt_flags_stop_is_todays(tmp_path: Path) -> None:
 def test_a_multi_line_stop_prompt_flag_refuses_the_start(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="stop prompt"):
         build_config(parse_args(["--root", f"main={tmp_path}", "--stop-prompt", "a\nb"]))
+
+
+def test_the_stop_policy_flag_refuses_anything_but_the_two(tmp_path: Path) -> None:
+    """Refused by `Config`, not argparse, so the flag and the file share words."""
+    with pytest.raises(ConfigError, match="ask, end_anyway"):
+        build_config(parse_args(["--root", f"main={tmp_path}", "--stop-policy", "whatever"]))
+    args = ["--root", f"main={tmp_path}", "--stop-policy", "end_anyway"]
+    cfg = build_config(parse_args(args))
+    assert (cfg.stop_policy, cfg.sources["stop_policy"]) == ("end_anyway", "flag")

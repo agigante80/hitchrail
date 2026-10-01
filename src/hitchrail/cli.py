@@ -259,6 +259,15 @@ def build_parser(*, mention_update_plugins: bool = True) -> argparse.ArgumentPar
         help="how long the agent has to finish the task and the stop prompt before "
         "Stop exits anyway; default 300",
     )
+    # #239. Choices are not given to argparse: `Config` is the one refusal,
+    # for the flag and the file alike, in the same words.
+    parser.add_argument(
+        "--stop-policy",
+        default=None,
+        metavar="POLICY",
+        help="what a stop that runs out of time on a question does: 'ask' (default) "
+        "reports and offers Kill; 'end_anyway' kills the session without the tap",
+    )
     # #167. Hitchrail's own lines only: uvicorn's stay at info below that,
     # since its debug is protocol tracing. `--verbose` exists so that "run it
     # with --verbose and send me the output" is a sentence, which is the
@@ -387,6 +396,11 @@ def build_config(args: argparse.Namespace) -> Config:
         stop_prompt_timeout = file_settings.stop_prompt_timeout
     if stop_prompt_timeout is None:
         stop_prompt_timeout = Config.stop_prompt_timeout
+    stop_policy = args.stop_policy
+    if stop_policy is None:
+        stop_policy = file_settings.stop_policy
+    if stop_policy is None:
+        stop_policy = Config.stop_policy
     given: frozenset[str] = getattr(args, "given", frozenset())
 
     def source(dest: str, from_file: bool = False) -> str:
@@ -408,6 +422,7 @@ def build_config(args: argparse.Namespace) -> Config:
         "stop_prompt_timeout": source(
             "stop_prompt_timeout", file_settings.stop_prompt_timeout is not None
         ),
+        "stop_policy": source("stop_policy", file_settings.stop_policy is not None),
         "tls": source("tls_cert"),
         "expect_gateway_mac": source("expect_gateway_mac"),
     }
@@ -430,6 +445,7 @@ def build_config(args: argparse.Namespace) -> Config:
         stop_timeout=args.stop_timeout,
         stop_prompt=stop_prompt,
         stop_prompt_timeout=stop_prompt_timeout,
+        stop_policy=stop_policy,
     )
 
 
@@ -564,7 +580,8 @@ def startup_block(config: Config, found: Preflight, level: str) -> list[str]:
         f"answers to Host {', '.join(config.allowed_hosts)}",
         f"agent {config.agent_binary!r} at {config.spawn_agent_binary}",
         f"tmux {found.tmux_binary}, socket {config.tmux_socket or 'the default'}",
-        f"sessions prefixed {config.session_prefix!r}, stop timeout {config.stop_timeout:g}s",
+        f"sessions prefixed {config.session_prefix!r}, stop timeout {config.stop_timeout:g}s, "
+        f"stop policy {config.stop_policy}",
         # Whether a prompt is set, never the prompt: what an operator tells
         # their agent is theirs, and this line goes to the journal. #242 asked
         # for the text itself; the kind is what an operator needs to debug a

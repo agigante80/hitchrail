@@ -168,13 +168,16 @@ class FileSettings:
     session_prefix: str | None = None
     stop_prompt: str | None = None
     stop_prompt_timeout: int | None = None
+    stop_policy: str | None = None
 
 
 # The schema is CLOSED. A misspelt key silently ignored is a setting the
 # operator believes is on, which on a file that draws the perimeter is the
 # wrong kind of quiet.
 _ROOT_KEYS = frozenset({"label", "path", "enabled"})
-_TOP_KEYS = frozenset({"roots", "session_prefix", "stop_prompt", "stop_prompt_timeout"})
+_TOP_KEYS = frozenset(
+    {"roots", "session_prefix", "stop_prompt", "stop_prompt_timeout", "stop_policy"}
+)
 
 
 def read_config_file(path: Path) -> FileSettings:
@@ -256,11 +259,15 @@ def read_config_file(path: Path) -> FileSettings:
     # `bool` is an `int` in Python, and `stop_prompt_timeout = true` is not a wait.
     if wait is not None and (isinstance(wait, bool) or not isinstance(wait, int)):
         raise SettingsError(f"{path}: stop_prompt_timeout must be a whole number of seconds")
+    policy = data.get("stop_policy")
+    if policy is not None and not isinstance(policy, str):
+        raise SettingsError(f"{path}: stop_policy must be a string")
     return FileSettings(
         roots=tuple(roots),
         session_prefix=prefix,
         stop_prompt=prompt,
         stop_prompt_timeout=wait,
+        stop_policy=policy,
     )
 
 

@@ -816,3 +816,36 @@ def test_a_stop_prompt_in_the_file_that_will_not_type_refuses_the_start(
     )
     with pytest.raises(ConfigError, match=complaint):
         build_config(parse_args(["--config", str(path)]))
+
+
+# -- #239: what an expiry on a prompt does, from the file -------------------
+
+
+def test_the_stop_policy_comes_from_the_flag_then_the_file_then_ask(tmp_path: Path) -> None:
+    (tmp_path / "work").mkdir()
+    roots = ROOTS_TOML.format(label="work", path=tmp_path / "work")
+    path = _write(tmp_path, 'stop_policy = "end_anyway"\n' + roots)
+    cfg = build_config(parse_args(["--config", str(path)]))
+    assert (cfg.stop_policy, cfg.sources["stop_policy"]) == ("end_anyway", "file")
+    cfg = build_config(parse_args(["--config", str(path), "--stop-policy", "ask"]))
+    assert (cfg.stop_policy, cfg.sources["stop_policy"]) == ("ask", "flag")
+    bare = _write(tmp_path, roots)
+    assert build_config(parse_args(["--config", str(bare)])).stop_policy == "ask"
+
+
+@pytest.mark.parametrize(
+    ("line", "complaint"),
+    [
+        ("stop_policy = true", "stop_policy must be a string"),
+        ('stop_policy = "kill"', "ask, end_anyway"),
+    ],
+)
+def test_a_stop_policy_in_the_file_that_is_not_one_of_the_two_refuses_the_start(
+    tmp_path: Path, line: str, complaint: str
+) -> None:
+    (tmp_path / "work").mkdir()
+    path = _write(
+        tmp_path, line + "\n" + ROOTS_TOML.format(label="work", path=tmp_path / "work")
+    )
+    with pytest.raises(ConfigError, match=complaint):
+        build_config(parse_args(["--config", str(path)]))

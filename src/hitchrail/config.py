@@ -65,6 +65,11 @@ STOP_PROMPT_MAX = 4096
 # Under ten seconds the agent cannot finish a turn it was just handed, and the
 # setting would be a slower Stop, not a wrap up.
 STOP_PROMPT_TIMEOUT_MIN = 10
+# #239. What an expiry does when the pane shows a prompt. `ask` is design
+# 4.3 step 4 unchanged: report, never escalate. `end_anyway` is the operator
+# deciding that answer once, in advance, and it is the existing kill, never a
+# key typed into the prompt: which key means "exit" is Claude Code knowledge.
+STOP_POLICIES = ("ask", "end_anyway")
 
 
 class ConfigError(ValueError):
@@ -203,6 +208,7 @@ class Config:
     # operator's (decided 2026-10-01).
     stop_prompt: str | None = None
     stop_prompt_timeout: float = 300.0
+    stop_policy: str = "ask"
     hard_floor_mb: int = 1536
     soft_floor_mb: int = 3072
     session_mb: int = 1536
@@ -490,6 +496,7 @@ class Config:
         self.check_stop_timeout(self.stop_timeout)
         object.__setattr__(self, "stop_prompt", self.check_stop_prompt(self.stop_prompt))
         self.check_stop_prompt_timeout(self.stop_prompt_timeout)
+        self.check_stop_policy(self.stop_policy)
         for name in ("hard_floor_mb", "soft_floor_mb", "session_mb"):
             value = getattr(self, name)
             if value < 0:
@@ -544,6 +551,13 @@ class Config:
                 "character is a key"
             )
         return prompt
+
+    @staticmethod
+    def check_stop_policy(policy: str) -> None:
+        if policy not in STOP_POLICIES:
+            raise ConfigError(
+                f"stop policy must be one of {', '.join(STOP_POLICIES)}: {policy!r}"
+            )
 
     @staticmethod
     def check_stop_prompt_timeout(seconds: float) -> None:
