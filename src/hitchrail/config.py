@@ -57,6 +57,14 @@ __all__ = [
 # the same number as its `max`, and `tests/test_settings_route.py` asserts
 # the two agree.
 MAX_STOP_TIMEOUT_S = 3600
+# #242. The wrap up prompt is typed into the agent's box as one literal line,
+# so a newline would send half of it and a control character would be read as
+# a key. 4096 is a paragraph, not a document: an instruction that long belongs
+# in a slash command the prompt names.
+STOP_PROMPT_MAX = 4096
+# Under ten seconds the agent cannot finish a turn it was just handed, and the
+# setting would be a slower Stop, not a wrap up.
+STOP_PROMPT_TIMEOUT_MIN = 10
 
 
 class ConfigError(ValueError):
@@ -188,6 +196,13 @@ class Config:
     extra_origins: tuple[str, ...] = ()
     session_prefix: str = "hr-"
     stop_timeout: float = 30.0
+    # #242. What Stop types before the exit sequence, queued behind the task
+    # in flight rather than interrupting it, and how long the agent has to
+    # finish it.
+    # `None` is today's Stop. No default prompt: what "wrap up" means is the
+    # operator's (decided 2026-10-01).
+    stop_prompt: str | None = None
+    stop_prompt_timeout: float = 300.0
     hard_floor_mb: int = 1536
     soft_floor_mb: int = 3072
     session_mb: int = 1536
@@ -473,6 +488,8 @@ class Config:
         if not (1 <= self.port <= 65535):
             raise ConfigError(f"port out of range: {self.port}")
         self.check_stop_timeout(self.stop_timeout)
+        object.__setattr__(self, "stop_prompt", self.check_stop_prompt(self.stop_prompt))
+        self.check_stop_prompt_timeout(self.stop_prompt_timeout)
         for name in ("hard_floor_mb", "soft_floor_mb", "session_mb"):
             value = getattr(self, name)
             if value < 0:
@@ -500,6 +517,40 @@ class Config:
             # the ticket first blamed is not what it does (review, round 1).
             raise ConfigError(
                 f"stop timeout must be at most {MAX_STOP_TIMEOUT_S} seconds: {seconds}"
+            )
+
+    @staticmethod
+    def check_stop_prompt(prompt: str | None) -> str | None:
+        """The one validator for the wrap up prompt, returning its stored form.
+
+        Stripped, and empty means none: a settings form that is cleared sends
+        `""`, and a prompt of nothing would type `Enter` into an empty box.
+        """
+        if prompt is None:
+            return None
+        prompt = prompt.strip()
+        if not prompt:
+            return None
+        if len(prompt) > STOP_PROMPT_MAX:
+            raise ConfigError(
+                f"stop prompt must be at most {STOP_PROMPT_MAX} characters: {len(prompt)}"
+            )
+        if not prompt.isprintable():
+            # Never echoed back: a refusal is logged, and what an operator
+            # typed as an instruction to their agent is theirs.
+            raise ConfigError(
+                "stop prompt must be one line of printable text: it is typed "
+                "into the agent's box, where a newline sends and a control "
+                "character is a key"
+            )
+        return prompt
+
+    @staticmethod
+    def check_stop_prompt_timeout(seconds: float) -> None:
+        if not (STOP_PROMPT_TIMEOUT_MIN <= seconds <= MAX_STOP_TIMEOUT_S):
+            raise ConfigError(
+                f"stop prompt timeout must be between {STOP_PROMPT_TIMEOUT_MIN} "
+                f"and {MAX_STOP_TIMEOUT_S} seconds: {seconds}"
             )
 
     def _check_bind_host(self) -> None:

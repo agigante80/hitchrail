@@ -241,6 +241,24 @@ def build_parser(*, mention_update_plugins: bool = True) -> argparse.ArgumentPar
         type=int,
         help="seconds to wait for a graceful stop before reporting it timed out; default 30",
     )
+    # #242. `None` defaults for the same reason as `--session-prefix`: the
+    # file's value is used when the flag is absent.
+    parser.add_argument(
+        "--stop-prompt",
+        default=None,
+        metavar="TEXT",
+        help="one line Stop types to the agent before it exits, queued behind the "
+        "task in flight, such as a slash command that commits and writes notes; "
+        "unset, Stop exits at once. Kill still interrupts",
+    )
+    parser.add_argument(
+        "--stop-prompt-timeout",
+        default=None,
+        type=int,
+        metavar="SECONDS",
+        help="how long the agent has to finish the task and the stop prompt before "
+        "Stop exits anyway; default 300",
+    )
     # #167. Hitchrail's own lines only: uvicorn's stay at info below that,
     # since its debug is protocol tracing. `--verbose` exists so that "run it
     # with --verbose and send me the output" is a sentence, which is the
@@ -361,6 +379,14 @@ def build_config(args: argparse.Namespace) -> Config:
     if prefix is None:
         # The dataclass default stays the one place "hr-" is spelled.
         prefix = Config.session_prefix
+    stop_prompt = args.stop_prompt
+    if stop_prompt is None:
+        stop_prompt = file_settings.stop_prompt
+    stop_prompt_timeout = args.stop_prompt_timeout
+    if stop_prompt_timeout is None:
+        stop_prompt_timeout = file_settings.stop_prompt_timeout
+    if stop_prompt_timeout is None:
+        stop_prompt_timeout = Config.stop_prompt_timeout
     given: frozenset[str] = getattr(args, "given", frozenset())
 
     def source(dest: str, from_file: bool = False) -> str:
@@ -378,6 +404,10 @@ def build_config(args: argparse.Namespace) -> Config:
         "agent_binary": source("agent_binary"),
         "session_prefix": source("session_prefix", file_settings.session_prefix is not None),
         "stop_timeout": source("stop_timeout"),
+        "stop_prompt": source("stop_prompt", file_settings.stop_prompt is not None),
+        "stop_prompt_timeout": source(
+            "stop_prompt_timeout", file_settings.stop_prompt_timeout is not None
+        ),
         "tls": source("tls_cert"),
         "expect_gateway_mac": source("expect_gateway_mac"),
     }
@@ -398,6 +428,8 @@ def build_config(args: argparse.Namespace) -> Config:
         self_project=args.self_project,
         agent_binary=args.agent_binary,
         stop_timeout=args.stop_timeout,
+        stop_prompt=stop_prompt,
+        stop_prompt_timeout=stop_prompt_timeout,
     )
 
 
@@ -521,6 +553,10 @@ def startup_block(config: Config, found: Preflight, level: str) -> list[str]:
         f"agent {config.agent_binary!r} at {config.spawn_agent_binary}",
         f"tmux {found.tmux_binary}, socket {config.tmux_socket or 'the default'}",
         f"sessions prefixed {config.session_prefix!r}, stop timeout {config.stop_timeout:g}s",
+        # Whether a prompt is set, never the prompt: what an operator tells
+        # their agent is theirs, and this line goes to the journal.
+        f"stop prompt {'set' if config.stop_prompt else 'none'}"
+        + (f", given {config.stop_prompt_timeout:g}s" if config.stop_prompt else ""),
         f"config file {config.config_path or 'none'}, log level {level}",
     ]
     if config.self_project:

@@ -2816,3 +2816,48 @@ def test_the_inner_suppress_in_local_addresses_is_defensive_not_observable(
     assert outcome(OSError("EAI")) == ("box",)
     assert outcome(UnicodeError("idna")) == ("box",)
     assert outcome(None) == ("box", "192.168.1.10")
+
+
+# -- #242: the wrap up prompt -----------------------------------------------
+
+
+@pytest.mark.parametrize("prompt", [None, "", "   ", "\t"])
+def test_an_absent_or_blank_stop_prompt_is_none(tmp_path: Path, prompt: str | None) -> None:
+    """A cleared form sends `""`: a prompt of nothing would type `Enter`."""
+    assert Config(roots=_r(tmp_path), stop_prompt=prompt).stop_prompt is None
+
+
+def test_a_stop_prompt_is_stored_stripped(tmp_path: Path) -> None:
+    assert Config(roots=_r(tmp_path), stop_prompt="  /wrapup  ").stop_prompt == "/wrapup"
+
+
+@pytest.mark.parametrize("prompt", ["a\nb", "a\rb", "a\x07", "a\x1b[2Jb", "/wrap\tup"])
+def test_a_stop_prompt_that_is_not_one_printable_line_is_refused_without_echo(
+    tmp_path: Path, prompt: str
+) -> None:
+    with pytest.raises(ConfigError, match="stop prompt must be one line") as caught:
+        Config(roots=_r(tmp_path), stop_prompt=prompt)
+    assert prompt.strip() not in str(caught.value)
+
+
+def test_a_stop_prompt_past_the_cap_is_refused_and_the_cap_is_accepted(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="at most 4096"):
+        Config(roots=_r(tmp_path), stop_prompt="x" * 4097)
+    assert Config(roots=_r(tmp_path), stop_prompt="x" * 4096).stop_prompt == "x" * 4096
+
+
+@pytest.mark.parametrize("seconds", [0, 9, 9.9, 3601, -1])
+def test_a_stop_prompt_timeout_outside_its_bounds_is_refused(
+    tmp_path: Path, seconds: float
+) -> None:
+    with pytest.raises(ConfigError, match="between 10 and 3600"):
+        Config(roots=_r(tmp_path), stop_prompt_timeout=seconds)
+
+
+@pytest.mark.parametrize("seconds", [10, 3600])
+def test_a_stop_prompt_timeout_at_either_bound_is_accepted(
+    tmp_path: Path, seconds: int
+) -> None:
+    assert (
+        Config(roots=_r(tmp_path), stop_prompt_timeout=seconds).stop_prompt_timeout == seconds
+    )

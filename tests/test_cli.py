@@ -1480,3 +1480,31 @@ def test_a_quieter_level_quietens_uvicorn_and_a_louder_one_does_not(
     capsys.readouterr()
     main(["--root", f"main={tmp_path}", "--log-level", "warning"])
     assert _log_lines(capsys.readouterr().err) == [], "info lines at warning"
+
+
+def test_the_stop_prompt_flags_reach_the_config_and_say_flag(tmp_path: Path) -> None:
+    cfg = build_config(
+        parse_args(
+            [
+                "--root",
+                f"main={tmp_path}",
+                "--stop-prompt",
+                "/wrapup",
+                "--stop-prompt-timeout",
+                "120",
+            ]
+        )
+    )
+    assert (cfg.stop_prompt, cfg.stop_prompt_timeout) == ("/wrapup", 120)
+    assert cfg.sources["stop_prompt"] == cfg.sources["stop_prompt_timeout"] == "flag"
+
+
+def test_without_the_stop_prompt_flags_stop_is_todays(tmp_path: Path) -> None:
+    cfg = build_config(parse_args(["--root", f"main={tmp_path}"]))
+    assert (cfg.stop_prompt, cfg.stop_prompt_timeout) == (None, 300)
+    assert cfg.sources["stop_prompt"] == "default"
+
+
+def test_a_multi_line_stop_prompt_flag_refuses_the_start(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="stop prompt"):
+        build_config(parse_args(["--root", f"main={tmp_path}", "--stop-prompt", "a\nb"]))

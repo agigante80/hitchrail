@@ -166,13 +166,15 @@ class FileSettings:
 
     roots: tuple[Root, ...]
     session_prefix: str | None = None
+    stop_prompt: str | None = None
+    stop_prompt_timeout: int | None = None
 
 
 # The schema is CLOSED. A misspelt key silently ignored is a setting the
 # operator believes is on, which on a file that draws the perimeter is the
 # wrong kind of quiet.
 _ROOT_KEYS = frozenset({"label", "path", "enabled"})
-_TOP_KEYS = frozenset({"roots", "session_prefix"})
+_TOP_KEYS = frozenset({"roots", "session_prefix", "stop_prompt", "stop_prompt_timeout"})
 
 
 def read_config_file(path: Path) -> FileSettings:
@@ -245,7 +247,21 @@ def read_config_file(path: Path) -> FileSettings:
     prefix = data.get("session_prefix")
     if prefix is not None and not isinstance(prefix, str):
         raise SettingsError(f"{path}: session_prefix must be a string")
-    return FileSettings(roots=tuple(roots), session_prefix=prefix)
+    # #242. Type only, here: what a usable prompt or wait IS lives in
+    # `Config`, which refuses the flag and the file in the same words.
+    prompt = data.get("stop_prompt")
+    if prompt is not None and not isinstance(prompt, str):
+        raise SettingsError(f"{path}: stop_prompt must be a string")
+    wait = data.get("stop_prompt_timeout")
+    # `bool` is an `int` in Python, and `stop_prompt_timeout = true` is not a wait.
+    if wait is not None and (isinstance(wait, bool) or not isinstance(wait, int)):
+        raise SettingsError(f"{path}: stop_prompt_timeout must be a whole number of seconds")
+    return FileSettings(
+        roots=tuple(roots),
+        session_prefix=prefix,
+        stop_prompt=prompt,
+        stop_prompt_timeout=wait,
+    )
 
 
 # -- the state file ------------------------------------------------------
