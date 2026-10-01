@@ -212,8 +212,10 @@ confirmed (#279). When it is sent and the row's agent is now a different pid,
 nothing is signalled and the answer is `not_ours`, before any handle is
 opened: a confirmation names one process, never whatever the row holds by
 the time the request lands. No body keeps the earlier behaviour, so a script
-written against it still works. A body that is not a JSON object, or a `pid`
-that is not a positive integer, is `invalid_body`.
+written against it still works, and so does `{}`. A body that is not a JSON
+object, a `pid` that is not a positive integer, or any key other than `pid`
+is `invalid_body` (#400): a misspelt `PID` read as no pid would send the
+unbound signal the body exists to prevent.
 
 ### `GET /api/config`
 

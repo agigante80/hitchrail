@@ -2348,6 +2348,10 @@ async def test_the_confirmed_pid_still_on_the_row_is_signalled(config: Config) -
         "[900]",
         "900",
         "not json",
+        # #400: a key the route does not take is refused, never ignored. A
+        # misspelt pid read as none sent the unbound signal.
+        '{"PID": 901}',
+        '{"pid": 900, "force": true}',
     ],
 )
 async def test_a_malformed_body_on_the_signal_route_is_400_and_signals_nothing(
@@ -2363,3 +2367,39 @@ async def test_a_malformed_body_on_the_signal_route_is_400_and_signals_nothing(
     assert r.status_code == 400, r.text
     assert r.json()["code"] == "invalid_body"
     assert fake.events == []
+
+
+# 20000 levels fit in MAX_BODY_BYTES and are past the parser's stack.
+_TOO_DEEP = "[" * 20000 + "]" * 20000
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "code"),
+    [
+        ("POST", "/api/projects", "invalid_name"),
+        ("PATCH", "/api/config", "invalid_body"),
+        ("POST", f"/api/sessions/{proj('vessel')}/answer", "invalid_body"),
+        ("POST", f"/api/sessions/{proj('vessel')}/signal", "invalid_body"),
+        ("POST", f"/api/sessions/{proj('vessel')}/signal/force", "invalid_body"),
+    ],
+)
+async def test_a_body_nested_past_the_parser_is_a_400_on_every_route_that_reads_one(
+    client: httpx.AsyncClient, method: str, path: str, code: str
+) -> None:
+    """#399: RecursionError is not a ValueError, so a catch of ValueError alone
+    let a deep body out of the handler as a 500 and a traceback."""
+    r = await client.request(method, path, headers=HEADERS, content=_TOO_DEEP)
+    assert r.status_code == 400, r.text
+    assert r.json()["code"] == code
+
+
+async def test_a_body_nested_past_the_parser_is_a_400_at_the_grant_without_a_token(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The grant checks its own token, so this one is reachable by a caller
+    who has none (#399)."""
+    engine, config = _token_app(tmp_path)
+    async with client_for(engine, config) as c:
+        r = await c.post("/api/grant", headers=GRANT_HEADERS, content=_TOO_DEEP)
+    assert r.status_code == 400, r.text
+    assert r.json()["code"] == "invalid_body"

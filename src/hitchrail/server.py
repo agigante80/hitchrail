@@ -85,6 +85,12 @@ EDITABLE_ROOT_FIELDS = frozenset({"enabled"})
 # find out the limit was never set.
 MAX_BODY_BYTES = 64 * 1024
 
+# What `request.json()` raises on a body it cannot parse. A body nested past
+# the parser's stack raises RecursionError, which is not a ValueError, and
+# 64 KB holds 20000 levels of `[`: catching ValueError alone answered it with
+# a 500 and a traceback (#399, the class #356 fixed in the file reads).
+_UNPARSEABLE = (ValueError, RecursionError)
+
 logger = logging.getLogger(__name__)
 
 
@@ -287,7 +293,7 @@ def create_app(
         try:
             payload = await request.json()
             name = str(payload["name"])
-        except (ValueError, KeyError, TypeError):
+        except (*_UNPARSEABLE, KeyError, TypeError):
             # A malformed body is a bad name, not a server fault. Returning 500
             # here would put a traceback where a client expects a code.
             return _error(400, "invalid_name", "a JSON body with a 'name' is required")
@@ -335,7 +341,7 @@ def create_app(
         """
         try:
             body = await request.json()
-        except ValueError:
+        except _UNPARSEABLE:
             return _error(400, "invalid_body", "a JSON object is required")
         if not isinstance(body, dict):
             return _error(400, "invalid_body", "a JSON object is required")
@@ -452,7 +458,7 @@ def create_app(
         try:
             body = await request.json()
             offered = body["token"]
-        except (ValueError, KeyError, TypeError):
+        except (*_UNPARSEABLE, KeyError, TypeError):
             return _error(400, "invalid_body", "a JSON body with a 'token' is required")
         if not isinstance(offered, str) or not sec.token_matches(offered, config.token):
             # The SAME answer a missing token gets from the middleware. A wrong
@@ -568,7 +574,7 @@ def create_app(
         try:
             body = await request.json()
             key = body["key"]
-        except (ValueError, TypeError, KeyError):
+        except (*_UNPARSEABLE, TypeError, KeyError):
             return _error(400, "invalid_body", "a JSON body with a 'key' is required")
         if not isinstance(key, str):
             return _error(400, "invalid_body", "a JSON body with a 'key' is required")
@@ -658,10 +664,16 @@ def create_app(
         if (await request.body()).strip():
             try:
                 body = await request.json()
-            except ValueError:
+            except _UNPARSEABLE:
                 return _error(400, "invalid_body", "the body, when sent, must be JSON")
             if not isinstance(body, dict):
                 return _error(400, "invalid_body", "the body, when sent, must be a JSON object")
+            # Any other key is refused rather than ignored (#400): `{"PID": 901}`
+            # was read as no pid and sent the unbound signal. `{}` asks for no
+            # binding, as no body does, so it stays today's request.
+            for key in body:
+                if key != "pid":
+                    return _error(400, "invalid_body", f"{key!r} is not a key this body takes")
             if "pid" in body:
                 seen_pid = body["pid"]
                 # bool is an int subclass, and `true` is not a pid.

@@ -1451,7 +1451,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 1008 for #279: the signal route reads an optional pid, and refuses a
         # body it cannot read rather than signal as if none were sent.
         # 1009 for #370: the plugin route names all five record codes.
-        "server.py": 1009,
+        # 1021 for #399 and #400: one catch for what an unparseable body
+        # raises, and the signal body refuses a key it does not take.
+        "server.py": 1021,
     }
 
     # Keyed by the path under `src/hitchrail` (#368), so a package's
