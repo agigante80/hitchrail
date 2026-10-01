@@ -13,9 +13,10 @@ from typing import Any
 import pytest
 
 from conftest import CLEAR_INPUT_BOX, FakeClock, FakeTmux, procs_from, ps_row
+from hitchrail import settings
 from hitchrail.config import Config, ConfigError
 from hitchrail.engine import Engine, StopMarker
-from hitchrail.sessions import State
+from hitchrail.sessions import InvalidValue, OperatorPinned, State
 from hitchrail.tmux import TmuxUnavailable
 from support import DEFAULT_LABEL, make_config
 from test_engine import MODAL_PANE
@@ -187,3 +188,99 @@ def test_the_self_project_is_never_killed_by_this_path(root: Path) -> None:
     assert engine.expire_stops() == [VESSEL]
     assert tmux.killed == []
     assert engine.get(VESSEL).state is State.RUNNING
+
+
+# -- #409: chosen on the settings page, kept in the state file ------------
+
+
+def test_a_policy_set_by_a_request_is_the_one_the_expiry_acts_on(root: Path) -> None:
+    """The engine reads the preference, not the frozen `Config`: a policy
+    chosen on the page and read nowhere would be a control that lies."""
+    engine, tmux, clock = policy_engine(root, state_path=root / "state" / "state.toml")
+    engine.prefs.apply(stop_policy="end_anyway")
+    assert expire_on(engine, tmux, clock, MODAL_PANE) == [VESSEL]
+    assert tmux.killed == [VESSEL]
+
+
+def test_a_policy_set_back_to_ask_kills_nothing(root: Path) -> None:
+    engine, tmux, clock = policy_engine(root, state_path=root / "state" / "state.toml")
+    engine.prefs.apply(stop_policy="end_anyway")
+    engine.prefs.apply(stop_policy="ask")
+    assert expire_on(engine, tmux, clock, MODAL_PANE) == [VESSEL]
+    assert tmux.killed == []
+
+
+def test_the_policy_persists_and_a_new_process_reads_it(root: Path) -> None:
+    state = root / "state" / "state.toml"
+    prefs = settings.Preferences(make_config(root, state_path=state))
+    assert (prefs.stop_policy(), prefs.stop_policy_source()) == ("ask", "default")
+    prefs.apply(stop_policy="end_anyway")
+    assert 'stop_policy = "end_anyway"' in state.read_text()
+    fresh = settings.Preferences(make_config(root, state_path=state))
+    assert (fresh.stop_policy(), fresh.stop_policy_source()) == ("end_anyway", "state")
+    assert fresh.stop_policy_editable()
+
+
+@pytest.mark.parametrize("bad", ["kill", "", "END_ANYWAY", 1, True, ["end_anyway"]])
+def test_a_request_for_an_unknown_policy_writes_nothing(root: Path, bad: object) -> None:
+    state = root / "state.toml"
+    prefs = settings.Preferences(make_config(root, state_path=state))
+    with pytest.raises(InvalidValue, match="ask, end_anyway"):
+        prefs.apply(stop_policy=bad)
+    assert not state.exists()
+    assert prefs.stop_policy() == "ask"
+
+
+@pytest.mark.parametrize(
+    ("source", "where"), [("flag", "command line"), ("file", "config file")]
+)
+def test_the_flag_and_the_file_both_pin_the_policy(root: Path, source: str, where: str) -> None:
+    """Unlike the wait, the file pins it too: a line in the operator's file
+    is a choice made on the machine, and the page does not outrank it. A
+    state file left from before the pin is not read either."""
+    state = root / "state.toml"
+    state.write_text('stop_policy = "end_anyway"\n')
+    state.chmod(0o600)
+    prefs = settings.Preferences(
+        make_config(root, state_path=state, stop_policy="ask", sources={"stop_policy": source})
+    )
+    assert (prefs.stop_policy(), prefs.stop_policy_source()) == ("ask", source)
+    assert not prefs.stop_policy_editable()
+    with pytest.raises(OperatorPinned, match=where):
+        prefs.apply(stop_policy="end_anyway")
+    assert prefs.stop_policy() == "ask"
+
+
+@pytest.mark.parametrize(
+    "line", ['stop_policy = "kill"', "stop_policy = true", "stop_policy = 1"]
+)
+def test_an_unknown_policy_in_the_state_file_is_ask_and_loses_nothing_beside_it(
+    root: Path, line: str
+) -> None:
+    """An unreadable choice chooses nothing, and nothing is `ask`: a state
+    file is never how an unknown word, or a kill, reaches the engine."""
+    state = root / "state.toml"
+    state.write_text(f'disabled = ["home"]\n{line}\n')
+    state.chmod(0o600)
+    read = settings.read_state(state)
+    assert read.stop_policy is None
+    assert read.hidden == {"home"}
+    assert settings.Preferences(make_config(root, state_path=state)).stop_policy() == "ask"
+
+
+def test_a_state_file_others_can_write_ends_nothing(root: Path) -> None:
+    """#281's rule, which matters more here than for a hidden root: a state
+    file anybody could have written must not be how a kill is switched on."""
+    state = root / "state.toml"
+    state.write_text('stop_policy = "end_anyway"\n')
+    state.chmod(0o666)
+    assert settings.Preferences(make_config(root, state_path=state)).stop_policy() == "ask"
+
+
+def test_every_field_survives_a_round_trip(root: Path) -> None:
+    state = root / "state.toml"
+    written = settings.State(
+        hidden=frozenset({"home"}), stop_timeout=45, stop_policy="end_anyway"
+    )
+    settings.write_state(state, written, configured={"home"})
+    assert settings.read_state(state) == written

@@ -53,3 +53,41 @@ async def test_ask_says_nothing_of_the_kind(page: Page, server: Harness) -> None
     dialog = page.locator("[data-dialog]")
     await expect(dialog).to_contain_text("It will be interrupted")
     assert NOTE not in await dialog.inner_text()
+
+
+async def test_end_anyway_chosen_on_the_settings_page_is_the_one_the_server_acts_on(
+    page: Page, server: Harness
+) -> None:
+    """#409. Chosen here rather than in the file: the page says what it does
+    under the Save, the list's dialog then warns, and the server ends the
+    stop with no tap."""
+    server.seed(running=["vessel"], prompts_after_stop=True, stop_timeout=2.0)
+    await page.goto(f"{server.base}/settings")
+    source = page.locator("[data-policy-source]")
+    await expect(source).to_contain_text("waits for you. Currently the default.")
+    await page.locator("[data-stop-policy]").select_option("end_anyway")
+    await page.locator("[data-policy-save]").click()
+    await expect(source).to_contain_text("is ended without a tap. Currently set here.")
+
+    await _confirm(page, server)
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text(NOTE)
+    await dialog.get_by_role("button", name="Stop", exact=True).click()
+    await expect(
+        page.locator(f'[data-project="{server.project("vessel")}"]')
+    ).to_have_attribute("data-state", "stopped", timeout=20_000)
+
+
+@pytest.mark.parametrize(
+    ("source", "where"), [("flag", "command line"), ("file", "config file")]
+)
+async def test_a_policy_the_operator_set_is_text_on_the_settings_page(
+    page: Page, server: Harness, source: str, where: str
+) -> None:
+    server.seed(stopped=["vessel"], stop_policy="end_anyway", stop_policy_source=source)
+    await page.goto(f"{server.base}/settings")
+    await expect(page.locator("[data-policy-source]")).to_contain_text(
+        f"is ended without a tap. Set {'on' if source == 'flag' else 'in'} the {where}"
+    )
+    assert await page.locator("[data-stop-policy]").is_hidden()
+    assert await page.locator("[data-policy-save]").is_hidden()

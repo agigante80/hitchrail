@@ -56,9 +56,14 @@ SWEEP_INTERVAL_S = 1.0
 # only way, and `tests/test_settings_route.py` asserts both sets member by
 # member. The test for membership is #238's: does changing this let a request
 # do anything a request with the token cannot already do? A longer wait does
-# not; hiding a configured root does not. The label between the two levels is
-# validated by membership in the configured set, in the engine.
-EDITABLE_TOP_LEVEL = frozenset({"roots", "stop_timeout"})
+# not; hiding a configured root does not. `stop_policy` (#409) passes it
+# too, and was held back from #239 for a while because it is the closest
+# call: `end_anyway` is a kill nobody tapped, but only of a session a request
+# already asked to stop, which the same token could Kill outright. Andrea
+# decided it on 2026-10-01; the file and the flag still pin it, in
+# `Preferences`. The label between the two levels is validated by membership
+# in the configured set, in the engine.
+EDITABLE_TOP_LEVEL = frozenset({"roots", "stop_timeout", "stop_policy"})
 EDITABLE_ROOT_FIELDS = frozenset({"enabled"})
 
 # Three routes read a body: create takes {"name": <a project name>}, answer
@@ -232,7 +237,7 @@ def create_app(
             "stop_prompt_set": config.stop_prompt is not None,
             "stop_prompt_timeout": config.stop_prompt_timeout,
             # #239. So the wait dialog says a kill is coming before it does.
-            "stop_policy": config.stop_policy,
+            "stop_policy": engine.prefs.stop_policy(),
         }
 
     async def list_projects(request: Request) -> Response:
@@ -379,11 +384,15 @@ def create_app(
             return _error(
                 400, "invalid_value", "stop_timeout must be a whole number of seconds"
             )
+        if "stop_policy" in body and body["stop_policy"] is None:
+            return _error(400, "invalid_value", "stop_policy must be ask or end_anyway")
         try:
             # Both halves in ONE call, checked together before either is
             # written: applied in sequence, a refused timeout left the roots
             # half already on disk (Phase 14 review, round 1).
-            await in_thread(engine.prefs.apply, changes, body.get("stop_timeout"))
+            await in_thread(
+                engine.prefs.apply, changes, body.get("stop_timeout"), body.get("stop_policy")
+            )
         except eng.UnknownRoot as exc:
             return _error(404, "unknown_root", str(exc))
         except eng.OperatorDisabled as exc:
@@ -394,6 +403,10 @@ def create_app(
             return _error(400, "invalid_value", str(exc))
         except eng.StateUnwritable as exc:
             return _error(503, "state_unwritable", str(exc))
+        if "stop_policy" in body:
+            # The startup block names the policy it started with; a kill
+            # nobody tapped later needs the journal to say when that changed.
+            logger.info("stop policy is %s, set by a request", engine.prefs.stop_policy())
         return JSONResponse(_config_view())
 
     def _text(path: Path | None) -> str | None:
@@ -436,9 +449,12 @@ def create_app(
             # be the free text input the roadmap defers.
             "stop_prompt": shown("stop_prompt", config.stop_prompt),
             "stop_prompt_timeout": shown("stop_prompt_timeout", config.stop_prompt_timeout),
-            # #239. Read only for now: making a kill policy editable from the
-            # phone is its own decision, not a field added beside this one.
-            "stop_policy": shown("stop_policy", config.stop_policy),
+            # #409. Editable unless the flag or the config file set it.
+            "stop_policy": {
+                "value": prefs.stop_policy(),
+                "source": prefs.stop_policy_source(),
+                "editable": prefs.stop_policy_editable(),
+            },
             # The certificate's path, or none: what "is this HTTPS" needs.
             "tls": shown("tls", _text(config.tls_cert)),
             "expect_gateway_mac": shown("expect_gateway_mac", config.expect_gateway_mac),

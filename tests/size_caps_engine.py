@@ -345,5 +345,7 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # with the decision written where a reader would undo it.
     # 488 for #242: the two file keys, read by the same rule as the rest.
     # 495 for #239: the `stop_policy` file key, typed here as the rest.
-    "settings.py": 495,
+    # 551 for #409: the policy kept in the state file, pinned by the file
+    # as well as the flag, with the reason where a reader would undo it.
+    "settings.py": 551,
 }

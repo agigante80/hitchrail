@@ -586,6 +586,7 @@ class Harness:
         wrap_up_takes: float | None = None,
         wrap_up_stays_busy: bool = False,
         stop_policy: str = "ask",
+        stop_policy_source: str | None = None,
     ) -> None:
         """Set the world up BEFORE the page loads.
 
@@ -593,7 +594,8 @@ class Harness:
         #238); `None` keeps them in memory for the life of the server, which
         is what every test that does not restart wants. `pinned_stop_timeout`
         tags the wait as given on the command line, so the page shows it
-        pinned.
+        pinned. `stop_policy_source` tags the policy the same way, `flag` or
+        `file`, both of which pin it (#409).
 
         `ceiling_mb` is what every session's cgroup ceiling reads as (#243).
         Injected, never read from this machine: the development box carries
@@ -723,6 +725,8 @@ class Harness:
         )
 
         sources = {"stop_timeout": "flag"} if pinned_stop_timeout else {}
+        if stop_policy_source is not None:
+            sources["stop_policy"] = stop_policy_source
 
         def build(protect: str | None) -> Config:
             if self.extra_roots:

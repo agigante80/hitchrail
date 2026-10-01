@@ -386,10 +386,11 @@ the next upgrade and fails at the next boot rather than at the upgrade.
 
 **Settings, from the phone.** The footer's "settings" link shows what this
 instance is pointed at: every root, the bind, the allowlists, the agent, the
-prefix, and where each came from, as text. Two things can be changed there
-and they are the only two: a root already in the file can be hidden from the
-list and shown again, and the wait before a stop is reported as unanswered.
-Both are kept in `~/.config/hitchrail/state.toml`, which is Hitchrail's own.
+prefix, and where each came from, as text. Three things can be changed there
+and they are the only three: a root already in the file can be hidden from the
+list and shown again, the wait before a stop is reported as unanswered, and
+what a stop that runs out of time on a question does (below). All three are
+kept in `~/.config/hitchrail/state.toml`, which is Hitchrail's own.
 Everything else is the perimeter and changes only in the config file or on
 the command line, on the machine.
 
@@ -539,7 +540,7 @@ install it first.
 | `--stop-timeout` | `30` | Seconds to wait for a graceful stop before reporting that it timed out, at most 3600. It reports; it does not escalate unless `--stop-policy` says so |
 | `--stop-prompt` | none | One line Stop types to the agent before asking it to exit, such as a slash command that commits and writes notes. See "Wrapping up on Stop" below. Also `stop_prompt` in the config file |
 | `--stop-prompt-timeout` | `300` | Seconds the agent has to finish its task and the prompt before Stop exits anyway, 10 to 3600. Also `stop_prompt_timeout` in the config file |
-| `--stop-policy` | `ask` | What a stop that runs out of time on a question does: `ask` reports and offers Kill, `end_anyway` kills it. Also `stop_policy` in the config file |
+| `--stop-policy` | `ask` | What a stop that runs out of time on a question does: `ask` reports and offers Kill, `end_anyway` kills it. Also `stop_policy` in the config file, or the settings page when neither sets it |
 | `--version` | | Print the version and exit |
 | `-h`, `--help` | | Print the options and exit |
 
@@ -591,8 +592,10 @@ stop_policy = "end_anyway"   # default "ask"; also --stop-policy
 Then a stop that runs out of time while the agent's screen shows a question
 is killed, as the Kill button would. Nothing is ever typed into the
 question, a stop that is merely slow is never killed, and the confirm and
-wait dialogs say what will happen before it does. Shown on the settings page,
-not changeable from it.
+wait dialogs say what will happen before it does. It can also be chosen on
+the settings page, which says under its Save what the choice does. Set by the
+flag or in the config file, it is shown there and not changeable from it: the
+page does not outrank a line on the machine.
 
 With a `stop_prompt` set, it applies once the exit is sent. A wrap up that
 ends on a question is reported for you to answer and never killed, because

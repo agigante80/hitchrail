@@ -36,8 +36,9 @@ import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import cast
 
-from hitchrail.config import MAX_STOP_TIMEOUT_S, Config
+from hitchrail.config import MAX_STOP_TIMEOUT_S, STOP_POLICIES, Config
 from hitchrail.projectnames import explain_name
 from hitchrail.roots import Root, RootError, parse_root_argument
 from hitchrail.sessions import (
@@ -276,12 +277,16 @@ def read_config_file(path: Path) -> FileSettings:
 
 @dataclass(frozen=True, slots=True)
 class State:
-    """What the interface has chosen. Two things, and both are policy about
-    work the token can already do: which configured roots are hidden, and
-    how long a graceful stop is waited for. Neither widens anything."""
+    """What the interface has chosen. Three things, and all are policy about
+    work the token can already do: which configured roots are hidden, how
+    long a graceful stop is waited for, and whether a stop that ends on a
+    question is ended (#409). The last is a kill nobody tapped, but only of a
+    session a request already asked to stop, which the same token could Kill
+    outright; it widens no route."""
 
     hidden: frozenset[str] = frozenset()
     stop_timeout: int | None = None
+    stop_policy: str | None = None
 
 
 def read_state(path: Path) -> State:
@@ -315,7 +320,12 @@ def read_state(path: Path) -> State:
         or timeout > MAX_STOP_TIMEOUT_S
     ):
         timeout = None
-    return State(hidden=hidden, stop_timeout=timeout)
+    # Anything but a known policy chooses nothing, which is `ask`: a state
+    # file must never be the way an unknown word reaches the engine.
+    policy = data.get("stop_policy")
+    if policy not in STOP_POLICIES:
+        policy = None
+    return State(hidden=hidden, stop_timeout=timeout, stop_policy=policy)
 
 
 def write_state(path: Path, state: State, configured: set[str]) -> None:
@@ -326,6 +336,8 @@ def write_state(path: Path, state: State, configured: set[str]) -> None:
     body = "disabled = [" + ", ".join(f'"{label}"' for label in kept) + "]\n"
     if state.stop_timeout is not None:
         body += f"stop_timeout = {state.stop_timeout}\n"
+    if state.stop_policy is not None:
+        body += f'stop_policy = "{state.stop_policy}"\n'
     path.parent.mkdir(parents=True, exist_ok=True)
     header = (
         "# Written by hitchrail: what the interface has chosen. The config file is yours.\n"
@@ -433,13 +445,37 @@ class Preferences:
             return "flag"
         return "state" if self._state.stop_timeout is not None else "default"
 
+    def stop_policy(self) -> str:
+        """What the engine does with a stop that ends on a question (#239)."""
+        if self.stop_policy_editable() and self._state.stop_policy is not None:
+            return self._state.stop_policy
+        return self._config.stop_policy
+
+    def stop_policy_editable(self) -> bool:
+        """Pinned by the config file too, not only by a flag, unlike
+        `stop_timeout`, which the file cannot set. The operator's file is the
+        operator's: a line in it saying `ask` is a choice made on the machine,
+        and a request overriding it would be the page outranking the person
+        who configured the server (#409)."""
+        return self._config.sources.get("stop_policy") not in ("flag", "file")
+
+    def stop_policy_source(self) -> str:
+        if not self.stop_policy_editable():
+            return self._config.sources["stop_policy"]
+        return "state" if self._state.stop_policy is not None else "default"
+
     def set_roots_enabled(self, changes: Mapping[str, bool]) -> None:
         self.apply(roots=changes)
 
     def set_stop_timeout(self, seconds: object) -> None:
         self.apply(stop_timeout=seconds)
 
-    def apply(self, roots: Mapping[str, bool] = {}, stop_timeout: object = None) -> None:
+    def apply(
+        self,
+        roots: Mapping[str, bool] = {},
+        stop_timeout: object = None,
+        stop_policy: object = None,
+    ) -> None:
         """One request, one write. EVERYTHING is checked before anything is
         persisted, so a body that names one unknown label, or a valid toggle
         beside a timeout of zero, changes nothing at all: round 1 of the
@@ -473,6 +509,24 @@ class Preferences:
                 Config.check_stop_timeout(stop_timeout)
             except ValueError as exc:
                 raise InvalidValue(str(exc)) from exc
+        policy: str | None = None
+        if stop_policy is not None:
+            if not self.stop_policy_editable():
+                where = (
+                    "on the command line"
+                    if self._config.sources.get("stop_policy") == "flag"
+                    else "in the operator's config file"
+                )
+                raise OperatorPinned(
+                    f"stop_policy is set {where}, which a request cannot override"
+                )
+            # The one validator refuses anything but the two words, a
+            # non string included, so the cast claims nothing it does not.
+            policy = cast(str, stop_policy)
+            try:
+                Config.check_stop_policy(policy)
+            except ValueError as exc:
+                raise InvalidValue(str(exc)) from exc
         with self._guard:
             hidden = set(self._state.hidden)
             for label, on in roots.items():
@@ -480,6 +534,8 @@ class Preferences:
             state = replace(self._state, hidden=frozenset(hidden))
             if stop_timeout is not None:
                 state = replace(state, stop_timeout=stop_timeout)
+            if policy is not None:
+                state = replace(state, stop_policy=policy)
             # Nothing to say, nothing written: `PATCH {}` on a read only
             # config directory answered 503 for a request that changed
             # nothing (Phase 14 review, round 2).

@@ -241,7 +241,8 @@ Stopping is a sequence, not a button:
    so. With a prompt set, the 30 seconds count from the exit phase, not from
    the tap. By default it does **not** escalate on its own. The session is still
    running, and the choice to kill it stays the user's. The one exception is
-   chosen by the operator in advance (#239): with `stop_policy = "end_anyway"`,
+   chosen in advance (#239), by the operator's flag or file or, when neither
+   sets it, on the settings page (#409): with `stop_policy = "end_anyway"`,
    a wait that runs out while the pane, read again at that moment, shows a
    prompt ends in the kill this step would have offered. It is a kill and never
    an answer: which key means "exit" is Claude Code knowledge, and a key typed

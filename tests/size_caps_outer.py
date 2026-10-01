@@ -145,5 +145,7 @@ OUTER_LAYER_CAPS: dict[str, int] = {
     # flight like the scan, and the listing says whether a prompt is set,
     # never which.
     # 1057 for #239: the policy in the listing and the settings payload.
-    "server.py": 1057,
+    # 1073 for #409: the policy editable, its null refused and its change
+    # a journal line.
+    "server.py": 1073,
 }

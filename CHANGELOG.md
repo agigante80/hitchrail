@@ -32,6 +32,17 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+### Added
+
+**What a stop that runs out of time on a question does can be chosen on the
+settings page**, between reporting it (`ask`, still the default) and ending
+the session (`end_anyway`). The page says under its Save what the choice does,
+and the choice is kept in `state.toml`. Nothing to do on upgrade: a
+`stop_policy` already set by `--stop-policy` or in the config file wins and
+is shown on the page as not changeable there. `PATCH /api/config` takes
+`stop_policy`, and `GET /api/config` now reports it as `{value, source,
+editable}`, like `stop_timeout`.
+
 ## 0.11.0 - 2026-09-28
 
 Nothing to do on upgrade. Everything below is a fix or an addition.

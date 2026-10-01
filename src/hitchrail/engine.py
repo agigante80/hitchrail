@@ -1634,7 +1634,7 @@ class Engine:
             # pane, never the sweep's overlay, and never a key typed into the
             # prompt. `kill` refuses the protected project itself, the same
             # refusal its route gives.
-            end_anyway = self.config.stop_policy == "end_anyway"
+            end_anyway = self.prefs.stop_policy() == "end_anyway"
             if waiting and end_anyway and self._end_anyway(name):
                 continue
             try:

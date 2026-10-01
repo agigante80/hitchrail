@@ -49,6 +49,19 @@
       </span>
       <span class="settings-source" data-stop-source></span>
     </label>
+    <!-- #409. A choice between two words, so a select; saved on Save, never
+         on change, because one of the two is a kill nobody tapped. -->
+    <label class="settings-field" data-policy-field>
+      <span class="settings-label">When a stop runs out of time on a question</span>
+      <span class="settings-control">
+        <select data-stop-policy>
+          <option value="ask">Report it and wait for me</option>
+          <option value="end_anyway">End the session</option>
+        </select>
+        <button type="button" class="accent" data-policy-save>Save</button>
+      </span>
+      <span class="settings-source" data-policy-source></span>
+    </label>
   </section>
   <!-- #297. Machine wide, so here rather than on a row. The record comes
        from GET /api/plugins/update on load and on every reconnect, then from

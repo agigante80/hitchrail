@@ -244,13 +244,13 @@ instance pointed at" without SSH. Every value is `{value, source}` where
 `source` is `flag`, `file`, `env` or `default`: `host`, `port`,
 `allow_hosts`, `allow_origins`, `self_project`, `agent_binary`,
 `session_prefix`, `stop_prompt` and `stop_prompt_timeout` (read only, #242),
-`stop_policy` (read only, #239),
 `tls` (the certificate's path, or null),
 `expect_gateway_mac` (the flag's value, normalised, or null), the three
 memory figures, `config_file` and `state_file`.
 `roots` is every configured root as `{label, path, enabled, editable,
 source}`, hidden ones included, with `hidden_roots` beside it; `stop_timeout`
-is `{value, source, editable}`, its source `state` when the interface set it.
+and `stop_policy` (#239, #409) are each `{value, source, editable}`, the
+source `state` when the interface set it.
 **`token` carries its source and never its value**, and `none` means the
 server runs without one, which only a loopback bind allows.
 
@@ -307,9 +307,10 @@ the operation fails the 202 has been sent.
 
 ### `PATCH /api/config`
 
-Body: `{"roots": {"work": {"enabled": false}}, "stop_timeout": 45}`, either
-half optional. One boolean per configured label, as many labels as the body
-names, and a whole number of seconds; the response is the same document
+Body: `{"roots": {"work": {"enabled": false}}, "stop_timeout": 45,
+"stop_policy": "end_anyway"}`, each part optional. One boolean per configured
+label, as many labels as the body names, a whole number of seconds, and
+`ask` or `end_anyway`; the response is the same document
 `GET` returns, as it now stands.
 
 **No route accepts a path, and this is the route that would have.** Roots are
@@ -342,6 +343,14 @@ in `state.toml`, and is read by the engine and reported on the listing's
 A `--stop-timeout` flag pins it: the value shows `source: "flag"`,
 `editable: false`, and a request to change it is `operator_pinned` (409)
 rather than a write the next restart would ignore.
+
+`stop_policy` (#409) is the closest call on the list: `end_anyway` is a kill
+nobody taps, but only of a session a request already asked to stop, which the
+same token could Kill outright. Anything but `ask` or `end_anyway`, null
+included, is `invalid_value` (400). It persists in `state.toml`, which an
+unknown word there reads as `ask`, and the change is a journal line. Unlike
+`stop_timeout`, the config file pins it as well as the flag: either one gives
+`editable: false`, and a request is `operator_pinned` (409).
 
 ## Session states
 
