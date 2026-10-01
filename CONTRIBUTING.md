@@ -62,8 +62,8 @@ for a contrast.
 
 **A file past roughly 400 lines is doing more than one thing.** Split it along
 the seam already there, or record the exception with its argument in
-`tests/test_config.py`, where every current one is argued rather than waved
-through.
+`tests/size_caps_engine.py` or `tests/size_caps_outer.py`, where every current
+one is argued rather than waved through.
 
 **Test the refusals.** A security control with only a happy path test is
 untested.

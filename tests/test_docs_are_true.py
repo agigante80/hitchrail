@@ -87,7 +87,7 @@ def _conventions() -> str:
     reversal, and the honest consequence is written here rather than left to
     be discovered: every check in this module that reads it runs on the
     machine where it is edited and on NO CI leg, exactly like the security
-    rules guard in `tests/test_config.py`. A skip everywhere would be a lie
+    rules guard in `tests/test_security_rules.py`. A skip everywhere would be a lie
     about coverage; a skip on the checkouts that genuinely do not carry the
     file is the cost of deriving a check from something the repository does
     not publish.

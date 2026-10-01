@@ -5,7 +5,7 @@ root proj
 # a test fixture value that happens to match a private-name shape
 skip tests/test_api.py
 
-# tests/test_no_private_data.py, tests/test_config.py, tests/test_ram.py, tests/test_docs_are_true.py,
+# tests/test_no_private_data.py, tests/test_config_origins.py, tests/test_ram.py, tests/test_docs_are_true.py,
 # packaging/hitchrail.service, src/hitchrail/config.py: this project's own private-data guard's test
 # fixtures and packaging examples, all placeholder/fake addresses
 email user@1000.service

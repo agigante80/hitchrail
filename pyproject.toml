@@ -374,12 +374,12 @@ also_copy = [
 # `xǁConfigǁ__post_init____mutmut_N` copy, and none of them is the allowlisted
 # `__post_init__`.
 pytest_add_cli_args = [
-  "--deselect=tests/test_config.py::test_every_read_of_agent_binary_is_the_resolved_property_or_allowlisted",
-  "--deselect=tests/test_config.py::test_every_environment_variable_the_product_reads_is_scrubbed",
-  "--deselect=tests/test_config.py::test_every_module_is_under_the_size_guideline",
-  "--deselect=tests/test_config.py::test_the_import_contract_covers_every_engine_layer_module",
-  "--deselect=tests/test_config.py::test_projectnames_does_not_import_config",
-  "--deselect=tests/test_config.py::test_hostnames_does_not_import_config",
+  "--deselect=tests/test_source_guards.py::test_every_read_of_agent_binary_is_the_resolved_property_or_allowlisted",
+  "--deselect=tests/test_source_guards.py::test_every_environment_variable_the_product_reads_is_scrubbed",
+  "--deselect=tests/test_size_guideline.py::test_every_module_is_under_the_size_guideline",
+  "--deselect=tests/test_source_guards.py::test_the_import_contract_covers_every_engine_layer_module",
+  "--deselect=tests/test_source_guards.py::test_projectnames_does_not_import_config",
+  "--deselect=tests/test_source_guards.py::test_hostnames_does_not_import_config",
   "--deselect=tests/test_tmux.py::test_the_sweep_drives_every_public_method",
 ]
 pytest_add_cli_args_test_selection = [
@@ -387,7 +387,18 @@ pytest_add_cli_args_test_selection = [
   "tests/test_security_token.py",
   "tests/test_security_origin.py",
   "tests/test_headers.py",
+  # #30 split one 2884 line file into these; every one of them was in the
+  # selection then, so every one of them still is.
   "tests/test_config.py",
+  "tests/test_config_hosts.py",
+  "tests/test_config_origins.py",
+  "tests/test_config_reach.py",
+  "tests/test_hostnames.py",
+  "tests/test_local_addresses.py",
+  "tests/test_source_guards.py",
+  "tests/test_size_guideline.py",
+  "tests/test_mutation_config.py",
+  "tests/test_security_rules.py",
   "tests/test_discovery.py",
   "tests/test_properties.py",
   # The integration tier belongs here even though it costs four seconds a

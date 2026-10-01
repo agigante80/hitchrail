@@ -5,9 +5,9 @@ none of them cared how it was built: they wanted a config pointing at a
 temporary root so they could test something else. Pluralising `root` for #120
 would therefore have been a 145 site diff, which is not a diff anybody reviews.
 
-`tests/test_config.py` deliberately does NOT use this. Config is the unit under
-test there, and a helper between the test and the constructor would hide the
-thing being asserted.
+The `Config` tests (`tests/config_support.py`) deliberately do NOT use this.
+Config is the unit under test there, and a helper between the test and the
+constructor would hide the thing being asserted.
 """
 
 from __future__ import annotations

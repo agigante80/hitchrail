@@ -227,7 +227,7 @@ class Config:
     # from `agent_binary` itself, rather than overwritten in place, so a
     # static read of the field name can tell "what the operator typed" from
     # "what preflight found on this machine" and hold every spawn site to
-    # the second: see the AST guard in test_config.py for #298.
+    # the second: see the AST guard in test_source_guards.py for #298.
     resolved_agent_binary: str | None = None
     # The default is Claude Code's state directory. The field name is neutral
     # because the directory is the agent adapter's business, not the server's.
@@ -360,7 +360,7 @@ class Config:
         nothing has resolved it, which is every Config built outside
         `cli.main`, `support.make_config` included. `launch_argv`,
         `find_detached` and the plugin update all read this property and
-        never the field directly; the AST guard in test_config.py enforces
+        never the field directly; the AST guard in test_source_guards.py enforces
         that everywhere but here and in `cli.update_plugins_command`, which
         resolves and checks its own copy before it ever builds a Config."""
         return self.resolved_agent_binary or self.agent_binary

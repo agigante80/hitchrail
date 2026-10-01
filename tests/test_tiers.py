@@ -383,7 +383,7 @@ _MAY_SKIP = {
     # out of a worktree. A different checkout is not a different machine.
     "test_workflows_are_pinned.py",
     "test_docs_are_true.py",
-    "test_config.py",
+    "test_security_rules.py",
     # A filesystem that will not create a name, and an `is_symlink` that did not
     # raise. Both are properties of the platform and both are asserted about,
     # not skipped past, in the tests that own them.
