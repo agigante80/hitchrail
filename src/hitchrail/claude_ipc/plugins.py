@@ -296,13 +296,15 @@ def plugin_runner(
             # traced back and the route recorded `internal_error`. Chosen over
             # catching `UnicodeDecodeError` in `_call`, which would need a new
             # failure code, or borrow `plugins_unreadable` for calls that are
-            # not the listing. Every byte this runner captures is either
-            # SHOWN to a person or matched by `_PLUGIN_ID`/`_SCOPE` after
-            # `json.loads` already refused it: `_read_listing` and
-            # `_approved_command` already treat malformed JSON as unreadable,
-            # so a lossily replaced character fails there the same way a
-            # missing quote does, and nothing here parses a replacement
-            # character as an instruction.
+            # not the listing. A replaced byte OUTSIDE a JSON string breaks
+            # the parse, and `_read_listing` and `_approved_command` already
+            # treat that as unreadable. INSIDE a string it parses (#366):
+            # the text then carries U+FFFD where the byte was, which is
+            # accepted on purpose. The decoder never swallows a following
+            # quote, so the structure cannot change; `_PLUGIN_ID` and
+            # `_SCOPE` still refuse a replaced id or scope; and a replaced
+            # byte in shown text, such as an approved command, shows the
+            # loss to the person rather than hiding it.
             errors="replace",
             env=env,
             cwd=Path.home(),

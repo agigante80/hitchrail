@@ -170,9 +170,9 @@ class PluginRuns:
         **A daemon thread, not the executor.** The interpreter joins executor
         threads at exit, and one plugin update is bounded at five minutes, so
         a stop during a run would sit past the unit's stop timeout and end in
-        a SIGKILL. A daemon thread is abandoned at exit instead; the vendor's
-        child process is then ended with the unit's cgroup, or, from a
-        terminal, finishes on its own.
+        a SIGKILL. A daemon thread is abandoned at exit instead, and the
+        vendor's child process is killed by the server's lifespan through
+        `RunningChild.kill()` (#361), never left to finish on its own.
         """
         with self._lock:
             if self._state == "running":

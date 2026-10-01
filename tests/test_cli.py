@@ -1253,7 +1253,8 @@ def test_update_plugins_reports_a_failed_plugin_not_a_traceback_on_invalid_utf8(
     code = main(["update-plugins", "--agent-binary", str(agent)])
     captured = capsys.readouterr()
     assert code == 1
-    assert "failed" in captured.out
+    # #367: "failed" alone matched the summary's own format at a count of 0.
+    assert "0 updated, 1 failed" in captured.out
     assert "Traceback" not in captured.err
     assert "Traceback" not in captured.out
 

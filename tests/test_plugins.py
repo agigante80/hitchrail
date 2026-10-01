@@ -333,11 +333,9 @@ def test_a_hung_refresh_updates_nothing() -> None:
         # Deep enough to blow the parser's own stack rather than raise
         # ValueError (#303): the listing is exactly as unreadable.
         "[" * 100_000,
-        # #351: what invalid UTF-8 on the wire looks like once the real
-        # runner's `errors="replace"` has already turned it into text. Not a
-        # crash to reproduce here, since `FakeAgent` never touches a byte:
-        # just the listing this code must already treat as unreadable JSON.
-        "��",
+        # No case for #351's replaced bytes: once `errors="replace"` has
+        # made them text they take the same `json.loads` refusal as "text",
+        # and a case that cannot fail on its own was removed (#367).
     ],
     ids=[
         "text",
@@ -349,7 +347,6 @@ def test_a_hung_refresh_updates_nothing() -> None:
         "strings",
         "one-bad-row",
         "deeply-nested",
-        "replaced-invalid-utf8",
     ],
 )
 def test_an_unreadable_listing_updates_nothing(listing: str) -> None:
