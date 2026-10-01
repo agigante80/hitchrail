@@ -541,6 +541,7 @@ install it first.
 | `--stop-prompt` | none | One line Stop types to the agent before asking it to exit, such as a slash command that commits and writes notes. See "Wrapping up on Stop" below. Also `stop_prompt` in the config file |
 | `--stop-prompt-timeout` | `300` | Seconds the agent has to finish its task and the prompt before Stop exits anyway, 10 to 3600. Also `stop_prompt_timeout` in the config file |
 | `--stop-policy` | `ask` | What a stop that runs out of time on a question does: `ask` reports and offers Kill, `end_anyway` kills it. Also `stop_policy` in the config file, or the settings page when neither sets it |
+| `--log-level`, `--verbose` | `info` | How much Hitchrail writes to stderr: `debug`, `info`, `warning` or `error`. `--verbose` is `--log-level debug`. Starts, stops and every refusal are logged at `info`; the token and what a pane shows never are |
 | `--version` | | Print the version and exit |
 | `-h`, `--help` | | Print the options and exit |
 
