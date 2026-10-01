@@ -1543,6 +1543,11 @@ class Engine:
         automatic kill is a destructive action taken while they were not
         looking.
 
+        **Unless the operator decided before they tapped** (#239):
+        `stop_policy = end_anyway`, off by default, kills a stop that ended on
+        a prompt. Escalation by choice made once in configuration, not by
+        default, which is what section 7 forbids; and a kill, not an answer.
+
         It announces, because the person watching the timer has to learn the
         wait ended. An expiry visible only on the next poll is one the
         interface cannot report.
@@ -1609,6 +1614,15 @@ class Engine:
                 with self._stopping_guard:
                     self._awaiting_input.add(name)
         for name in expired:
+            # #239. The operator's answer, given in advance, to a stop that
+            # ran out of time on a question: the kill the dialog offers at
+            # this moment, taken without the tap. Only on THIS look at the
+            # pane, never the sweep's overlay, and never a key typed into the
+            # prompt. `kill` refuses the protected project itself, the same
+            # refusal its route gives.
+            end_anyway = self.config.stop_policy == "end_anyway"
+            if waiting[name] and end_anyway and self._end_anyway(name):
+                continue
             try:
                 session = self.get(name)
             except MachineUnreadable:
@@ -1639,6 +1653,30 @@ class Engine:
                 )
             self._announce(session)
         return expired
+
+    def _end_anyway(self, name: str) -> bool:
+        """Kill an expired stop under `stop_policy = end_anyway` (#239).
+
+        True when the kill went through, and it has announced. False on any
+        refusal, and the caller reports the expiry exactly as `ask` would:
+        the unknown case does the thing that destroys nothing. Never raises,
+        for `expire_stops`' reason.
+        """
+        try:
+            self.kill(name)
+        except EngineError as exc:
+            logger.warning(
+                "stop %s: ended on a prompt, and end_anyway did not kill it: %s",
+                name,
+                type(exc).__name__,
+            )
+            return False
+        logger.info(
+            "stop %s: ended on a prompt after %gs; killed, as stop_policy end_anyway says",
+            name,
+            self.prefs.stop_timeout(),
+        )
+        return True
 
     def locate(self, name: str) -> Session:
         """The row a client may address by name, or the refusal the API gives.
