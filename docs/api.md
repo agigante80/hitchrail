@@ -207,6 +207,14 @@ route matches on is what a second instance as the same user writes too and
 only the directory tells the two apart. A folder deleted under a running
 agent still reads as under the root, so that agent can still be ended.
 
+The body is optional: `{"pid": N}`, the pid the row showed when the person
+confirmed (#279). When it is sent and the row's agent is now a different pid,
+nothing is signalled and the answer is `not_ours`, before any handle is
+opened: a confirmation names one process, never whatever the row holds by
+the time the request lands. No body keeps the earlier behaviour, so a script
+written against it still works. A body that is not a JSON object, or a `pid`
+that is not a positive integer, is `invalid_body`.
+
 ### `GET /api/config`
 
 The effective configuration, for a person on a phone asking "what is this
@@ -352,7 +360,7 @@ than by position.
 | Code | Status | When |
 |---|---|---|
 | `host_rejected` | 400 | the `Host` header names something not on the allowlist |
-| `invalid_body` | 400 | a body was required and was absent or not JSON |
+| `invalid_body` | 400 | a body was required and was absent or not JSON, or an optional one was sent malformed |
 | `invalid_name` | 400 | the project name is not one this tool will accept |
 | `unauthorized` | 401 | no token, or the wrong one |
 | `origin_missing` | 403 | a mutating request with no `Origin` |

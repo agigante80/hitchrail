@@ -148,6 +148,26 @@ def test_a_pid_that_changed_identity_is_refused_after_the_handle_is_opened(root:
     assert not fake.leaked
 
 
+def test_a_row_that_moved_since_the_confirmation_signals_nothing(root: Path) -> None:
+    """#279: the person confirmed pid 901, and the row's agent is now 900,
+    a different process for the same folder: ours, and not the one the
+    confirmation named. Refused before any handle is opened."""
+    fake = FakePidfd()
+    engine = _engine(root, Watched(fake, DETACHED), fake)
+    with pytest.raises(NotOurs, match="the row moved: pid 901"):
+        engine.signal_detached(proj("vessel"), seen_pid=ORPHAN + 1)
+    assert fake.signals == []
+    assert [k for k, _ in fake.events if k in ("open", "send", "owner", "cwd")] == []
+
+
+def test_the_confirmed_pid_still_on_the_row_is_signalled(root: Path) -> None:
+    fake = FakePidfd()
+    engine = _engine(root, Watched(fake, DETACHED), fake)
+    engine.signal_detached(proj("vessel"), force=True, seen_pid=ORPHAN)
+    assert fake.signals == [signal.SIGKILL]
+    assert not fake.leaked
+
+
 def test_an_agent_that_exited_before_the_handle_is_gone(root: Path) -> None:
     fake = FakePidfd(fail_open=OSError(errno.ESRCH, "No such process"))
     engine = _engine(root, Watched(fake, DETACHED), fake)

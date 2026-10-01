@@ -950,7 +950,9 @@ class Engine:
         self._announce(updated)
         return updated
 
-    def signal_detached(self, name: str, force: bool = False) -> Session:
+    def signal_detached(
+        self, name: str, force: bool = False, seen_pid: int | None = None
+    ) -> Session:
         """End an agent nothing addressable owns, through a handle (#107).
 
         The one destructive path that is not scoped by the tmux prefix, so
@@ -989,6 +991,14 @@ class Engine:
         `force` is SIGKILL, and it is a second explicit request on its own
         route, never the default: #169's rule that a kill is always available
         and never what happens first.
+
+        `seen_pid` is the pid the person confirmed (#279). Without it, the
+        agent signalled is whichever one derivation picks NOW, which may be a
+        second agent for the same folder that started after the row was drawn:
+        ours, and not the one the confirmation was about. With it, a mismatch
+        is `NotOurs` before any handle, and the verification after the handle
+        holds the derived pid, so the binding lasts through to the send.
+        Optional, so a client that sends no body keeps today's behaviour.
         """
         self._require_addressable(name)
         # The label names the root whose child the process must be running
@@ -1016,6 +1026,11 @@ class Engine:
         if session.held_elsewhere is not None:
             raise OwnedElsewhere(name, session.foreign_session, session.foreign_server_pid)
         pid = session.pid
+        if seen_pid is not None and seen_pid != pid:
+            raise NotOurs(
+                f"the row moved: pid {seen_pid} was shown for {name} and its agent is "
+                f"now pid {pid}, so nothing was signalled. Look again before ending it"
+            )
         self._refuse_our_own_tree(pid)
         try:
             if self._owner_uid(pid) != os.getuid():

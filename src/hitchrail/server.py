@@ -649,8 +649,26 @@ def create_app(
 
     async def _signal(request: Request, *, force: bool) -> Response:
         name = request.path_params["name"]
+        # #279: an OPTIONAL `{"pid": N}`, the pid the person confirmed. No
+        # body is today's request, so an older page or a script keeps working;
+        # a body that is there must say what it means, because a pid we could
+        # not read and then ignored would be the unbound signal this exists to
+        # remove.
+        seen_pid: int | None = None
+        if (await request.body()).strip():
+            try:
+                body = await request.json()
+            except ValueError:
+                return _error(400, "invalid_body", "the body, when sent, must be JSON")
+            if not isinstance(body, dict):
+                return _error(400, "invalid_body", "the body, when sent, must be a JSON object")
+            if "pid" in body:
+                seen_pid = body["pid"]
+                # bool is an int subclass, and `true` is not a pid.
+                if type(seen_pid) is not int or seen_pid <= 0:
+                    return _error(400, "invalid_body", "'pid' must be a positive integer")
         try:
-            session = await in_thread(engine.signal_detached, name, force)
+            session = await in_thread(engine.signal_detached, name, force, seen_pid)
         except eng.UnknownProject as exc:
             return _error(404, "unknown_project", str(exc))
         except eng.Protected as exc:

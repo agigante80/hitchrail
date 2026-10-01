@@ -2304,3 +2304,62 @@ async def test_an_unknown_project_is_404_on_the_signal_route(config: Config) -> 
         other = await c.post("/api/sessions/other~vessel/signal", headers=HEADERS)
     assert r.status_code == 404 and other.status_code == 404
     assert fake.events == []
+
+
+# -- #279: the signal is bound to the pid the person confirmed ---------------
+
+
+async def test_a_confirmed_pid_the_row_no_longer_holds_is_409_and_signals_nothing(
+    config: Config,
+) -> None:
+    fake = FakePidfd()
+    async with client_for(_signal_engine(config, fake), config) as c:
+        r = await c.post(
+            f"/api/sessions/{proj('vessel')}/signal",
+            headers=HEADERS,
+            json={"pid": 901},
+        )
+    assert r.status_code == 409, r.text
+    assert r.json()["code"] == "not_ours"
+    assert "the row moved" in r.json()["message"]
+    assert fake.signals == []
+
+
+async def test_the_confirmed_pid_still_on_the_row_is_signalled(config: Config) -> None:
+    fake = FakePidfd()
+    async with client_for(_signal_engine(config, fake), config) as c:
+        r = await c.post(
+            f"/api/sessions/{proj('vessel')}/signal",
+            headers=HEADERS,
+            json={"pid": 900},
+        )
+    assert r.status_code == 202, r.text
+    assert fake.signals == [signal.SIGTERM]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        '{"pid": true}',
+        '{"pid": 0}',
+        '{"pid": -900}',
+        '{"pid": "900"}',
+        '{"pid": 900.0}',
+        "[900]",
+        "900",
+        "not json",
+    ],
+)
+async def test_a_malformed_body_on_the_signal_route_is_400_and_signals_nothing(
+    config: Config, body: str
+) -> None:
+    """A body that is there must say what it means: a pid we could not read
+    and then ignored would be the unbound signal #279 removes."""
+    fake = FakePidfd()
+    async with client_for(_signal_engine(config, fake), config) as c:
+        r = await c.post(
+            f"/api/sessions/{proj('vessel')}/signal/force", headers=HEADERS, content=body
+        )
+    assert r.status_code == 400, r.text
+    assert r.json()["code"] == "invalid_body"
+    assert fake.events == []
