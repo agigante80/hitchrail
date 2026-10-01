@@ -608,7 +608,12 @@ cannot be reused.** The five constraints:
    open and the window is open again. Where the syscall is unavailable the
    route refuses and never falls back to `os.kill`: a race free path that
    silently degrades to a racy one is the guard failing open control 7
-   forbids.
+   forbids. "That pid" is the one the person confirmed when the request
+   carries it (#279): a row whose agent has become a different pid by then
+   is refused before any handle is opened, since a confirmation names one
+   process, never whatever the row holds when the request lands. A request
+   with no body is unbound by design, so a script written before #279 keeps
+   working, and a body with any key but `pid` is refused (#400).
 4. SIGTERM, then SIGKILL only on a second explicit request, mirroring the
    stop then kill escalation.
 5. The protected project is refused before any handle is opened, and so is
