@@ -1129,7 +1129,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 1734 for #242: the wrap up phase, claimed under the lock so the
         # sweep never types into the middle of the prompt, its ceiling, and
         # the sentence on why a second Stop skips to the exit.
-        "engine.py": 1734,
+        # 1771 for #239: `_end_anyway`, the opt in kill at expiry, and the
+        # docstring saying why it is a kill and never an answer.
+        "engine.py": 1771,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon
@@ -1286,7 +1288,8 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # log line or traceback that printed a `Config`.
         # 789 for #242: `stop_prompt` and its ceiling, with the refusals for
         # a newline or a control character and the 10s floor.
-        "config.py": 789,
+        # 803 for #239: `stop_policy` and its literal refusal.
+        "config.py": 803,
         # 460 for #123, #154 and #238: `--config`, `--session-prefix` and the
         # source tagging the settings page shows, which is one function
         # reading the flags back out of argv. Nothing here parses a value
@@ -1346,7 +1349,8 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # a bind off loopback gets no `Secure` cookie, and how to get it.
         # 1005 for #242: the two flags, and the startup line naming the kind
         # of prompt Stop sends without echoing the prompt itself.
-        "cli.py": 1005,
+        # 1022 for #239: `--stop-policy`, resolved flag then file then default.
+        "cli.py": 1022,
         # 409, nine lines over, down from 542. #115 deleted the `?token=`
         # carrier: 135 lines once the two blocks inside `TokenMiddleware`
         # that only served it are counted.
@@ -1400,7 +1404,8 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # one, and the state file read by the operator file's rule, each
         # with the decision written where a reader would undo it.
         # 488 for #242: the two file keys, read by the same rule as the rest.
-        "settings.py": 488,
+        # 495 for #239: the `stop_policy` file key, typed here as the rest.
+        "settings.py": 495,
         # rather than one. A refusal handler is the shape this file is made of.
         # 513 to 517 for #120. The listing payload reports every configured
         # root as a labelled list rather than one path string, and the comment
@@ -1466,7 +1471,8 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # 1052 for #242: the sweep starts the wrap up watch, at most one in
         # flight like the scan, and the listing says whether a prompt is set,
         # never which.
-        "server.py": 1052,
+        # 1057 for #239: the policy in the listing and the settings payload.
+        "server.py": 1057,
     }
 
     # Keyed by the path under `src/hitchrail` (#368), so a package's

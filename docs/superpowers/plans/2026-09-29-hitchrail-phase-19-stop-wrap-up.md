@@ -145,10 +145,10 @@ Tasks continue from Phase 22's 163. Batches run in order.
 
 ### Batch 5: a stop that ends on a prompt, tasks 175 to 176
 
-- [ ] **Task 175, #239.** `stop_policy`, off by default, refused for an
+- [x] **Task 175, #239.** `stop_policy`, off by default, refused for an
       unknown value; at the expiry, a modal plus the opt in kills, anything
       else reports; the self project is never killed.
-- [ ] **Task 176, #239.** Design 4.3 step 4 and "Deliberately later" amended;
+- [x] **Task 176, #239.** Design 4.3 step 4 and "Deliberately later" amended;
       E2E where a shim answering `/exit` with a prompt ends `stopped`.
 
 ### Batch 6: the Backlog's first rule, tasks from 177
@@ -184,10 +184,10 @@ opened. Each is ticked here by number as it closes.
 - [ ] A session with `stop_prompt` configured, stopped from the interface,
       ran the closing skill before it exited, observed on a real session by
       Andrea, and the journal shows the prompt sent, the wait, and the exit
-- [ ] A stop that ends on a prompt does nothing on its own unless the operator
+- [x] A stop that ends on a prompt does nothing on its own unless the operator
       opted in before tapping
-- [ ] `stop_prompt` cannot be set through any HTTP route, and a test says so
-- [ ] With `stop_prompt` unset, which is the default, Stop is byte for byte
+- [x] `stop_prompt` cannot be set through any HTTP route, and a test says so
+- [x] With `stop_prompt` unset, which is the default, Stop is byte for byte
       today's sequence
 - [ ] Every task ticked, or marked MOVED OUT or NOT BUILT with an issue number
 - [ ] No `from-review` ticket open in the milestone without a decision

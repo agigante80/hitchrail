@@ -258,6 +258,11 @@ Not scheduled, and not to be smuggled into an earlier phase:
   operator configured on the machine, typed on Stop. A string arriving through
   the API would be, which is why no route can set it.
 
+  Nor is #239's `stop_policy`. "No timeout that presses a key" stays true: a
+  stop that runs out of time on a prompt is KILLED under an opt in the
+  operator set before tapping, exactly as the dialog's Kill would, and
+  nothing is typed into the prompt.
+
 ## Notes
 
 - **Deleted, 2026-09-26: "Phase 18: Modules that do one thing".** Its splits

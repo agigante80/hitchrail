@@ -109,6 +109,12 @@ and never retypes the prompt; one that arrives while the prompt is still being
 typed answers 202 and types nothing. If a message is already queued in the
 box, the call is 409 `stop_unsafe` and nothing is typed after the clear.
 
+With `stop_policy = "end_anyway"` (#239, off by default), a stop whose
+`stop_timeout` runs out while the agent's screen shows a prompt is killed by
+the server, exactly as `POST /api/sessions/{name}/kill` would, and the row is
+announced `stopped`. A screen showing anything else reports as it always has.
+Nothing is ever typed into the prompt.
+
 ### The listing payload
 
 `GET /api/projects` answers one object. The fields, checked against the server
@@ -129,6 +135,7 @@ in both directions by the suite:
 | `server.started_at` | when this process started, Unix seconds; format it in the viewer's timezone, never the server's |
 | `server.stop_timeout` | seconds the server waits for a graceful stop before reporting it timed out; the browser's own patience is this number, read here rather than assumed |
 | `server.stop_prompt_set` | whether Stop types a wrap up prompt before the exit (#242); the prompt itself is only in `GET /api/config` |
+| `server.stop_policy` | `ask` (default) or `end_anyway` (#239): what a stop that runs out of time on a prompt does, so the wait dialog can say so before it happens |
 | `server.stop_prompt_timeout` | seconds the agent has to finish its task and the wrap up before Stop sends the exit anyway; `stop_timeout` counts from that exit |
 
 ### The session payload
@@ -237,6 +244,7 @@ instance pointed at" without SSH. Every value is `{value, source}` where
 `source` is `flag`, `file`, `env` or `default`: `host`, `port`,
 `allow_hosts`, `allow_origins`, `self_project`, `agent_binary`,
 `session_prefix`, `stop_prompt` and `stop_prompt_timeout` (read only, #242),
+`stop_policy` (read only, #239),
 `tls` (the certificate's path, or null),
 `expect_gateway_mac` (the flag's value, normalised, or null), the three
 memory figures, `config_file` and `state_file`.

@@ -536,9 +536,10 @@ install it first.
 | `--tls-cert`, `--tls-key` | none | A PEM certificate and its key: serve HTTPS from the server itself. Both or neither, refused at startup before the bind when one is missing or the pair cannot be loaded. The key must be unencrypted, and one with a passphrase refuses saying so rather than prompting, because under the unit there is no terminal to prompt at. Derived origins, banner links and the cookie's `Secure` flag follow |
 | `--expect-gateway-mac` | none | Refuse to start unless the default gateway has this MAC address, read from `/proc/net/route` and `/proc/net/arp`. A guard against a laptop serving on a network it joined by accident; a MAC is spoofable, so not against an attacker on the LAN. Checked once at start. A mismatch is exit 2, which the unit keeps stopped; "cannot tell" (no route yet, no ARP entry, a pinned entry) is exit 3, which it retries |
 | `--session-prefix` | `hr-` | What every tmux session this instance creates is named with, and the only sessions it will ever stop. Two instances on one tmux server need two prefixes: with one, each reads the other's agent in a same named folder as its own and can stop it. Also `session_prefix` in the config file |
-| `--stop-timeout` | `30` | Seconds to wait for a graceful stop before reporting that it timed out, at most 3600. It reports; it does not escalate |
+| `--stop-timeout` | `30` | Seconds to wait for a graceful stop before reporting that it timed out, at most 3600. It reports; it does not escalate unless `--stop-policy` says so |
 | `--stop-prompt` | none | One line Stop types to the agent before asking it to exit, such as a slash command that commits and writes notes. See "Wrapping up on Stop" below. Also `stop_prompt` in the config file |
 | `--stop-prompt-timeout` | `300` | Seconds the agent has to finish its task and the prompt before Stop exits anyway, 10 to 3600. Also `stop_prompt_timeout` in the config file |
+| `--stop-policy` | `ask` | What a stop that runs out of time on a question does: `ask` reports and offers Kill, `end_anyway` kills it. Also `stop_policy` in the config file |
 | `--version` | | Print the version and exit |
 | `-h`, `--help` | | Print the options and exit |
 
@@ -575,6 +576,23 @@ and still interrupts.
   records it.
 - Neither setting can be changed from the phone: a request that could set
   what Stop types would be a route that types arbitrary text.
+
+### When a stop ends on a question
+
+Asked to exit with background work running, the agent can answer with a
+question instead, and by default Hitchrail reports that when `stop_timeout`
+runs out and leaves the choice to you. If you have already decided the
+answer for every such stop, say so ahead of time:
+
+```toml
+stop_policy = "end_anyway"   # default "ask"; also --stop-policy
+```
+
+Then a stop that runs out of time while the agent's screen shows a question
+is killed, as the Kill button would. Nothing is ever typed into the
+question, a stop that is merely slow is never killed, and the confirm and
+wait dialogs say what will happen before it does. Shown on the settings page,
+not changeable from it.
 
 ### Updating the agent's plugins
 

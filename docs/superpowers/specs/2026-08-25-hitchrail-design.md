@@ -239,8 +239,15 @@ Stopping is a sequence, not a button:
    secondary, destructive path, never as the way out of a stuck dialog.
 4. **Timeout.** After 30 seconds with no reply, Hitchrail stops waiting and says
    so. With a prompt set, the 30 seconds count from the exit phase, not from
-   the tap. It does **not** escalate on its own. The session is still running, and
-   the choice to kill it stays the user's.
+   the tap. By default it does **not** escalate on its own. The session is still
+   running, and the choice to kill it stays the user's. The one exception is
+   chosen by the operator in advance (#239): with `stop_policy = "end_anyway"`,
+   a wait that runs out while the pane, read again at that moment, shows a
+   prompt ends in the kill this step would have offered. It is a kill and never
+   an answer: which key means "exit" is Claude Code knowledge, and a key typed
+   with nobody reading is what the answer route refuses. A pane showing
+   anything else, or one that cannot be read, reports as by default, and the
+   protected project is refused as the kill route refuses it.
 
 Kill is deliberately unreachable before a graceful attempt has been made. Not
 because forcing is wrong, but because on a phone the destructive control would
