@@ -61,7 +61,7 @@ function outcomeItem(outcome) {
   // agent's own words, the server escaped control characters in it, and
   // textContent means nothing here is parsed. For `skipped` it is ours, and
   // a skip has more than one reason since #300 (another scope, or a `user`
-  // row the listing named twice), so the detail is shown rather than a
+  // row the listing named more than once), so the detail is shown rather than a
   // fixed scope-shaped sentence that would misname the second one.
   const lines = [];
   if (outcome.detail) lines.push(outcome.detail);

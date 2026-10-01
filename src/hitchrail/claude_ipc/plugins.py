@@ -417,7 +417,7 @@ def update_plugins(
             # Dropping this row silently left the count short of what the
             # listing actually returned (#300): the comment above promises
             # every row is covered, and a duplicate is still a row.
-            outcome = PluginOutcome(plugin, scope, "skipped", "listed twice")
+            outcome = PluginOutcome(plugin, scope, "skipped", "listed more than once")
         else:
             seen.add(plugin)
             try:

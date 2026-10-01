@@ -203,7 +203,16 @@ def test_a_genuine_user_duplicate_is_updated_once_and_reported_as_skipped() -> N
         ("b@m", "user", "updated"),
         ("a@m", "user", "skipped"),
     ]
-    assert outcomes[2].detail == "listed twice"
+    assert outcomes[2].detail == "listed more than once"
+
+
+def test_a_third_copy_is_not_called_a_second_one() -> None:
+    """#355: the third copy of a listed plugin was also labelled "listed
+    twice", which was true of the first repeat only."""
+    agent = FakeAgent([row("a@m")] * 3)
+    outcomes = run(agent)
+    assert agent.updated == ["a@m"]
+    assert [o.detail for o in outcomes[1:]] == ["listed more than once"] * 2
 
 
 # -- one plugin fails ----------------------------------------------------------

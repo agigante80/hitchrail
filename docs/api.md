@@ -256,7 +256,7 @@ does not replay.
 plugin that was already current. A plugin at any scope other than `user` is
 `skipped` with its scope, since it belongs to a project folder the agent's
 list does not name. A `user` scope plugin the listing names more than once is
-also `skipped`, with detail `listed twice`, after the first is updated: the
+also `skipped`, with detail `listed more than once`, after the first is updated: the
 count then covers every row the listing returned, not only the ones that
 updated. `abandoned` means the server shut down mid run (#361): that row and
 every one still waiting behind it in the listing never started, which is not
