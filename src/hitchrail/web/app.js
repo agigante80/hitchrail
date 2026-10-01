@@ -749,10 +749,16 @@ function buildActions(project, actions) {
   // interface that lets you reach a 423 has already failed the person holding
   // the phone: refusing after the tap is worse than not offering the tap.
   if (!project.protected && isRunning(project)) {
-    // A row already stopping reopens its wait rather than confirming a second
+    // A row wrapping up reopens its wait rather than confirming a second
     // stop: that DELETE is the Exit now, which interrupts the task, behind a
-    // confirmation promising a wrap up (#242 review).
-    const onStop = project.stopping ? () => reopenStop(project) : () => confirmStop(project);
+    // confirmation promising a wrap up (#242 review). Only `closing`, though:
+    // on `exiting` a repeated Stop resends the exit, as before #242, and is
+    // the only way short of Kill to ask an agent that ignored the first one
+    // (#242 review round 2).
+    const onStop =
+      project.stopping_phase === "closing"
+        ? () => reopenStop(project)
+        : () => confirmStop(project);
     add("Stop", "").addEventListener("click", onStop);
   }
   // A stale session gets Clear, not Stop (#98). Stop asks the agent to exit
@@ -1155,6 +1161,8 @@ async function beginStop(project) {
   if (!result.ok) {
     // The row goes with it: `stop_unsafe` is refused here and nowhere else,
     // and the dialog that reports it offers a kill that has to name a session.
+    // Over, or a later Stop on the row reopens a wait no ticker drives.
+    wait.over = true;
     showRefusal(result, project);
     return;
   }
@@ -1643,9 +1651,12 @@ let bulk = null;
 function stoppableRows() {
   // Stale rows get Clear, not Stop (#98), and are left out; the self project
   // never enters the set.
-  // A row already stopping is left out too: Stop all would send it the exit,
-  // interrupting a wrap up the confirmation says it is waiting for.
-  return state.projects.filter((p) => isRunning(p) && !p.protected && !p.stopping);
+  // A row wrapping up is left out too: Stop all would send it the exit,
+  // interrupting a wrap up the confirmation says it is waiting for. A row
+  // already `exiting` stays in, so a second Stop all resends the exit.
+  return state.projects.filter(
+    (p) => isRunning(p) && !p.protected && p.stopping_phase !== "closing",
+  );
 }
 
 function renderStopAll() {
