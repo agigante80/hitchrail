@@ -69,6 +69,44 @@ def test_what_cannot_be_read_is_unknown_rather_than_either_answer(pane: str) -> 
     assert ipc_screen.wrap_up_reading(pane) is None
 
 
+# What `capture-pane -e` wrote for the e2e shim against tmux 3.4: the idle row
+# under a line that ended in the default colour carries no escape at all.
+BARE = "\u276f\xa0                     "
+
+
+@pytest.mark.parametrize(
+    ("above", "reading"),
+    [
+        ("plain output", True),
+        ("\x1b[39mplain output", True),
+        ("\x1b[38;5;246mgrey border", False),
+        ("\x1b[38;5;246mgrey \x1b[0mthen reset", True),
+        ("\x1b[38;5;246;48;5;17mgrey on blue", False),
+        ("\x1b[38;2;1;2;3mrgb", None),
+        ("\x1b[31mred", None),
+        ("\x1b[48;5;246mbackground only", True),
+    ],
+    ids=[
+        "default",
+        "explicit-default",
+        "busy-inherited",
+        "reset",
+        "busy-with-background",
+        "rgb",
+        "basic",
+        "background-is-not-foreground",
+    ],
+)
+def test_a_bare_ornament_takes_the_colour_left_by_the_line_above(
+    above: str, reading: bool | None
+) -> None:
+    """tmux writes an SGR only where the colour changes, across lines. The
+    first version read only the escape touching the ornament, so this row,
+    measured, read unknown and every wrap up waited out its ceiling."""
+    pane = f"{above}\n{BARE}\n  bypass permissions on\n"
+    assert ipc_screen.wrap_up_reading(pane) is reading
+
+
 def test_an_idle_box_holding_a_draft_is_not_finished() -> None:
     """Someone is typing in the terminal: not the agent's empty box."""
     assert ipc_screen.wrap_up_reading(pane_text(DRAFT_BOX)) is False

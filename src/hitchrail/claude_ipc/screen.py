@@ -6,6 +6,8 @@ Every rule here is a fact about the vendor's screen layout, captured rather than
 
 from __future__ import annotations
 
+import re
+
 # The prompt ornament, captured from a real session rather than described.
 # Written as an escape rather than pasted: U+276F is confusable with a plain
 # `>` in every editor.
@@ -271,10 +273,18 @@ def awaits_answer(pane: str) -> bool | None:
 #     busy    '\x1b[38;5;246m\u276f\xa0\x1b[39m          '
 #     queued  '\x1b[38;5;246m\u276f\xa0\x1b[2m\x1b[39mPress up to edit queued messages\x1b[0m'
 #
-# Read as the escape IMMEDIATELY before the ornament, never by stripping
-# escapes, for `shows_input_box`'s reason: the escape is the whole signal.
-_IDLE_ORNAMENT = "\x1b[39m"
-_BUSY_ORNAMENT = "\x1b[38;5;246m"
+# The escape is the whole signal, so it is never stripped first, for
+# `shows_input_box`'s reason. Nor is it read as the escape immediately before
+# the ornament, which the first version did: `capture-pane -e` emits an SGR
+# only where a cell's attributes CHANGE, and the change it tracks runs across
+# lines, so the idle row's `39m` is there only because the line above it ended
+# in a colour. A default coloured line above leaves the ornament with no
+# escape at all, measured against a private tmux 3.4, and that version read it
+# as unknown and waited every wrap up out to its ceiling. So the colour is the
+# foreground in effect at the ornament, from every SGR before it.
+_DEFAULT_FOREGROUND = None
+_BUSY_FOREGROUND = "38;5;246"
+_SGR = re.compile(r"\x1b\[([0-9;:]*)m")
 # The queued placeholder's wording. Dim, so `input_is_clear` reads it as clear,
 # which is right for a stop: nothing in it was typed. It is NOT clear for a
 # wrap up: a message the person queued would run first, and two queued
@@ -295,6 +305,32 @@ def queued_message(pane: str) -> bool:
     return row is not None and _QUEUED in row
 
 
+def _foreground_before(text: str) -> str | None:
+    """The SGR foreground in effect at the end of `text`; None is the default.
+
+    Only what tmux writes is modelled: a reset, the default, the sixteen
+    colours and the 256 colour and RGB forms. A background or another
+    attribute moves past without changing the answer.
+    """
+    foreground: str | None = _DEFAULT_FOREGROUND
+    for match in _SGR.finditer(text):
+        params = match.group(1).replace(":", ";").split(";")
+        i = 0
+        while i < len(params):
+            code = params[i]
+            if code in ("", "0", "39"):
+                foreground = _DEFAULT_FOREGROUND
+            elif code in ("38", "48"):
+                width = 3 if params[i + 1 : i + 2] == ["5"] else 5
+                if code == "38":
+                    foreground = ";".join(params[i : i + width])
+                i += width - 1
+            elif code.isdigit() and (30 <= int(code) <= 37 or 90 <= int(code) <= 97):
+                foreground = code
+            i += 1
+    return foreground
+
+
 def wrap_up_reading(pane: str) -> bool | None:
     """One look at whether the agent is idle at an empty box (#242).
 
@@ -309,9 +345,12 @@ def wrap_up_reading(pane: str) -> bool | None:
     before, after = row.split(_PROMPT, 1)
     if not after.startswith("\xa0"):
         return None
-    if _QUEUED in after or before.endswith(_BUSY_ORNAMENT):
+    rows = pane.splitlines()
+    above = "\n".join(rows[: len(rows) - 1 - rows[::-1].index(row)])
+    colour = _foreground_before(above + "\n" + before)
+    if _QUEUED in after or colour == _BUSY_FOREGROUND:
         return False
-    if not before.endswith(_IDLE_ORNAMENT):
+    if colour is not _DEFAULT_FOREGROUND:
         return None
     return input_is_clear(row) is True
 
