@@ -156,6 +156,7 @@ const state = {
     stop_timeout: null,
     stop_prompt_set: false,
     stop_prompt_timeout: null,
+    stop_policy: "ask",
   },
   tab: "all",
   query: "",
@@ -1080,11 +1081,14 @@ function confirmStop(project) {
     // #242: with a wrap up prompt set the first thing sent is the prompt,
     // queued behind the current task, and nothing is interrupted unless the
     // wrap up outlasts its ceiling. The warning moves to that case.
-    body: state.server.stop_prompt_set
-      ? "It will be asked to wrap up after its current task, then to exit. "
-        + `If that takes longer than ${wrapUpSeconds()}s, the task is interrupted.`
-      : "It will be interrupted, then asked to exit. "
-        + "Anything it is part way through may be lost.",
+    body: [
+      state.server.stop_prompt_set
+        ? "It will be asked to wrap up after its current task, then to exit. "
+          + `If that takes longer than ${wrapUpSeconds()}s, the task is interrupted.`
+        : "It will be interrupted, then asked to exit. "
+          + "Anything it is part way through may be lost.",
+      endAnywayNote(),
+    ].filter(Boolean).join(" "),
     // Cancel and Stop, and nothing else. A kill control at this step puts the
     // destructive path under the thumb at the same weight as the safe one.
     actions: [
@@ -1137,6 +1141,18 @@ function waitingPhase(wait, current) {
 }
 
 function waitingBody(wait, phase) {
+  const note = endAnywayNote();
+  return note ? `${phaseBody(wait, phase)} ${note}` : phaseBody(wait, phase);
+}
+
+/* #239. A kill the operator configured a week ago must not surprise them:
+   said on the confirm and through the whole wait, before it happens. */
+function endAnywayNote() {
+  if (state.server.stop_policy !== "end_anyway") return "";
+  return "If it stops on a question it will be ended, as this server is configured to.";
+}
+
+function phaseBody(wait, phase) {
   if (phase === "sending") return "Asking it to wrap up, after its current task.";
   if (phase === "closing") {
     const seconds = Math.max(0, Math.round((Date.now() - wait.began) / 1000));
@@ -1607,11 +1623,14 @@ function confirmStopAll() {
   if (rows.length === 0) return;
   showDialog({
     title: `Stop ${rows.length} sessions?`,
-    body: state.server.stop_prompt_set
-      ? "Each will be asked to wrap up after its current task, then to exit. "
-        + `A wrap up longer than ${wrapUpSeconds()}s has its task interrupted.`
-      : "Each will be interrupted, then asked to exit, one at a time. "
-        + "Anything they are part way through may be lost.",
+    body: [
+      state.server.stop_prompt_set
+        ? "Each will be asked to wrap up after its current task, then to exit. "
+          + `A wrap up longer than ${wrapUpSeconds()}s has its task interrupted.`
+        : "Each will be interrupted, then asked to exit, one at a time. "
+          + "Anything they are part way through may be lost.",
+      endAnywayNote(),
+    ].filter(Boolean).join(" "),
     actions: [
       ["Cancel", "ghost", () => closeDialog()],
       ["Stop all", "", () => beginStopAll(rows)],

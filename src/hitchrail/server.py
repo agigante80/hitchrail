@@ -231,6 +231,8 @@ def create_app(
             # `/api/config`, behind the same token, and not in every listing.
             "stop_prompt_set": config.stop_prompt is not None,
             "stop_prompt_timeout": config.stop_prompt_timeout,
+            # #239. So the wait dialog says a kill is coming before it does.
+            "stop_policy": config.stop_policy,
         }
 
     async def list_projects(request: Request) -> Response:
@@ -434,6 +436,9 @@ def create_app(
             # be the free text input the roadmap defers.
             "stop_prompt": shown("stop_prompt", config.stop_prompt),
             "stop_prompt_timeout": shown("stop_prompt_timeout", config.stop_prompt_timeout),
+            # #239. Read only for now: making a kill policy editable from the
+            # phone is its own decision, not a field added beside this one.
+            "stop_policy": shown("stop_policy", config.stop_policy),
             # The certificate's path, or none: what "is this HTTPS" needs.
             "tls": shown("tls", _text(config.tls_cert)),
             "expect_gateway_mac": shown("expect_gateway_mac", config.expect_gateway_mac),

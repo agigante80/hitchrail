@@ -259,6 +259,7 @@ async def test_a_request_cannot_enable_what_the_operator_disabled(
         ({"session_prefix": "x-"}, "not_editable", "session_prefix"),
         ({"token": "abc"}, "not_editable", "token"),
         ({"stop_prompt": "rm -rf"}, "not_editable", "stop_prompt"),
+        ({"stop_policy": "end_anyway"}, "not_editable", "stop_policy"),
         ({"hard_floor_mb": 0}, "not_editable", "hard_floor_mb"),
         # One bad key beside a good one: nothing is applied.
         ({"stop_timeout": 45, "host": "0.0.0.0"}, "not_editable", "host"),

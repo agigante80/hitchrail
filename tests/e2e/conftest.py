@@ -585,6 +585,7 @@ class Harness:
         stop_prompt_timeout: float = 300.0,
         wrap_up_takes: float | None = None,
         wrap_up_stays_busy: bool = False,
+        stop_policy: str = "ask",
     ) -> None:
         """Set the world up BEFORE the page loads.
 
@@ -746,6 +747,7 @@ class Harness:
                     stop_timeout=stop_timeout,
                     stop_prompt=stop_prompt,
                     stop_prompt_timeout=stop_prompt_timeout,
+                    stop_policy=stop_policy,
                     token=token,
                     self_project=protect,
                     state_path=state_path,
@@ -767,6 +769,7 @@ class Harness:
                 stop_timeout=stop_timeout,
                 stop_prompt=stop_prompt,
                 stop_prompt_timeout=stop_prompt_timeout,
+                stop_policy=stop_policy,
                 token=token,
                 self_project=protect,
                 state_path=state_path,
