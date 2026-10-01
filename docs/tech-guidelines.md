@@ -49,7 +49,8 @@ used, and what does it depend on.
 - `discovery` scans the root and creates folders. It knows nothing about tmux.
 - `engine` derives state and starts and stops sessions. It knows nothing about
   HTTP and must not import Starlette.
-- `claude_ipc` is the only module that knows Claude Code internals: how an
+- `claude_ipc` is the only package that knows Claude Code internals (one
+  module per seam since #368, imported only through the package): how an
   agent is launched, stopped, found and linked to, and since #124 how its
   plugins are updated. The last makes it run subprocesses of its own.
 - `ram` reads memory and decides the guard. Pure, given its inputs.

@@ -91,11 +91,12 @@ ignore = [
 # S603 is ruff's warning about subprocess calls. Silenced only in the three
 # modules that legitimately run subprocesses, so the exception is visible in
 # configuration rather than scattered through the code as inline noqa comments.
-# `claude_ipc.py` joined them for #124: the plugin update is vendor knowledge,
-# and its argv is built in the same module that runs it.
+# `claude_ipc` joined them for #124: the plugin update is vendor knowledge,
+# and its argv is built in the same module that runs it. Since #368 that module
+# is `claude_ipc/plugins.py`, and the ignore names the file, not the package.
 "src/hitchrail/tmux.py" = ["S603"]
 "src/hitchrail/procs.py" = ["S603"]
-"src/hitchrail/claude_ipc.py" = ["S603"]
+"src/hitchrail/claude_ipc/plugins.py" = ["S603"]
 # Tests are where the dangerous literals belong: a wildcard bind and a fake
 # token are the subject matter of the security suite, not a leak. src/ stays
 # strict, so a real 0.0.0.0 or credential in shipped code still fails.
@@ -274,7 +275,11 @@ source_paths = [
   # security.md` already listed it; this list did not, which is the half of
   # the ticket that was true.
   #
-  # The whole file is over a thousand lines, most of it `launch_argv`,
+  # A package since #368, and only `plugins.py` is listed: the plugin section
+  # is what was mutated before the split, and the other four modules are in
+  # `also_copy` below, by name, so the package imports in the mutants tree.
+  #
+  # The whole package is over a thousand lines, most of it `launch_argv`,
   # `request_stop` and the tmux IPC key sequences, which `test_claude_ipc.py`
   # already exercises hard without mutmut. Mutating all of it would make a
   # single sweep the minutes the premortem above warns against for a much
@@ -285,7 +290,7 @@ source_paths = [
   # `_update_one`, `_read_listing`, `_approved_command`, `_detail`, `_shown`,
   # `plugin_runner`) rather than to every mutant the file has. Widening
   # either list to the rest of the module is future work, not this ticket.
-  "src/hitchrail/claude_ipc.py",
+  "src/hitchrail/claude_ipc/plugins.py",
 ]
 # The tests that actually exercise those five. The full suite takes 34 seconds
 # and would make a single run hours; these 441 take 1.5, which is what makes
@@ -296,6 +301,11 @@ source_paths = [
 # themselves and make every run report zero mutants killed.
 also_copy = [
   "src/hitchrail/__init__.py",
+  # #368: the package around the one mutated module.
+  "src/hitchrail/claude_ipc/__init__.py",
+  "src/hitchrail/claude_ipc/keys.py",
+  "src/hitchrail/claude_ipc/launch.py",
+  "src/hitchrail/claude_ipc/screen.py",
   # #221. Copied rather than mutated, and its ABSENCE was not a gap but a
   # break: `engine.py` imports it, so the assembled tree had the importer and
   # not the module, `tests/conftest.py` failed to import, and pytest exited 4.

@@ -25,6 +25,9 @@ import pytest
 
 from hitchrail import claude_ipc
 from hitchrail.claude_ipc import PluginOutcome, PluginsFailed, update_plugins
+
+# A private constant, read from its own module: the package re-exports public names only.
+from hitchrail.claude_ipc import plugins as ipc_plugins
 from support import in_claude_ipc, source_modules
 
 SRC = Path(__file__).parent.parent / "src" / "hitchrail"
@@ -516,7 +519,7 @@ def test_an_empty_approved_command_is_treated_as_absent() -> None:
 def test_a_command_at_exactly_the_limit_is_not_marked_cut() -> None:
     """#304: `_shown`'s length check is inclusive of `_DETAIL_LIMIT`, so a
     command that exactly fills it is the whole vendor text, not a cut of it."""
-    command = "a" * claude_ipc._DETAIL_LIMIT
+    command = "a" * ipc_plugins._DETAIL_LIMIT
     line = json.dumps({"shownCommand": {"command": command, "sha256": "ab"}})
     agent = FakeAgent([row("a@m")], **{"a@m": done(0, stdout=line)})
     (outcome,) = run(agent)

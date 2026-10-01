@@ -1549,7 +1549,7 @@ def test_the_phone_doc_requires_both_allowlist_flags_for_a_proxy() -> None:
 
 
 def test_the_keypad_offers_exactly_the_keys_the_server_will_send() -> None:
-    """#204. `app.js` and `claude_ipc.py` name the same keys, or a button lies.
+    """#204. `app.js` and `claude_ipc` name the same keys, or a button lies.
 
     Two lists rather than one because they are in two languages, and the copy
     in the browser is an AFFORDANCE while the copy on the server is the GUARD.

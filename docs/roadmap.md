@@ -93,7 +93,7 @@ against it rather than around it: the prompt is configuration on the machine,
 never text from the page, and the page's only verb is still Stop.
 
 Two tickets joined it from Backlog on 2026-09-29, each because this is the
-next phase to change the file it names: the split of `claude_ipc.py`, which
+next phase to change the file it names: the split of `claude_ipc.py` into a package, which
 this phase adds the wrap up to before Phase 23 adds anything, so the split goes
 first; and `Config`'s surviving mutants, which are pinned before this phase
 adds `stop_prompt`'s refusals beside them.
@@ -110,7 +110,7 @@ operator or API contract, and no text from a page reaches a spawn.
 
 Those are decisions rather than obstacles, so the answer is one of three: stay
 single agent and close the epic with the reason; widen the vendor seam that
-`claude_ipc.py` already is, one quarantined module per agent and no templates;
+`claude_ipc` already is, one quarantined package per agent and no templates;
 or change the security argument deliberately and say so in the spec.
 
 Delivers: the decision, written into the design spec and into what

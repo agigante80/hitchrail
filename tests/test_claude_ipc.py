@@ -7,6 +7,7 @@ literal or a usage pattern.
 
 from __future__ import annotations
 
+import ast
 import inspect
 import logging
 from pathlib import Path
@@ -28,6 +29,7 @@ from hitchrail.claude_ipc import (
     shows_input_box,
     trusted_folders,
 )
+from hitchrail.claude_ipc import screen as ipc_screen
 from support import in_claude_ipc, source_modules
 
 SRC = Path(__file__).parent.parent / "src" / "hitchrail"
@@ -889,7 +891,7 @@ def test_the_modal_tail_allowance_is_one_row_past_the_captured_screens() -> None
     and no more, because the failure direction to prefer is a missing
     warning over a key into a working agent.
     """
-    assert claude_ipc._MODAL_TAIL_ROWS == 3
+    assert ipc_screen._MODAL_TAIL_ROWS == 3
     at_the_edge = EXIT_MODAL_SCREEN + "  one more line\n"
     assert awaits_answer(at_the_edge) is True
     past_it = at_the_edge + "  and another\n"
@@ -1008,3 +1010,106 @@ def test_the_stop_logs_verdicts_and_never_the_screen(caplog: pytest.LogCaptureFi
         request_stop(pane, "vessel", settle=lambda _s: None)
     assert "looked at the input box, clear is False" in caplog.text
     assert "DRAFT-ONLY-91c" not in caplog.text
+
+
+# -- #368: the quarantine is a package ----------------------------------------
+
+# Every name the rest of the tree imported from `hitchrail.claude_ipc` when it
+# was one file, spelled out rather than read from `__all__`, so dropping one
+# from `__init__.py` fails here instead of shrinking both lists together.
+_SURFACE_BEFORE_THE_SPLIT = {
+    "ANSWER_KEYS",
+    "GRACEFUL_STOP_KEYS",
+    "REMOTE_CONTROL_MARKER",
+    "URL_BASE",
+    "AnswerNotSafe",
+    "Pane",
+    "PluginFailure",
+    "PluginOutcome",
+    "PluginResult",
+    "PluginRunner",
+    "PluginsFailed",
+    "RunnerClosed",
+    "RunningChild",
+    "SessionUrl",
+    "StopNotSafe",
+    "awaits_answer",
+    "bridge_url",
+    "input_is_clear",
+    "launch_argv",
+    "plugin_runner",
+    "request_stop",
+    "send_answer",
+    "session_url",
+    "shows_input_box",
+    "trusted_folders",
+    "update_plugins",
+}
+
+
+def test_the_package_still_offers_every_name_the_single_file_did() -> None:
+    missing = sorted(n for n in _SURFACE_BEFORE_THE_SPLIT if not hasattr(claude_ipc, n))
+    assert not missing, f"`hitchrail.claude_ipc` no longer offers {missing}"
+    assert set(claude_ipc.__all__) == _SURFACE_BEFORE_THE_SPLIT
+
+
+def _submodule_imports(tree: ast.AST) -> list[str]:
+    """Every import in `tree` that reaches past the package into a submodule."""
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found += [a.name for a in node.names if a.name.startswith("hitchrail.claude_ipc.")]
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            if node.module.startswith("hitchrail.claude_ipc."):
+                found.append(node.module)
+            elif node.module == "hitchrail.claude_ipc":
+                found += [
+                    f"{node.module}.{a.name}"
+                    for a in node.names
+                    if a.name in {"screen", "keys", "launch", "plugins"}
+                ]
+    return found
+
+
+def test_nothing_outside_the_package_imports_one_of_its_modules() -> None:
+    """A submodule import bypasses every `monkeypatch.setattr(claude_ipc, ...)`.
+
+    `plugin_runs.py` calls `claude_ipc.plugin_runner` through the package so
+    that `test_plugin_runs.py` can replace it. `from hitchrail.claude_ipc.plugins
+    import plugin_runner` would bind the real one at import, and the test would
+    pass while exercising nothing.
+    """
+    reached = {
+        rel: hits
+        for rel, path in _outside_the_quarantine().items()
+        if (hits := _submodule_imports(ast.parse(path.read_text())))
+    }
+    assert reached == {}, f"modules outside `claude_ipc` import its submodules: {reached}"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from hitchrail.claude_ipc.plugins import plugin_runner",
+        "import hitchrail.claude_ipc.keys",
+        "from hitchrail.claude_ipc import launch",
+    ],
+)
+def test_the_submodule_scan_sees_each_spelling(source: str) -> None:
+    assert _submodule_imports(ast.parse(source))
+
+
+def test_the_package_surface_is_not_a_submodule_import() -> None:
+    assert _submodule_imports(ast.parse("from hitchrail.claude_ipc import launch_argv")) == []
+
+
+def test_a_submodule_log_line_reaches_the_package_logger(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Loggers are per module now, `hitchrail.claude_ipc.keys` and so on, and a
+    capture on the package name must still see them through propagation."""
+    from hitchrail.claude_ipc import keys
+
+    with caplog.at_level(logging.INFO, logger="hitchrail.claude_ipc"):
+        keys.logger.info("from the keys module")
+    assert [r.name for r in caplog.records] == ["hitchrail.claude_ipc.keys"]

@@ -87,7 +87,7 @@ What IS done, because each item costs nothing today and is expensive to retrofit
    released. Under `docs/versioning.md` an operator facing rename is a MAJOR,
    so this specific item goes from free to a major version bump the day v1
    ships.
-2. **`claude_ipc.py` is the seam.** It already exists, quarantined for a
+2. **`claude_ipc` is the seam.** It already exists, quarantined for a
    different reason (undocumented internals that change without notice), and
    that is structurally the same boundary a second vendor would need. Its
    members are an agent adapter interface in all but name: how to launch, how
@@ -122,7 +122,8 @@ testable without HTTP, and the HTTP layer must be testable without tmux.
 src/hitchrail/
   discovery.py   root scanning, folder creation, path safety
   engine.py      state derivation, start, stop, log tail
-  claude_ipc.py  everything that knows Claude Code internals
+  claude_ipc/    everything that knows Claude Code internals (a package
+                 since #368: screen, keys, launch, plugins)
   ram.py         memory readings and the guard decision
   server.py      Starlette app, routes, middleware, SSE
   web/           index.html, app.js, app.css (no build step)
@@ -241,7 +242,7 @@ otherwise sit under the thumb at the same size as the safe one.
 
 **The engine owns the policy; the agent adapter owns the mechanism.** Step 2 is
 "ask the agent to finish", and what that ASK physically is belongs entirely to
-`claude_ipc.py`. For Claude Code it is a key sequence typed into the pane. For
+`claude_ipc`. For Claude Code it is a key sequence typed into the pane. For
 something else it could be a signal, a subcommand, or an HTTP call. The engine
 therefore calls one function, `claude_ipc.request_stop(...)`, and never iterates
 a key sequence or reaches for `tmux.send_keys` itself.
@@ -342,9 +343,9 @@ The session link comes from `~/.claude/sessions/<pid>.json`, key
 every session, and the fallback of scraping the terminal for a `claude.ai/code`
 URL can match a URL that merely appeared as text rather than a live bridge.
 
-All of this lives in `claude_ipc.py` behind one documented function with an
+All of this lives in `claude_ipc` behind one documented function with an
 explicit instability warning. When it breaks on a Claude Code update, exactly
-one module changes, and the UI degrades to a `pending` state rather than
+one package changes, and the UI degrades to a `pending` state rather than
 reporting something false.
 
 **Amended 2026-09-23 for #124.** The module also runs the agent's plugin
@@ -1058,7 +1059,7 @@ rewards the wrong behaviour. The gate is review, and the standard is the list in
 
 | Risk | Handling |
 |---|---|
-| `bridgeSessionId` changes or disappears | quarantined in `claude_ipc.py`, degrades to `pending` |
+| `bridgeSessionId` changes or disappears | quarantined in `claude_ipc`, degrades to `pending` |
 | A user exposes Hitchrail to a hostile network | token forced on non loopback bind, host allowlist always on |
 | An unattended service is reachable on a network the operator did not choose | overlay route documented first in `docs/guides/phone-access.md`; the token withheld from the journal; see 9.3 |
 | Two starts race on the same folder | start lock, and the API is idempotent per folder |

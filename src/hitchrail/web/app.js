@@ -1825,7 +1825,7 @@ function showDeadStart(project, body) {
 /* -- answering a prompt the agent is blocked on (#204) ------------------ */
 
 // The keys this interface offers, and the only ones the server will carry.
-// Mirrors `ANSWER_KEYS` in `claude_ipc.py`, and a test asserts the two lists
+// Mirrors `ANSWER_KEYS` in `claude_ipc/keys.py`, and a test asserts the two lists
 // are the same, because a key offered here and refused there is a button that
 // does nothing.
 //

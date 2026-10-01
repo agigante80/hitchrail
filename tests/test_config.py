@@ -997,145 +997,17 @@ def test_every_module_is_under_the_size_guideline() -> None:
     # Raise this only for a change that adds behaviour, and say what in the
     # commit. If it passes roughly 550, look for a seam again with fresh eyes.
     caps = {
-        # 476, and this one does NOT want splitting, which is why it is here
-        # rather than in a ticket like #93. The whole value of `claude_ipc` is
-        # that it is ONE module: when Claude Code moves, exactly one file
-        # changes and the interface degrades rather than reporting something
-        # false. Two quarantine modules is two places to look and two places to
-        # forget, and the seam anyone would cut on, "talking to a running
-        # agent" against "finding its session link", puts undocumented vendor
-        # knowledge on both sides of it.
+        # #368 split `claude_ipc.py` (1351 lines, its cap raised three times in
+        # Phase 22, each honestly, which is how a file grows past its seam) into
+        # a package. `screen`, `keys` and `launch` came in under the guideline.
         #
-        # The growth is #89: the stop sequence now reads the input box and
-        # verifies it between steps, and most of the added length is the three
-        # captured rows and why each is what it is. Those captures are the
-        # reason the check is right, and a description of them is what was
-        # wrong twice.
-        #
-        # The growth from 419 is review reversing decisions inside
-        # `_require_clear` and leaving each reason behind: why the read settles
-        # before the FIRST look rather than only between retries, why an
-        # unrecognised pane refuses where it used to proceed, and why the
-        # escape stripper went back to the narrower pattern after the wider one
-        # introduced a worse defect than it fixed. Those are the comments a
-        # further round would otherwise re-litigate.
-        # 563 to 571 for #91: the relay framing, written at the one call site
-        # that types into a pane. Documentation rather than behaviour, and the
-        # note above allows the exception to be argued rather than assumed.
-        # This is the module whose whole value is being the one place that
-        # knows how an agent is talked to, so what that costs the operator
-        # belongs in it.
-        # 571 to 581 for #95. The settle seam lost its default and gained the
-        # split that keeps two rules at once: the DURATION is quarantine
-        # knowledge about how a Claude Code pane settles, the WAITING is the
-        # machine seam the architecture injects. Both reasons are at the code.
-        # 583 to 649 for #97. The regex became a parser, and the growth is
-        # mostly the reason: two regexes failed in OPPOSITE directions, one
-        # refusing every stop and one eating a draft character, and a third
-        # regex would have been the same bet a third time.
-        # 649 to 651, and neither line is prose: `ruff format` 0.16.4 wants two
-        # blank lines before the two module level comments that follow an
-        # assignment, and HEAD was committed without the formatter having run.
-        # Recorded so the next reader does not go looking for the behaviour that
-        # grew the file. It did not; the gate did.
-        # 651 to 692 for #100: `shows_input_box`, and the reason it exists
-        # beside `input_is_clear` rather than replacing it. The two differ on
-        # one case, an ordinary box with text in it, and the captured rows that
-        # prove the difference are most of the addition. The rest is why the
-        # escapes are deliberately NOT stripped here: the stripper eats one
-        # printable character after a two character escape (#97), and the
-        # character it would eat is the U+00A0 this predicate reads.
-        # 692 to 781 for #204: ANSWER_KEYS, `awaits_answer` and `send_answer`.
-        # The behaviour is about fifteen lines; the rest is why each narrowing
-        # is a security property and not a preference, which is the whole of
-        # this feature's safety case. A literal key set, `None` not collapsing
-        # into answerable, and the re-read living INSIDE the send are each one
-        # edit away from becoming the terminal the roadmap defers, and a reader
-        # who does not know that will make that edit and think it a tidy-up.
-        # 781 to 800 for #208: the known gap in `awaits_answer`, recorded at the
-        # predicate rather than only in the ticket. A stale modal reads as live,
-        # which is cosmetic for #100's badge and a keystroke for #204, and the
-        # next reader of this function is the one who needs to know that.
-        # 800 to 821 for closing #208: `_live_ornament_row` and the allowance
-        # it reads. The predicate is five lines; the rest is the belief behind
-        # the number and the two captured screens that justify it, which is
-        # exactly the kind of vendor layout fact this module quarantines.
-        # 821 to 1062 for #124: the plugin update. A second responsibility in
-        # the quarantine, and it goes HERE rather than into a sibling module
-        # because "the only module that knows vendor internals" is the rule the
-        # AST guard in `test_plugins.py` enforces; a second quarantine file
-        # would be a second place to look when the vendor moves. About a third
-        # of it is the two decisions (`-y`, user scope only) and the facts they
-        # rest on, which the next reader would otherwise reopen. If the file is
-        # now two things, the split is a `claude_ipc` package, and that is
-        # Phase 18's argument rather than this phase's. The last 16 lines are
-        # round 1 of its review: vendor text escaped before it is printed.
-        # 1062 to 1077 for batch 3 task 139, #305: `_shown` now cuts the raw
-        # text and escapes after, so the 240 limit bounds the vendor's own
-        # text rather than what escaping turns it into. The growth is mostly
-        # the docstring saying why the order flipped.
-        # 1077 to 1083 for task 141, #303: `_read_listing` and
-        # `_approved_command` catch `RecursionError` beside `ValueError`,
-        # since deeply nested `--json` output blows the parser's own stack
-        # rather than raising the error they already handled.
-        # 1083 to 1087 for task 142, #300: a `user` scope plugin the listing
-        # names twice is reported `skipped`, detail `listed twice`, instead
-        # of being dropped, so the outcome count covers every row returned.
-        # 1087 to 1105 for task 143, #299: `plugin_runner`'s inner `run` moves
-        # off `subprocess.run`, which never exposes the `Popen` it creates
-        # internally and so cannot be told to kill a hung child's own
-        # children, a process group. It now starts the child in its own
-        # session and kills that group on timeout; the growth is the
-        # `Popen`/`communicate` split `subprocess.run` used to do in one call,
-        # plus the comment saying why.
-        # 1105 to 1146 for #299's round 1 review: the kill now catches
-        # `BaseException`, not only `TimeoutExpired`, so a `SIGINT` mid update
-        # is still a kill (M2); `os.killpg` is given `proc.pid` directly
-        # rather than `os.getpgid(proc.pid)`, so a `start_new_session`
-        # regression raises instead of killing hitchrail's own group (M3);
-        # and the reap after the kill closes the pipes and bounds its own
-        # `wait`, rather than a second unbounded `communicate()` that a
-        # grandchild outside the group and still holding them could block for
-        # as long as it runs (H1, measured at 8.0s against a 0.5s bound).
-        # Most of the growth is the docstring carrying those three reasons and
-        # the measurement, not the code, which is ten lines longer: `SIM105`
-        # wants the two suppressed exceptions as `contextlib.suppress`, not
-        # `try`/`except`/`pass`, one line pricier once the reason each one is
-        # suppressed stays a comment above the `with` rather than beside the
-        # `pass` it used to sit on.
-        # 1147 to 1163 for task 156, #351: `plugin_runner`'s `Popen` call takes
-        # `errors="replace"` on top of `text=True`, so an agent binary whose
-        # child prints bytes that are not valid UTF-8 is reported unreadable,
-        # like other malformed output already is, rather than raising
-        # `UnicodeDecodeError` out of `update_plugins` uncaught. Most of the
-        # growth is the comment saying why replacement and not a stricter
-        # catch: `_read_listing`/`_approved_command` already treat malformed
-        # JSON as unreadable, so reusing that path needed no new failure code.
-        # 1163 to 1226 for task 157, #361: `RunningChild`, a thread-safe pid
-        # handle `plugin_runner` sets and clears around its `Popen`, so the
-        # server's lifespan can kill an in flight update's process group from
-        # outside the daemon thread it runs on, which never sees the
-        # shutdown's `KeyboardInterrupt`. Most of the growth is the docstring
-        # explaining why `except BaseException` above it only ever restores
-        # Ctrl-C's own kill for `hitchrail update-plugins`, never for a run
-        # the server started.
-        # 1226 to 1335 for #361 round 1 review, M1: `RunningChild` becomes a
-        # one-shot latch (`_closed`, `raise_if_closed`, and a closed check
-        # inside `_set`) rather than a bare pid slot, because the bare slot
-        # left a kill landing between two plugins, or between one's `Popen`
-        # returning and its pid becoming visible, signalling nothing and
-        # letting the run carry on: measured by the reviewer as a second
-        # `claude plugin update ... -y` spawned 41ms after the lifespan that
-        # was supposed to have ended the run had already exited. `RunnerClosed`
-        # and `update_plugins`'s new `abandoned` handling are the honest
-        # report of what the latch refused, so a shutdown reads as a shutdown
-        # rather than a per-plugin failure or a dropped row. Most of the
-        # growth is the docstrings saying why the latch exists and which race
-        # each of its two checks closes.
-        # 1351 for #167: each key group Stop sends, each look's verdict and the
-        # answer typed, as log lines. Never the pane text. #368 is the split,
-        # and it is Phase 19's next batch.
-        "claude_ipc.py": 1351,
+        # `plugins.py` did not, and does NOT want splitting further: the runner
+        # and the update share the timeout and reap constants and the vocabulary
+        # `tests/test_plugins.py` keeps out of every other module, so a second
+        # file would put that vocabulary in two places for no reader's benefit.
+        # Most of its length is the docstrings saying which race each of
+        # `RunningChild`'s two checks closes. Measured 533 at the split.
+        "claude_ipc/plugins.py": 540,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.
@@ -1330,15 +1202,15 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # the server's pid asked for on its own when there is no pane to
         # list it from (`exit-empty off`).
         # 619 to 640 for task 143, #299: `_default_runner` moves off
-        # `subprocess.run`, for the same reason as `claude_ipc.py`'s
+        # `subprocess.run`, for the same reason as `claude_ipc/plugins.py`'s
         # `plugin_runner` above: it never exposes the `Popen` it creates, so
         # it cannot kill a hung tmux invocation's own child processes as a
-        # group. Duplicated rather than shared with `claude_ipc.py`, because
+        # group. Duplicated rather than shared with `claude_ipc/plugins.py`, because
         # sharing it would import the tmux adapter into the vendor quarantine
         # or the vendor quarantine into the tmux adapter, either a worse
         # coupling than fifteen duplicated lines with a comment in each.
         # 640 to 678 for #299's round 1 review, the same three fixes as
-        # `claude_ipc.py`'s and duplicated for the identical reason: catch
+        # `claude_ipc/plugins.py`'s and duplicated for the identical reason: catch
         # `BaseException` so Ctrl-C mid call still kills the group (M2), give
         # `os.killpg` `proc.pid` directly so a dropped `start_new_session`
         # raises instead of killing this process's own group (M3), and bound
@@ -1420,7 +1292,7 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # own small parser, dispatched before the server's. A module of its own
         # was the other seam; it would have been a third web layer module for
         # forty lines of argument handling and printing, with the operation
-        # itself already in `claude_ipc.py`. If a second subcommand arrives,
+        # itself already in `claude_ipc/plugins.py`. If a second subcommand arrives,
         # that is the moment to move both out. 693 in its review: the failure
         # code printed ahead of the words, so a script can match on it.
         # 748 for #326: `identity_banner()`, printed once before

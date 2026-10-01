@@ -95,11 +95,15 @@ Tasks continue from Phase 22's 163. Batches run in order.
 
 ### Batch 2: `claude_ipc` split along its seam, task 166
 
-- [ ] **Task 166, #368 (P3).** `claude_ipc/` becomes a package, pane and stop
-      in one module and the plugin update in another, public names still
-      importable from `hitchrail.claude_ipc`. The size caps, the vocabulary
-      guard, `.claude/rules/security.md`'s list and mutmut's `source_paths`
-      move with it. No behaviour change, and the suite unchanged proves it.
+- [x] **Task 166, #368 (P3).** `claude_ipc/` becomes a package of four
+      modules along the seams the file had: `screen` (reading a pane), `keys`
+      (typing into one), `launch` (argv, trust, session link) and `plugins`,
+      every public name still importable from `hitchrail.claude_ipc` and
+      reached only through it. The structural guards key on a path under
+      `src/hitchrail` first, as a no-op commit, so the move's diff proves one
+      thing. The size caps, the vocabulary guard, `.claude/rules/security.md`'s
+      list and mutmut's `source_paths` move with it. No behaviour change, and
+      the suite unchanged proves it.
 
 ### Batch 3: `Config`'s refusals pinned, tasks 167 to 168
 
