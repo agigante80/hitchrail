@@ -8,6 +8,8 @@ machine, not on the row.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from playwright.async_api import Page, expect
 
@@ -179,6 +181,30 @@ async def test_an_agent_gone_before_the_tap_is_a_refusal_with_a_next_step(
     await expect(dialog.get_by_role("button", name="Refresh")).to_be_visible()
     await dialog.get_by_role("button", name="Refresh").click()
     await expect(row).to_have_attribute("data-state", "stopped", timeout=15_000)
+
+
+async def test_a_second_agent_that_took_the_row_is_not_the_one_ended(
+    page: Page, server: Harness
+) -> None:
+    """#279. The person confirmed ending the agent the row showed; before the
+    tap landed, that one left and a second agent started for the same folder.
+    The page sends the pid it showed, the server finds the row's agent is
+    another one, and nothing is signalled: the confirmation named a process,
+    never whatever the row holds by the time the request arrives."""
+    server.seed(detached=["forge-kit"])
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("forge-kit")}"]')
+    await expect(row).to_have_attribute("data-state", "detached")
+    await row.get_by_role("button", name="End").click()
+    server.end_orphans_now()
+    server.reseed_detached("forge-kit")
+    await asyncio.sleep(0.4)
+    await page.locator("[data-dialog]").get_by_role("button", name="End it").click()
+
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text("Nothing was signalled")
+    await expect(dialog).to_contain_text("the row moved")
+    assert not server.orphans_exited(timeout=1.0), "the second agent was ended"
 
 
 async def test_a_row_another_session_owns_offers_no_end(page: Page, server: Harness) -> None:

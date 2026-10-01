@@ -810,7 +810,13 @@ function confirmSignal(project, escalate) {
 
 async function signalNow(project, escalate) {
   const path = `/api/sessions/${encodeURIComponent(project.name)}/signal${escalate ? "/force" : ""}`;
-  const result = await api(path, { method: "POST" });
+  // The pid this row showed, which is the one the person confirmed (#279). The
+  // server refuses `not_ours` when its agent for the folder is another one now,
+  // rather than end an agent nobody was asked about.
+  const result = await api(path, {
+    method: "POST",
+    body: JSON.stringify({ pid: project.pid }),
+  });
   closeDialog();
   if (!result.ok) {
     showRefusal(result, project);
