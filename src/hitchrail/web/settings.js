@@ -246,6 +246,9 @@ const FACTS = [
   ["self_project", "Protected project"],
   ["agent_binary", "Agent"],
   ["session_prefix", "Session prefix"],
+  // #242. Shown, never editable: what Stop types is set in the config file.
+  ["stop_prompt", "Wrap up prompt"],
+  ["stop_prompt_timeout", "Wrap up waits up to, seconds"],
   ["tls", "TLS certificate"],
   ["expect_gateway_mac", "Expected gateway"],
   ["hard_floor_mb", "Hard memory floor, MB"],
