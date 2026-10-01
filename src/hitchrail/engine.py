@@ -1616,12 +1616,18 @@ class Engine:
         # It only ever ADDS. Nothing here answers the prompt: the options in
         # that dialog decide what happens to work the operator did not ask to
         # end, and choosing for them is the power #88 declined to take.
-        waiting = {name: self._pane_needs_a_person(name) for name in expired}
+        #
+        # One name at a time, look then act, never every look first (#239
+        # review). Each end_anyway kill waits up to `kill_grace` for the
+        # session to go, so with the looks taken up front a later row's look
+        # could be seconds old by its kill, long enough for a person to Kill
+        # and Start it again, and the fresh agent, which never saw a prompt,
+        # would be killed for the old one's question.
         for name in expired:
-            if waiting[name]:
+            waiting = self._pane_needs_a_person(name)
+            if waiting:
                 with self._stopping_guard:
                     self._awaiting_input.add(name)
-        for name in expired:
             # #239. The operator's answer, given in advance, to a stop that
             # ran out of time on a question: the kill the dialog offers at
             # this moment, taken without the tap. Only on THIS look at the
@@ -1629,7 +1635,7 @@ class Engine:
             # prompt. `kill` refuses the protected project itself, the same
             # refusal its route gives.
             end_anyway = self.config.stop_policy == "end_anyway"
-            if waiting[name] and end_anyway and self._end_anyway(name):
+            if waiting and end_anyway and self._end_anyway(name):
                 continue
             try:
                 session = self.get(name)
@@ -1657,7 +1663,7 @@ class Engine:
                     name,
                     self.prefs.stop_timeout(),
                     session.state.value,
-                    "; its screen is waiting on a person" if waiting[name] else "",
+                    "; its screen is waiting on a person" if waiting else "",
                 )
             self._announce(session)
         return expired

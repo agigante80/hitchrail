@@ -1133,7 +1133,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # docstring saying why it is a kill and never an answer.
         # 1780 for #242's review: the look at the pane when the exit after a
         # wrap up is refused, which ends the stop as expiry does.
-        "engine.py": 1780,
+        # 1786 for #239's review: one look then act per name, so a later
+        # row's look is never stale by the time of its kill.
+        "engine.py": 1786,
         # tmux.py is the module that encodes what tmux actually does
         # rather than what its manual implies, and every entry is a footgun
         # that cost real debugging: prefix matching targets, the colon

@@ -594,6 +594,10 @@ question, a stop that is merely slow is never killed, and the confirm and
 wait dialogs say what will happen before it does. Shown on the settings page,
 not changeable from it.
 
+With a `stop_prompt` set, it applies once the exit is sent. A wrap up that
+ends on a question is reported for you to answer and never killed, because
+the exit it would have refused was never sent.
+
 ### Updating the agent's plugins
 
 ```sh

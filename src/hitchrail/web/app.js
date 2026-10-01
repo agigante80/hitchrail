@@ -1195,7 +1195,9 @@ function waitingBody(wait, phase) {
    said on the confirm and through the whole wait, before it happens. */
 function endAnywayNote() {
   if (state.server.stop_policy !== "end_anyway") return "";
-  return "If it stops on a question it will be ended, as this server is configured to.";
+  // "Once asked to exit": a wrap up that ends on a question is reported and
+  // never killed, since the exit it would refuse was never sent (#239 review).
+  return "If it stops on a question once asked to exit, it will be ended, as this server is configured to.";
 }
 
 function phaseBody(wait, phase) {

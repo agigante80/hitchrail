@@ -16,11 +16,11 @@ from conftest import CLEAR_INPUT_BOX, FakeClock, FakeTmux, procs_from, ps_row
 from hitchrail.config import Config, ConfigError
 from hitchrail.engine import Engine, StopMarker
 from hitchrail.sessions import State
+from hitchrail.tmux import TmuxUnavailable
 from support import DEFAULT_LABEL, make_config
 from test_engine import MODAL_PANE
 
 PANE = 500
-AGENT = 501
 VESSEL = f"{DEFAULT_LABEL}~vessel"
 
 
@@ -30,15 +30,24 @@ def root(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def policy_engine(root: Path, **config: Any) -> tuple[Engine, FakeTmux, FakeClock]:
+def policy_engine(
+    root: Path, projects: tuple[str, ...] = (VESSEL,), **config: Any
+) -> tuple[Engine, FakeTmux, FakeClock]:
     """An engine with `vessel` running whose process leaves when its tmux
     session does, so a kill reads `stopped` rather than `detached`."""
-    tmux = FakeTmux(sessions={VESSEL: PANE})
-    tmux.pane_text[VESSEL] = CLEAR_INPUT_BOX
-    table = ps_row(PANE, 1) + ps_row(AGENT, PANE, project=VESSEL)
+    panes = {name: PANE + 10 * i for i, name in enumerate(projects)}
+    tmux = FakeTmux(sessions=dict(panes))
+    for name in projects:
+        tmux.pane_text[name] = CLEAR_INPUT_BOX
 
     def procs() -> Any:
-        return procs_from(table if VESSEL in tmux.sessions else "")()
+        return procs_from(
+            "".join(
+                ps_row(pane, 1) + ps_row(pane + 1, pane, project=name)
+                for name, pane in panes.items()
+                if name in tmux.sessions
+            )
+        )()
 
     clock = FakeClock()
     sessions_dir = root / ".sessions"
@@ -119,14 +128,52 @@ def test_the_pane_is_read_at_expiry_not_the_sweeps_overlay(root: Path) -> None:
     assert tmux.killed == []
 
 
-def test_an_unreadable_pane_at_expiry_kills_nothing(root: Path) -> None:
-    """The unknown case does the thing that destroys nothing."""
+@pytest.mark.parametrize("unreadable", ["tmux_gone", "no_box_drawn"])
+def test_an_unreadable_pane_at_expiry_kills_nothing(root: Path, unreadable: str) -> None:
+    """The unknown case does the thing that destroys nothing.
+
+    Both ways a look can fail to say anything: the capture raises, or it
+    returns a screen with no input box to read (#239 review: an earlier
+    version popped the pane text, and the fake answers that with a clear box,
+    so the test checked a clear pane twice and an unreadable one never).
+    """
     engine, tmux, clock = policy_engine(root, stop_policy="end_anyway")
     engine.stop(VESSEL)
-    tmux.pane_text.pop(VESSEL)
+    if unreadable == "tmux_gone":
+
+        def gone(project: str, lines: int = 40, escapes: bool = False) -> str:
+            raise TmuxUnavailable("no server")
+
+        tmux.capture_pane = gone  # type: ignore[method-assign]
+    else:
+        tmux.pane_text[VESSEL] = ""
     clock.advance(engine.prefs.stop_timeout() + 1)
     engine.expire_stops()
     assert tmux.killed == []
+
+
+def test_a_row_restarted_during_another_rows_kill_is_not_killed(root: Path) -> None:
+    """Look then act, one name at a time (#239 review). Each kill waits for its
+    session to go; a look taken before that wait is stale by its own kill, and
+    a row a person restarted in between holds a fresh agent that never asked."""
+    (root / "other").mkdir()
+    other = f"{DEFAULT_LABEL}~other"
+    engine, tmux, clock = policy_engine(root, (VESSEL, other), stop_policy="end_anyway")
+    engine.stop(VESSEL)
+    engine.stop(other)
+    tmux.pane_text[VESSEL] = MODAL_PANE
+    tmux.pane_text[other] = MODAL_PANE
+    kill = tmux.kill_session
+
+    def kill_then_restart_the_other(project: str) -> None:
+        kill(project)
+        if project == VESSEL:
+            tmux.pane_text[other] = CLEAR_INPUT_BOX
+
+    tmux.kill_session = kill_then_restart_the_other  # type: ignore[method-assign]
+    clock.advance(engine.prefs.stop_timeout() + 1)
+    assert sorted(engine.expire_stops()) == sorted([VESSEL, other])
+    assert tmux.killed == [VESSEL]
 
 
 def test_the_self_project_is_never_killed_by_this_path(root: Path) -> None:

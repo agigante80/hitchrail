@@ -14,7 +14,7 @@ from .conftest import Harness
 
 pytestmark = pytest.mark.e2e
 
-NOTE = "If it stops on a question it will be ended"
+NOTE = "If it stops on a question once asked to exit, it will be ended"
 
 
 async def _confirm(page: Page, server: Harness) -> None:
