@@ -92,7 +92,9 @@ def trusted_folders(config_path: Path) -> frozenset[str] | None:
         return _trust_cache[1]
     try:
         raw = json.loads(config_path.read_text())
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
+        # RecursionError: nesting past the parser's stack is as unreadable as
+        # malformed JSON, and is not a ValueError (#356).
         _trust_cache = (key, None)
         return None
     answer = _read_trust(raw)
@@ -182,7 +184,7 @@ def bridge_url(pid: int, sessions_dir: Path) -> str | None:
     path = sessions_dir / f"{pid}.json"
     try:
         payload = json.loads(path.read_text())
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):  # #356, as above
         return None
     if not isinstance(payload, dict):
         return None

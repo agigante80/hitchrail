@@ -444,8 +444,16 @@ def test_a_missing_file_is_none(tmp_path: Path) -> None:
     assert claude_ipc.bridge_url(999, tmp_path) is None
 
 
-def test_unparseable_json_is_none(tmp_path: Path) -> None:
-    (tmp_path / "9.json").write_text("{not json")
+# `"[" * 100000` blows the parser's own stack, a RecursionError and not a
+# ValueError (#356, the shape #303 fixed in the plugin listing).
+_UNPARSEABLE = pytest.mark.parametrize(
+    "text", ["{not json", "[" * 100000], ids=["malformed", "nested past the stack"]
+)
+
+
+@_UNPARSEABLE
+def test_unparseable_json_is_none(tmp_path: Path, text: str) -> None:
+    (tmp_path / "9.json").write_text(text)
     assert claude_ipc.bridge_url(9, tmp_path) is None
 
 
@@ -644,9 +652,10 @@ def test_a_missing_config_is_unknown(tmp_path: Path) -> None:
     assert trusted_folders(tmp_path / "nope.json") is None
 
 
-def test_unreadable_json_is_unknown(tmp_path: Path) -> None:
+@_UNPARSEABLE
+def test_unreadable_json_is_unknown(tmp_path: Path, text: str) -> None:
     path = tmp_path / "broken.json"
-    path.write_text("{not json")
+    path.write_text(text)
     assert trusted_folders(path) is None
 
 
