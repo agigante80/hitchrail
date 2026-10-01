@@ -238,6 +238,64 @@ while True:
     time.sleep(0.2)
 """
 
+# #242. Takes the wrap up prompt as a task: draws the busy ornament while it
+# "works" for {work}s, writes `handoff.md` in its folder, then draws the idle
+# ornament, the two rows task 169 captured from Claude Code 2.1.286. The idle
+# row is printed LAST each time because the reading refuses a row with output
+# under it, and the tty's own echo of the typed prompt is such output.
+#
+# The interrupt is modelled as measured: an Escape during the work cuts the
+# task, the queued wrap up still runs, and only then is `/exit` read. A line
+# carrying the 0x1b byte is that Escape, for the reason SHIM_BODY gives.
+WRAPS_UP_BODY = """
+import os, select
+BUSY = "\\x1b[38;5;246m\\u276f\\u00a0\\x1b[39m                     "
+IDLE = "\\x1b[39m\\u276f\\u00a0                     "
+
+def wrap_up():
+    with open("handoff.md", "w") as handoff:
+        handoff.write("wrapped up\\n")
+    print("hitchrail-shim: wrapped up", flush=True)
+
+while True:
+    line = sys.stdin.readline()
+    if line == "":
+        time.sleep(0.2)
+        continue
+    if line.rsplit("\\x1b", 1)[-1].strip() == "/exit":
+        print("hitchrail-shim: exiting", flush=True)
+        sys.exit(0)
+    if not line.strip():
+        continue
+    print(BUSY, flush=True)
+    until = time.monotonic() + {work}
+    interrupted = None
+    while time.monotonic() < until and interrupted is None:
+        if select.select([sys.stdin], [], [], 0.2)[0]:
+            got = sys.stdin.readline()
+            if "\\x1b" in got:
+                interrupted = got
+    wrap_up()
+    if interrupted is not None and interrupted.rsplit("\\x1b", 1)[-1].strip() == "/exit":
+        print("hitchrail-shim: exiting", flush=True)
+        sys.exit(0)
+    print(IDLE, flush=True)
+"""
+
+# #242's ceiling: takes the prompt, draws the busy ornament, and never reads
+# again, so the wrap up runs out of `stop_prompt_timeout` and the exit that
+# follows is not obeyed either. The dialog then holds the ceiling's words
+# long enough to be read rather than closing on the row's exit.
+STAYS_BUSY_BODY = """
+import signal
+signal.signal(signal.SIGINT, signal.SIG_IGN)
+while sys.stdin.readline().strip() == "":
+    time.sleep(0.2)
+print("\\x1b[38;5;246m\\u276f\\u00a0\\x1b[39m                     ", flush=True)
+while True:
+    time.sleep(0.2)
+"""
+
 # Exits at once, for the dead start flow. **A WHOLE script, and `/bin/sh`, not
 # the Python head the others share (#67).**
 #
@@ -523,6 +581,10 @@ class Harness:
         state_path: Path | None = None,
         pinned_stop_timeout: bool = False,
         disabled_roots: list[str] | None = None,
+        stop_prompt: str | None = None,
+        stop_prompt_timeout: float = 300.0,
+        wrap_up_takes: float | None = None,
+        wrap_up_stays_busy: bool = False,
     ) -> None:
         """Set the world up BEFORE the page loads.
 
@@ -571,6 +633,10 @@ class Harness:
             body = PROMPTS_AFTER_STOP_BODY
         if agent_shows_a_modal:
             body = STUCK_BODY
+        if wrap_up_takes is not None:
+            body = WRAPS_UP_BODY.format(work=wrap_up_takes)
+        if wrap_up_stays_busy:
+            body = STAYS_BUSY_BODY
         # **Two shims cannot both be written, and this used to decide it by
         # accident (#235 L7).** The chain above is last-wins, so `modal` beat
         # `dying`; moving the dying agent out to its own `sh` script for #67
@@ -678,6 +744,8 @@ class Harness:
                     tmux_socket=self._sock,
                     agent_binary=str(self._agent),
                     stop_timeout=stop_timeout,
+                    stop_prompt=stop_prompt,
+                    stop_prompt_timeout=stop_prompt_timeout,
                     token=token,
                     self_project=protect,
                     state_path=state_path,
@@ -697,6 +765,8 @@ class Harness:
                 tmux_socket=self._sock,
                 agent_binary=str(self._agent),
                 stop_timeout=stop_timeout,
+                stop_prompt=stop_prompt,
+                stop_prompt_timeout=stop_prompt_timeout,
                 token=token,
                 self_project=protect,
                 state_path=state_path,
