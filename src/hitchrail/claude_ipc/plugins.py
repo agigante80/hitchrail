@@ -442,6 +442,9 @@ def update_plugins(
             # every row is covered, and a duplicate is still a row.
             outcome = PluginOutcome(plugin, scope, "skipped", "listed more than once")
         elif abandoned:
+            # Seen here too, or a repeat behind the abandonment is counted as
+            # a second row that never started (#401).
+            seen.add(plugin)
             outcome = PluginOutcome(plugin, scope, "abandoned", _ABANDONED_DETAIL)
         else:
             seen.add(plugin)

@@ -444,9 +444,10 @@ def test_a_closed_runner_abandons_the_row_it_interrupted_and_every_row_after() -
 def test_a_row_behind_an_abandonment_keeps_its_own_reason_to_be_skipped() -> None:
     """#370. Abandonment was tested before scope, so a project scope row
     behind the interruption read "never started", a start it was never
-    going to get; a repeat of an updated plugin likewise."""
+    going to get; a repeat of an updated plugin likewise, and a repeat of an
+    abandoned one (#401), which was counted as a second row never started."""
     agent = FakeAgent(
-        [row("a@m"), row("b@m"), row("p@m", "project"), row("a@m"), row("c@m")],
+        [row("a@m"), row("b@m"), row("p@m", "project"), row("a@m"), row("c@m"), row("c@m")],
         **{"b@m": claude_ipc.RunnerClosed()},
     )
     assert results(run(agent)) == [
@@ -455,6 +456,7 @@ def test_a_row_behind_an_abandonment_keeps_its_own_reason_to_be_skipped() -> Non
         ("p@m", "project", "skipped"),
         ("a@m", "user", "skipped"),
         ("c@m", "user", "abandoned"),
+        ("c@m", "user", "skipped"),
     ]
 
 
