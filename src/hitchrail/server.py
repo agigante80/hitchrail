@@ -28,7 +28,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 import hitchrail
-from hitchrail import discovery, pages
+from hitchrail import discovery, logs, pages
 from hitchrail import engine as eng
 from hitchrail import security as sec
 from hitchrail.config import Config
@@ -50,14 +50,20 @@ SWEEP_INTERVAL_S = 1.0
 # walks a body of `{"roots": {"<label>": {"enabled": bool}}, "stop_timeout":
 # int}` and refuses any key that is not named here, so the perimeter (a
 # root's path, the bind, the allowlists, the token, `agent_binary`,
-# `session_prefix`, `self_project`, and `stop_prompt` when #242 adds it)
-# cannot become editable by an edit elsewhere: adding a name to either set is
-# the only way, and `tests/test_settings_route.py` asserts both sets member by
+# `session_prefix`, `self_project`, and #242's `stop_prompt`, which a
+# request setting would make a route that types arbitrary text) cannot
+# become editable by an edit elsewhere: adding a name to either set is the
+# only way, and `tests/test_settings_route.py` asserts both sets member by
 # member. The test for membership is #238's: does changing this let a request
 # do anything a request with the token cannot already do? A longer wait does
-# not; hiding a configured root does not. The label between the two levels is
-# validated by membership in the configured set, in the engine.
-EDITABLE_TOP_LEVEL = frozenset({"roots", "stop_timeout"})
+# not; hiding a configured root does not. `stop_policy` (#409) passes it
+# too, and was held back from #239 for a while because it is the closest
+# call: `end_anyway` is a kill nobody tapped, but only of a session a request
+# already asked to stop, which the same token could Kill outright. Andrea
+# decided it on 2026-10-01; the file and the flag still pin it, in
+# `Preferences`. The label between the two levels is validated by membership
+# in the configured set, in the engine.
+EDITABLE_TOP_LEVEL = frozenset({"roots", "stop_timeout", "stop_policy"})
 EDITABLE_ROOT_FIELDS = frozenset({"enabled"})
 
 # Three routes read a body: create takes {"name": <a project name>}, answer
@@ -85,6 +91,12 @@ EDITABLE_ROOT_FIELDS = frozenset({"enabled"})
 # find out the limit was never set.
 MAX_BODY_BYTES = 64 * 1024
 
+# What `request.json()` raises on a body it cannot parse. A body nested past
+# the parser's stack raises RecursionError, which is not a ValueError, and
+# 64 KB holds 20000 levels of `[`: catching ValueError alone answered it with
+# a 500 and a traceback (#399, the class #356 fixed in the file reads).
+_UNPARSEABLE = (ValueError, RecursionError)
+
 logger = logging.getLogger(__name__)
 
 
@@ -104,6 +116,20 @@ async def in_thread(fn: Callable[..., T], *args: object, **kwargs: object) -> T:
 
 
 def _error(status: int, code: str, message: str, **extra: object) -> JSONResponse:
+    """Every refusal a route makes, and the one place each is logged (#167).
+
+    The code and message only. `extra` is the caller's, and on `start_died`
+    it is the dead pane's output, which never enters a log. The message can
+    carry a name straight from the request path, so it goes through
+    `logs.shown`. The access line uvicorn writes next says which route.
+    """
+    logger.log(
+        logging.WARNING if status >= 500 else logging.INFO,
+        "refused %s %s: %s",
+        status,
+        code,
+        logs.shown(message),
+    )
     return JSONResponse({"code": code, "message": message, **extra}, status_code=status)
 
 
@@ -202,7 +228,17 @@ def create_app(
         # to be right before the settings page has ever been opened, and
         # this is the payload the page already fetches first. Read per
         # request because the settings route can change it.
-        return {**server_facts, "stop_timeout": engine.prefs.stop_timeout()}
+        return {
+            **server_facts,
+            "stop_timeout": engine.prefs.stop_timeout(),
+            # #242. Whether Stop wraps up first, and for how long, so the
+            # dialog's deadline is right. Never the prompt itself: that is in
+            # `/api/config`, behind the same token, and not in every listing.
+            "stop_prompt_set": config.stop_prompt is not None,
+            "stop_prompt_timeout": config.stop_prompt_timeout,
+            # #239. So the wait dialog says a kill is coming before it does.
+            "stop_policy": engine.prefs.stop_policy(),
+        }
 
     async def list_projects(request: Request) -> Response:
         # ONE scan, one thread hop, one consistent answer.
@@ -273,7 +309,7 @@ def create_app(
         try:
             payload = await request.json()
             name = str(payload["name"])
-        except (ValueError, KeyError, TypeError):
+        except (*_UNPARSEABLE, KeyError, TypeError):
             # A malformed body is a bad name, not a server fault. Returning 500
             # here would put a traceback where a client expects a code.
             return _error(400, "invalid_name", "a JSON body with a 'name' is required")
@@ -321,7 +357,7 @@ def create_app(
         """
         try:
             body = await request.json()
-        except ValueError:
+        except _UNPARSEABLE:
             return _error(400, "invalid_body", "a JSON object is required")
         if not isinstance(body, dict):
             return _error(400, "invalid_body", "a JSON object is required")
@@ -348,11 +384,15 @@ def create_app(
             return _error(
                 400, "invalid_value", "stop_timeout must be a whole number of seconds"
             )
+        if "stop_policy" in body and body["stop_policy"] is None:
+            return _error(400, "invalid_value", "stop_policy must be ask or end_anyway")
         try:
             # Both halves in ONE call, checked together before either is
             # written: applied in sequence, a refused timeout left the roots
             # half already on disk (Phase 14 review, round 1).
-            await in_thread(engine.prefs.apply, changes, body.get("stop_timeout"))
+            await in_thread(
+                engine.prefs.apply, changes, body.get("stop_timeout"), body.get("stop_policy")
+            )
         except eng.UnknownRoot as exc:
             return _error(404, "unknown_root", str(exc))
         except eng.OperatorDisabled as exc:
@@ -363,6 +403,10 @@ def create_app(
             return _error(400, "invalid_value", str(exc))
         except eng.StateUnwritable as exc:
             return _error(503, "state_unwritable", str(exc))
+        if "stop_policy" in body:
+            # The startup block names the policy it started with; a kill
+            # nobody tapped later needs the journal to say when that changed.
+            logger.info("stop policy is %s, set by a request", engine.prefs.stop_policy())
         return JSONResponse(_config_view())
 
     def _text(path: Path | None) -> str | None:
@@ -401,6 +445,16 @@ def create_app(
             "self_project": shown("self_project", config.self_project),
             "agent_binary": shown("agent_binary", config.agent_binary),
             "session_prefix": shown("session_prefix", config.session_prefix),
+            # #242. Read only: a request that could set what Stop TYPES would
+            # be the free text input the roadmap defers.
+            "stop_prompt": shown("stop_prompt", config.stop_prompt),
+            "stop_prompt_timeout": shown("stop_prompt_timeout", config.stop_prompt_timeout),
+            # #409. Editable unless the flag or the config file set it.
+            "stop_policy": {
+                "value": prefs.stop_policy(),
+                "source": prefs.stop_policy_source(),
+                "editable": prefs.stop_policy_editable(),
+            },
             # The certificate's path, or none: what "is this HTTPS" needs.
             "tls": shown("tls", _text(config.tls_cert)),
             "expect_gateway_mac": shown("expect_gateway_mac", config.expect_gateway_mac),
@@ -438,7 +492,7 @@ def create_app(
         try:
             body = await request.json()
             offered = body["token"]
-        except (ValueError, KeyError, TypeError):
+        except (*_UNPARSEABLE, KeyError, TypeError):
             return _error(400, "invalid_body", "a JSON body with a 'token' is required")
         if not isinstance(offered, str) or not sec.token_matches(offered, config.token):
             # The SAME answer a missing token gets from the middleware. A wrong
@@ -554,7 +608,7 @@ def create_app(
         try:
             body = await request.json()
             key = body["key"]
-        except (ValueError, TypeError, KeyError):
+        except (*_UNPARSEABLE, TypeError, KeyError):
             return _error(400, "invalid_body", "a JSON body with a 'key' is required")
         if not isinstance(key, str):
             return _error(400, "invalid_body", "a JSON body with a 'key' is required")
@@ -635,8 +689,32 @@ def create_app(
 
     async def _signal(request: Request, *, force: bool) -> Response:
         name = request.path_params["name"]
+        # #279: an OPTIONAL `{"pid": N}`, the pid the person confirmed. No
+        # body is today's request, so an older page or a script keeps working;
+        # a body that is there must say what it means, because a pid we could
+        # not read and then ignored would be the unbound signal this exists to
+        # remove.
+        seen_pid: int | None = None
+        if (await request.body()).strip():
+            try:
+                body = await request.json()
+            except _UNPARSEABLE:
+                return _error(400, "invalid_body", "the body, when sent, must be JSON")
+            if not isinstance(body, dict):
+                return _error(400, "invalid_body", "the body, when sent, must be a JSON object")
+            # Any other key is refused rather than ignored (#400): `{"PID": 901}`
+            # was read as no pid and sent the unbound signal. `{}` asks for no
+            # binding, as no body does, so it stays today's request.
+            for key in body:
+                if key != "pid":
+                    return _error(400, "invalid_body", f"{key!r} is not a key this body takes")
+            if "pid" in body:
+                seen_pid = body["pid"]
+                # bool is an int subclass, and `true` is not a pid.
+                if type(seen_pid) is not int or seen_pid <= 0:
+                    return _error(400, "invalid_body", "'pid' must be a positive integer")
         try:
-            session = await in_thread(engine.signal_detached, name, force)
+            session = await in_thread(engine.signal_detached, name, force, seen_pid)
         except eng.UnknownProject as exc:
             return _error(404, "unknown_project", str(exc))
         except eng.Protected as exc:
@@ -745,8 +823,9 @@ def create_app(
         it to the first network change. The record then arrives on the stream
         as a named `plugins` event, and `GET` below answers a page that opens
         or reconnects in the middle. A failure of the operation itself
-        (`agent_missing`, `marketplace_refresh_failed`, `plugins_unreadable`)
-        is in the record, not in a status: by then this 202 has been sent.
+        (`agent_missing`, `marketplace_refresh_failed`, `plugins_unreadable`,
+        `shutting_down`, or `internal_error`) is in the record, not in a
+        status: by then this 202 has been sent.
 
         `update_in_flight` rather than `locked`: `locked` is documented as a
         start in flight for a PROJECT, and this is machine wide.
@@ -832,6 +911,8 @@ def create_app(
         # #180. At most one scan in flight, tracked so the expiry loop never
         # waits behind it and so teardown can cancel it.
         scanning: asyncio.Task[list[str]] | None = None
+        # #242. The same shape for the wrap up watch, for the same reason.
+        wrapping: asyncio.Task[list[str]] | None = None
 
         def scan_finished(task: asyncio.Task[list[str]]) -> None:
             """A task nobody awaits swallows its exception, and this one is the
@@ -851,6 +932,14 @@ def create_app(
                     exc_info=task.exception(),
                 )
 
+        def wrap_up_finished(task: asyncio.Task[list[str]]) -> None:
+            """`scan_finished`'s argument, for the wrap up watch (#242)."""
+            if not task.cancelled() and task.exception() is not None:
+                logger.error(
+                    "wrap up watch failed; the sweep continues",
+                    exc_info=task.exception(),
+                )
+
         async def sweep() -> None:
             """Expire stop markers on a timer, so a timeout the user is
             watching resolves without waiting for the next poll.
@@ -864,7 +953,7 @@ def create_app(
             operational case (a machine it cannot read); this catches the
             unexpected one and says so.
             """
-            nonlocal scanning
+            nonlocal scanning, wrapping
             while True:
                 await asyncio.sleep(SWEEP_INTERVAL_S)
                 try:
@@ -890,6 +979,13 @@ def create_app(
                     if scanning is None or scanning.done():
                         scanning = asyncio.create_task(in_thread(engine.scan_for_stuck))
                         scanning.add_done_callback(scan_finished)
+                    # #242. Started, not awaited, at most one in flight, as the
+                    # scan above and for its reason: it captures a pane per
+                    # wrapping row and may type the exit sequence with its
+                    # settles. Unlike the scan it runs with nobody watching.
+                    if wrapping is None or wrapping.done():
+                        wrapping = asyncio.create_task(in_thread(engine.advance_wrap_ups))
+                        wrapping.add_done_callback(wrap_up_finished)
                 except Exception:
                     logger.exception("stop sweep failed; the timer continues")
 
@@ -907,29 +1003,37 @@ def create_app(
             # does not itself need bounding. What follows it is bounded
             # already, inside `plugin_runner`'s own `communicate()`, on the
             # daemon thread this call does not wait for.
-            plugin_updates.handle.kill()
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
-            # #180. **This cancels the AWAIT, not the thread, and the
-            # difference matters.** `in_thread` is `run_in_executor`, so
-            # `scan_for_stuck` goes on running in its worker whatever happens
-            # here. Measured: teardown returns in about 3ms with the thread
-            # still working, and the process then blocks for the rest of the
-            # capture at `shutdown_default_executor()`.
-            #
-            # So what this buys is that the lifespan does not HANG, not that the
-            # scan stops. An earlier version of this note claimed the second and
-            # was wrong, which is the defect #178 in this same commit is about:
-            # a comment contradicted by its own code.
-            #
-            # A capture bounded at `_CALL_TIMEOUT_S` is the worst case, so the
-            # process waits up to ten seconds on shutdown. That is the cost of
-            # not being able to cancel a thread, and it is bounded.
-            if scanning is not None:
-                scanning.cancel()
+            # #365. `kill()` is an `os.killpg`, and a group that has become
+            # another user's, or a kernel refusing it, raises. Everything
+            # after it is in the `finally` so that raise cannot leave the
+            # sweep ticking, or a scan awaited by nobody, while the error
+            # goes up: the error is still reported, just not instead.
+            try:
+                plugin_updates.handle.kill()
+            finally:
+                task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
-                    await scanning
+                    await task
+                # #180. **This cancels the AWAIT, not the thread, and the
+                # difference matters.** `in_thread` is `run_in_executor`, so
+                # `scan_for_stuck` goes on running in its worker whatever happens
+                # here. Measured: teardown returns in about 3ms with the thread
+                # still working, and the process then blocks for the rest of the
+                # capture at `shutdown_default_executor()`.
+                #
+                # So what this buys is that the lifespan does not HANG, not that the
+                # scan stops. An earlier version of this note claimed the second and
+                # was wrong, which is the defect #178 in this same commit is about:
+                # a comment contradicted by its own code.
+                #
+                # A capture bounded at `_CALL_TIMEOUT_S` is the worst case, so the
+                # process waits up to ten seconds on shutdown. That is the cost of
+                # not being able to cancel a thread, and it is bounded.
+                for pending in (scanning, wrapping):
+                    if pending is not None:
+                        pending.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await pending
 
     return Starlette(
         routes=[

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import logging
 import re
 import time
 
@@ -284,6 +285,35 @@ async def test_a_graceful_stop_that_works_needs_no_kill(page: Page, server: Harn
         page.locator(f'[data-project="{server.project("vessel")}"]')
     ).to_have_attribute("data-state", "stopped", timeout=20_000)
     await expect(page.locator("[data-dialog]")).to_be_hidden()
+
+
+async def test_a_stop_from_the_page_reads_end_to_end_in_the_log(
+    page: Page, server: Harness, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#167, task 165: "what did Stop do" answered from the log of a stop made
+    by a tap, through a real tmux and a shim that obeys `/exit`. The unit tier
+    proves each line; this proves they arrive, in order, from the assembled
+    server and its sweep, and that the stop's duration is among them."""
+    server.seed(running=["vessel"])
+    name = server.project("vessel")
+    with caplog.at_level(logging.INFO, logger="hitchrail"):
+        await _open_stop(page, server)
+        await (
+            page.locator("[data-dialog]").get_by_role("button", name="Stop", exact=True).click()
+        )
+        await expect(page.locator(f'[data-project="{name}"]')).to_have_attribute(
+            "data-state", "stopped", timeout=20_000
+        )
+
+    lines = [r.getMessage() for r in caplog.records if name in r.getMessage()]
+    expected = [
+        "requested, the row reads running",
+        "sent /exit Enter",
+        "exit requested",
+        "exited after",
+    ]
+    found = [next((i for i, line in enumerate(lines) if part in line), -1) for part in expected]
+    assert -1 not in found and found == sorted(found), lines
 
 
 async def test_the_protected_row_offers_no_stop_at_all(page: Page, server: Harness) -> None:

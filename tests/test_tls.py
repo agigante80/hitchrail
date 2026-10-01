@@ -321,6 +321,8 @@ async def test_the_cookie_is_secure_exactly_when_we_terminate_tls(
         ("127.0.0.1", ("http://box.lan",), False),
         ("127.0.0.1", (), False),
         ("0.0.0.0", ("https://box.lan",), False),
+        ("127.1", ("https://box.lan",), True),
+        ("::ffff:127.0.0.1", ("https://box.lan",), True),
     ],
     ids=[
         "proxy",
@@ -329,6 +331,8 @@ async def test_the_cookie_is_secure_exactly_when_we_terminate_tls(
         "plain-lan",
         "none",
         "proxy-origin-but-we-are-reachable-in-the-clear",
+        "short-loopback-spelling",
+        "ipv4-mapped-loopback",
     ],
 )
 async def test_the_cookie_is_secure_behind_a_proxy_whose_origins_are_all_https(
@@ -355,6 +359,9 @@ async def test_the_cookie_is_secure_behind_a_proxy_whose_origins_are_all_https(
     LAN address directly gets a 200 and a cookie its browser throws away,
     then 401s forever with a correct token. The bind says what a browser
     can do; the origins only say what the operator meant.
+
+    The two short spellings are #283: each binds loopback, and each lost the
+    flag because `ipaddress` alone did not call it loopback.
     """
     (tmp_path / "root").mkdir(exist_ok=True)
     config = make_config(

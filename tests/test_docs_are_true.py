@@ -34,27 +34,14 @@ import pytest
 
 from hitchrail import claude_ipc
 from hitchrail.cli import parse_args
-from support import make_config
+from support import make_config, source_modules
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src" / "hitchrail"
 CLAUDE_MD = ROOT / ".claude" / "CLAUDE.md"
 
-# **These guards used to skip on a clone, and now they do not.**
-#
-# The conventions lived in `.claude/CLAUDE.md` while `.gitignore` excluded the
-# whole of `.claude/`, so every check below ran only in the maintainer's
-# checkout: CI validated the roadmap and not the file an agent reads first. #60
-# moved them to `AGENTS.md` at the root for that reason. On 2026-09-11 they
-# moved back, because Claude Code reads `CLAUDE.md` and not `AGENTS.md`, and
-# `.gitignore` now excludes `.claude/*` and re-admits this one file, which is
-# the git spelling that lets a file under an ignored directory be tracked. The
-# guard that caught a reversed middleware order still runs on every push, for
-# every contributor, and `test_the_conventions_file_is_tracked` is what keeps
-# a `.gitignore` edit from quietly taking it back out of CI.
-#
-# There is no skip mark any more. A missing `.claude/CLAUDE.md` is a failure,
-# not a reason to pass quietly.
+# The checks below that read `.claude/CLAUDE.md` skip where it is absent,
+# which is a clone and every CI leg: `_conventions()` says why (#281).
 ROADMAP = ROOT / "docs" / "roadmap.md"
 README = ROOT / "README.md"
 
@@ -64,7 +51,9 @@ PLACEHOLDER_LINES = 5
 
 
 def _modules() -> dict[str, int]:
-    return {p.name: len(p.read_text().splitlines()) for p in SRC.glob("*.py")}
+    """Keyed by the path under `src/hitchrail`, which is how a document names
+    a module inside a package (#368)."""
+    return {rel: len(p.read_text().splitlines()) for rel, p in source_modules(SRC).items()}
 
 
 @pytest.mark.parametrize("doc", [CLAUDE_MD, ROADMAP], ids=lambda p: p.name)
@@ -98,7 +87,7 @@ def _conventions() -> str:
     reversal, and the honest consequence is written here rather than left to
     be discovered: every check in this module that reads it runs on the
     machine where it is edited and on NO CI leg, exactly like the security
-    rules guard in `tests/test_config.py`. A skip everywhere would be a lie
+    rules guard in `tests/test_security_rules.py`. A skip everywhere would be a lie
     about coverage; a skip on the checkouts that genuinely do not carry the
     file is the cost of deriving a check from something the repository does
     not publish.
@@ -124,15 +113,34 @@ def test_no_document_hardcodes_a_test_count(doc: Path) -> None:
 
 
 def _named_in_claude_md() -> set[str]:
-    """The modules the architecture block claims exist, by their listed name."""
-    return set(re.findall(r"^\s{2}(\w+\.py)\s", _conventions(), re.M))
+    """The modules the architecture block claims exist, by their path under
+    `src/hitchrail`.
+
+    A package is a `name/` line at the block's indent with its modules one
+    level further in (#368), so `claude_ipc/` then `    keys.py` names
+    `claude_ipc/keys.py`. `web/` is the same shape and lists no module.
+    """
+    named: set[str] = set()
+    package = ""
+    for line in _conventions().splitlines():
+        top = re.match(r"^\s{2}(\w+)(\.py|/)(?:\s|$)", line)
+        if top:
+            name, kind = top.groups()
+            package = f"{name}/" if kind == "/" else ""
+            if kind == ".py":
+                named.add(f"{name}.py")
+            continue
+        nested = re.match(r"^\s{4}(\w+\.py)(?:\s|$)", line)
+        if nested and package:
+            named.add(package + nested.group(1))
+    return named
 
 
 # `__init__.py` is a package marker rather than a module anybody navigates to,
 # and listing it in the architecture block would be noise. Named here, and kept
 # short on purpose: a broad pattern in this exemption is how the NEXT module
 # goes missing, which is the whole failure below.
-_NOT_ON_THE_MAP = {"__init__.py"}
+_NOT_ON_THE_MAP = {"__init__.py", "claude_ipc/__init__.py"}
 
 
 def test_every_module_named_in_claude_md_exists() -> None:
@@ -157,7 +165,7 @@ def test_every_module_that_exists_is_named_in_claude_md() -> None:
     that reads a file chosen by a URL. The map told a reader deciding what it
     was safe to touch that neither existed.
     """
-    on_disk = {p.name for p in SRC.glob("*.py")} - _NOT_ON_THE_MAP
+    on_disk = set(source_modules(SRC)) - _NOT_ON_THE_MAP
     unlisted = on_disk - _named_in_claude_md()
     assert not unlisted, (
         ".claude/CLAUDE.md does not name "
@@ -1541,7 +1549,7 @@ def test_the_phone_doc_requires_both_allowlist_flags_for_a_proxy() -> None:
 
 
 def test_the_keypad_offers_exactly_the_keys_the_server_will_send() -> None:
-    """#204. `app.js` and `claude_ipc.py` name the same keys, or a button lies.
+    """#204. `app.js` and `claude_ipc` name the same keys, or a button lies.
 
     Two lists rather than one because they are in two languages, and the copy
     in the browser is an AFFORDANCE while the copy on the server is the GUARD.

@@ -268,8 +268,9 @@ def test_a_colon_in_a_session_name_never_breaks_a_pane_record(server: PrivateTmu
 
 
 def test_an_unnamed_session_is_refused_or_named_as_such(server: PrivateTmux) -> None:
-    """3.7a admits an empty session name; up to 3.7 refuse it. Both are
-    answers, and CI's tmux gives the second, so this asserts whichever this
+    """3.7a admits an empty session name and some earlier versions refuse
+    it; which ones is deliberately not listed, since #278 found the list
+    wrong. Both are answers, and CI's tmux has refused, so this asserts whichever this
     server gives rather than skipping: a refusal creates nothing, and an
     admitted one is foreign under the placeholder, never a pane in neither
     map (round 1 review of #189)."""
@@ -874,6 +875,33 @@ def test_a_key_reaches_a_real_pty_and_the_screen_changes(server: PrivateTmux) ->
     pytest.fail(f"the key never reached the pty; pane was:\n{tmux.capture_pane(project)}")
 
 
+_ECHO_TWO_LINES = (
+    'read -r a; printf "GOT:[%s]\\n" "$a"; read -r b; printf "GOT:[%s]\\n" "$b"; sleep 30'
+)
+
+
+def test_text_that_looks_like_a_key_or_a_flag_arrives_as_text(server: PrivateTmux) -> None:
+    """#242. The wrap up prompt is the operator's free text, and tmux reads a
+    `send-keys` argument as a key name first and a leading `-` as an option.
+    `-l` and `--` are the adapter's answer; a fake can only prove they were
+    passed, and this proves a real tmux honours them."""
+    project = "literal"
+    name = sanitize(f"{PREFIX}{project}")
+    server.run("new-session", "-d", "-s", name, "sh", "-c", _ECHO_TWO_LINES)
+    server.created.append(name)
+    tmux = adapter(server)
+    for text in ("Enter", "-X"):
+        tmux.send_text(project, text)
+        tmux.send_keys(project, "Enter")
+    deadline = time.time() + TIMEOUT
+    while time.time() < deadline:
+        pane = tmux.capture_pane(project)
+        if "GOT:[Enter]" in pane and "GOT:[-X]" in pane:
+            return
+        time.sleep(0.05)
+    pytest.fail(f"the text did not arrive as typed; pane was:\n{tmux.capture_pane(project)}")
+
+
 # #208. The modal row, then the agent moves on and keeps printing: the row is
 # still in the scrollback and nothing newer has drawn an ornament. The loop
 # prints one line a tick so the pane grows while a key could be sent.
@@ -1251,11 +1279,17 @@ def test_an_agent_that_outlived_its_pane_under_our_own_server_keeps_end(
             time.sleep(0.05)
         assert not Path(f"/proc/{row.pid}").exists(), "End did not end it"
     finally:
-        # Back on, so the session-less server exits on its next loop and the
-        # fixture's leak check finds a dead socket rather than a live server.
+        # Back on, so the session-less server exits on its next loop rather
+        # than outliving the run. Waited on by asking the SERVER, not by
+        # watching the socket file (#278): tmux never unlinks its socket at
+        # exit, so that wait always ran to its deadline and proved nothing.
+        # `close()`'s `rmtree` removes the file either way.
         server.run("set-option", "-g", "exit-empty", "on")
         deadline = time.monotonic() + 5
-        while Path(server.socket).exists() and time.monotonic() < deadline:
+        while (
+            server.run("display-message", "-p", "#{pid}").returncode == 0
+            and time.monotonic() < deadline
+        ):
             time.sleep(0.05)
 
 

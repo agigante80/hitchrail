@@ -7,7 +7,9 @@ literal or a usage pattern.
 
 from __future__ import annotations
 
+import ast
 import inspect
+import logging
 from pathlib import Path
 
 import pytest
@@ -27,8 +29,23 @@ from hitchrail.claude_ipc import (
     shows_input_box,
     trusted_folders,
 )
+from hitchrail.claude_ipc import screen as ipc_screen
+from support import in_claude_ipc, source_modules
 
 SRC = Path(__file__).parent.parent / "src" / "hitchrail"
+
+
+def _outside_the_quarantine() -> dict[str, Path]:
+    """Every module but the quarantine, keyed by its path under `SRC` (#368).
+
+    A flat glob would not see into a `claude_ipc` package, and a test that
+    excluded `claude_ipc.py` by name would then scan every one of its files
+    as if they were outside it. The walk has to see the quarantine for the
+    exclusion to mean anything, so that is asserted rather than assumed.
+    """
+    modules = source_modules(SRC)
+    assert any(in_claude_ipc(rel) for rel in modules), "the walk saw no claude_ipc module"
+    return {rel: p for rel, p in modules.items() if not in_claude_ipc(rel)}
 
 
 # Exact input rows captured from a real Claude Code session on 2026-09-02,
@@ -72,6 +89,9 @@ class FakePane:
 
     def send_keys(self, project: str, *keys: str) -> None:
         self.sent.append((project, *keys))
+
+    def send_text(self, project: str, text: str) -> None:
+        self.sent.append((project, "text", text))
 
     def capture_pane(self, project: str, lines: int = 40, escapes: bool = False) -> str:
         self.captured.append(project)
@@ -312,6 +332,10 @@ def test_request_stop_takes_anything_shaped_like_a_pane() -> None:
         def capture_pane(self, project: str, lines: int = 40, escapes: bool = False) -> str:
             return pane_text(CLEAR_BOX)
 
+        # Part of the protocol since #242, for the wrap up prompt.
+        def send_text(self, project: str, text: str) -> None:
+            self.count += 1
+
     pane = NotATmux()
     request_stop(pane, "vessel", settle=lambda _s: None)
     assert pane.count == len(GRACEFUL_STOP_KEYS)
@@ -322,19 +346,15 @@ def test_request_stop_takes_anything_shaped_like_a_pane() -> None:
 
 def test_the_stop_keys_live_only_here() -> None:
     """`lint-imports` cannot catch a string, so this is a grep."""
-    leaked = [
-        p.name
-        for p in SRC.glob("*.py")
-        if p.name != "claude_ipc.py" and "/exit" in p.read_text()
-    ]
+    leaked = [rel for rel, p in _outside_the_quarantine().items() if "/exit" in p.read_text()]
     assert leaked == []
 
 
 def test_the_marker_lives_only_here() -> None:
     leaked = [
-        p.name
-        for p in SRC.glob("*.py")
-        if p.name != "claude_ipc.py" and REMOTE_CONTROL_MARKER in p.read_text()
+        rel
+        for rel, p in _outside_the_quarantine().items()
+        if REMOTE_CONTROL_MARKER in p.read_text()
     ]
     assert leaked == []
 
@@ -363,9 +383,8 @@ def test_the_launch_flags_live_only_here() -> None:
     ]
     assert flags, "launch_argv grew no flags, so this guard checks nothing"
     leaked = {
-        p.name: f
-        for p in SRC.glob("*.py")
-        if p.name != "claude_ipc.py"
+        rel: f
+        for rel, p in _outside_the_quarantine().items()
         for f in flags
         if f in p.read_text()
     }
@@ -432,8 +451,16 @@ def test_a_missing_file_is_none(tmp_path: Path) -> None:
     assert claude_ipc.bridge_url(999, tmp_path) is None
 
 
-def test_unparseable_json_is_none(tmp_path: Path) -> None:
-    (tmp_path / "9.json").write_text("{not json")
+# `"[" * 100000` blows the parser's own stack, a RecursionError and not a
+# ValueError (#356, the shape #303 fixed in the plugin listing).
+_UNPARSEABLE = pytest.mark.parametrize(
+    "text", ["{not json", "[" * 100000], ids=["malformed", "nested past the stack"]
+)
+
+
+@_UNPARSEABLE
+def test_unparseable_json_is_none(tmp_path: Path, text: str) -> None:
+    (tmp_path / "9.json").write_text(text)
     assert claude_ipc.bridge_url(9, tmp_path) is None
 
 
@@ -632,9 +659,10 @@ def test_a_missing_config_is_unknown(tmp_path: Path) -> None:
     assert trusted_folders(tmp_path / "nope.json") is None
 
 
-def test_unreadable_json_is_unknown(tmp_path: Path) -> None:
+@_UNPARSEABLE
+def test_unreadable_json_is_unknown(tmp_path: Path, text: str) -> None:
     path = tmp_path / "broken.json"
-    path.write_text("{not json")
+    path.write_text(text)
     assert trusted_folders(path) is None
 
 
@@ -695,8 +723,10 @@ def test_only_the_quarantine_types_into_a_pane() -> None:
     attributed to the operator. That is the relay the graceful stop depends on,
     and it holds only while the relayed content is what a person asked for.
 
-    Today the single call site is `claude_ipc.request_stop`, which sends the
-    stop keys and nothing else. Nothing structural kept it that way, and the
+    The call sites are the quarantine's three typing functions:
+    `request_stop` (the stop keys), `send_answer` (one key from a literal set,
+    #204) and `request_wrap_up` (the operator's configured prompt, #242).
+    Nothing structural kept it that way, and the
     design now names keystroke injection as a capability of the API, so the
     narrowness is worth asserting rather than trusting.
 
@@ -705,10 +735,13 @@ def test_only_the_quarantine_types_into_a_pane() -> None:
     inverts the layering: tmux is the lower module and must not know what an
     agent is. A grep is the control that fits.
     """
+    # Both of the adapter's typing methods (#242): `send_text` types free text,
+    # which is the more dangerous of the two, and a grep for one alone would
+    # let a second caller of the other through.
     callers = sorted(
-        p.name
-        for p in SRC.glob("*.py")
-        if p.name != "claude_ipc.py" and ".send_keys(" in p.read_text()
+        rel
+        for rel, p in _outside_the_quarantine().items()
+        if ".send_keys(" in p.read_text() or ".send_text(" in p.read_text()
     )
     assert callers == [], (
         f"{callers} types into a pane. What goes to an agent's stdin is "
@@ -881,7 +914,7 @@ def test_the_modal_tail_allowance_is_one_row_past_the_captured_screens() -> None
     and no more, because the failure direction to prefer is a missing
     warning over a key into a working agent.
     """
-    assert claude_ipc._MODAL_TAIL_ROWS == 3
+    assert ipc_screen._MODAL_TAIL_ROWS == 3
     at_the_edge = EXIT_MODAL_SCREEN + "  one more line\n"
     assert awaits_answer(at_the_edge) is True
     past_it = at_the_edge + "  and another\n"
@@ -964,3 +997,147 @@ def test_the_pane_is_read_inside_the_send_not_handed_in() -> None:
     """
     params = list(inspect.signature(send_answer).parameters)
     assert params == ["pane", "project", "key"]
+
+
+def test_an_answer_is_logged_with_the_key_that_went_out(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    pane = FakePane([pane_text(MODAL_BOX)])
+    with caplog.at_level(logging.INFO, logger="hitchrail.claude_ipc"):
+        send_answer(pane, "proj", "Enter")
+    assert "answer proj: the pane showed a question, sent Enter" in caplog.text
+
+
+def test_a_refused_answer_logs_no_key_as_sent(caplog: pytest.LogCaptureFixture) -> None:
+    """The line is written after the send, so a refusal cannot leave one
+    claiming a key reached the pane."""
+    pane = FakePane([pane_text(DRAFT_BOX)])
+    with (
+        caplog.at_level(logging.DEBUG, logger="hitchrail.claude_ipc"),
+        pytest.raises(AnswerNotSafe),
+    ):
+        send_answer(pane, "proj", "Enter")
+    assert "sent" not in caplog.text
+
+
+def test_the_stop_logs_verdicts_and_never_the_screen(caplog: pytest.LogCaptureFixture) -> None:
+    """At debug, every look at the input box is a line, and none of them
+    carries what the box held: a draft is the operator's unsent text."""
+    draft = DRAFT_BOX.replace("draft text here", "DRAFT-ONLY-91c")
+    assert draft != DRAFT_BOX, "the fixture changed and this test looks for nothing"
+    pane = FakePane([pane_text(draft)])
+    with (
+        caplog.at_level(logging.DEBUG, logger="hitchrail.claude_ipc"),
+        pytest.raises(StopNotSafe),
+    ):
+        request_stop(pane, "vessel", settle=lambda _s: None)
+    assert "looked at the input box, clear is False" in caplog.text
+    assert "DRAFT-ONLY-91c" not in caplog.text
+
+
+# -- #368: the quarantine is a package ----------------------------------------
+
+# Every name the rest of the tree imported from `hitchrail.claude_ipc` when it
+# was one file, spelled out rather than read from `__all__`, so dropping one
+# from `__init__.py` fails here instead of shrinking both lists together.
+_SURFACE_BEFORE_THE_SPLIT = {
+    "ANSWER_KEYS",
+    "GRACEFUL_STOP_KEYS",
+    "REMOTE_CONTROL_MARKER",
+    "URL_BASE",
+    "AnswerNotSafe",
+    "Pane",
+    "PluginFailure",
+    "PluginOutcome",
+    "PluginResult",
+    "PluginRunner",
+    "PluginsFailed",
+    "RunnerClosed",
+    "RunningChild",
+    "SessionUrl",
+    "StopNotSafe",
+    "awaits_answer",
+    "bridge_url",
+    "input_is_clear",
+    "launch_argv",
+    "plugin_runner",
+    "request_stop",
+    "send_answer",
+    "session_url",
+    "shows_input_box",
+    "trusted_folders",
+    "update_plugins",
+}
+
+
+def test_the_package_still_offers_every_name_the_single_file_did() -> None:
+    missing = sorted(n for n in _SURFACE_BEFORE_THE_SPLIT if not hasattr(claude_ipc, n))
+    assert not missing, f"`hitchrail.claude_ipc` no longer offers {missing}"
+    assert set(claude_ipc.__all__) == _SURFACE_BEFORE_THE_SPLIT | _ADDED_SINCE_THE_SPLIT
+
+
+# Public names added after #368, kept apart so the list above stays a record
+# of what the single file offered.
+_ADDED_SINCE_THE_SPLIT = {"WrapUpWatch", "request_wrap_up"}  # #242
+
+
+def _submodule_imports(tree: ast.AST) -> list[str]:
+    """Every import in `tree` that reaches past the package into a submodule."""
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found += [a.name for a in node.names if a.name.startswith("hitchrail.claude_ipc.")]
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            if node.module.startswith("hitchrail.claude_ipc."):
+                found.append(node.module)
+            elif node.module == "hitchrail.claude_ipc":
+                found += [
+                    f"{node.module}.{a.name}"
+                    for a in node.names
+                    if a.name in {"screen", "keys", "launch", "plugins"}
+                ]
+    return found
+
+
+def test_nothing_outside_the_package_imports_one_of_its_modules() -> None:
+    """A submodule import bypasses every `monkeypatch.setattr(claude_ipc, ...)`.
+
+    `plugin_runs.py` calls `claude_ipc.plugin_runner` through the package so
+    that `test_plugin_runs.py` can replace it. `from hitchrail.claude_ipc.plugins
+    import plugin_runner` would bind the real one at import, and the test would
+    pass while exercising nothing.
+    """
+    reached = {
+        rel: hits
+        for rel, path in _outside_the_quarantine().items()
+        if (hits := _submodule_imports(ast.parse(path.read_text())))
+    }
+    assert reached == {}, f"modules outside `claude_ipc` import its submodules: {reached}"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from hitchrail.claude_ipc.plugins import plugin_runner",
+        "import hitchrail.claude_ipc.keys",
+        "from hitchrail.claude_ipc import launch",
+    ],
+)
+def test_the_submodule_scan_sees_each_spelling(source: str) -> None:
+    assert _submodule_imports(ast.parse(source))
+
+
+def test_the_package_surface_is_not_a_submodule_import() -> None:
+    assert _submodule_imports(ast.parse("from hitchrail.claude_ipc import launch_argv")) == []
+
+
+def test_a_submodule_log_line_reaches_the_package_logger(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Loggers are per module now, `hitchrail.claude_ipc.keys` and so on, and a
+    capture on the package name must still see them through propagation."""
+    from hitchrail.claude_ipc import keys
+
+    with caplog.at_level(logging.INFO, logger="hitchrail.claude_ipc"):
+        keys.logger.info("from the keys module")
+    assert [r.name for r in caplog.records] == ["hitchrail.claude_ipc.keys"]

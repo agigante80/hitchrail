@@ -6,6 +6,7 @@ now it holds the one guard that keeps the hermetic tier honest.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import subprocess
@@ -238,6 +239,28 @@ def no_ambient_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
+# #167. `cli.main` configures logging for the whole process, as it must,
+# and a test calling it would otherwise leave that configuration behind:
+# `hitchrail` no longer propagating, so every later `caplog` reads nothing,
+# and a handler bound to a capture stream pytest has since closed. Put back
+# exactly what each touched logger had.
+_CONFIGURED_LOGGERS = ("", "hitchrail", "uvicorn", "uvicorn.error", "uvicorn.access")
+
+
+@pytest.fixture(autouse=True)
+def logging_is_restored() -> Iterator[None]:
+    saved = []
+    for name in _CONFIGURED_LOGGERS:
+        log = logging.getLogger(name)
+        saved.append((log, log.handlers[:], log.level, log.propagate, log.disabled))
+    yield
+    for log, handlers, level, propagate, disabled in saved:
+        log.handlers[:] = handlers
+        log.setLevel(level)
+        log.propagate = propagate
+        log.disabled = disabled
+
+
 @pytest.fixture(autouse=True)
 def no_real_config_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """#154. `settings.default_config_path()` reads `XDG_CONFIG_HOME` and falls
@@ -398,6 +421,16 @@ class FakeTmux(Tmux):
 
     def send_keys(self, project: str, *keys: str) -> None:
         self.sent.append((project, keys))
+
+    def send_text(self, project: str, text: str) -> None:
+        """#242's literal text, in the same list as the keys, because the
+        property under test is the ORDER: clear, text, then `Enter`."""
+        self.sent.append((project, (TYPED, text)))
+
+
+# What `FakeTmux.sent` records ahead of literal text, so a typed prompt of
+# `Enter` cannot read as the key.
+TYPED = "<typed>"
 
 
 class FakeClock:

@@ -1,5 +1,5 @@
 /* The settings page (#238): what this instance is pointed at, and the two
-   things a request may change.
+   things a request may change. Three since #409.
 
    Deliberately NOT app.js, for the reason logs.js gives: that file boots the
    list, the stream and the dialogs, and this page shows one document. What
@@ -87,6 +87,15 @@ function settle(owner) {
     note("", owner);
     noteOwner = null;
   }
+}
+
+// A new action by the person retires a settings refusal's owed repaint
+// (#281): the flag belonged to the repaint after THAT refusal, and a local
+// refusal or an offline one gets none, so it was spent by the next success
+// instead and "Not changed" stood over a change that was made. Never the
+// other flow's flag, by #315's rule.
+function begin() {
+  if (noteOwner !== "plugins") keepNote = false;
 }
 
 async function call(method, body) {
@@ -186,6 +195,7 @@ function renderRoots(config) {
 }
 
 async function toggle(label, enabled, box) {
+  begin();
   box.disabled = true;
   const config = await call("PATCH", { roots: { [label]: { enabled } } });
   box.disabled = false;
@@ -212,6 +222,7 @@ function renderStop(config) {
 }
 
 async function saveStop() {
+  begin();
   const input = $("[data-stop-timeout]");
   const seconds = Number(input.value);
   const ceiling = Number(input.max);
@@ -222,6 +233,40 @@ async function saveStop() {
   }
   const config = await call("PATCH", { stop_timeout: seconds });
   if (config) render(config);
+}
+
+/* #409. The page says what the policy DOES, in the source line under the
+   control, every time it renders: with `end_anyway` that is a kill nobody
+   taps, and the person who chose it reads that sentence under the Save they
+   pressed. Pinned by the flag or the config file, it is text, like the wait. */
+const POLICY_WORDS = {
+  ask: "A stop that runs out of time on a question is reported, and waits for you.",
+  end_anyway:
+    "A stop that runs out of time on a question, once asked to exit, is ended without a tap.",
+};
+
+function renderPolicy(config) {
+  const field = $("[data-policy-field]");
+  const select = $("[data-stop-policy]");
+  const save = $("[data-policy-save]");
+  const source = $("[data-policy-source]");
+  const policy = config.stop_policy;
+  select.value = policy.value;
+  const words = POLICY_WORDS[policy.value] ?? policy.value;
+  const where = policy.source === "flag" ? "on the command line" : "in the config file";
+  source.textContent = policy.editable
+    ? `${words} Currently ${sourceText(policy.source)}.`
+    : `${words} Set ${where}; change it there.`;
+  field.dataset.editable = String(policy.editable);
+  select.hidden = !policy.editable;
+  save.hidden = !policy.editable;
+}
+
+async function savePolicy() {
+  begin();
+  const config = await call("PATCH", { stop_policy: $("[data-stop-policy]").value });
+  if (config) render(config);
+  else refresh();
 }
 
 /* Read only, as text, each with where it came from. The token is its
@@ -235,6 +280,9 @@ const FACTS = [
   ["self_project", "Protected project"],
   ["agent_binary", "Agent"],
   ["session_prefix", "Session prefix"],
+  // #242. Shown, never editable: what Stop types is set in the config file.
+  ["stop_prompt", "Wrap up prompt"],
+  ["stop_prompt_timeout", "Wrap up waits up to, seconds"],
   ["tls", "TLS certificate"],
   ["expect_gateway_mac", "Expected gateway"],
   ["hard_floor_mb", "Hard memory floor, MB"],
@@ -277,6 +325,7 @@ function renderFacts(config) {
 function render(config) {
   renderRoots(config);
   renderStop(config);
+  renderPolicy(config);
   renderFacts(config);
   $("[data-settings]").dataset.loaded = "";
 }
@@ -287,6 +336,7 @@ async function refresh() {
 }
 
 $("[data-stop-save]").addEventListener("click", saveStop);
+$("[data-policy-save]").addEventListener("click", savePolicy);
 $("[data-stop-timeout]").addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();

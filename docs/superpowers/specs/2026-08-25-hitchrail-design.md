@@ -87,7 +87,7 @@ What IS done, because each item costs nothing today and is expensive to retrofit
    released. Under `docs/versioning.md` an operator facing rename is a MAJOR,
    so this specific item goes from free to a major version bump the day v1
    ships.
-2. **`claude_ipc.py` is the seam.** It already exists, quarantined for a
+2. **`claude_ipc` is the seam.** It already exists, quarantined for a
    different reason (undocumented internals that change without notice), and
    that is structurally the same boundary a second vendor would need. Its
    members are an agent adapter interface in all but name: how to launch, how
@@ -122,7 +122,8 @@ testable without HTTP, and the HTTP layer must be testable without tmux.
 src/hitchrail/
   discovery.py   root scanning, folder creation, path safety
   engine.py      state derivation, start, stop, log tail
-  claude_ipc.py  everything that knows Claude Code internals
+  claude_ipc/    everything that knows Claude Code internals (a package
+                 since #368: screen, keys, launch, plugins)
   ram.py         memory readings and the guard decision
   server.py      Starlette app, routes, middleware, SSE
   web/           index.html, app.js, app.css (no build step)
@@ -226,14 +227,28 @@ the user's own tmux server, which this project drives by default.
 Stopping is a sequence, not a button:
 
 1. **Confirm.** Cheap to reverse, so it is one tap away from nothing happening.
-2. **Graceful request.** Hitchrail asks the agent to finish and exit, and the row
-   enters `stopping`. Nothing has been killed. The user watches it happen.
+2. **Graceful request.** Hitchrail asks the agent to exit, and the row enters
+   `stopping`. Nothing has been killed. The user watches it happen. With a
+   `stop_prompt` configured (#242) this is a request and a wait: the prompt is
+   typed behind the task in flight, the row reads `closing` until the agent is
+   idle again or `stop_prompt_timeout` passes, and only then is the exit sent
+   and the row reads `exiting`. A second Stop during `closing` skips to the
+   exit and never retypes the prompt.
 3. **Escalation, available throughout.** A kill control is present for the whole
    wait, so a user who does not want to wait never has to. It is styled as the
    secondary, destructive path, never as the way out of a stuck dialog.
 4. **Timeout.** After 30 seconds with no reply, Hitchrail stops waiting and says
-   so. It does **not** escalate on its own. The session is still running, and
-   the choice to kill it stays the user's.
+   so. With a prompt set, the 30 seconds count from the exit phase, not from
+   the tap. By default it does **not** escalate on its own. The session is still
+   running, and the choice to kill it stays the user's. The one exception is
+   chosen in advance (#239), by the operator's flag or file or, when neither
+   sets it, on the settings page (#409): with `stop_policy = "end_anyway"`,
+   a wait that runs out while the pane, read again at that moment, shows a
+   prompt ends in the kill this step would have offered. It is a kill and never
+   an answer: which key means "exit" is Claude Code knowledge, and a key typed
+   with nobody reading is what the answer route refuses. A pane showing
+   anything else, or one that cannot be read, reports as by default, and the
+   protected project is refused as the kill route refuses it.
 
 Kill is deliberately unreachable before a graceful attempt has been made. Not
 because forcing is wrong, but because on a phone the destructive control would
@@ -241,10 +256,11 @@ otherwise sit under the thumb at the same size as the safe one.
 
 **The engine owns the policy; the agent adapter owns the mechanism.** Step 2 is
 "ask the agent to finish", and what that ASK physically is belongs entirely to
-`claude_ipc.py`. For Claude Code it is a key sequence typed into the pane. For
+`claude_ipc`. For Claude Code it is a key sequence typed into the pane. For
 something else it could be a signal, a subcommand, or an HTTP call. The engine
-therefore calls one function, `claude_ipc.request_stop(...)`, and never iterates
-a key sequence or reaches for `tmux.send_keys` itself.
+therefore calls `claude_ipc.request_wrap_up(...)` when a prompt is set and
+`claude_ipc.request_stop(...)` for the exit, and never iterates a key sequence
+or reaches for `tmux.send_keys` or `tmux.send_text` itself.
 
 This split is worth stating because the obvious implementation gets it wrong.
 Writing `for keys in GRACEFUL_STOP_KEYS: tmux.send_keys(...)` in the engine puts
@@ -342,9 +358,9 @@ The session link comes from `~/.claude/sessions/<pid>.json`, key
 every session, and the fallback of scraping the terminal for a `claude.ai/code`
 URL can match a URL that merely appeared as text rather than a live bridge.
 
-All of this lives in `claude_ipc.py` behind one documented function with an
+All of this lives in `claude_ipc` behind one documented function with an
 explicit instability warning. When it breaks on a Claude Code update, exactly
-one module changes, and the UI degrades to a `pending` state rather than
+one package changes, and the UI degrades to a `pending` state rather than
 reporting something false.
 
 **Amended 2026-09-23 for #124.** The module also runs the agent's plugin
@@ -567,9 +583,13 @@ is where that distinction reversed the design.
 
 The honest framing is **relay, not impersonation**: a person tapped Stop, and
 Hitchrail passed that to the pane the way a keyboard would. It holds exactly as
-long as the relayed content is what the person asked for. Today there is one
-call site, `claude_ipc.request_stop`, which sends only the stop keys, and
-nothing structural keeps it that narrow. A future feature that sent a typed
+long as the relayed content is what the person asked for. The call sites are
+the quarantine's three typing functions, each typing a fixed string the
+operator authored or a fixed key sequence: `request_stop` the stop keys,
+`send_answer` one key from a literal set, and `request_wrap_up` (#242) the
+`stop_prompt` from the config file or the command line, which no request can
+set. A grep test keeps every `send_keys` and `send_text` call inside
+`claude_ipc`; nothing structural keeps what those functions type that narrow. A future feature that sent a typed
 instruction on the user's behalf would be a different product with a different
 risk and would not look different from here.
 
@@ -607,7 +627,12 @@ cannot be reused.** The five constraints:
    open and the window is open again. Where the syscall is unavailable the
    route refuses and never falls back to `os.kill`: a race free path that
    silently degrades to a racy one is the guard failing open control 7
-   forbids.
+   forbids. "That pid" is the one the person confirmed when the request
+   carries it (#279): a row whose agent has become a different pid by then
+   is refused before any handle is opened, since a confirmation names one
+   process, never whatever the row holds when the request lands. A request
+   with no body is unbound by design, so a script written before #279 keeps
+   working, and a body with any key but `pid` is refused (#400).
 4. SIGTERM, then SIGKILL only on a second explicit request, mirroring the
    stop then kill escalation.
 5. The protected project is refused before any handle is opened, and so is
@@ -1058,7 +1083,7 @@ rewards the wrong behaviour. The gate is review, and the standard is the list in
 
 | Risk | Handling |
 |---|---|
-| `bridgeSessionId` changes or disappears | quarantined in `claude_ipc.py`, degrades to `pending` |
+| `bridgeSessionId` changes or disappears | quarantined in `claude_ipc`, degrades to `pending` |
 | A user exposes Hitchrail to a hostile network | token forced on non loopback bind, host allowlist always on |
 | An unattended service is reachable on a network the operator did not choose | overlay route documented first in `docs/guides/phone-access.md`; the token withheld from the journal; see 9.3 |
 | Two starts race on the same folder | start lock, and the API is idempotent per folder |

@@ -230,3 +230,12 @@ Hitchrail sees it is writing to the journal it prints the address without the
 fragment, and tells you to append the value you already put in the
 `EnvironmentFile`. If you have not set one, it says that instead, because a
 generated token under a service is wrong twice over.
+
+**What it did, and why, is in the journal.** `journalctl --user -u hitchrail`
+shows a block at every start saying what this process serves and with what
+(the roots, the address, where the token came from, which agent and which
+tmux), then a line for each start, each moment of a stop, and each request it
+refused and why. `--verbose`, or `--log-level debug`, adds each look Stop takes
+at the input box. Everything goes to stderr, so the journal keeps it and
+rotates it, and Hitchrail writes no log file of its own. Neither the token nor
+anything a session printed ever enters a log line, at any level.

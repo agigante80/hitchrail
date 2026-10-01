@@ -49,7 +49,8 @@ used, and what does it depend on.
 - `discovery` scans the root and creates folders. It knows nothing about tmux.
 - `engine` derives state and starts and stops sessions. It knows nothing about
   HTTP and must not import Starlette.
-- `claude_ipc` is the only module that knows Claude Code internals: how an
+- `claude_ipc` is the only package that knows Claude Code internals (one
+  module per seam since #368, imported only through the package): how an
   agent is launched, stopped, found and linked to, and since #124 how its
   plugins are updated. The last makes it run subprocesses of its own.
 - `ram` reads memory and decides the guard. Pure, given its inputs.
@@ -161,6 +162,18 @@ non negotiable and each has a test that asserts the refusal.
    `log_level="warning"`, so the component under test was silenced by the test
    that was meant to observe it. A tier that quiets its subject proves less
    than it appears to.
+
+9. **The token and pane content never enter a log line, at any level,**
+   and every value that arrived in a request is escaped through
+   `logs.shown` before it does (#167). The journal is persistent and read in
+   a terminal: a token there is a token anyone in `systemd-journal` can use, a
+   pane is whatever an agent printed while reading private code, and a
+   control character from a forged `Host` is an escape sequence aimed at
+   whoever reads the journal. A refusal names its code and whether a
+   credential was offered, never what was offered, since a wrong token one
+   character off is a token. `Config.token` is out of the dataclass `repr`
+   for the same reason. There is no `trace` level: uvicorn's logs whole ASGI
+   scopes, headers included.
 
 ## 6. Dependencies
 

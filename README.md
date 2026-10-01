@@ -239,16 +239,34 @@ executable still there next month. See `packaging/hitchrail.service`, whose
 
 Which command you need depends on which line above you used.
 
-**`uvx`** re-resolves against PyPI on close to every invocation, so running
-`uvx hitchrail ...` again already picks up a new release. If a cached
-resolution is still stale, force it with `uvx hitchrail@latest`, or clear the
-cache entirely with `uv cache clean hitchrail`.
+**If you installed it with `uv tool install`** (what the service below runs):
 
-**`uv tool install`, which is what `packaging/hitchrail.service` runs, does
-not notice a new release on its own.** `uv tool upgrade hitchrail` fetches it,
-and then, because the running process keeps serving the old code until it is
-restarted, `systemctl --user restart hitchrail` for the packaged unit. Either
-way, `hitchrail --version` is how you confirm the upgrade actually landed.
+```sh
+uv tool upgrade hitchrail
+systemctl --user restart hitchrail
+hitchrail --version
+```
+
+The restart is not optional: the running server keeps serving the old code
+until it restarts. Skip that line if you do not run it as a service.
+
+**If you run it with `uvx`**, it usually picks up a new release by itself. If
+it does not:
+
+```sh
+uvx hitchrail@latest --version
+```
+
+and if that still shows the old version, clear the cache and try again:
+
+```sh
+uv cache clean hitchrail
+```
+
+**A release can take a few minutes to reach the index `uv` reads**, so
+straight after one is announced, `uv tool upgrade` may still say there is
+nothing to do. Wait, then run `uv tool upgrade --reinstall hitchrail`,
+which skips the cached answer.
 
 ## Prerequisites
 
@@ -257,7 +275,7 @@ does not vendor or install any of them.
 
 | Needed | Why | Checked |
 |---|---|---|
-| **tmux** | every session Hitchrail starts lives in a tmux session; this is the whole mechanism, not an option | `tmux -V` |
+| **tmux 2.1+** | every session Hitchrail starts lives in a tmux session; this is the whole mechanism, not an option. 2.1 is where exact `=` targets and the `#{pid}` format arrived, and older fails closed with every agent shown as detached; only 3.x is tested | `tmux -V` |
 | **Claude Code on `PATH`** | it is what Hitchrail runs. Configurable with `--agent-binary`. The binary is self contained: no node, no npm, whichever installer you used, because the npm package ships the same native executable | `claude --version` |
 | **Linux** | memory pressure is read from `/proc/meminfo`, and the process table from `ps`. macOS has neither in this form, which is why the package declares `Operating System :: POSIX :: Linux` | |
 | **Python 3.11+** | `uvx` and `pipx` handle this for you; `pip` needs it already there | `python3 --version` |
@@ -356,23 +374,33 @@ it can still find the agent. An interactive test will pass either way, because
 starting the unit by hand happens after a login has already fixed the PATH,
 which is what makes this show up only after a reboot.
 
+**When something did not do what you expected, read its log:**
+`journalctl --user -u hitchrail` under the unit, or the terminal it runs in.
+It says what it is serving at startup, and a line for each start, stop and
+refusal. Add `--verbose` to the `ExecStart` for more, and attach those lines
+to a bug report: they never contain the token or anything a session printed.
+
 If your agent needs something outside those directories, add it to that line,
 and prefer a stable path over a version pinned one: a pinned one goes stale at
 the next upgrade and fails at the next boot rather than at the upgrade.
 
 **Settings, from the phone.** The footer's "settings" link shows what this
 instance is pointed at: every root, the bind, the allowlists, the agent, the
-prefix, and where each came from, as text. Two things can be changed there
-and they are the only two: a root already in the file can be hidden from the
-list and shown again, and the wait before a stop is reported as unanswered.
-Both are kept in `~/.config/hitchrail/state.toml`, which is Hitchrail's own.
+prefix, and where each came from, as text. Three things can be changed there
+and they are the only three: a root already in the file can be hidden from the
+list and shown again, the wait before a stop is reported as unanswered, and
+what a stop that runs out of time on a question does (below). All three are
+kept in `~/.config/hitchrail/state.toml`, which is Hitchrail's own.
 Everything else is the perimeter and changes only in the config file or on
 the command line, on the machine.
 
-<img src="docs/screenshots/phone-settings-plugins.png" alt="The settings page having just finished a plugin update: three outcomes listed and a status line noting the running session keeps the old versions until restarted" width="300">
+| | |
+|---|---|
+| <img src="docs/screenshots/phone-settings-plugins.png" alt="The settings page having just finished a plugin update: three outcomes listed and a status line noting the running session keeps the old versions until restarted" width="300"> | <img src="docs/screenshots/phone-settings-instance.png" alt="The settings page's This instance list: the bind address, port, allowlists, token, agent and session prefix, each with where its value came from" width="300"> |
 
-The picture above is the update below, finished: see "Updating the agent's
-plugins".
+The left picture is the update below, finished: see "Updating the agent's
+plugins". The right one is the same page further down, listing what this
+instance is pointed at.
 
 `journalctl --user -u hitchrail` shows the startup banner, which lists every
 address the server will answer to. It prints the links without the `#token=`
@@ -509,11 +537,70 @@ install it first.
 | `--tls-cert`, `--tls-key` | none | A PEM certificate and its key: serve HTTPS from the server itself. Both or neither, refused at startup before the bind when one is missing or the pair cannot be loaded. The key must be unencrypted, and one with a passphrase refuses saying so rather than prompting, because under the unit there is no terminal to prompt at. Derived origins, banner links and the cookie's `Secure` flag follow |
 | `--expect-gateway-mac` | none | Refuse to start unless the default gateway has this MAC address, read from `/proc/net/route` and `/proc/net/arp`. A guard against a laptop serving on a network it joined by accident; a MAC is spoofable, so not against an attacker on the LAN. Checked once at start. A mismatch is exit 2, which the unit keeps stopped; "cannot tell" (no route yet, no ARP entry, a pinned entry) is exit 3, which it retries |
 | `--session-prefix` | `hr-` | What every tmux session this instance creates is named with, and the only sessions it will ever stop. Two instances on one tmux server need two prefixes: with one, each reads the other's agent in a same named folder as its own and can stop it. Also `session_prefix` in the config file |
-| `--stop-timeout` | `30` | Seconds to wait for a graceful stop before reporting that it timed out, at most 3600. It reports; it does not escalate |
+| `--stop-timeout` | `30` | Seconds to wait for a graceful stop before reporting that it timed out, at most 3600. It reports; it does not escalate unless `--stop-policy` says so |
+| `--stop-prompt` | none | One line Stop types to the agent before asking it to exit, such as a slash command that commits and writes notes. See "Wrapping up on Stop" below. Also `stop_prompt` in the config file |
+| `--stop-prompt-timeout` | `300` | Seconds the agent has to finish its task and the prompt before Stop exits anyway, 10 to 3600. Also `stop_prompt_timeout` in the config file |
+| `--stop-policy` | `ask` | What a stop that runs out of time on a question does: `ask` reports and offers Kill, `end_anyway` kills it. Also `stop_policy` in the config file, or the settings page when neither sets it |
+| `--log-level`, `--verbose` | `info` | How much Hitchrail writes to stderr: `debug`, `info`, `warning` or `error`. `--verbose` is `--log-level debug`. Starts, stops and every refusal are logged at `info`; the token and what a pane shows never are |
 | `--version` | | Print the version and exit |
 | `-h`, `--help` | | Print the options and exit |
 
 One subcommand, and bare `hitchrail` still means the server.
+
+### Wrapping up on Stop
+
+By default Stop interrupts the agent and asks it to exit, so work in flight
+can be lost. Set `stop_prompt` and Stop asks it to wrap up first:
+
+```toml
+stop_prompt = "/wrapup"
+stop_prompt_timeout = 300
+```
+
+There is no default prompt: what an agent should do before it stops is
+yours to say. Hitchrail clears the agent's input box, types the prompt behind
+the task in flight, waits until the agent is idle again, then asks it to exit.
+The dialog says which of the two it is waiting on and offers **Exit now**,
+which skips the rest of the wait without killing anything. Kill is unchanged
+and still interrupts.
+
+- **A slash command** waits for the current turn to end. **Plain text** is
+  delivered at the agent's next tool boundary, so it reaches the agent inside
+  its current task. The startup log says which you have.
+- **A draft in the terminal is cleared** when Stop types the prompt. Stop
+  refuses when a message is already queued, since that would run first.
+- **The ceiling interrupts the task, not the wrap up.** When
+  `stop_prompt_timeout` passes, the exit's interrupt cuts the task, the queued
+  prompt then runs, and the exit follows it. So `stop_timeout` has to cover
+  one run of the prompt; raise it for a long one.
+- **No secrets in the prompt.** It is typed into a pane, shown on the settings
+  page and readable by anyone who can attach to the session. The log never
+  records it.
+- Neither setting can be changed from the phone: a request that could set
+  what Stop types would be a route that types arbitrary text.
+
+### When a stop ends on a question
+
+Asked to exit with background work running, the agent can answer with a
+question instead, and by default Hitchrail reports that when `stop_timeout`
+runs out and leaves the choice to you. If you have already decided the
+answer for every such stop, say so ahead of time:
+
+```toml
+stop_policy = "end_anyway"   # default "ask"; also --stop-policy
+```
+
+Then a stop that runs out of time while the agent's screen shows a question
+is killed, as the Kill button would. Nothing is ever typed into the
+question, a stop that is merely slow is never killed, and the confirm and
+wait dialogs say what will happen before it does. It can also be chosen on
+the settings page, which says under its Save what the choice does. Set by the
+flag or in the config file, it is shown there and not changeable from it: the
+page does not outrank a line on the machine.
+
+With a `stop_prompt` set, it applies once the exit is sent. A wrap up that
+ends on a question is reported for you to answer and never killed, because
+the exit it would have refused was never sent.
 
 ### Updating the agent's plugins
 

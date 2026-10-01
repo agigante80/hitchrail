@@ -259,6 +259,8 @@ async def test_a_request_cannot_enable_what_the_operator_disabled(
         ({"session_prefix": "x-"}, "not_editable", "session_prefix"),
         ({"token": "abc"}, "not_editable", "token"),
         ({"stop_prompt": "rm -rf"}, "not_editable", "stop_prompt"),
+        # `stop_policy` was here until #409 made it editable: the refusals
+        # it keeps are the value's, below, and the pin's, in its own test.
         ({"hard_floor_mb": 0}, "not_editable", "hard_floor_mb"),
         # One bad key beside a good one: nothing is applied.
         ({"stop_timeout": 45, "host": "0.0.0.0"}, "not_editable", "host"),
@@ -267,6 +269,11 @@ async def test_a_request_cannot_enable_what_the_operator_disabled(
         ({"stop_timeout": True}, "invalid_value", "whole number"),
         ({"stop_timeout": 3601}, "invalid_value", "at most 3600"),
         ({"stop_timeout": None}, "invalid_value", "whole number"),
+        ({"stop_policy": "kill"}, "invalid_value", "ask, end_anyway"),
+        ({"stop_policy": None}, "invalid_value", "ask or end_anyway"),
+        ({"stop_policy": True}, "invalid_value", "ask, end_anyway"),
+        ({"stop_policy": "end_anyway", "host": "0.0.0.0"}, "not_editable", "host"),
+        ({"stop_policy": "end_anyway", "stop_timeout": 0}, "invalid_value", "positive"),
         # Malformed shapes, all 400 and none of them a state change.
         ({"roots": {"work": {"enabled": "false"}}}, "invalid_body", "boolean"),
         ({"roots": {"work": {"enabled": 0}}}, "invalid_body", "boolean"),
@@ -296,6 +303,7 @@ async def test_get_config_shows_every_value_with_its_source_and_never_the_token(
     assert body["token"] == {"source": "none"}
     assert body["host"] == {"value": "127.0.0.1", "source": "default"}
     assert body["stop_timeout"] == {"value": 30.0, "source": "default", "editable": True}
+    assert body["stop_policy"] == {"value": "ask", "source": "default", "editable": True}
     assert body["session_prefix"] == {"value": "hr-", "source": "default"}
     assert [(v["label"], v["enabled"], v["editable"]) for v in body["roots"]] == [
         ("work", True, True),
@@ -592,7 +600,7 @@ def test_the_editable_subset_is_exactly_the_literal() -> None:
     """Premortem 3. Member by member, so adding a key to either set fails
     here and is a decision, not a drift. The second half names every
     perimeter field #238 lists as read only and asserts none is editable."""
-    assert set(server.EDITABLE_TOP_LEVEL) == {"roots", "stop_timeout"}
+    assert set(server.EDITABLE_TOP_LEVEL) == {"roots", "stop_timeout", "stop_policy"}
     assert set(server.EDITABLE_ROOT_FIELDS) == {"enabled"}
     perimeter = {
         "path",
@@ -619,10 +627,13 @@ def test_the_editable_subset_is_exactly_the_literal() -> None:
 
 # Every name a route reads out of a request body, as a literal. `name` is a
 # project identifier, `key` is one of ANSWER_KEYS, `token` is the grant's
-# credential, and the settings PATCH reads the two literal sets above plus
-# one integer. None of them is a path, and a new one has to be added here on
-# purpose.
-BODY_KEYS = frozenset({"name", "key", "token", "roots", "enabled", "stop_timeout"})
+# credential, the settings PATCH reads the two literal sets above plus one
+# integer, and `pid` is the positive integer a detached stop or kill binds its
+# signal to (#279). None of them is a path, and a new one has to be added here
+# on purpose.
+BODY_KEYS = frozenset(
+    {"name", "key", "token", "roots", "enabled", "stop_timeout", "stop_policy", "pid"}
+)
 
 
 class RouteSurfaces:
@@ -795,3 +806,84 @@ def test_the_guard_sees_a_path_converter(engine: Engine, config: Config) -> None
     ]
     found = RouteSurfaces(widened, pathlib.Path(server.__file__).read_text())
     assert found.converters == {"name:path"}
+
+
+async def test_the_wrap_up_settings_are_shown_and_never_editable(
+    tmp_path: pathlib.Path, config: Config, engine: Engine
+) -> None:
+    """#242. Read only on the page: a prompt is text Hitchrail types into an
+    agent, and a route that could set it is a route that types arbitrary text,
+    which the deferred terminal is. The operator's file and flags own it."""
+    wrapped = replace(config, stop_prompt="/wrapup", stop_prompt_timeout=120.0)
+    app = create_app(engine=engine, config=wrapped, bus=EventBus())
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as c:
+        body = (await c.get("/api/config", headers=HEADERS)).json()
+        assert body["stop_prompt"] == {"value": "/wrapup", "source": "default"}
+        assert body["stop_prompt_timeout"] == {"value": 120.0, "source": "default"}
+        for key, value in (("stop_prompt", "/rm -rf"), ("stop_prompt_timeout", 10)):
+            r = await c.patch("/api/config", json={key: value}, headers=HEADERS)
+            assert r.status_code == 400, r.text
+            assert r.json()["code"] == "not_editable"
+        listing = await _listing(c)
+    assert listing["server"]["stop_prompt_set"] is True
+    assert listing["server"]["stop_prompt_timeout"] == 120.0
+    assert "/wrapup" not in str(listing), "the listing says whether, never what"
+    assert config.state_path is not None
+    assert not config.state_path.exists()
+
+
+async def test_with_no_prompt_the_listing_says_none_is_set(client: httpx.AsyncClient) -> None:
+    server_facts = (await _listing(client))["server"]
+    assert server_facts["stop_prompt_set"] is False
+    assert server_facts["stop_prompt_timeout"] == 300.0
+
+
+# -- #409: the stop policy, editable unless the operator set it -----------
+
+
+async def test_a_stop_policy_change_reaches_the_listing_persists_and_is_logged(
+    client: httpx.AsyncClient,
+    config: Config,
+    tmux: FakeTmux,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The list page reads the policy from the listing to warn before a
+    kill, so the change must be there on the next poll, and the journal
+    must say when a kill nobody taps was switched on."""
+    assert (await _listing(client))["server"]["stop_policy"] == "ask"
+    with caplog.at_level("INFO", logger="hitchrail.server"):
+        r = await client.patch(
+            "/api/config", json={"stop_policy": "end_anyway"}, headers=HEADERS
+        )
+    assert r.status_code == 200, r.text
+    assert r.json()["stop_policy"] == {
+        "value": "end_anyway",
+        "source": "state",
+        "editable": True,
+    }
+    assert (await _listing(client))["server"]["stop_policy"] == "end_anyway"
+    assert "stop policy is end_anyway, set by a request" in caplog.text
+    assert config.state_path is not None
+    assert 'stop_policy = "end_anyway"' in config.state_path.read_text()
+    fresh = make_engine(config, tmux, procs_from(RUNNING_PS), PLENTY)
+    assert fresh.prefs.stop_policy() == "end_anyway"
+
+
+@pytest.mark.parametrize("source", ["flag", "file"])
+async def test_a_stop_policy_the_operator_set_is_pinned(
+    config: Config, engine: Engine, source: str
+) -> None:
+    pinned = replace(config, sources={"stop_policy": source})
+    pinned_engine = make_engine(pinned, FakeTmux(), procs_from(""), PLENTY)
+    app = create_app(engine=pinned_engine, config=pinned, bus=EventBus())
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as c:
+        body = (await c.get("/api/config", headers=HEADERS)).json()
+        assert body["stop_policy"] == {"value": "ask", "source": source, "editable": False}
+        r = await c.patch("/api/config", json={"stop_policy": "end_anyway"}, headers=HEADERS)
+        assert r.status_code == 409, r.text
+        assert r.json()["code"] == "operator_pinned"
+        assert (await _listing(c))["server"]["stop_policy"] == "ask"
+    assert pinned.state_path is not None
+    assert not pinned.state_path.exists()

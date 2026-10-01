@@ -113,6 +113,7 @@ def drive_every_method(tmux: Tmux) -> None:
     tmux.capture_pane("p")
     tmux.new_session("p", "/srv/p", ["claude"])
     tmux.send_keys("p", "C-c")
+    tmux.send_text("p", "-x")
     tmux.keep_pane_on_exit("p", True)
     tmux.pane_is_dead("p")
     tmux.kill_session("p")
@@ -459,6 +460,21 @@ def test_the_socket_is_carried_on_every_call() -> None:
     runner = FakeRunner()
     drive_every_method(Tmux(prefix="hr-", socket="/run/hr/hr.sock", run=runner))
     for argv in runner.calls:
+        assert argv[:3] == ["tmux", "-S", "/run/hr/hr.sock"], argv
+
+
+def test_the_server_pid_call_carries_the_socket() -> None:
+    """#278. The sweep above drives `panes()` with a `list-panes` that
+    succeeds, so `_server_pid`'s `display-message` never runs in it. That is
+    the one call whose socket matters most: answered by a different server,
+    its pid would make an agent under OUR server look held by another, and
+    End would be offered on it. Driven here with `list-panes` failing, the
+    no-session state that makes the adapter ask."""
+    runner = FakeRunner(rc={"list-panes": 1})
+    Tmux(prefix="hr-", socket="/run/hr/hr.sock", run=runner).panes()
+    asked = [argv for argv in runner.calls if "display-message" in argv]
+    assert asked, "the no-session state never asked the server for its pid"
+    for argv in asked:
         assert argv[:3] == ["tmux", "-S", "/run/hr/hr.sock"], argv
 
 
@@ -861,7 +877,7 @@ def test_an_unnamed_session_is_foreign_under_a_placeholder() -> None:
     or null, and `""` is neither: `app.js` reads it as falsy and says "no
     session Hitchrail can address".
 
-    Up to 3.7 tmux refused an empty session name and this record was
+    Some tmux versions refuse an empty session name, and this record was
     DROPPED as a guard against a format change. 3.7a admits the empty name
     (CHANGES "3.7 to 3.7a"), and a dropped record put the pane in neither
     map: the agent inside it derived as an orphan under our own server and
@@ -1205,3 +1221,22 @@ def test_capture_panes_default_depth_is_a_tuning_number_not_a_boundary() -> None
 
     assert runner.calls[-1][4] == "-S", "the depth flag moved, so the default reaches nothing"
     assert runner.calls[-1][5].startswith("-"), "the default depth is not a negative line count"
+
+
+def test_send_text_is_literal_and_ends_the_options_before_the_text() -> None:
+    """#242. `-l` so a key name arrives as characters, and `--` so a text
+    beginning with `-` is not parsed as a flag: without it tmux 3.4 reads
+    `-X` as its own option and types nothing.
+    """
+    runner = FakeRunner()
+    Tmux(prefix="hr-", run=runner).send_text("vessel", "-X Enter")
+
+    assert runner.calls[-1] == [
+        "tmux",
+        "send-keys",
+        "-l",
+        "-t",
+        "=hr-vessel:",
+        "--",
+        "-X Enter",
+    ]

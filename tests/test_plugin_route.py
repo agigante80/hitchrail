@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import errno
 import os
 import pathlib
 import sys
@@ -19,6 +20,7 @@ import pytest
 
 from conftest import FakeTmux, PluginUpdateGuard, procs_from
 from hitchrail import claude_ipc
+from hitchrail import server as srv
 from hitchrail.claude_ipc import PluginOutcome, PluginsFailed
 from hitchrail.config import Config
 from hitchrail.engine import Engine
@@ -273,7 +275,10 @@ def test_a_forgetful_test_errors_at_teardown_not_silently(pytester: pytest.Pytes
                 pass
         """
     )
-    result = pytester.runpytest()
+    # `-p no:asyncio` (#364): the inner session has no project config, so
+    # pytest-asyncio warned that its loop scope was unset, the default run's
+    # only warning. Nothing in the inner test is async.
+    result = pytester.runpytest("-p", "no:asyncio")
     result.assert_outcomes(passed=1, errors=1)
 
 
@@ -394,3 +399,95 @@ async def test_the_lifespan_kills_an_in_flight_update_on_shutdown(
         await asyncio.sleep(0.05)
     else:
         raise AssertionError(f"pid {pid} outlived the lifespan by more than 2 seconds")
+
+
+def _refused_kill(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The kill fails the way `os.killpg` does on a group it may not signal.
+    Patched on `RunningChild` itself, since patching `os.killpg` changes
+    nothing when no update is running and the lifespan reaches no signal."""
+
+    def refuse(self: claude_ipc.RunningChild) -> None:
+        raise PermissionError(errno.EPERM, "Operation not permitted")
+
+    monkeypatch.setattr(claude_ipc.RunningChild, "kill", refuse)
+
+
+async def test_a_failing_kill_at_shutdown_still_cancels_the_sweep(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#365. The kill came first in the lifespan's `finally` with nothing
+    around it, so a raise there skipped the sweep's cancel: the error went
+    up and the stop timer went on ticking, against a server that had
+    already said it was shutting down.
+
+    Reverting the `try/finally` in `server.py`, with
+    `PYTHONDONTWRITEBYTECODE=1`, fails this on the count.
+    """
+    monkeypatch.setattr(srv, "SWEEP_INTERVAL_S", 0.02)
+    _refused_kill(monkeypatch)
+    expiries = 0
+
+    class Counting(Engine):
+        def expire_stops(self) -> list[str]:
+            nonlocal expiries
+            expiries += 1
+            return []
+
+        def scan_for_stuck(self) -> list[str]:
+            return []
+
+    (tmp_path / "vessel").mkdir()
+    config = make_config(tmp_path)
+    engine = Counting(config=config, tmux=FakeTmux(), procs_fn=procs_from(""))
+    app = create_app(engine=engine, config=config, bus=EventBus())
+
+    with pytest.raises(PermissionError):
+        async with app.router.lifespan_context(app):
+            await asyncio.sleep(0.1)
+    after = expiries
+    await asyncio.sleep(0.2)
+    assert expiries == after, (
+        f"{expiries - after} stop expiries ran after the lifespan had exited: a "
+        f"kill that raised skipped the sweep's cancel. See #365."
+    )
+
+
+async def test_a_failing_kill_at_shutdown_still_cancels_an_in_flight_scan(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#365's other half: the scan task, awaited by nobody once the lifespan
+    is gone, is left pending on a loop that goes on to close. Observed as no
+    pending scan task left behind; the worker thread itself runs on, which
+    #180 already says cannot be helped."""
+    monkeypatch.setattr(srv, "SWEEP_INTERVAL_S", 0.02)
+    _refused_kill(monkeypatch)
+    scanning = threading.Event()
+    release = threading.Event()
+
+    class Wedged(Engine):
+        def expire_stops(self) -> list[str]:
+            return []
+
+        def scan_for_stuck(self) -> list[str]:
+            scanning.set()
+            release.wait(timeout=5)
+            return []
+
+    (tmp_path / "vessel").mkdir()
+    config = make_config(tmp_path)
+    engine = Wedged(config=config, tmux=FakeTmux(), procs_fn=procs_from(""))
+    app = create_app(engine=engine, config=config, bus=EventBus())
+    before = asyncio.all_tasks()
+    try:
+        with pytest.raises(PermissionError):
+            async with app.router.lifespan_context(app):
+                assert await asyncio.to_thread(scanning.wait, 5), "the scan never started"
+        left = [t for t in asyncio.all_tasks() - before if not t.done()]
+        assert left == [], (
+            f"{len(left)} task(s) from the lifespan were still pending after it "
+            f"exited: a kill that raised skipped the scan's cancel. See #365."
+        )
+    finally:
+        # Without this the executor's shutdown waits the full five seconds
+        # on the blocked worker.
+        release.set()

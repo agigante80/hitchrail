@@ -5,9 +5,9 @@ none of them cared how it was built: they wanted a config pointing at a
 temporary root so they could test something else. Pluralising `root` for #120
 would therefore have been a 145 site diff, which is not a diff anybody reviews.
 
-`tests/test_config.py` deliberately does NOT use this. Config is the unit under
-test there, and a helper between the test and the constructor would hide the
-thing being asserted.
+The `Config` tests (`tests/config_support.py`) deliberately do NOT use this.
+Config is the unit under test there, and a helper between the test and the
+constructor would hide the thing being asserted.
 """
 
 from __future__ import annotations
@@ -218,3 +218,48 @@ class Orphan:
                 self._exited(5)
         os.close(self._fd)
         self._fd = -1
+
+
+SRC = Path(__file__).resolve().parents[1] / "src" / "hitchrail"
+
+
+def keyed_modules(paths: Any, src: Path = SRC) -> dict[str, Path]:
+    """`paths` keyed by their POSIX path relative to `src`, refusing a repeat.
+
+    Split from `source_modules` so the refusal can be handed a repeat, which
+    a real walk of one directory tree cannot produce.
+    """
+    found: dict[str, Path] = {}
+    for path in paths:
+        rel = path.relative_to(src).as_posix()
+        if rel in found:
+            raise ValueError(f"two modules keyed {rel!r}: {found[rel]} and {path}")
+        found[rel] = path
+    return found
+
+
+def source_modules(src: Path = SRC) -> dict[str, Path]:
+    """Every module of the package, keyed by its path relative to `src` (#368).
+
+    The structural guards walked `src.glob("*.py")` and keyed on `p.name`,
+    which is right only while the package is flat. `claude_ipc` becoming a
+    package breaks it twice: a flat glob never sees the subpackage, so every
+    guard passes over the quarantine without looking, and a bare name merges
+    `hitchrail/__init__.py` with `claude_ipc/__init__.py`. A relative path is
+    unique by construction and reads the same as the old key for every
+    top level module, so a cap or an allowlist keyed `cli.py` is untouched.
+    """
+    return keyed_modules(sorted(src.rglob("*.py")), src)
+
+
+def in_claude_ipc(rel: str) -> bool:
+    """Whether a `source_modules` key is the quarantine, as a file or a package."""
+    return rel == "claude_ipc.py" or rel.startswith("claude_ipc/")
+
+
+def module_name(rel: str) -> str:
+    """The dotted import name of a `source_modules` key."""
+    parts = ["hitchrail", *rel.removesuffix(".py").split("/")]
+    if parts[-1] == "__init__":
+        parts.pop()
+    return ".".join(parts)

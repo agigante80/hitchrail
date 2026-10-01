@@ -166,14 +166,32 @@ def is_loopback_host(host: str) -> bool:
     documentation, and reading it as a network bind meant refusing to serve
     loopback without a token, with a message about anyone on the network being
     able to run code as you. Fail safe, but wrong and rude.
+
+    The answer has to be the one the bind gets, and uvicorn's bind goes
+    through `getaddrinfo`, not `ipaddress` (#283). Two spellings differ:
+    `::ffff:127.0.0.1` is mapped to its IPv4 address first, because whether
+    `ipaddress` calls it loopback varies by PATCH release (True on 3.11.13
+    and 3.13, False on 3.12.3). And `127.1` is not an `ipaddress` literal at
+    all, so a dotted decimal form is read by `inet_aton`, the parser the bind
+    uses, which also gives `0177.0.0.1` its octal meaning. Digits and dots
+    only: `inet_aton` would take hex too, and a spelling nobody types is not
+    worth widening what reaches it.
     """
     bare = normalise_host(host)
     if bare in LOOPBACK_NAMES:
         return True
     try:
-        return ipaddress.ip_address(bare).is_loopback
+        address = ipaddress.ip_address(bare)
     except ValueError:
-        return False
+        if not re.fullmatch(r"[0-9]+(?:\.[0-9]+){0,3}", bare):
+            return False
+        try:
+            return ipaddress.IPv4Address(socket.inet_aton(bare)).is_loopback
+        except OSError:
+            return False
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+        return address.ipv4_mapped.is_loopback
+    return address.is_loopback
 
 
 def is_wildcard_host(host: str) -> bool:

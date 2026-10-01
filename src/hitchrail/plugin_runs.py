@@ -32,10 +32,10 @@ import time
 from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import Literal, TypedDict, get_args
 
 from hitchrail import claude_ipc
-from hitchrail.claude_ipc import PluginOutcome, PluginsFailed
+from hitchrail.claude_ipc import PluginOutcome, PluginResult, PluginsFailed
 from hitchrail.config import TOKEN_ENV
 
 logger = logging.getLogger(__name__)
@@ -170,9 +170,9 @@ class PluginRuns:
         **A daemon thread, not the executor.** The interpreter joins executor
         threads at exit, and one plugin update is bounded at five minutes, so
         a stop during a run would sit past the unit's stop timeout and end in
-        a SIGKILL. A daemon thread is abandoned at exit instead; the vendor's
-        child process is then ended with the unit's cgroup, or, from a
-        terminal, finishes on its own.
+        a SIGKILL. A daemon thread is abandoned at exit instead, and the
+        vendor's child process is killed by the server's lifespan through
+        `RunningChild.kill()` (#361), never left to finish on its own.
         """
         with self._lock:
             if self._state == "running":
@@ -249,7 +249,9 @@ class PluginRuns:
         if self._state == "done":
             counts = {
                 result: sum(o.result == result for o in self._outcomes)
-                for result in ("updated", "failed", "skipped", "abandoned")
+                # #370: from the literal, so a new result is counted here
+                # without a second list to remember.
+                for result in get_args(PluginResult)
             }
         return {
             "epoch": self._epoch,

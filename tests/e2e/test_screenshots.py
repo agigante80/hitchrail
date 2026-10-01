@@ -378,3 +378,27 @@ async def test_capture_the_settings_page_after_a_plugin_update(
         "The running session keeps the old versions until restarted."
     )
     await _shoot(page, "phone-settings-plugins", page.locator("[data-plugins]"))
+
+
+async def test_capture_what_this_instance_is_pointed_at(
+    page: Page, shots_server: Harness
+) -> None:
+    """The settings page's "This instance" list, which README's settings
+    paragraph describes in words: the bind, the allowlists, the agent, the
+    prefix, and where each came from.
+
+    **Scrolled to that section rather than a whole page capture.** The top of
+    the page is already `phone-settings-plugins`, and the full height at a
+    phone width is over five screens, which the README would shrink to an
+    unreadable strip. The section is the part no other picture shows.
+    """
+    await page.set_viewport_size(PHONE)
+    shots_server.seed(running=["vessel"])
+    await page.goto(f"{shots_server.base}/settings")
+    await expect(page.locator("[data-settings]")).to_have_attribute("data-loaded", "")
+    facts = page.locator("[data-facts]")
+    await expect(facts).to_contain_text("Session prefix")
+    await page.get_by_role("heading", name="This instance").evaluate(
+        "el => el.scrollIntoView({block: 'start'})"
+    )
+    await _shoot(page, "phone-settings-instance", facts)

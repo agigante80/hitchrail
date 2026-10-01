@@ -157,7 +157,9 @@ def _default_runner(
         # turn this into hitchrail killing itself. Addressing `proc.pid`
         # directly means that mistake raises ProcessLookupError here instead,
         # which this suppresses the same way as an already exited child:
-        # either way there is nothing left here to kill.
+        # either way there is nothing left here to kill. Killed even when the
+        # child was already reaped, for the reason `claude_ipc.plugin_runner`
+        # gives at its own kill (#363).
         with contextlib.suppress(ProcessLookupError):
             os.killpg(proc.pid, signal.SIGKILL)
         if proc.stdout is not None:
@@ -253,8 +255,8 @@ class Tmux:
     def _try(self, argv: list[str]) -> subprocess.CompletedProcess[str]:
         """Run, turning "could not be executed" into a distinct failure.
 
-        `subprocess.run` raises before there is a returncode when tmux is
-        absent or not executable. An earlier version of this method turned that
+        The runner's `Popen` raises before there is a returncode when tmux
+        is absent or not executable. An earlier version of this method turned that
         into a non zero return, on the reasoning that every caller already
         treats non zero as "no".
 
@@ -400,9 +402,9 @@ class Tmux:
                 continue
             if server_pid is None:
                 server_pid = server
-            # An EMPTY name is a session, not a malformed record. Up to 3.7
-            # tmux refused one at creation and this branch dropped the
-            # record as a guard against a format change; 3.7a admits the
+            # An EMPTY name is a session, not a malformed record. Some tmux
+            # versions refuse one (which, #278 found once misstated), so this
+            # branch dropped the record as a format guard; 3.7a admits the
             # empty name, and a dropped record put its pane in neither map,
             # so an agent inside it derived as an orphan under our own
             # server, said "no session Hitchrail can address" and was
@@ -676,3 +678,16 @@ class Tmux:
         would mean this module importing the quarantine.
         """
         self._try(self._argv("send-keys", "-t", self.pane_target(project), *keys))
+
+    def send_text(self, project: str, text: str) -> None:
+        """Type `text` as characters, never as key names or flags (#242).
+
+        `-l` makes tmux skip the key name lookup, so `Enter` arrives as five
+        characters. `--` ends the options, and without it a text beginning
+        with `-` is parsed as one: verified on tmux 3.4, `send-keys -l -t
+        =hr-x: -X` answers "not in a mode" and types nothing.
+
+        Attributed to the operator exactly as `send_keys` is, and called from
+        `claude_ipc` alone for the same reason; the grep covers both.
+        """
+        self._try(self._argv("send-keys", "-l", "-t", self.pane_target(project), "--", text))

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -206,6 +207,32 @@ def test_a_start_lands_on_a_server_nobody_else_can_see(agent: Path, tmp_path: Pa
     assert folder not in default.stdout, (
         "the session reached the operator's own tmux server, which is the whole "
         f"failure #216 is about: {default.stdout!r}"
+    )
+
+
+@pytest.mark.cli
+def test_the_running_program_logs_its_startup_and_its_requests_in_one_format(
+    agent: Path, roots: Path
+) -> None:
+    """#167, task 165, on the real console script: the startup block and
+    uvicorn's access line both arrive while it serves, in one format. Before
+    #167 neither did: nothing under `hitchrail` had a handler, and uvicorn's
+    own config put its access line on stdout in a second shape."""
+    import urllib.request
+
+    shape = r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} INFO "
+    with serving("--root", f"main={roots / 'main'}", "--agent-binary", str(agent)) as program:
+        with urllib.request.urlopen(f"{program.url}/api/projects", timeout=10):  # noqa: S310
+            pass
+        printed = program.expect("uvicorn.access")
+
+    lines = printed.splitlines()
+    assert [x for x in lines if re.match(shape + r"hitchrail\.cli: serving http://", x)], (
+        printed
+    )
+    assert [x for x in lines if re.match(shape + r"hitchrail\.cli: agent ", x)], printed
+    assert [x for x in lines if re.match(shape + r"uvicorn\.access: .*/api/projects", x)], (
+        printed
     )
 
 

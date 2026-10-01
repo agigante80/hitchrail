@@ -841,7 +841,9 @@ async def test_visibility_regained_refreshes_a_run_the_stream_missed(
     is exactly the frame the server's bus drops for a slow client, which is
     what a phone that sleeps mid run looks like: the connection never
     notices anything is wrong, so no reconnect ever fires to correct the
-    screen. Coming back from that is what `visibilitychange` is for, and it
+    screen. The test models it with a stream that cannot reconnect at all,
+    since Playwright cannot drop one SSE frame and keep the connection.
+    Coming back from either is what `visibilitychange` is for, and it
     must go through the same `loadPlugins` a reconnect uses, gated by the
     same staleness check (#314), rather than paint anything directly."""
     server.seed_plugins([{"id": "alpha@m", "scope": "user"}])
@@ -852,8 +854,12 @@ async def test_visibility_regained_refreshes_a_run_the_stream_missed(
         "Refreshing the marketplaces."
     )
 
-    # The stream stays open, but its next frame (the run finishing) never
-    # reaches the page: the stand in for a dropped SSE frame.
+    # The run's finishing frame never reaches the page. This does not keep
+    # the stream open, as a dropped frame would: it drops the connection and
+    # aborts every reconnect, the harsher case of a reconnect that keeps
+    # failing (#343). Either way no frame corrects the screen, which is the
+    # state `visibilitychange` must recover from, so the test fails without
+    # the handler all the same.
     await page.route("**/api/events", lambda route: route.abort())
     server.drop_connections()
     server.release_plugin("alpha@m")
@@ -1327,3 +1333,69 @@ async def test_a_record_of_another_boot_suspended_across_a_newer_paint_loses(
     await page.wait_for_timeout(500)
     await expect(status).to_have_text("Not run since this server started.")
     await expect(page.locator("[data-plugins-update]")).to_be_enabled()
+
+
+async def _show_record(page: Page, record: dict[str, object]) -> None:
+    async def answer(route):  # type: ignore[no-untyped-def]
+        if route.request.method == "GET":
+            await route.fulfill(
+                status=200, content_type="application/json", body=json.dumps(record)
+            )
+        else:
+            await route.continue_()
+
+    await page.route("**/api/plugins/update", answer)
+    await page.evaluate("() => window.__plugins.loadPlugins()")
+
+
+async def test_a_shutdown_before_the_listing_reads_as_one_sentence(
+    page: Page, server: Harness
+) -> None:
+    """#370. The page had no `shutting_down` entry, so `failureText` fell
+    back to the server's message, which already ends "so nothing was
+    updated", and appended its own: the clause twice."""
+    server.seed()
+    await open_settings(page, server)
+    await _show_record(
+        page,
+        _synthetic_record(
+            "e2e-synthetic-epoch",
+            1,
+            "failed",
+            code="shutting_down",
+            message="the server was shutting down, so nothing was updated",
+        ),
+    )
+    await expect(page.locator("[data-plugins-status]")).to_have_text(
+        "The server was shutting down, so nothing was updated."
+    )
+
+
+async def test_a_run_cut_short_counts_what_never_started(page: Page, server: Harness) -> None:
+    """#370. The done sentence counted three results of four, so a run the
+    shutdown cut short summed to fewer rows than it listed."""
+    server.seed()
+    await open_settings(page, server)
+    row = {"scope": "user", "detail": None, "approved_command": None}
+    await _show_record(
+        page,
+        _synthetic_record(
+            "e2e-synthetic-epoch",
+            1,
+            "done",
+            finished_at=1,
+            outcomes=[
+                {**row, "plugin": "a@m", "result": "updated"},
+                {
+                    **row,
+                    "plugin": "b@m",
+                    "result": "abandoned",
+                    "detail": "never started: the server was shutting down",
+                },
+            ],
+            counts={"updated": 1, "failed": 0, "skipped": 0, "abandoned": 1},
+        ),
+    )
+    await expect(page.locator("[data-plugins-status]")).to_have_text(
+        "1 updated, 0 failed, 0 left alone, 1 never started."
+    )

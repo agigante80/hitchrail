@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import argparse
 import ast
+import logging
+import re
 import shutil
 import sys
 from pathlib import Path
 
 import pytest
 
-from hitchrail import __version__, cli
+from hitchrail import __version__, cli, logs
 from hitchrail.cli import (
     JOURNAL_ENV,
     banner,
@@ -366,8 +368,68 @@ def test_a_relative_path_on_path_is_refused_rather_than_spawned(tmp_path: Path) 
         meminfo=tmp_path,
     )
     assert len(found.problems) == 1
-    assert "relative" in found.problems[0]
+    assert "relative PATH entry" in found.problems[0]
     assert found.agent_binary is None
+
+
+@pytest.mark.parametrize("typed", ["bin/claude", "./claude"])
+def test_a_typed_relative_agent_binary_is_refused_as_typed(tmp_path: Path, typed: str) -> None:
+    """#341. A value with a directory in it is never searched on PATH, so
+    blaming a "relative PATH entry" sent the operator to fix a PATH that was
+    never read. `which` hands a typed path back unchanged, as the premise
+    pin below shows against the real one."""
+    found = preflight(
+        make_config(tmp_path, agent_binary=typed),
+        which=lambda n: typed if n == typed else "/usr/bin/tmux",
+        meminfo=tmp_path,
+    )
+    assert len(found.problems) == 1
+    assert repr(typed) in found.problems[0]
+    assert "absolute" in found.problems[0]
+    assert "PATH entry" not in found.problems[0]
+    assert found.agent_binary is None
+
+
+def test_a_typed_path_that_is_not_there_is_not_blamed_on_path(tmp_path: Path) -> None:
+    """#341. The other half: "is not on PATH" is false of a path that was
+    never looked up there, whatever else is wrong with it."""
+    found = preflight(
+        make_config(tmp_path, agent_binary="bin/claude"),
+        which=lambda n: None if n == "bin/claude" else "/usr/bin/tmux",
+        meminfo=tmp_path,
+    )
+    assert len(found.problems) == 1
+    assert "not an executable file" in found.problems[0]
+    assert "is not on PATH" not in found.problems[0]
+    assert found.agent_binary is None
+
+
+def test_an_absolute_agent_binary_is_accepted_as_typed(tmp_path: Path) -> None:
+    """The positive side: a typed ABSOLUTE path is the remedy both refusals
+    above name, so it must pass untouched."""
+    found = preflight(
+        make_config(tmp_path, agent_binary="/opt/claude"),
+        which=lambda n: "/opt/claude" if n == "/opt/claude" else "/usr/bin/tmux",
+        meminfo=tmp_path,
+    )
+    assert found.problems == []
+    assert found.agent_binary == "/opt/claude"
+
+
+def test_which_hands_a_typed_relative_path_back_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The premise #341 rests on, pinned against the real `shutil.which`: a
+    name with a directory component is checked where it stands and returned
+    as given, never searched on PATH or made absolute. If a Python release
+    changes that, the typed branch in `preflight` needs rethinking."""
+    (tmp_path / "bin").mkdir()
+    agent = tmp_path / "bin" / "claude"
+    agent.write_text("#!/bin/sh\n")
+    agent.chmod(0o755)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PATH", "/nonexistent")
+    assert _REAL_SHUTIL_WHICH("bin/claude") == "bin/claude"
 
 
 def test_an_unreadable_meminfo_refuses_rather_than_running_unguarded(
@@ -1191,7 +1253,8 @@ def test_update_plugins_reports_a_failed_plugin_not_a_traceback_on_invalid_utf8(
     code = main(["update-plugins", "--agent-binary", str(agent)])
     captured = capsys.readouterr()
     assert code == 1
-    assert "failed" in captured.out
+    # #367: "failed" alone matched the summary's own format at a count of 0.
+    assert "0 updated, 1 failed" in captured.out
     assert "Traceback" not in captured.err
     assert "Traceback" not in captured.out
 
@@ -1299,3 +1362,184 @@ def test_the_server_help_names_the_subcommand(capsys: pytest.CaptureFixture[str]
     with pytest.raises(SystemExit):
         parse_args(["--help"])
     assert "update-plugins" in capsys.readouterr().out
+
+
+# -- #167: the log --------------------------------------------------------
+
+
+def _log_lines(err: str) -> list[str]:
+    """Lines in `logs.FORMAT`, told apart from the banner's prints by shape."""
+    return [line for line in err.splitlines() if " hitchrail." in line and ": " in line]
+
+
+def test_the_log_level_defaults_to_info(tmp_path: Path) -> None:
+    assert parse_args(["--root", f"main={tmp_path}"]).log_level == "info"
+
+
+@pytest.mark.parametrize("flags", [["--verbose"], ["--log-level", "debug"]])
+def test_verbose_is_the_debug_level(tmp_path: Path, flags: list[str]) -> None:
+    assert parse_args(["--root", f"main={tmp_path}", *flags]).log_level == "debug"
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        ["--log-level", "loud"],
+        # Never offered: uvicorn's trace logs whole ASGI scopes, headers and
+        # all, and the token travels in a header.
+        ["--log-level", "trace"],
+        ["--verbose", "--log-level", "warning"],
+    ],
+)
+def test_a_level_it_does_not_offer_is_a_usage_error(
+    tmp_path: Path, flags: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as caught:
+        parse_args(["--root", f"main={tmp_path}", *flags])
+    assert caught.value.code == 2
+    assert "--log-level" in capsys.readouterr().err
+
+
+def test_the_startup_block_is_logged_in_the_format(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """One configuration, written once, to stderr: a line that falls through
+    to Python's last resort handler has no timestamp, level or name."""
+    monkeypatch.setattr(cli, "_serve", lambda *a: 0)
+    assert main(["--root", f"main={tmp_path}"]) == 0
+    lines = _log_lines(capsys.readouterr().err)
+    assert any(
+        re.match(r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} INFO hitchrail\.cli: serving ", line)
+        for line in lines
+    ), lines
+    assert any(f"root main={tmp_path}" in line for line in lines)
+    assert any("agent 'claude' at /usr/bin/claude" in line for line in lines)
+    assert any("tmux /usr/bin/tmux" in line for line in lines)
+
+
+@pytest.mark.parametrize(
+    ("host", "origins", "said"),
+    [
+        ("0.0.0.0", ("https://box.lan",), True),
+        ("0.0.0.0", ("http://box.lan",), False),
+        ("127.0.0.1", ("https://box.lan",), False),
+        ("0.0.0.0", (), False),
+    ],
+    ids=["https-origin-off-loopback", "plain-origin", "loopback-bind", "no-origin"],
+)
+def test_the_startup_block_says_when_a_proxy_origin_gets_no_secure_cookie(
+    tmp_path: Path, host: str, origins: tuple[str, ...], said: bool
+) -> None:
+    """#283 item 4. The deployment works and only loses a hardening flag, so
+    #268's refusal would be wrong here; silence left the operator no way to
+    learn why the flag was missing. A plain origin is not a proxy, and a
+    loopback bind already gets the flag, so neither is told anything."""
+    config = make_config(tmp_path, host=host, token="t" * 24, extra_origins=origins)
+    lines = cli.startup_block(
+        config, cli.Preflight([], "/usr/bin/claude", "/usr/bin/tmux"), "info"
+    )
+    assert any(line.startswith("token cookie not Secure") for line in lines) is said, lines
+
+
+@pytest.mark.parametrize(
+    ("prompt", "said"),
+    [
+        (None, "stop prompt none"),
+        ("/wrapup now-distinctive", "stop prompt set (a slash command), waits up to 120s"),
+        (
+            "please wrap up now-distinctive",
+            "stop prompt set (plain text: delivered at the agent's next tool boundary, "
+            "inside its current task), waits up to 120s",
+        ),
+    ],
+    ids=["none", "slash", "plain"],
+)
+def test_the_startup_block_says_what_kind_of_stop_prompt_and_never_the_prompt(
+    tmp_path: Path, prompt: str | None, said: str
+) -> None:
+    """#242: plain text lands mid task, which is worth knowing when a wrap up
+    surprises; the text is the operator's and the journal is not theirs alone."""
+    config = make_config(tmp_path, stop_prompt=prompt, stop_prompt_timeout=120.0)
+    lines = cli.startup_block(
+        config, cli.Preflight([], "/usr/bin/claude", "/usr/bin/tmux"), "info"
+    )
+    assert said in lines, lines
+    assert not any("distinctive" in line for line in lines)
+
+
+def test_the_token_never_reaches_a_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """At the highest level offered, the startup block says where the token
+    came from and nothing else. `banner()` printing it for the operator to
+    copy is a print, not a log line, and is its own decision."""
+    secret = "s3cret-log-probe-value"
+    monkeypatch.setattr(cli, "_serve", lambda *a: 0)
+    code = main(
+        ["--root", f"main={tmp_path}", "--host", "0.0.0.0", "--token", secret, "--verbose"]
+    )
+    assert code == 0
+    lines = _log_lines(capsys.readouterr().err)
+    assert any("token from" in line for line in lines), lines
+    assert not [line for line in lines if secret in line]
+
+
+def test_the_config_repr_never_carries_the_token(tmp_path: Path) -> None:
+    """A `Config` in a traceback or a `%r` is a log line nobody wrote on purpose."""
+    cfg = make_config(tmp_path, host="0.0.0.0", token="s3cret-repr-probe")
+    assert "s3cret-repr-probe" not in repr(cfg)
+
+
+def test_a_quieter_level_quietens_uvicorn_and_a_louder_one_does_not(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """uvicorn's debug is protocol tracing, so `--verbose` leaves it at info;
+    `warning` is a request for less, and applies to the access log too."""
+    monkeypatch.setattr(cli, "_serve", lambda *a: 0)
+    main(["--root", f"main={tmp_path}", "--verbose"])
+    assert logs.uvicorn_level() == "info"
+    assert logging.getLogger("hitchrail").getEffectiveLevel() == logging.DEBUG
+
+    main(["--root", f"main={tmp_path}", "--log-level", "warning"])
+    assert logs.uvicorn_level() == "warning"
+    assert logging.getLogger("uvicorn.access").getEffectiveLevel() == logging.WARNING
+    capsys.readouterr()
+    main(["--root", f"main={tmp_path}", "--log-level", "warning"])
+    assert _log_lines(capsys.readouterr().err) == [], "info lines at warning"
+
+
+def test_the_stop_prompt_flags_reach_the_config_and_say_flag(tmp_path: Path) -> None:
+    cfg = build_config(
+        parse_args(
+            [
+                "--root",
+                f"main={tmp_path}",
+                "--stop-prompt",
+                "/wrapup",
+                "--stop-prompt-timeout",
+                "120",
+            ]
+        )
+    )
+    assert (cfg.stop_prompt, cfg.stop_prompt_timeout) == ("/wrapup", 120)
+    assert cfg.sources["stop_prompt"] == cfg.sources["stop_prompt_timeout"] == "flag"
+
+
+def test_without_the_stop_prompt_flags_stop_is_todays(tmp_path: Path) -> None:
+    cfg = build_config(parse_args(["--root", f"main={tmp_path}"]))
+    assert (cfg.stop_prompt, cfg.stop_prompt_timeout) == (None, 300)
+    assert cfg.sources["stop_prompt"] == "default"
+
+
+def test_a_multi_line_stop_prompt_flag_refuses_the_start(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="stop prompt"):
+        build_config(parse_args(["--root", f"main={tmp_path}", "--stop-prompt", "a\nb"]))
+
+
+def test_the_stop_policy_flag_refuses_anything_but_the_two(tmp_path: Path) -> None:
+    """Refused by `Config`, not argparse, so the flag and the file share words."""
+    with pytest.raises(ConfigError, match="ask, end_anyway"):
+        build_config(parse_args(["--root", f"main={tmp_path}", "--stop-policy", "whatever"]))
+    args = ["--root", f"main={tmp_path}", "--stop-policy", "end_anyway"]
+    cfg = build_config(parse_args(args))
+    assert (cfg.stop_policy, cfg.sources["stop_policy"]) == ("end_anyway", "flag")

@@ -38,8 +38,9 @@ import signal
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Literal
 
 from hitchrail import attention, claude_ipc, derive, discovery, procs, ram, settings
 from hitchrail.config import TOKEN_ENV, Config
@@ -151,6 +152,33 @@ def _no_session_here(session: Session, consequence: str) -> str:
 ANSWER_KEYS = claude_ipc.ANSWER_KEYS
 
 
+@dataclass(eq=False)
+class StopMarker:
+    """One graceful stop in flight (#242). Compared by identity, never value.
+
+    `closing` is the wrap up: the prompt is queued behind the task and the
+    sweep watches for the agent to finish both. `exiting` is the exit
+    sequence sent, which is all a stop was before #242 and still is with no
+    prompt configured. `watch` is None while the prompt is being typed, and
+    no path may claim the marker then: that is what stops a second Stop or
+    the sweep typing into the middle of the prompt.
+
+    **Every removal is by identity**, through `Engine._drop`. A pop by name
+    removes whatever marker is there now, which after a repeated Stop is a
+    newer one than the caller holds.
+
+    A claim writes `exit_at` and `ceiling` BEFORE `phase`, and `_derive` reads
+    `phase` first without the lock, so a reader that sees `exiting` sees the
+    ceiling flag that came with it.
+    """
+
+    began: float
+    phase: Literal["closing", "exiting"]
+    watch: claude_ipc.WrapUpWatch | None = None
+    exit_at: float | None = None
+    ceiling: bool = False
+
+
 class Engine:
     """Derivation, and in later tickets the session lifecycle."""
 
@@ -201,7 +229,7 @@ class Engine:
         self._bus: EventBus | None = bus
         # The one piece of state that is not derived. Memory only, and lost on
         # restart on purpose: see the module docstring.
-        self._stopping: dict[str, float] = {}
+        self._stopping: dict[str, StopMarker] = {}
         # Names whose LAST stop ran out of patience with the agent showing
         # something that needs a person (#101). In memory and not persisted,
         # for the same reason the stop marker is not: it describes one attempt,
@@ -341,7 +369,20 @@ class Engine:
             # as a timeout thirty seconds later, telling the user their agent
             # would not stop when it had already gone.
             with self._stopping_guard:
-                self._stopping.pop(name, None)
+                gone = self._stopping.pop(name, None)
+            # Only the call that removed the marker says so, since two
+            # listings can both see STOPPED and race to this line.
+            if gone is not None:
+                logger.info(
+                    "stop %s: the agent exited after %.1fs", name, self._clock() - gone.began
+                )
+            return session
+        # #242. Unlocked, by `_stopping_guard`'s reasoning: one dict load, then
+        # one attribute load each, `phase` first (see `StopMarker`).
+        marker = self._stopping.get(name)
+        if session.stopping and marker is not None:
+            phase = marker.phase
+            session = replace(session, stopping_phase=phase, stop_ceiling=marker.ceiling)
         return session
 
     def list(self, listing: discovery.Listing | None = None) -> list[Session]:
@@ -409,7 +450,14 @@ class Engine:
     def stopping_since(self, name: str) -> float | None:
         """When a graceful stop was requested, or None. Memory only."""
         with self._stopping_guard:
-            return self._stopping.get(name)
+            marker = self._stopping.get(name)
+            return None if marker is None else marker.began
+
+    def _drop(self, name: str, marker: StopMarker) -> None:
+        """Remove `marker`, and only it: a newer stop's stays (#242)."""
+        with self._stopping_guard:
+            if self._stopping.get(name) is marker:
+                del self._stopping[name]
 
     # -- the lifecycle -------------------------------------------------
 
@@ -602,14 +650,16 @@ class Engine:
         # fifteen seconds, so a claim left standing here is one nothing would
         # correct.
         self._forget_attention(name)
+        argv = claude_ipc.launch_argv(self.config.spawn_agent_binary, name)
+        # The argv the scrub left (#113): the environment is withheld from
+        # the child, never the arguments, so there is nothing in it to hide.
+        logger.info("start %s: in %s, running %s", name, path_str, argv)
         try:
             if current.state is State.STALE:
                 # A terminal with no agent in it. Reusing it would start the
                 # new session in a pane already holding old scrollback.
                 self.tmux.kill_session(name)
-            self.tmux.new_session(
-                name, path_str, claude_ipc.launch_argv(self.config.spawn_agent_binary, name)
-            )
+            self.tmux.new_session(name, path_str, argv)
         except TmuxUnavailable as exc:
             self._abandon_partial_session(name)
             raise MachineUnreadable(str(exc)) from exc
@@ -669,9 +719,22 @@ class Engine:
                 # pane and the session would linger, so the engine would derive
                 # `stale` where the truth is `stopped`. See #66.
                 self._release_pane(name)
+                logger.info("start %s: the agent is running as pid %s", name, started.pid)
+                if started.awaiting_trust:
+                    # One of the two states that make a correct system look
+                    # broken: the agent is up, and asking whether to trust
+                    # the folder, so the row looks idle and nothing happens.
+                    logger.info(
+                        "start %s: the agent is waiting for its folder to be trusted", name
+                    )
                 self._announce(started)
                 return started
             if self._clock() >= deadline:
+                # The output goes to the caller, never here: it is pane
+                # content, and a journal is persistent (#167).
+                logger.warning(
+                    "start %s: no agent appeared within %.0fs", name, self.start_grace
+                )
                 raise StartFailed(self._dead_start_output(name))
             self._sleep(self.poll_interval)
 
@@ -749,6 +812,7 @@ class Engine:
     def stop(self, name: str) -> Session:
         """Ask the agent to finish. Nothing is killed."""
         session = self._require_live(name)
+        logger.info("stop %s: requested, the row reads %s", name, session.state)
         # A fresh attempt starts from nothing (#101). The flag describes ONE
         # stop, and a prompt the person has since answered would otherwise go
         # on being reported at them.
@@ -781,8 +845,37 @@ class Engine:
             )
         if session.state is State.DETACHED:
             raise NoAgent(_no_session_here(session, "no terminal to type into"))
+        prompt = self.config.stop_prompt
+        now = self._clock()
+        # #242. The claim: who may type is decided here, in one critical
+        # section, and only the caller that wrote the marker types. The table
+        # on the ticket is the whole rule.
         with self._stopping_guard:
-            self._stopping[name] = self._clock()
+            current = self._stopping.get(name)
+            if current is not None and current.phase == "closing" and current.watch is None:
+                # Another stop is typing the prompt this moment. Typing the
+                # exit sequence now would land in the middle of it.
+                typing = None
+            elif current is not None and current.phase == "closing":
+                # "Exit now": a second Stop during the wait skips to the exit,
+                # and never retypes the prompt.
+                current.exit_at, current.ceiling = now, False
+                current.phase = "exiting"
+                typing = current
+            elif current is not None:
+                # A repeated Stop on `exiting`, as before #242, keeping the
+                # ceiling flag so the dialog still says why it is exiting.
+                typing = StopMarker(now, "exiting", exit_at=now, ceiling=current.ceiling)
+            elif prompt is not None:
+                typing = StopMarker(now, "closing")
+            else:
+                typing = StopMarker(now, "exiting", exit_at=now)
+            if typing is not None:
+                self._stopping[name] = typing
+        if typing is None:
+            logger.info("stop %s: the wrap up prompt is still being typed, so nothing is", name)
+            return session
+        wrapping_up = typing.phase == "closing"
         # One call, and the engine does not learn what a stop physically is.
         # Iterating the key sequence here would teach it three Claude Code
         # facts: that stopping is keystrokes, that it is a sequence of them,
@@ -790,12 +883,16 @@ class Engine:
         # timeout, the marker and the refusal to escalate; the adapter owns the
         # mechanism.
         try:
-            claude_ipc.request_stop(self.tmux, name, settle=self._sleep)
+            if wrapping_up:
+                assert prompt is not None
+                claude_ipc.request_wrap_up(self.tmux, name, prompt, settle=self._sleep)
+            else:
+                claude_ipc.request_stop(self.tmux, name, settle=self._sleep)
         except TmuxUnavailable as exc:
-            with self._stopping_guard:
-                self._stopping.pop(name, None)
+            self._drop(name, typing)
             raise MachineUnreadable(str(exc)) from exc
         except claude_ipc.StopNotSafe as exc:
+            logger.info("stop %s: refused, %s", name, exc)
             # The marker goes back for the same reason a vanished tmux takes it
             # back: a wait must not outlive a request that was never sent. The
             # adapter looked at the pane and declined to ask the agent to exit,
@@ -808,9 +905,21 @@ class Engine:
             # Translated at this boundary rather than let through. The server
             # catching a `claude_ipc` exception would put Claude Code knowledge
             # in the HTTP layer, which is the whole point of the quarantine.
-            with self._stopping_guard:
-                self._stopping.pop(name, None)
+            self._drop(name, typing)
             raise StopRefused(str(exc)) from exc
+        if wrapping_up:
+            with self._stopping_guard:
+                if self._stopping.get(name) is typing:
+                    typing.watch = claude_ipc.WrapUpWatch(sent_at=self._clock())
+            logger.info(
+                "stop %s: wrap up sent, waiting up to %gs for it",
+                name,
+                self.config.stop_prompt_timeout,
+            )
+        else:
+            logger.info(
+                "stop %s: exit requested, waiting up to %gs", name, self.prefs.stop_timeout()
+            )
         updated = self.get(name)
         self._announce(updated)
         return updated
@@ -924,7 +1033,9 @@ class Engine:
         self._announce(updated)
         return updated
 
-    def signal_detached(self, name: str, force: bool = False) -> Session:
+    def signal_detached(
+        self, name: str, force: bool = False, seen_pid: int | None = None
+    ) -> Session:
         """End an agent nothing addressable owns, through a handle (#107).
 
         The one destructive path that is not scoped by the tmux prefix, so
@@ -963,6 +1074,14 @@ class Engine:
         `force` is SIGKILL, and it is a second explicit request on its own
         route, never the default: #169's rule that a kill is always available
         and never what happens first.
+
+        `seen_pid` is the pid the person confirmed (#279). Without it, the
+        agent signalled is whichever one derivation picks NOW, which may be a
+        second agent for the same folder that started after the row was drawn:
+        ours, and not the one the confirmation was about. With it, a mismatch
+        is `NotOurs` before any handle, and the verification after the handle
+        holds the derived pid, so the binding lasts through to the send.
+        Optional, so a client that sends no body keeps today's behaviour.
         """
         self._require_addressable(name)
         # The label names the root whose child the process must be running
@@ -990,6 +1109,11 @@ class Engine:
         if session.held_elsewhere is not None:
             raise OwnedElsewhere(name, session.foreign_session, session.foreign_server_pid)
         pid = session.pid
+        if seen_pid is not None and seen_pid != pid:
+            raise NotOurs(
+                f"the row moved: pid {seen_pid} was shown for {name} and its agent is "
+                f"now pid {pid}, so nothing was signalled. Look again before ending it"
+            )
         self._refuse_our_own_tree(pid)
         try:
             if self._owner_uid(pid) != os.getuid():
@@ -1310,6 +1434,11 @@ class Engine:
         # decision came from rather than from a newer one that may disagree.
         by_name = {row.name: row for row in rows}
         for name in changed:
+            if name in stuck:
+                logger.info("%s: its screen is waiting on a person", name)
+            else:
+                logger.debug("%s: no longer waiting on a person", name)
+        for name in changed:
             row = by_name.get(name)
             if row is not None:
                 self._announce(replace(row, awaiting_input=name in stuck))
@@ -1344,6 +1473,76 @@ class Engine:
         # that a modal and a box would both match.
         return claude_ipc.shows_input_box(pane) is False
 
+    def advance_wrap_ups(self) -> builtins.list[str]:
+        """Move each finished or overdue wrap up on to the exit (#242).
+
+        Driven by the server's sweep, started rather than awaited and at most
+        one in flight, because it captures a pane per `closing` row and may
+        run the exit sequence with its settles: awaited beside `expire_stops`,
+        one hung capture would hold back every other row's expiry. And not
+        inside `scan_for_stuck`, which does nothing while no browser is
+        connected: a wrap up has to finish with the phone in a pocket.
+
+        Whether a screen reads finished is `claude_ipc`'s, through the watch;
+        this only asks. Returns the names sent to the exit. Never raises, for
+        the reason `_pane_needs_a_person` gives.
+        """
+        with self._stopping_guard:
+            closing = [
+                (name, marker)
+                for name, marker in self._stopping.items()
+                if marker.phase == "closing" and marker.watch is not None
+            ]
+        moved: builtins.list[str] = []
+        for name, marker in closing:
+            watch = marker.watch
+            assert watch is not None
+            try:
+                pane = self.tmux.capture_pane(name, escapes=True)
+            except TmuxUnavailable:
+                pane = ""
+            now = self._clock()
+            finished = watch.observe(now, pane)
+            ceiling = not finished and now - marker.began >= self.config.stop_prompt_timeout
+            if not (finished or ceiling):
+                continue
+            with self._stopping_guard:
+                if self._stopping.get(name) is not marker or marker.phase != "closing":
+                    # A second Stop claimed it, or a kill or a refusal took it,
+                    # while this pane was being read.
+                    continue
+                marker.exit_at, marker.ceiling = now, ceiling
+                marker.phase = "exiting"
+            logger.info(
+                "stop %s: wrap up %s after %.0fs",
+                name,
+                "hit the ceiling" if ceiling else "finished",
+                now - marker.began,
+            )
+            try:
+                claude_ipc.request_stop(self.tmux, name, settle=self._sleep)
+            except (claude_ipc.StopNotSafe, TmuxUnavailable) as exc:
+                self._drop(name, marker)
+                logger.info("stop %s: exit refused after wrap up, %s", name, exc)
+                # The stop ends here, so this is `expire_stops`' moment: one
+                # look at the pane, or the page says "no answer" over a
+                # question the person was never shown (#242 review). Only the
+                # report; `end_anyway` kills a stop that expired after its exit
+                # was SENT, and this one never was.
+                if self._pane_needs_a_person(name):
+                    with self._stopping_guard:
+                        self._awaiting_input.add(name)
+            moved.append(name)
+            try:
+                self._announce(self.get(name))
+            except MachineUnreadable:
+                logger.warning(
+                    "stop %s: the wrap up moved on but the machine could not be "
+                    "read, so no event was sent",
+                    name,
+                )
+        return moved
+
     def expire_stops(self) -> builtins.list[str]:
         """Drop stop markers older than the timeout, and say so.
 
@@ -1351,6 +1550,11 @@ class Engine:
         still alive and the decision to kill it belongs to a person: an
         automatic kill is a destructive action taken while they were not
         looking.
+
+        **Unless the operator decided before they tapped** (#239):
+        `stop_policy = end_anyway`, off by default, kills a stop that ended on
+        a prompt. Escalation by choice made once in configuration, not by
+        default, which is what section 7 forbids; and a kill, not an answer.
 
         It announces, because the person watching the timer has to learn the
         wait ended. An expiry visible only on the next poll is one the
@@ -1361,10 +1565,15 @@ class Engine:
             # A snapshot, taken under the lock. Iterating the live dict while
             # `stop` adds on another thread raises, and that raise kills the
             # ticker Phase 5 drives this from.
+            # #242. A `closing` marker is the sweep's, not this method's, and
+            # the wait is measured from the exit: under a wrap up the time
+            # before it is the rest of the agent's task.
             candidates = [
-                (name, began)
-                for name, began in self._stopping.items()
-                if now - began >= self.prefs.stop_timeout()
+                (name, marker)
+                for name, marker in self._stopping.items()
+                if marker.exit_at is not None
+                and marker.phase == "exiting"
+                and now - marker.exit_at >= self.prefs.stop_timeout()
             ]
             # No "is it still the same stop" check, deliberately. The
             # snapshot and the removal are inside ONE lock, so nothing can
@@ -1376,7 +1585,7 @@ class Engine:
             #
             # If the announce loop below is ever moved inside the lock, or the
             # snapshot taken outside it, that stops being true.
-            expired = [name for name, _began in candidates]
+            expired = [name for name, _marker in candidates]
             for name in expired:
                 del self._stopping[name]
         # Announced outside the lock: `get` does two subprocess calls, and
@@ -1407,20 +1616,81 @@ class Engine:
         # It only ever ADDS. Nothing here answers the prompt: the options in
         # that dialog decide what happens to work the operator did not ask to
         # end, and choosing for them is the power #88 declined to take.
+        #
+        # One name at a time, look then act, never every look first (#239
+        # review). Each end_anyway kill waits up to `kill_grace` for the
+        # session to go, so with the looks taken up front a later row's look
+        # could be seconds old by its kill, long enough for a person to Kill
+        # and Start it again, and the fresh agent, which never saw a prompt,
+        # would be killed for the old one's question.
         for name in expired:
-            if self._pane_needs_a_person(name):
+            waiting = self._pane_needs_a_person(name)
+            if waiting:
                 with self._stopping_guard:
                     self._awaiting_input.add(name)
-        for name in expired:
+            # #239. The operator's answer, given in advance, to a stop that
+            # ran out of time on a question: the kill the dialog offers at
+            # this moment, taken without the tap. Only on THIS look at the
+            # pane, never the sweep's overlay, and never a key typed into the
+            # prompt. `kill` refuses the protected project itself, the same
+            # refusal its route gives.
+            end_anyway = self.prefs.stop_policy() == "end_anyway"
+            if waiting and end_anyway and self._end_anyway(name):
+                continue
             try:
-                self._announce(self.get(name))
+                session = self.get(name)
             except MachineUnreadable:
                 logger.warning(
                     "stop timer for %s expired but the machine could not be "
                     "read, so no event was sent; the marker is already dropped",
                     name,
                 )
+                continue
+            # Worded from the state read AFTER the timer, never assumed (#167
+            # review). Only `get` clears the marker on a clean exit, and with
+            # no browser connected nothing calls it, so an agent that exited at
+            # 12s still reaches this line at 30s. Saying "still running" there
+            # is the journal calling a stop that worked a failure.
+            if session.state is State.STOPPED:
+                logger.info(
+                    "stop %s: the %gs wait ran out after the agent had already exited",
+                    name,
+                    self.prefs.stop_timeout(),
+                )
+            else:
+                logger.info(
+                    "stop %s: gave up waiting after %gs, and the row is still %s%s",
+                    name,
+                    self.prefs.stop_timeout(),
+                    session.state.value,
+                    "; its screen is waiting on a person" if waiting else "",
+                )
+            self._announce(session)
         return expired
+
+    def _end_anyway(self, name: str) -> bool:
+        """Kill an expired stop under `stop_policy = end_anyway` (#239).
+
+        True when the kill went through, and it has announced. False on any
+        refusal, and the caller reports the expiry exactly as `ask` would:
+        the unknown case does the thing that destroys nothing. Never raises,
+        for `expire_stops`' reason.
+        """
+        try:
+            self.kill(name)
+        except EngineError as exc:
+            logger.warning(
+                "stop %s: ended on a prompt, and end_anyway did not kill it: %s",
+                name,
+                type(exc).__name__,
+            )
+            return False
+        logger.info(
+            "stop %s: ended on a prompt after %gs; killed, as stop_policy end_anyway says",
+            name,
+            self.prefs.stop_timeout(),
+        )
+        return True
 
     def locate(self, name: str) -> Session:
         """The row a client may address by name, or the refusal the API gives.

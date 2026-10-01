@@ -1,6 +1,6 @@
 [project]
 name = "hitchrail"
-version = "0.11.0"
+version = "0.12.0"
 description = "Start and stop headless Claude Code sessions across a folder of projects, from a phone-first web UI."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -91,11 +91,12 @@ ignore = [
 # S603 is ruff's warning about subprocess calls. Silenced only in the three
 # modules that legitimately run subprocesses, so the exception is visible in
 # configuration rather than scattered through the code as inline noqa comments.
-# `claude_ipc.py` joined them for #124: the plugin update is vendor knowledge,
-# and its argv is built in the same module that runs it.
+# `claude_ipc` joined them for #124: the plugin update is vendor knowledge,
+# and its argv is built in the same module that runs it. Since #368 that module
+# is `claude_ipc/plugins.py`, and the ignore names the file, not the package.
 "src/hitchrail/tmux.py" = ["S603"]
 "src/hitchrail/procs.py" = ["S603"]
-"src/hitchrail/claude_ipc.py" = ["S603"]
+"src/hitchrail/claude_ipc/plugins.py" = ["S603"]
 # Tests are where the dangerous literals belong: a wildcard bind and a fake
 # token are the subject matter of the security suite, not a leak. src/ stays
 # strict, so a real 0.0.0.0 or credential in shipped code still fails.
@@ -174,6 +175,7 @@ source_modules = [
   "hitchrail.derive",
   "hitchrail.engine",
   "hitchrail.plugin_runs",
+  "hitchrail.logs",
 ]
 forbidden_modules = [
   "hitchrail.server",
@@ -273,7 +275,11 @@ source_paths = [
   # security.md` already listed it; this list did not, which is the half of
   # the ticket that was true.
   #
-  # The whole file is over a thousand lines, most of it `launch_argv`,
+  # A package since #368, and only `plugins.py` is listed: the plugin section
+  # is what was mutated before the split, and the other four modules are in
+  # `also_copy` below, by name, so the package imports in the mutants tree.
+  #
+  # The whole package is over a thousand lines, most of it `launch_argv`,
   # `request_stop` and the tmux IPC key sequences, which `test_claude_ipc.py`
   # already exercises hard without mutmut. Mutating all of it would make a
   # single sweep the minutes the premortem above warns against for a much
@@ -284,7 +290,7 @@ source_paths = [
   # `_update_one`, `_read_listing`, `_approved_command`, `_detail`, `_shown`,
   # `plugin_runner`) rather than to every mutant the file has. Widening
   # either list to the rest of the module is future work, not this ticket.
-  "src/hitchrail/claude_ipc.py",
+  "src/hitchrail/claude_ipc/plugins.py",
 ]
 # The tests that actually exercise those five. The full suite takes 34 seconds
 # and would make a single run hours; these 441 take 1.5, which is what makes
@@ -295,6 +301,11 @@ source_paths = [
 # themselves and make every run report zero mutants killed.
 also_copy = [
   "src/hitchrail/__init__.py",
+  # #368: the package around the one mutated module.
+  "src/hitchrail/claude_ipc/__init__.py",
+  "src/hitchrail/claude_ipc/keys.py",
+  "src/hitchrail/claude_ipc/launch.py",
+  "src/hitchrail/claude_ipc/screen.py",
   # #221. Copied rather than mutated, and its ABSENCE was not a gap but a
   # break: `engine.py` imports it, so the assembled tree had the importer and
   # not the module, `tests/conftest.py` failed to import, and pytest exited 4.
@@ -309,6 +320,11 @@ also_copy = [
   "src/hitchrail/engine.py",
   "src/hitchrail/events.py",
   "src/hitchrail/headers.py",
+  # #167. Copied, not mutated: `security.py` escapes request values through
+  # `logs.shown` before logging them, so the tree cannot import without it,
+  # but nothing in it reaches a shell. What it must never write is pinned by
+  # `tests/test_logs.py` directly.
+  "src/hitchrail/logs.py",
   "src/hitchrail/pages.py",
   "src/hitchrail/plugin_runs.py",
   "src/hitchrail/procs.py",
@@ -358,12 +374,12 @@ also_copy = [
 # `xǁConfigǁ__post_init____mutmut_N` copy, and none of them is the allowlisted
 # `__post_init__`.
 pytest_add_cli_args = [
-  "--deselect=tests/test_config.py::test_every_read_of_agent_binary_is_the_resolved_property_or_allowlisted",
-  "--deselect=tests/test_config.py::test_every_environment_variable_the_product_reads_is_scrubbed",
-  "--deselect=tests/test_config.py::test_every_module_is_under_the_size_guideline",
-  "--deselect=tests/test_config.py::test_the_import_contract_covers_every_engine_layer_module",
-  "--deselect=tests/test_config.py::test_projectnames_does_not_import_config",
-  "--deselect=tests/test_config.py::test_hostnames_does_not_import_config",
+  "--deselect=tests/test_source_guards.py::test_every_read_of_agent_binary_is_the_resolved_property_or_allowlisted",
+  "--deselect=tests/test_source_guards.py::test_every_environment_variable_the_product_reads_is_scrubbed",
+  "--deselect=tests/test_size_guideline.py::test_every_module_is_under_the_size_guideline",
+  "--deselect=tests/test_source_guards.py::test_the_import_contract_covers_every_engine_layer_module",
+  "--deselect=tests/test_source_guards.py::test_projectnames_does_not_import_config",
+  "--deselect=tests/test_source_guards.py::test_hostnames_does_not_import_config",
   "--deselect=tests/test_tmux.py::test_the_sweep_drives_every_public_method",
 ]
 pytest_add_cli_args_test_selection = [
@@ -371,7 +387,18 @@ pytest_add_cli_args_test_selection = [
   "tests/test_security_token.py",
   "tests/test_security_origin.py",
   "tests/test_headers.py",
+  # #30 split one 2884 line file into these; every one of them was in the
+  # selection then, so every one of them still is.
   "tests/test_config.py",
+  "tests/test_config_hosts.py",
+  "tests/test_config_origins.py",
+  "tests/test_config_reach.py",
+  "tests/test_hostnames.py",
+  "tests/test_local_addresses.py",
+  "tests/test_source_guards.py",
+  "tests/test_size_guideline.py",
+  "tests/test_mutation_config.py",
+  "tests/test_security_rules.py",
   "tests/test_discovery.py",
   "tests/test_properties.py",
   # The integration tier belongs here even though it costs four seconds a
@@ -383,6 +410,8 @@ pytest_add_cli_args_test_selection = [
   # The assertions this check produced. They belong in the selection or the
   # next run reports the mutants they kill as surviving again.
   "tests/test_mutation_survivors.py",
+  # #377's kills in `config.py`, in their own file for the same reason.
+  "tests/test_config_mutants.py",
   # The 26 tests that kill mutants in `roots.py`, and some in `config` and
   # `discovery` that only these reach. Without them the run reports gaps in
   # the suite that are really gaps in this list.

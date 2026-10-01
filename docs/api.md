@@ -100,6 +100,21 @@ client that meant to be gentle is never one query parameter away from a kill.
 The graceful call returns as soon as the request is sent and reports progress
 over the event stream like every other state change.
 
+With `stop_prompt` set (#242), the graceful call first types that prompt into
+the agent's box WITHOUT interrupting it, so it runs after the task in flight;
+the row reads `stopping_phase: "closing"`. When the agent has finished both,
+or `stop_prompt_timeout` has passed, the server sends the exit and the row
+reads `exiting`. A second `DELETE` during `closing` skips to the exit at once
+and never retypes the prompt; one that arrives while the prompt is still being
+typed answers 202 and types nothing. If a message is already queued in the
+box, the call is 409 `stop_unsafe` and nothing is typed after the clear.
+
+With `stop_policy = "end_anyway"` (#239, off by default), a stop whose
+`stop_timeout` runs out while the agent's screen shows a prompt is killed by
+the server, exactly as `POST /api/sessions/{name}/kill` would, and the row is
+announced `stopped`. A screen showing anything else reports as it always has.
+Nothing is ever typed into the prompt.
+
 ### The listing payload
 
 `GET /api/projects` answers one object. The fields, checked against the server
@@ -119,6 +134,9 @@ in both directions by the suite:
 | `server.user` | the account this server runs as, which is the account every session it starts runs as; the numeric uid when the account has no passwd entry |
 | `server.started_at` | when this process started, Unix seconds; format it in the viewer's timezone, never the server's |
 | `server.stop_timeout` | seconds the server waits for a graceful stop before reporting it timed out; the browser's own patience is this number, read here rather than assumed |
+| `server.stop_prompt_set` | whether Stop types a wrap up prompt before the exit (#242); the prompt itself is only in `GET /api/config` |
+| `server.stop_policy` | `ask` (default) or `end_anyway` (#239): what a stop that runs out of time on a prompt does, so the wait dialog can say so before it happens |
+| `server.stop_prompt_timeout` | seconds the agent has to finish its task and the wrap up before Stop sends the exit anyway; `stop_timeout` counts from that exit |
 
 ### The session payload
 
@@ -135,6 +153,8 @@ One project, as `projects` lists it, as `POST` and `DELETE` on
 | `uptime_s` | how long the agent has run |
 | `url` | the session link once the agent has published one, else null |
 | `stopping` | a graceful stop is in flight |
+| `stopping_phase` | while `stopping`: `closing` while the wrap up prompt runs behind the agent's task, `exiting` once the exit is sent; null otherwise |
+| `stop_ceiling` | the exit was sent because the wrap up ran out of `stop_prompt_timeout`, not because it finished |
 | `protected` | the self project; refuses every mutating route |
 | `awaiting_trust` | the agent is sitting on its trust prompt |
 | `awaiting_input` | the agent is sitting on a question only a person can answer |
@@ -207,18 +227,30 @@ route matches on is what a second instance as the same user writes too and
 only the directory tells the two apart. A folder deleted under a running
 agent still reads as under the root, so that agent can still be ended.
 
+The body is optional: `{"pid": N}`, the pid the row showed when the person
+confirmed (#279). When it is sent and the row's agent is now a different pid,
+nothing is signalled and the answer is `not_ours`, before any handle is
+opened: a confirmation names one process, never whatever the row holds by
+the time the request lands. No body keeps the earlier behaviour, so a script
+written against it still works, and so does `{}`. A body that is not a JSON
+object, a `pid` that is not a positive integer, or any key other than `pid`
+is `invalid_body` (#400): a misspelt `PID` read as no pid would send the
+unbound signal the body exists to prevent.
+
 ### `GET /api/config`
 
 The effective configuration, for a person on a phone asking "what is this
 instance pointed at" without SSH. Every value is `{value, source}` where
 `source` is `flag`, `file`, `env` or `default`: `host`, `port`,
 `allow_hosts`, `allow_origins`, `self_project`, `agent_binary`,
-`session_prefix`, `tls` (the certificate's path, or null),
+`session_prefix`, `stop_prompt` and `stop_prompt_timeout` (read only, #242),
+`tls` (the certificate's path, or null),
 `expect_gateway_mac` (the flag's value, normalised, or null), the three
 memory figures, `config_file` and `state_file`.
 `roots` is every configured root as `{label, path, enabled, editable,
 source}`, hidden ones included, with `hidden_roots` beside it; `stop_timeout`
-is `{value, source, editable}`, its source `state` when the interface set it.
+and `stop_policy` (#239, #409) are each `{value, source, editable}`, the
+source `state` when the interface set it.
 **`token` carries its source and never its value**, and `none` means the
 server runs without one, which only a loopback bind allows.
 
@@ -248,11 +280,15 @@ does not replay.
 plugin that was already current. A plugin at any scope other than `user` is
 `skipped` with its scope, since it belongs to a project folder the agent's
 list does not name. A `user` scope plugin the listing names more than once is
-also `skipped`, with detail `listed twice`, after the first is updated: the
+also `skipped`, with detail `listed more than once`, after the first is updated: the
 count then covers every row the listing returned, not only the ones that
 updated. `abandoned` means the server shut down mid run (#361): that row and
-every one still waiting behind it in the listing never started, which is not
-the same claim as `failed`. `detail` and `approved_command` are the agent's
+every `user` scope row still waiting behind it in the listing never started,
+which is not the same claim as `failed`; a row at another scope, or a repeat,
+is still `skipped` for its own reason. A shutdown that lands DURING one of
+the agent's calls ends that call, and is reported as what that call saw: the
+refresh as `marketplace_refresh_failed`, the listing as `plugins_unreadable`,
+and the plugin being updated as `failed`, exited -9. `detail` and `approved_command` are the agent's
 own words, with control characters escaped and cut to 240 characters: render
 them as text. `approved_command` is what `-y` approved without showing it,
 when the agent reports it; see `SECURITY.md`. Running sessions keep the old
@@ -266,14 +302,15 @@ the operation fails the 202 has been sent.
 | `agent_missing` | the configured agent binary could not be run |
 | `marketplace_refresh_failed` | the marketplaces did not refresh, so no plugin was updated |
 | `plugins_unreadable` | the installed plugin list was not understood, so nothing was updated, including the rows that parsed |
-| `shutting_down` | the server shut down before the listing was even read, so no row exists to mark `abandoned` |
+| `shutting_down` | the server shut down between two of the agent's calls, before the listing was read, so no row exists to mark `abandoned` |
 | `internal_error` | the run stopped on a defect in Hitchrail; the journal has the traceback |
 
 ### `PATCH /api/config`
 
-Body: `{"roots": {"work": {"enabled": false}}, "stop_timeout": 45}`, either
-half optional. One boolean per configured label, as many labels as the body
-names, and a whole number of seconds; the response is the same document
+Body: `{"roots": {"work": {"enabled": false}}, "stop_timeout": 45,
+"stop_policy": "end_anyway"}`, each part optional. One boolean per configured
+label, as many labels as the body names, a whole number of seconds, and
+`ask` or `end_anyway`; the response is the same document
 `GET` returns, as it now stands.
 
 **No route accepts a path, and this is the route that would have.** Roots are
@@ -306,6 +343,14 @@ in `state.toml`, and is read by the engine and reported on the listing's
 A `--stop-timeout` flag pins it: the value shows `source: "flag"`,
 `editable: false`, and a request to change it is `operator_pinned` (409)
 rather than a write the next restart would ignore.
+
+`stop_policy` (#409) is the closest call on the list: `end_anyway` is a kill
+nobody taps, but only of a session a request already asked to stop, which the
+same token could Kill outright. Anything but `ask` or `end_anyway`, null
+included, is `invalid_value` (400). It persists in `state.toml`, which an
+unknown word there reads as `ask`, and the change is a journal line. Unlike
+`stop_timeout`, the config file pins it as well as the flag: either one gives
+`editable: false`, and a request is `operator_pinned` (409).
 
 ## Session states
 
@@ -352,7 +397,7 @@ than by position.
 | Code | Status | When |
 |---|---|---|
 | `host_rejected` | 400 | the `Host` header names something not on the allowlist |
-| `invalid_body` | 400 | a body was required and was absent or not JSON |
+| `invalid_body` | 400 | a body was required and was absent or not JSON, or an optional one was sent malformed |
 | `invalid_name` | 400 | the project name is not one this tool will accept |
 | `unauthorized` | 401 | no token, or the wrong one |
 | `origin_missing` | 403 | a mutating request with no `Origin` |

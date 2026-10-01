@@ -57,6 +57,19 @@ __all__ = [
 # the same number as its `max`, and `tests/test_settings_route.py` asserts
 # the two agree.
 MAX_STOP_TIMEOUT_S = 3600
+# #242. The wrap up prompt is typed into the agent's box as one literal line,
+# so a newline would send half of it and a control character would be read as
+# a key. 4096 is a paragraph, not a document: an instruction that long belongs
+# in a slash command the prompt names.
+STOP_PROMPT_MAX = 4096
+# Under ten seconds the agent cannot finish a turn it was just handed, and the
+# setting would be a slower Stop, not a wrap up.
+STOP_PROMPT_TIMEOUT_MIN = 10
+# #239. What an expiry does when the pane shows a prompt. `ask` is design
+# 4.3 step 4 unchanged: report, never escalate. `end_anyway` is the operator
+# deciding that answer once, in advance, and it is the existing kill, never a
+# key typed into the prompt: which key means "exit" is Claude Code knowledge.
+STOP_POLICIES = ("ask", "end_anyway")
 
 
 class ConfigError(ValueError):
@@ -180,11 +193,22 @@ class Config:
     roots: tuple[Root, ...]
     host: str = "127.0.0.1"
     port: int = 8787
-    token: str | None = None
+    # #167. Out of the repr: a `Config` is exactly what somebody logs while
+    # debugging, `%r` of a dataclass prints every field, and this one is the
+    # security boundary. `test_the_token_never_reaches_a_log` holds it.
+    token: str | None = field(default=None, repr=False)
     extra_hosts: tuple[str, ...] = ()
     extra_origins: tuple[str, ...] = ()
     session_prefix: str = "hr-"
     stop_timeout: float = 30.0
+    # #242. What Stop types before the exit sequence, queued behind the task
+    # in flight rather than interrupting it, and how long the agent has to
+    # finish it.
+    # `None` is today's Stop. No default prompt: what "wrap up" means is the
+    # operator's (decided 2026-10-01).
+    stop_prompt: str | None = None
+    stop_prompt_timeout: float = 300.0
+    stop_policy: str = "ask"
     hard_floor_mb: int = 1536
     soft_floor_mb: int = 3072
     session_mb: int = 1536
@@ -203,7 +227,7 @@ class Config:
     # from `agent_binary` itself, rather than overwritten in place, so a
     # static read of the field name can tell "what the operator typed" from
     # "what preflight found on this machine" and hold every spawn site to
-    # the second: see the AST guard in test_config.py for #298.
+    # the second: see the AST guard in test_source_guards.py for #298.
     resolved_agent_binary: str | None = None
     # The default is Claude Code's state directory. The field name is neutral
     # because the directory is the agent adapter's business, not the server's.
@@ -336,7 +360,7 @@ class Config:
         nothing has resolved it, which is every Config built outside
         `cli.main`, `support.make_config` included. `launch_argv`,
         `find_detached` and the plugin update all read this property and
-        never the field directly; the AST guard in test_config.py enforces
+        never the field directly; the AST guard in test_source_guards.py enforces
         that everywhere but here and in `cli.update_plugins_command`, which
         resolves and checks its own copy before it ever builds a Config."""
         return self.resolved_agent_binary or self.agent_binary
@@ -470,6 +494,9 @@ class Config:
         if not (1 <= self.port <= 65535):
             raise ConfigError(f"port out of range: {self.port}")
         self.check_stop_timeout(self.stop_timeout)
+        object.__setattr__(self, "stop_prompt", self.check_stop_prompt(self.stop_prompt))
+        self.check_stop_prompt_timeout(self.stop_prompt_timeout)
+        self.check_stop_policy(self.stop_policy)
         for name in ("hard_floor_mb", "soft_floor_mb", "session_mb"):
             value = getattr(self, name)
             if value < 0:
@@ -497,6 +524,47 @@ class Config:
             # the ticket first blamed is not what it does (review, round 1).
             raise ConfigError(
                 f"stop timeout must be at most {MAX_STOP_TIMEOUT_S} seconds: {seconds}"
+            )
+
+    @staticmethod
+    def check_stop_prompt(prompt: str | None) -> str | None:
+        """The one validator for the wrap up prompt, returning its stored form.
+
+        Stripped, and empty means none: a settings form that is cleared sends
+        `""`, and a prompt of nothing would type `Enter` into an empty box.
+        """
+        if prompt is None:
+            return None
+        prompt = prompt.strip()
+        if not prompt:
+            return None
+        if len(prompt) > STOP_PROMPT_MAX:
+            raise ConfigError(
+                f"stop prompt must be at most {STOP_PROMPT_MAX} characters: {len(prompt)}"
+            )
+        if not prompt.isprintable():
+            # Never echoed back: a refusal is logged, and what an operator
+            # typed as an instruction to their agent is theirs.
+            raise ConfigError(
+                "stop prompt must be one line of printable text: it is typed "
+                "into the agent's box, where a newline sends and a control "
+                "character is a key"
+            )
+        return prompt
+
+    @staticmethod
+    def check_stop_policy(policy: str) -> None:
+        if policy not in STOP_POLICIES:
+            raise ConfigError(
+                f"stop policy must be one of {', '.join(STOP_POLICIES)}: {policy!r}"
+            )
+
+    @staticmethod
+    def check_stop_prompt_timeout(seconds: float) -> None:
+        if not (STOP_PROMPT_TIMEOUT_MIN <= seconds <= MAX_STOP_TIMEOUT_S):
+            raise ConfigError(
+                f"stop prompt timeout must be between {STOP_PROMPT_TIMEOUT_MIN} "
+                f"and {MAX_STOP_TIMEOUT_S} seconds: {seconds}"
             )
 
     def _check_bind_host(self) -> None:

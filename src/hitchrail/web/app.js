@@ -149,7 +149,15 @@ const state = {
   unsupportedTotal: 0,
   root: "",
   memory: { available_mb: null, total_mb: null },
-  server: { version: null, user: null, started_at: null, stop_timeout: null },
+  server: {
+    version: null,
+    user: null,
+    started_at: null,
+    stop_timeout: null,
+    stop_prompt_set: false,
+    stop_prompt_timeout: null,
+    stop_policy: "ask",
+  },
   tab: "all",
   query: "",
   // #146. Root labels to show; empty means all. A Set, never persisted as
@@ -741,7 +749,17 @@ function buildActions(project, actions) {
   // interface that lets you reach a 423 has already failed the person holding
   // the phone: refusing after the tap is worse than not offering the tap.
   if (!project.protected && isRunning(project)) {
-    add("Stop", "").addEventListener("click", () => confirmStop(project));
+    // A row wrapping up reopens its wait rather than confirming a second
+    // stop: that DELETE is the Exit now, which interrupts the task, behind a
+    // confirmation promising a wrap up (#242 review). Only `closing`, though:
+    // on `exiting` a repeated Stop resends the exit, as before #242, and is
+    // the only way short of Kill to ask an agent that ignored the first one
+    // (#242 review round 2).
+    const onStop =
+      project.stopping_phase === "closing"
+        ? () => reopenStop(project)
+        : () => confirmStop(project);
+    add("Stop", "").addEventListener("click", onStop);
   }
   // A stale session gets Clear, not Stop (#98). Stop asks the agent to exit
   // and there is no agent here, so the API answers `no_agent` every time: the
@@ -810,7 +828,13 @@ function confirmSignal(project, escalate) {
 
 async function signalNow(project, escalate) {
   const path = `/api/sessions/${encodeURIComponent(project.name)}/signal${escalate ? "/force" : ""}`;
-  const result = await api(path, { method: "POST" });
+  // The pid this row showed, which is the one the person confirmed (#279). The
+  // server refuses `not_ours` when its agent for the folder is another one now,
+  // rather than end an agent nobody was asked about.
+  const result = await api(path, {
+    method: "POST",
+    body: JSON.stringify({ pid: project.pid }),
+  });
   closeDialog();
   if (!result.ok) {
     showRefusal(result, project);
@@ -1009,6 +1033,7 @@ function showDialog({ title, body, actions, extra, forProject, wide = false }) {
   dialog.replaceChildren();
   delete dialog.dataset.refusal;
   delete dialog.dataset.bulk;
+  delete dialog.dataset.waiting;
   // #168. Only the pane view asks for room, and only the stylesheet's wide
   // breakpoint grants it: the confirmation and the rest of the stop sequence
   // share this element and keep the phone's column at every width.
@@ -1062,9 +1087,18 @@ function confirmStop(project) {
     // an interrupt. Say that, and carry the warning about part done work here
     // rather than only on the kill screen, because the interrupt is where the
     // work is lost and the kill screen is thirty seconds too late to say so.
-    body:
-      "It will be interrupted, then asked to exit. " +
-      "Anything it is part way through may be lost.",
+    //
+    // #242: with a wrap up prompt set the first thing sent is the prompt,
+    // queued behind the current task, and nothing is interrupted unless the
+    // wrap up outlasts its ceiling. The warning moves to that case.
+    body: [
+      state.server.stop_prompt_set
+        ? "It will be asked to wrap up after its current task, then to exit. "
+          + `If that takes longer than ${wrapUpSeconds()}s, the task is interrupted.`
+        : "It will be interrupted, then asked to exit. "
+          + "Anything it is part way through may be lost.",
+      endAnywayNote(),
+    ].filter(Boolean).join(" "),
     // Cancel and Stop, and nothing else. A kill control at this step puts the
     // destructive path under the thumb at the same weight as the safe one.
     actions: [
@@ -1087,47 +1121,162 @@ function confirmClear(project) {
   });
 }
 
+/* The live wait per project, so a second look at a stopping row reuses its
+   ticker. Two tickers for one project read the phase differently, and each
+   repaint then rebuilds the dialog every tick, taking focus (#71). */
+const waits = new Map();
+
+function newWait(project) {
+  // `over` lets Exit now's refusal end the ticker, which would otherwise
+  // paint "no answer" over the refusal it just showed.
+  const previous = waits.get(project.name);
+  if (previous) previous.over = true;
+  const wait = { began: Date.now(), over: false, sawClosing: false, exitSeen: false };
+  waits.set(project.name, wait);
+  return wait;
+}
+
+function reopenStop(project) {
+  const live = waits.get(project.name);
+  if (live && !live.over) {
+    showWaiting(project, live, waitingPhase(live, project));
+    return;
+  }
+  // Stopped from another browser, or before this page loaded. The deadline
+  // starts now, later than the server's, which errs long as `stopTimeoutMs`
+  // says it should.
+  const wait = newWait(project);
+  wait.sawClosing = project.stopping_phase === "closing";
+  wait.armed = true;
+  showWaiting(project, wait, waitingPhase(wait, project));
+  awaitStopped(project, wait);
+}
+
 async function beginStop(project) {
-  showWaiting(project);
+  const wait = newWait(project);
+  showWaiting(project, wait, state.server.stop_prompt_set ? "sending" : "waiting");
   const result = await api(`/api/sessions/${encodeURIComponent(project.name)}`, {
     method: "DELETE",
   });
   if (!result.ok) {
     // The row goes with it: `stop_unsafe` is refused here and nowhere else,
     // and the dialog that reports it offers a kill that has to name a session.
+    // Over, or a later Stop on the row reopens a wait no ticker drives.
+    wait.over = true;
+    showRefusal(result, project);
+    return;
+  }
+  // With no prompt the exit's wait starts once the DELETE has answered, as
+  // it did before #242: from the tap it would end before the server's own
+  // expiry most times, and say "no answer" before the server's one look at
+  // the pane could say the agent is waiting on a question (#242 review).
+  if (!state.server.stop_prompt_set) wait.armed = true;
+  await refresh();
+  awaitStopped(project, wait);
+}
+
+/* #242. The words follow the row's phase: `closing` while the wrap up runs
+   behind the task, `exiting` once the exit is sent, and the ceiling named
+   when that is why. Repainted only on a change of phase, and only while this
+   wait is the dialog on screen: a hidden wait must stay hidden, and a
+   rebuild on every listing takes focus from under the thumb (#71). */
+function waitingPhase(wait, current) {
+  if (current?.stopping_phase === "closing") return "closing";
+  if (current?.stop_ceiling) return "ceiling";
+  return wait.sawClosing ? "exiting" : "waiting";
+}
+
+function waitingBody(wait, phase) {
+  const note = endAnywayNote();
+  return note ? `${phaseBody(wait, phase)} ${note}` : phaseBody(wait, phase);
+}
+
+/* #239. A kill the operator configured a week ago must not surprise them:
+   said on the confirm and through the whole wait, before it happens. */
+function endAnywayNote() {
+  if (state.server.stop_policy !== "end_anyway") return "";
+  // "Once asked to exit": a wrap up that ends on a question is reported and
+  // never killed, since the exit it would refuse was never sent (#239 review).
+  return "If it stops on a question once asked to exit, it will be ended, as this server is configured to.";
+}
+
+function phaseBody(wait, phase) {
+  if (phase === "sending") return "Asking it to wrap up, after its current task.";
+  if (phase === "closing") {
+    const seconds = Math.max(0, Math.round((Date.now() - wait.began) / 1000));
+    return `Asking it to wrap up, after its current task. ${seconds}s so far.`;
+  }
+  if (phase === "ceiling") {
+    return `Wrap up did not finish in ${wrapUpSeconds()}s; asked it to exit.`;
+  }
+  if (phase === "exiting") return "Asking it to exit.";
+  // Waiting for it to exit, not to finish. The sequence interrupts before it
+  // asks anything, so once the request lands there is no grace period being
+  // observed: the wait is for the process to go.
+  //
+  // Careful with "already": `beginStop` paints this BEFORE it awaits the
+  // DELETE, so for the first moments nothing has been sent at all. An
+  // earlier version of this comment said the interrupt had already happened
+  // when the screen appeared, which is the wrong way round.
+  return "Waiting for it to exit.";
+}
+
+function showWaiting(project, wait, phase) {
+  const actions = [
+    // "Hide, keep stopping" first: a modal that owns a phone screen for
+    // thirty seconds is one people kill the app to escape.
+    ["Hide, keep stopping", "ghost", () => closeDialog()],
+  ];
+  // A graceful way out of a long wrap up short of the kill: a second DELETE
+  // during `closing` sends the exit now and never retypes the prompt. Not
+  // while `sending`, before the first DELETE has answered: the row already
+  // reads `closing` while the prompt is typed, and a DELETE then is a no-op
+  // 202, so the button would answer and do nothing.
+  if (phase === "closing") actions.push(["Exit now", "", () => exitNow(project, wait)]);
+  // Phrased as impatience rather than as an alternative, and available
+  // for the WHOLE wait rather than only at the end.
+  actions.push(["Do not wait, kill it now", "danger", () => killNow(project)]);
+  showDialog({
+    title: `Stopping ${project.name}`,
+    body: waitingBody(wait, phase),
+    forProject: project.name,
+    actions,
+  });
+  const dialog = $("[data-dialog]");
+  if (dialog) dialog.dataset.waiting = phase;
+}
+
+function repaintWaiting(project, wait, current) {
+  const dialog = $("[data-dialog]");
+  if (!dialog?.open || dialog.dataset.for !== project.name) return;
+  if (!("waiting" in dialog.dataset)) return;
+  const phase = waitingPhase(wait, current);
+  if (dialog.dataset.waiting !== phase) {
+    showWaiting(project, wait, phase);
+    return;
+  }
+  const body = dialog.querySelector(".dialog-body");
+  if (body) body.textContent = waitingBody(wait, phase);
+}
+
+async function exitNow(project, wait) {
+  const result = await api(`/api/sessions/${encodeURIComponent(project.name)}`, {
+    method: "DELETE",
+  });
+  if (!result.ok) {
+    wait.over = true;
     showRefusal(result, project);
     return;
   }
   await refresh();
-  awaitStopped(project);
 }
 
-function showWaiting(project) {
-  showDialog({
-    title: `Stopping ${project.name}`,
-    // Waiting for it to exit, not to finish. The sequence interrupts before it
-    // asks anything, so once the request lands there is no grace period being
-    // observed: the wait is for the process to go.
-    //
-    // Careful with "already": `beginStop` paints this BEFORE it awaits the
-    // DELETE, so for the first moments nothing has been sent at all. An
-    // earlier version of this comment said the interrupt had already happened
-    // when the screen appeared, which is the wrong way round.
-    body: "Waiting for it to exit.",
-    forProject: project.name,
-    actions: [
-      // "Hide, keep stopping" first: a modal that owns a phone screen for
-      // thirty seconds is one people kill the app to escape.
-      ["Hide, keep stopping", "ghost", () => closeDialog()],
-      // Phrased as impatience rather than as an alternative, and available
-      // for the WHOLE wait rather than only at the end.
-      ["Do not wait, kill it now", "danger", () => killNow(project)],
-    ],
-  });
-}
-
-function awaitStopped(project) {
-  const deadline = Date.now() + stopTimeoutMs();
+function awaitStopped(project, wait) {
+  // #242: a wrap up gets its own ceiling before the exit's wait begins, so
+  // the page's patience is both while the row reads `closing`, and the exit's
+  // alone from the first `exiting` reading, which is never earlier than the
+  // server's `exit_at`: erring long, for the reason `stopTimeoutMs` gives.
+  let deadline = (wait.armed ? Date.now() : wait.began) + stopTimeoutMs() + wrapUpTimeoutMs();
   // #81. `refresh()` returns whether the listing could be read, and this loop
   // used to discard it. Every listing during the wait could fail and the
   // timeout screen would still state, as fact, that the session has not
@@ -1144,9 +1293,11 @@ function awaitStopped(project) {
   // have a good reading a moment ago.
   let lastReadOk = true;
   const tick = async () => {
+    if (wait.over) return;
     const current = state.projects.find((p) => p.name === project.name);
     if (!current) {
       // Gone from the listing entirely: the folder was removed under us.
+      wait.over = true;
       closeDialog(project.name);
       return;
     }
@@ -1161,15 +1312,32 @@ function awaitStopped(project) {
       // the mistake #81 fixed one branch over. The two timers are independent
       // and either can be the shorter, so this cannot assume its own fires
       // first.
+      wait.over = true;
       if (current.state === "stopped") closeDialog(project.name);
       else showTimedOut(project);
       return;
+    }
+    if (current.stopping_phase === "closing") {
+      wait.sawClosing = true;
+    } else if (wait.sawClosing && !wait.exitSeen) {
+      wait.exitSeen = true;
+      deadline = Date.now() + stopTimeoutMs();
+    }
+    repaintWaiting(project, wait, current);
+    // The marker still being there at the deadline means the server's own
+    // expiry, on a one second sweep, has not run yet, and that expiry is the
+    // one look at the pane that can say the agent is asking a question. Two
+    // sweeps of grace, once, so "no answer" is not said over it (#242 review).
+    if (Date.now() >= deadline && !wait.graced) {
+      wait.graced = true;
+      deadline = Date.now() + 2000;
     }
     if (Date.now() >= deadline) {
       // The LAST reading, not "did they all fail". At the deadline the question
       // is what is true NOW, and the answer comes from the most recent listing.
       // If that one failed, the page cannot answer, and one blip costing an
       // honest screen instead of a claim is the right way round to be wrong.
+      wait.over = true;
       if (lastReadOk) showTimedOut(project);
       else showLostTrack(project);
       return;
@@ -1289,6 +1457,26 @@ function stopTimeoutMs() {
 
 export function setStopPatience(ms) {
   stopPatienceMs = ms;
+}
+
+/* #242. The wrap up's ceiling, from the same listing and with the same
+   override rule as the stop's; zero when no prompt is set, so every deadline
+   that adds it is today's. */
+let wrapUpPatienceMs = null;
+
+function wrapUpSeconds() {
+  const seconds = state.server.stop_prompt_timeout;
+  return typeof seconds === "number" && seconds > 0 ? seconds : 300;
+}
+
+function wrapUpTimeoutMs() {
+  if (!state.server.stop_prompt_set) return 0;
+  if (wrapUpPatienceMs !== null) return wrapUpPatienceMs;
+  return wrapUpSeconds() * 1000;
+}
+
+export function setWrapUpPatience(ms) {
+  wrapUpPatienceMs = ms;
 }
 
 function showRefusal(result, project) {
@@ -1465,7 +1653,12 @@ let bulk = null;
 function stoppableRows() {
   // Stale rows get Clear, not Stop (#98), and are left out; the self project
   // never enters the set.
-  return state.projects.filter((p) => isRunning(p) && !p.protected);
+  // A row wrapping up is left out too: Stop all would send it the exit,
+  // interrupting a wrap up the confirmation says it is waiting for. A row
+  // already `exiting` stays in, so a second Stop all resends the exit.
+  return state.projects.filter(
+    (p) => isRunning(p) && !p.protected && p.stopping_phase !== "closing",
+  );
 }
 
 function renderStopAll() {
@@ -1494,9 +1687,14 @@ function confirmStopAll() {
   if (rows.length === 0) return;
   showDialog({
     title: `Stop ${rows.length} sessions?`,
-    body:
-      "Each will be interrupted, then asked to exit, one at a time. "
-      + "Anything they are part way through may be lost.",
+    body: [
+      state.server.stop_prompt_set
+        ? "Each will be asked to wrap up after its current task, then to exit. "
+          + `A wrap up longer than ${wrapUpSeconds()}s has its task interrupted.`
+        : "Each will be interrupted, then asked to exit, one at a time. "
+          + "Anything they are part way through may be lost.",
+      endAnywayNote(),
+    ].filter(Boolean).join(" "),
     actions: [
       ["Cancel", "ghost", () => closeDialog()],
       ["Stop all", "", () => beginStopAll(rows)],
@@ -1547,7 +1745,9 @@ async function beginStopAll(rows) {
   // The same two fields `killRemaining` resets, and for the same reason
   // (#254): a ticker started by a kill during the request phase can give up
   // before the last request returns, and a fresh wait must not start over.
-  bulk.deadline = Date.now() + stopTimeoutMs();
+  // #242: every row's wrap up runs in parallel, so one ceiling covers them.
+  // `killRemaining` keeps `stopTimeoutMs()` alone: a kill waits on no wrap up.
+  bulk.deadline = Date.now() + wrapUpTimeoutMs() + stopTimeoutMs();
   bulk.over = false;
   await awaitBulk();
 }
@@ -1559,6 +1759,7 @@ function bulkStatus(row) {
   const current = state.projects.find((p) => p.name === row.name);
   if (current && current.state === "stopped") return "exited";
   if (bulk.lost) return "unknown";
+  if (!bulk.over && current?.stopping_phase === "closing") return "wrapping up";
   // "Not finished" is the ticker's verdict at the deadline, never the clock's
   // on some other render: the words and the flag flip together.
   if (bulk.over) return "not finished";
@@ -1571,7 +1772,7 @@ function bulkStatus(row) {
    which is the affordance rule; a row that exited or refused is terminal and
    is not touched. */
 function bulkInFlight() {
-  const live = ["queued", "requesting", "requested", "not finished"];
+  const live = ["queued", "requesting", "requested", "wrapping up", "not finished"];
   return bulk.rows.filter((row) => live.includes(bulkStatus(row)));
 }
 
@@ -1825,7 +2026,7 @@ function showDeadStart(project, body) {
 /* -- answering a prompt the agent is blocked on (#204) ------------------ */
 
 // The keys this interface offers, and the only ones the server will carry.
-// Mirrors `ANSWER_KEYS` in `claude_ipc.py`, and a test asserts the two lists
+// Mirrors `ANSWER_KEYS` in `claude_ipc/keys.py`, and a test asserts the two lists
 // are the same, because a key offered here and refused there is a button that
 // does nothing.
 //
@@ -2475,6 +2676,7 @@ window.__hitchrail = {
   state,
   api,
   setStopPatience,
+  setWrapUpPatience,
   stopTimeoutMs,
   setReopenPace,
   openStream,

@@ -32,6 +32,70 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+## 0.12.0 - 2026-10-01
+
+Nothing to do on upgrade. Every new setting is off or unchanged by default,
+and every API change is an addition a client may ignore.
+
+### Added
+
+**Stop can let the agent wrap up first.** Set `--stop-prompt` (or
+`stop_prompt` in the config file) to one line, such as a slash command that
+commits and writes notes, and Stop types it to the agent WITHOUT
+interrupting the task in flight: it queues behind that task, and Stop asks
+the agent to exit once the prompt's turn ends, or once
+`--stop-prompt-timeout` (default 300 seconds) runs out. Kill still
+interrupts at any moment, and a second Stop skips to the exit. Unset, which
+is the default, Stop is exactly what it was. The prompt can never be set
+over HTTP, and the startup block names its kind, never its text. The stop
+dialog names each phase of the wait. `stopping_phase` in a session row says
+which one a stop is in.
+
+**What a stop that runs out of time on a question does can be chosen**:
+`--stop-policy` (or `stop_policy` in the config file) is `ask`, the
+default, which reports and offers Kill as before, or `end_anyway`, which
+ends the session. It applies only to a stop asked to exit, never to a slow
+one with a clear input box, and never to the self project. With neither
+set, the settings page can choose it, kept in `state.toml`; set by the flag
+or the file, the page shows it as not changeable there. The confirmation
+and the wait say beforehand when a stop will be ended. `PATCH /api/config`
+takes `stop_policy`, and `GET /api/config` reports it as `{value, source,
+editable}`, like `stop_timeout`.
+
+**Hitchrail logs what it does.** Starts, stops, each moment of a stop, and
+every refusal go to stderr in uvicorn's format, so the journal answers
+"what did Stop do". `--log-level` chooses how much, and `--verbose` is
+`--log-level debug`. The token and pane content never reach a log line.
+
+**End and Kill on a detached agent are bound to the pid the person
+confirmed.** The page sends `{"pid": N}` to the signal route, and a
+different agent in the row by then is `not_ours`, not signalled. The body
+is optional, so a script without one works as before; a malformed body, or
+a key other than `pid`, is `invalid_body`.
+
+### Fixed
+
+- `127.1` and `::ffff:127.0.0.1` count as loopback, as the bind already
+  treated them.
+- A config file reached through a symlink has the directory it resolves
+  into checked for permissions, and the state file is read by the same rule.
+- An `--agent-binary` typed with a directory in it is refused as typed,
+  rather than with advice to fix `PATH`, which is never searched for it.
+- A stop that worked but was not watched is no longer logged as having
+  timed out.
+- A body or a Claude state file nested deeper than the parser can follow is
+  refused as unreadable rather than as a server error.
+- The plugin strip: a cut record keeps its tail, a third copy of a listed
+  plugin is called "listed more than once", and an abandoned row is marked
+  seen.
+- Shutting down cancels the sweep even when the shutdown kill fails.
+
+### Changed
+
+The README states tmux 2.1 as the minimum, where exact `=` targets and the
+`#{pid}` format arrived. Older versions fail closed, showing every agent as
+detached. Only 3.x is tested.
+
 ## 0.11.0 - 2026-09-28
 
 Nothing to do on upgrade. Everything below is a fix or an addition.

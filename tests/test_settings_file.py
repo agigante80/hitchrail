@@ -284,7 +284,6 @@ def test_the_private_group_convention_is_read_from_the_passwd_database(
     assert not settings._group_is_private(1000, 1000)
     monkeypatch.setattr(grp, "getgrgid", lambda gid: group("alice"))
     assert not settings._group_is_private(1001, 1000)
-    monkeypatch.setattr(grp, "getgrgid", getgrgid_alice)
     # `usermod -aG alice bob`: private in name only, and the audit's case.
     monkeypatch.setattr(grp, "getgrgid", lambda gid: group("alice", ["bob"]))
     assert not settings._group_is_private(1000, 1000)
@@ -732,3 +731,121 @@ def test_a_symlink_left_at_the_state_files_tmp_name_is_not_written_through(
         "state.tmp",
         "state.toml",
     ], "a temporary name was left behind"
+
+
+def test_a_state_file_that_is_not_utf8_disables_nothing(tmp_path: Path) -> None:
+    """#281: `read_text` raised `UnicodeDecodeError`, a `ValueError` neither
+    arm caught, out of `Preferences` and so out of `Engine.__init__`."""
+    state = tmp_path / "state.toml"
+    state.write_bytes(b'disabled = ["w\xff"]\n')
+    assert settings.read_state(state) == settings.State()
+
+
+def test_a_state_file_others_can_write_disables_nothing(tmp_path: Path) -> None:
+    """#281: the operator file's rule, decided for the state file too. A
+    hidden root is the dangerous direction, so a file somebody else could
+    have written hides nothing; the same file made private is read."""
+    state = tmp_path / "state.toml"
+    state.write_text('disabled = ["work"]\n')
+    state.chmod(0o666)
+    assert settings.read_state(state) == settings.State()
+    state.chmod(0o600)
+    assert settings.read_state(state).hidden == {"work"}
+
+
+def test_a_config_symlinked_into_a_shared_directory_is_refused_naming_it(
+    tmp_path: Path,
+) -> None:
+    """#281: the directory rule looked at the link's parent, which was
+    private, while `os.open` followed the link into a 0777 one where anybody
+    could rename a file over the target."""
+    (tmp_path / "work").mkdir()
+    shared = tmp_path / "srv"
+    shared.mkdir()
+    target = _write(shared, ROOTS_TOML.format(label="work", path=tmp_path / "work"))
+    home = tmp_path / "home"
+    home.mkdir()
+    link = home / "config.toml"
+    link.symlink_to(target)
+    shared.chmod(0o777)
+    try:
+        with pytest.raises(ConfigError, match=r"srv: is writable by group or others"):
+            build_config(parse_args(["--config", str(link)]))
+    finally:
+        shared.chmod(0o755)
+    assert [r.label for r in build_config(parse_args(["--config", str(link)])).roots] == [
+        "work"
+    ]
+
+
+# -- #242: the wrap up prompt, from the file --------------------------------
+
+
+def test_the_stop_prompt_comes_from_the_flag_then_the_file_then_none(tmp_path: Path) -> None:
+    (tmp_path / "work").mkdir()
+    roots = ROOTS_TOML.format(label="work", path=tmp_path / "work")
+    path = _write(tmp_path, 'stop_prompt = "/wrapup"\nstop_prompt_timeout = 120\n' + roots)
+    cfg = build_config(parse_args(["--config", str(path)]))
+    assert (cfg.stop_prompt, cfg.stop_prompt_timeout) == ("/wrapup", 120)
+    assert cfg.sources["stop_prompt"] == cfg.sources["stop_prompt_timeout"] == "file"
+    flag = ["--config", str(path), "--stop-prompt", "/other", "--stop-prompt-timeout", "60"]
+    cfg = build_config(parse_args(flag))
+    assert (cfg.stop_prompt, cfg.stop_prompt_timeout) == ("/other", 60)
+    bare = _write(tmp_path, roots)
+    assert build_config(parse_args(["--config", str(bare)])).stop_prompt is None
+
+
+@pytest.mark.parametrize(
+    ("line", "complaint"),
+    [
+        ("stop_prompt = 1", "stop_prompt must be a string"),
+        ("stop_prompt_timeout = true", "stop_prompt_timeout must be a whole number"),
+        ("stop_prompt_timeout = 60.5", "stop_prompt_timeout must be a whole number"),
+        ('stop_prompt_timeout = "60"', "stop_prompt_timeout must be a whole number"),
+        ('stop_prompt = "a\\u0007"', "stop prompt must be one line"),
+        ('stop_prompt = """a\nb"""', "stop prompt must be one line"),
+        ("stop_prompt_timeout = 5", "between 10 and 3600"),
+    ],
+)
+def test_a_stop_prompt_in_the_file_that_will_not_type_refuses_the_start(
+    tmp_path: Path, line: str, complaint: str
+) -> None:
+    (tmp_path / "work").mkdir()
+    path = _write(
+        tmp_path, line + "\n" + ROOTS_TOML.format(label="work", path=tmp_path / "work")
+    )
+    with pytest.raises(ConfigError, match=complaint):
+        build_config(parse_args(["--config", str(path)]))
+
+
+# -- #239: what an expiry on a prompt does, from the file -------------------
+
+
+def test_the_stop_policy_comes_from_the_flag_then_the_file_then_ask(tmp_path: Path) -> None:
+    (tmp_path / "work").mkdir()
+    roots = ROOTS_TOML.format(label="work", path=tmp_path / "work")
+    path = _write(tmp_path, 'stop_policy = "end_anyway"\n' + roots)
+    cfg = build_config(parse_args(["--config", str(path)]))
+    assert (cfg.stop_policy, cfg.sources["stop_policy"]) == ("end_anyway", "file")
+    cfg = build_config(parse_args(["--config", str(path), "--stop-policy", "ask"]))
+    assert (cfg.stop_policy, cfg.sources["stop_policy"]) == ("ask", "flag")
+    bare = _write(tmp_path, roots)
+    assert build_config(parse_args(["--config", str(bare)])).stop_policy == "ask"
+
+
+@pytest.mark.parametrize(
+    ("line", "complaint"),
+    [
+        ("stop_policy = true", "stop_policy must be a string"),
+        ('stop_policy = "kill"', "ask, end_anyway"),
+    ],
+)
+def test_a_stop_policy_in_the_file_that_is_not_one_of_the_two_refuses_the_start(
+    tmp_path: Path, line: str, complaint: str
+) -> None:
+    (tmp_path / "work").mkdir()
+    path = _write(
+        tmp_path, line + "\n" + ROOTS_TOML.format(label="work", path=tmp_path / "work")
+    )
+    with pytest.raises(ConfigError, match=complaint):
+        build_config(parse_args(["--config", str(path)]))

@@ -189,7 +189,7 @@ two mediums in task 157, fixed in `0ea8706` (the handle latches); round 2
 found no high, and its one medium is a missing regression test for that
 latch, so it stays here. Its lows went to Backlog as #365 to #368 and #370.
 
-- [ ] **Task 158, #369 (P2).** A real runner test kills the handle mid
+- [x] **Task 158, #369 (P2).** A real runner test kills the handle mid
       update and asserts the next plugin never spawns.
 
 ### Batch 6: the dependency updates, tasks 159 to 163
@@ -215,18 +215,31 @@ no ticket, since `develop` already locks newer versions.
 
 ## Done looks like
 
-- [ ] Every task above is ticked, or marked MOVED OUT or NOT BUILT with the
+- [x] Every task above is ticked, or marked MOVED OUT or NOT BUILT with the
       issue number that carries it.
-- [ ] No spawn site resolves the agent binary a second time, and a test says
-      so for every site at once.
-- [ ] No from-review ticket about the plugin update or the agent binary is
-      open without a decision.
+- [x] No spawn site resolves the agent binary a second time, and a test says
+      so for every site at once:
+      `test_every_read_of_agent_binary_is_the_resolved_property_or_allowlisted`,
+      tightened by #345 and #346.
+- [x] No from-review ticket about the plugin update or the agent binary is
+      open without a decision. Checked 2026-09-29: #369 is this phase's; every
+      other one filed by its reviews sits in Backlog with a P3 priority.
 - [x] The mutation survivors in `claude_ipc.py`'s plugin section have been
       read, not counted: `495e6da` and `ed04093`, dispositions on #304.
-- [ ] A plugin update started from the phone has been watched finishing on
-      the phone, after batch 2, against a private test root.
-- [ ] The roadmap's Phase 22 block says `state: done`, the milestone is
-      closed, and `scripts/check-phases.sh` passes.
+- [x] A plugin update started from the phone has been watched finishing on
+      the phone, after batch 2, against a private test root. Watched
+      2026-10-01 on the Pixel 2 in Chrome, over `adb reverse` to a loopback
+      instance with an empty root and an empty config file: 16 updated, 0
+      failed, 7 left alone, in 33 seconds, the button disabled while it ran
+      and the summary and every row painted when it finished. The six
+      identical `local` rows it showed are #312, in Phase 24. The device
+      tier was run first and was red on a label renamed on 2026-09-11,
+      unnoticed because nothing selects that tier; fixed the same day.
+- [x] The roadmap's Phase 22 block says `state: done`, the milestone is
+      closed, and `scripts/check-phases.sh` passes. Closed 2026-10-01 as
+      **done**: every ticket in the milestone landed, and every review
+      finding outside it sits in Backlog with a priority. The block then
+      left the roadmap under the 2026-09-26 rule.
 
 ## Fails if
 

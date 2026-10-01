@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
+import platform
 import secrets
 import shutil
 import ssl
@@ -18,7 +20,7 @@ from urllib.parse import quote
 import uvicorn
 from starlette.applications import Starlette
 
-from hitchrail import __version__, claude_ipc, gateway, settings
+from hitchrail import __version__, claude_ipc, gateway, logs, settings
 from hitchrail.config import (
     TOKEN_ENV,
     Config,
@@ -239,6 +241,51 @@ def build_parser(*, mention_update_plugins: bool = True) -> argparse.ArgumentPar
         type=int,
         help="seconds to wait for a graceful stop before reporting it timed out; default 30",
     )
+    # #242. `None` defaults for the same reason as `--session-prefix`: the
+    # file's value is used when the flag is absent.
+    parser.add_argument(
+        "--stop-prompt",
+        default=None,
+        metavar="TEXT",
+        help="one line Stop types to the agent before it exits, queued behind the "
+        "task in flight, such as a slash command that commits and writes notes; "
+        "unset, Stop exits at once. Kill still interrupts",
+    )
+    parser.add_argument(
+        "--stop-prompt-timeout",
+        default=None,
+        type=int,
+        metavar="SECONDS",
+        help="how long the agent has to finish the task and the stop prompt before "
+        "Stop exits anyway; default 300",
+    )
+    # #239. Choices are not given to argparse: `Config` is the one refusal,
+    # for the flag and the file alike, in the same words.
+    parser.add_argument(
+        "--stop-policy",
+        default=None,
+        metavar="POLICY",
+        help="what a stop that runs out of time on a question does: 'ask' (default) "
+        "reports and offers Kill; 'end_anyway' kills the session without the tap",
+    )
+    # #167. Hitchrail's own lines only: uvicorn's stay at info below that,
+    # since its debug is protocol tracing. `--verbose` exists so that "run it
+    # with --verbose and send me the output" is a sentence, which is the
+    # whole reason for the ticket.
+    loudness = parser.add_mutually_exclusive_group()
+    loudness.add_argument(
+        "--log-level",
+        choices=logs.LEVELS,
+        default=logs.DEFAULT_LEVEL,
+        help=f"how much Hitchrail writes to stderr; default {logs.DEFAULT_LEVEL}",
+    )
+    loudness.add_argument(
+        "--verbose",
+        dest="log_level",
+        action="store_const",
+        const="debug",
+        help="the same as --log-level debug",
+    )
     parser.add_argument(
         "--version",
         action="version",
@@ -341,6 +388,19 @@ def build_config(args: argparse.Namespace) -> Config:
     if prefix is None:
         # The dataclass default stays the one place "hr-" is spelled.
         prefix = Config.session_prefix
+    stop_prompt = args.stop_prompt
+    if stop_prompt is None:
+        stop_prompt = file_settings.stop_prompt
+    stop_prompt_timeout = args.stop_prompt_timeout
+    if stop_prompt_timeout is None:
+        stop_prompt_timeout = file_settings.stop_prompt_timeout
+    if stop_prompt_timeout is None:
+        stop_prompt_timeout = Config.stop_prompt_timeout
+    stop_policy = args.stop_policy
+    if stop_policy is None:
+        stop_policy = file_settings.stop_policy
+    if stop_policy is None:
+        stop_policy = Config.stop_policy
     given: frozenset[str] = getattr(args, "given", frozenset())
 
     def source(dest: str, from_file: bool = False) -> str:
@@ -358,6 +418,11 @@ def build_config(args: argparse.Namespace) -> Config:
         "agent_binary": source("agent_binary"),
         "session_prefix": source("session_prefix", file_settings.session_prefix is not None),
         "stop_timeout": source("stop_timeout"),
+        "stop_prompt": source("stop_prompt", file_settings.stop_prompt is not None),
+        "stop_prompt_timeout": source(
+            "stop_prompt_timeout", file_settings.stop_prompt_timeout is not None
+        ),
+        "stop_policy": source("stop_policy", file_settings.stop_policy is not None),
         "tls": source("tls_cert"),
         "expect_gateway_mac": source("expect_gateway_mac"),
     }
@@ -378,6 +443,9 @@ def build_config(args: argparse.Namespace) -> Config:
         self_project=args.self_project,
         agent_binary=args.agent_binary,
         stop_timeout=args.stop_timeout,
+        stop_prompt=stop_prompt,
+        stop_prompt_timeout=stop_prompt_timeout,
+        stop_policy=stop_policy,
     )
 
 
@@ -476,6 +544,63 @@ def banner(config: Config) -> str:
     return "\n".join(lines)
 
 
+def _stop_prompt_line(config: Config) -> str:
+    if not config.stop_prompt:
+        return "stop prompt none"
+    if config.stop_prompt.startswith("/"):
+        kind = "a slash command"
+    else:
+        kind = (
+            "plain text: delivered at the agent's next tool boundary, inside its current task"
+        )
+    return f"stop prompt set ({kind}), waits up to {config.stop_prompt_timeout:g}s"
+
+
+def startup_block(config: Config, found: Preflight, level: str) -> list[str]:
+    """What a bug report needs to be a diagnosis, one fact per line (#167).
+
+    Logged once, after the preflight and before the bind, so every line
+    describes the configuration that is about to serve. The token's SOURCE and
+    never its value: this is written to the journal, which `banner()`
+    already refuses to put a token in for the reasons it gives.
+
+    Not the account it runs as, though #148 shows it on the page: under a
+    unit the journal records the uid on every entry, and in a terminal the
+    person reading this is that account.
+    """
+    if config.token is None:
+        credential = "none, so only this machine can reach it"
+    else:
+        credential = f"from {config.sources.get('token', 'the caller')}"
+    lines = [
+        f"hitchrail {__version__} on Python {platform.python_version()}, pid {os.getpid()}",
+        *(f"root {root.label}={root.path}" for root in config.roots),
+        f"serving {config.scheme}://{config.host}:{config.port}, "
+        f"TLS {'on' if config.tls_cert else 'off'}, token {credential}",
+        f"answers to Host {', '.join(config.allowed_hosts)}",
+        f"agent {config.agent_binary!r} at {config.spawn_agent_binary}",
+        f"tmux {found.tmux_binary}, socket {config.tmux_socket or 'the default'}",
+        f"sessions prefixed {config.session_prefix!r}, stop timeout {config.stop_timeout:g}s, "
+        f"stop policy {config.stop_policy}",
+        # Whether a prompt is set, never the prompt: what an operator tells
+        # their agent is theirs, and this line goes to the journal. #242 asked
+        # for the text itself; the kind is what an operator needs to debug a
+        # wrap up that ran inside the current task, and it reveals nothing.
+        _stop_prompt_line(config),
+        f"config file {config.config_path or 'none'}, log level {level}",
+    ]
+    if config.self_project:
+        lines.append(f"self project {config.self_project}, never stopped from here")
+    # #283: the mirror of #268's refusal. It works, so it is a line, not a refusal.
+    proxied = any(o.strip().lower().startswith("https://") for o in config.extra_origins)
+    if proxied and not config.cookie_is_secure and not config.is_loopback:
+        lines.append(
+            "token cookie not Secure: an https origin is set but this plain http bind "
+            "is off loopback; bind loopback behind the proxy to get the flag"
+        )
+    return lines
+
+
 # The prerequisites Hitchrail drives but does not install. Neither is a Python
 # dependency, so every documented install route succeeds on a machine that
 # cannot run a single session. See #28.
@@ -491,6 +616,9 @@ class Preflight(NamedTuple):
 
     problems: list[str]
     agent_binary: str | None
+    # #167. Where tmux was found, for the startup block; the adapter still
+    # runs the bare name, as it always has.
+    tmux_binary: str | None = None
 
 
 def preflight(
@@ -522,14 +650,28 @@ def preflight(
     # that never runs. Looked up per call, the patch lands.
     look = which if which is not None else shutil.which
     problems = []
-    if look("tmux") is None:
+    tmux = look("tmux")
+    if tmux is None:
         problems.append(
             "tmux is not on PATH. Hitchrail runs every session inside tmux, so "
             "there is nothing it can do without it. Install it with your "
             "package manager, for example: sudo apt install tmux"
         )
     found = look(config.agent_binary)
-    if found is None:
+    # #341. A value with a directory in it is a path the operator TYPED, and
+    # `shutil.which` does not search PATH for one: it checks that exact file
+    # and hands it back unchanged. So neither PATH message below is true of
+    # it, and each would send the operator to fix a PATH that was never read.
+    # `os.path.dirname` and not `Path.parent`: `Path("./claude")` normalises
+    # the "./" away, and `which` decides by the same `dirname` test this is.
+    typed = bool(os.path.dirname(config.agent_binary))  # noqa: PTH120
+    if found is None and typed:
+        problems.append(
+            f"{config.agent_binary!r} is not an executable file. That is the "
+            "agent Hitchrail starts, and a value containing a directory is "
+            "taken as a path to that file, not searched for on PATH"
+        )
+    elif found is None:
         # **"Install it" is the wrong first remedy, and #195 is why.** The case
         # this actually fires in is a lingering systemd unit at boot: the agent
         # IS installed, in `~/.local/bin`, and the user manager's PATH before
@@ -544,6 +686,18 @@ def preflight(
             "THIS process has: under a systemd unit that is the unit's own "
             "Environment=PATH rather than your login's"
         )
+    elif not Path(found).is_absolute() and typed:
+        # Refused for the same reason as the relative PATH entry below: the
+        # child's cwd would decide which file runs. `update-plugins` accepts
+        # this shape instead, resolving it at once (#298), because there the
+        # check and the spawn are one command in one directory; a server
+        # spawns for as long as it runs.
+        problems.append(
+            f"{config.agent_binary!r} is a relative path, which would be "
+            "looked up from wherever each agent is started. Give "
+            "--agent-binary an absolute path, or a bare name found on PATH"
+        )
+        found = None
     elif not Path(found).is_absolute():
         # A PATH entry given as a relative directory, "." most often, is the
         # one shape `shutil.which` will hand back unresolved: everything else
@@ -563,7 +717,7 @@ def preflight(
             "rather than run without the check that stops it filling the "
             "machine with agents"
         )
-    return Preflight(problems, found if not problems else None)
+    return Preflight(problems, found if not problems else None, tmux)
 
 
 EXIT_REFUSED = 2
@@ -672,7 +826,12 @@ def _serve(app: Starlette, config: Config, tls: ssl.SSLContext | None) -> int:
         app,
         host=config.host,
         port=config.port,
-        log_level="info",
+        # #167. `None`: `logs.configure` already set up uvicorn's loggers,
+        # and uvicorn's own dictConfig would replace them with a second
+        # format on a second stream. The level is still applied, since
+        # uvicorn sets it on its loggers after this.
+        log_config=None,
+        log_level=logs.uvicorn_level(),
         ssl_context_factory=None if tls is None else (lambda _config, _default: tls),
     )
     return 0
@@ -728,6 +887,13 @@ def update_plugins_command(argv: list[str]) -> int:
     # directory. `resolve()` against THIS process's cwd, before
     # `plugin_runner` starts the child in `Path.home()`, is what makes the
     # program checked and the program run the same file.
+    #
+    # **Serve's `preflight` refuses the same typed relative path, and the
+    # difference is deliberate (#341).** Here the check and the spawn happen
+    # in one command, from one directory, so resolving once is exact. A
+    # server spawns agents for as long as it runs, and asks the operator for
+    # an absolute path instead. `resolve()` also follows a symlink, which
+    # `preflight` leaves alone; either names the same executable.
     resolved = str(Path(resolved).resolve())
 
     def show(outcome: claude_ipc.PluginOutcome) -> None:
@@ -760,6 +926,14 @@ def main(argv: list[str] | None = None) -> int:
     if argv[:1] == [UPDATE_PLUGINS]:
         return update_plugins_command(argv[1:])
     args = parse_args(argv)
+    # #167. First, before the config is built, so every module shares one
+    # configuration from its first line.
+    #
+    # The refusals below stay `print`s to stderr rather than becoming log
+    # records: they are this command's answer to a person at a terminal, in
+    # the `hitchrail: ...` form the README and the CLI tier quote, and under
+    # the unit stderr reaches the journal either way.
+    logs.configure(args.log_level)
     # #326. Before build_config(): identity_banner() carries nothing derived
     # from a Config, so it still appears when a later config, preflight or
     # gateway check refuses to start. flush=True for the same #145 reason
@@ -838,6 +1012,11 @@ def main(argv: list[str] | None = None) -> int:
         # is the journal.
         print(text, flush=True)
 
+    log = logging.getLogger(__name__)
+    for line in startup_block(config, found, args.log_level):
+        log.info("%s", line)
+
     engine = Engine(config=config)
     # One bus, built here and owned here, because the CLI owns the process.
-    return _serve(create_app(engine=engine, config=config, bus=EventBus()), config, tls)
+    app = create_app(engine=engine, config=config, bus=EventBus())
+    return _serve(app, config, tls)

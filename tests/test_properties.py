@@ -22,7 +22,8 @@ import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
-from hitchrail.claude_ipc import URL_BASE, _valid_bridge_id, launch_argv
+from hitchrail.claude_ipc import URL_BASE, launch_argv
+from hitchrail.claude_ipc.launch import _valid_bridge_id
 from hitchrail.config import Config, ConfigError
 from hitchrail.hostnames import is_valid_host, normalise_host, normalise_origin
 from hitchrail.procs import ProcTable, parse_ps

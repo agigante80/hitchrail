@@ -45,33 +45,9 @@ suite is green. It is finished when the behaviour has been watched working in
 the running application, on the phone it is for. See
 [`tech-guidelines.md`](tech-guidelines.md) section 7.
 
-## Phase: Phase 22: The plugin update, hardened
-state: open
-plan: docs/superpowers/plans/2026-09-26-hitchrail-phase-22-plugin-hardened.md
-
-The plugin update from a phone, made as careful as the rest of the spawn path.
-Phase 21 shipped it and closed on its own review loop's trip wire, so its last
-round's findings were filed rather than fixed, and several of them sit on the
-path between a web page and a shell.
-
-Delivers: the agent binary resolved once, checked from the directory it runs
-in, and spawned exactly as checked. Three tickets describe that one defect from
-three sides and are built together rather than closed as duplicates, because
-each names a different place the second resolution happens. Every other
-finding from Phase 21's review is fixed or closed with its reason.
-
-Done when no from-review ticket about the plugin update or the agent binary is
-open without a decision, and a mutation run over `claude_ipc.py` and
-`plugin_runs.py` has been read.
-
-Placed first after Phase 15 by the Backlog's second rule: a phase that ships
-new surface is followed by the one that hardens it, as Phase 20 followed 14.
-Ahead of 19 because both change how a spawned agent is found and started, and
-a stop sequence watched on an unhardened spawn path is watched on the wrong
-thing.
-
 ## Phase: Phase 19: Stop means wrap up, and says so
-state: planned
+state: open
+plan: docs/superpowers/plans/2026-09-29-hitchrail-phase-19-stop-wrap-up.md
 
 A session stopped from a phone leaves the same record as one closed by hand.
 Cut out of Phase 11 on 2026-09-11.
@@ -86,9 +62,10 @@ authored on the machine only, sent only on a tapped Stop, and sent with
 `send-keys -l`.
 
 A phase rather than a ticket for the reason Phase 16 is one: what it changes,
-not how big it is. It changes design section 4.3, the stop sequence, and it
-carries an open sub decision, the order in which the interrupt and the prompt
-are sent, that is the operator's to make.
+not how big it is. It changes design section 4.3, the stop sequence. The
+order the interrupt and the prompt are sent in was the operator's to decide,
+and was decided on 2026-09-29: Stop queues the prompt behind the task in
+flight, and Kill, available throughout the wait, is the interrupt.
 
 Moved ahead of 16, 17 and 18 on 2026-09-16, on the third ordering rule, cost
 of delay, invoked for the second time. Every stop tapped from a phone today
@@ -99,23 +76,30 @@ the new stop sequence diagnosable when it is first watched on a real
 session: "was the prompt sent, and did the pane go idle" has to have an
 answer in the journal before the sequence is trusted.
 
-Delivers: a configured prompt sent before the exit sequence, the closing skill
-by default, with a per session wait for the pane to show an idle input box
-under a ceiling; and an opt in, off by default, that lets a stop ending on a
-prompt end the session anyway because the operator said so ahead of time.
+Delivers: a configured prompt sent before the exit sequence, with no default so
+an unconfigured Stop is today's (decided 2026-10-01: the closing skill is a
+plugin most installs do not have), and a per session wait for the pane to show
+an idle input box under a ceiling; and an opt in, off by default, that lets a
+stop ending on a prompt end the session anyway because the operator said so
+ahead of time.
 
-Done when a session stopped from the interface has run the closing skill
-before it exits, a stop that ends on a prompt still does nothing on its own
-unless the operator opted in before tapping, and `stop_prompt` cannot be set
-through any HTTP route.
+Done when a session with a prompt configured, stopped from the interface, has
+run the closing skill before it exits, a stop that ends on a prompt still does
+nothing on its own unless the operator opted in before tapping, and
+`stop_prompt` cannot be set through any HTTP route.
 
 The deferral under "Deliberately later" still binds, and this phase is written
 against it rather than around it: the prompt is configuration on the machine,
 never text from the page, and the page's only verb is still Stop.
 
+Two tickets joined it from Backlog on 2026-09-29, each because this is the
+next phase to change the file it names: the split of `claude_ipc.py` into a package, which
+this phase adds the wrap up to before Phase 23 adds anything, so the split goes
+first; and `Config`'s surviving mutants, which are pinned before this phase
+adds `stop_prompt`'s refusals beside them.
+
 ## Phase: Phase 23: Decide on more than one agent
 state: planned
-plan: 
 
 Answer design section 3.1 before anybody builds against it. The spec says more
 than one agent is "not built, not closed off". An epic filed on 2026-09-22
@@ -126,7 +110,7 @@ operator or API contract, and no text from a page reaches a spawn.
 
 Those are decisions rather than obstacles, so the answer is one of three: stay
 single agent and close the epic with the reason; widen the vendor seam that
-`claude_ipc.py` already is, one quarantined module per agent and no templates;
+`claude_ipc` already is, one quarantined package per agent and no templates;
 or change the security argument deliberately and say so in the spec.
 
 Delivers: the decision, written into the design spec and into what
@@ -170,7 +154,6 @@ than quietly outgrown.
 
 ## Phase: Phase 24: The interface, found
 state: planned
-plan: 
 
 Everything the phone offers can be found by looking at it. Filed together from
 using it: settings is a text link at the end of the footer, the button that
@@ -226,7 +209,7 @@ Every time a phase opens, this is read for what now belongs in it, by two
 rules rather than by judgement. The opening phase takes every open
 `from-review` ticket about a file it changes, because that is when fixing it
 is cheapest. And a phase that ships new surface is followed by one that
-hardens it, as Phase 20 followed 14 and Phase 22 follows 21: a review loop that
+hardens it, as Phase 20 followed 14 and Phase 22 followed 21: a review loop that
 stops on its trip wire files its findings here, and without the second rule
 they stay here.
 
@@ -270,6 +253,15 @@ Not scheduled, and not to be smuggled into an earlier phase:
   command line. If a free text field, an automatic choice, or a key sent
   without re-reading the pane ever appears, this becomes the deferred item and
   the deferral binds.
+
+  #242's `stop_prompt` is not the deferred item either: a fixed string the
+  operator configured on the machine, typed on Stop. A string arriving through
+  the API would be, which is why no route can set it.
+
+  Nor is #239's `stop_policy`. "No timeout that presses a key" stays true: a
+  stop that runs out of time on a prompt is KILLED under an opt in the
+  operator set before tapping, exactly as the dialog's Kill would, and
+  nothing is typed into the prompt.
 
 ## Notes
 
