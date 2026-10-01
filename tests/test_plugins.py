@@ -1011,6 +1011,50 @@ def test_kill_after_a_finished_child_still_latches_and_signals_nothing(
         handle.raise_if_closed()
 
 
+def test_a_second_kill_signals_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#384. `_set(None)` on a closed handle is ignored, so the pid a first
+    `kill()` signalled used to stay recorded, and a second `kill()` sent
+    SIGKILL to it again, by then a reaped child's number the operating
+    system may have reused for someone else's group."""
+    killed: list[tuple[int, int]] = []
+    monkeypatch.setattr("os.killpg", lambda pgid, sig: killed.append((pgid, sig)))
+    handle = claude_ipc.RunningChild()
+    handle._set(4242)
+    handle.kill()
+    handle._set(None)  # what `plugin_runner`'s `finally` does after the reap
+    handle.kill()
+    assert killed == [(4242, signal.SIGKILL)]
+
+
+def test_an_interrupt_after_the_reap_still_kills_the_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#363, the decision pinned: a `KeyboardInterrupt` landing after
+    `communicate` already reaped the child still kills its group, since a
+    lingering grandchild keeps the group id allocated and is exactly what
+    the kill is for. A `returncode` check in front of the kill fails this."""
+    killed: list[tuple[int, int]] = []
+
+    class FakeProcess:
+        pid = 4242
+        returncode: int | None = None
+        stdout = _FakeStream()
+        stderr = _FakeStream()
+
+        def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+            self.returncode = 0
+            raise KeyboardInterrupt
+
+        def wait(self, timeout: float | None = None) -> int:
+            return 0
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: FakeProcess())
+    monkeypatch.setattr("os.killpg", lambda pgid, sig: killed.append((pgid, sig)))
+    with pytest.raises(KeyboardInterrupt):
+        claude_ipc.plugin_runner(withhold=())(["claude", "plugin", "update"], 30.0)
+    assert killed == [(4242, signal.SIGKILL)]
+
+
 def test_plugin_runner_refuses_to_spawn_once_the_handle_is_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

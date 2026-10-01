@@ -157,7 +157,9 @@ def _default_runner(
         # turn this into hitchrail killing itself. Addressing `proc.pid`
         # directly means that mistake raises ProcessLookupError here instead,
         # which this suppresses the same way as an already exited child:
-        # either way there is nothing left here to kill.
+        # either way there is nothing left here to kill. Killed even when the
+        # child was already reaped, for the reason `claude_ipc.plugin_runner`
+        # gives at its own kill (#363).
         with contextlib.suppress(ProcessLookupError):
             os.killpg(proc.pid, signal.SIGKILL)
         if proc.stdout is not None:

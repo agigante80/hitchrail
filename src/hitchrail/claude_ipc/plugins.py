@@ -169,9 +169,15 @@ class RunningChild:
         `ProcessLookupError` means the child (or the whole group) is already
         gone, which is not a failure here any more than it is at the timeout
         kill in `plugin_runner`.
+
+        Safe to repeat (#384): the pid is taken and cleared in one locked
+        step, so a second call signals nothing. Clearing it in `_set(None)`
+        alone was not enough, since a closed handle ignores that call, and a
+        second `kill()` then sent SIGKILL to a reaped child's pid, which the
+        operating system may since have given to someone else's group.
         """
         with self._lock:
-            pid = self._pid
+            pid, self._pid = self._pid, None
             self._closed = True
         if pid is not None:
             with contextlib.suppress(ProcessLookupError):
@@ -322,6 +328,18 @@ def plugin_runner(
             try:
                 stdout, stderr = proc.communicate(timeout=timeout)
             except BaseException:
+                # Killed even when `communicate` already reaped the child and
+                # the exception landed after (#363), deliberately, unlike
+                # `Popen.send_signal`'s `poll()` check (bpo-38630): that
+                # guards one pid, and this targets a GROUP. The kernel keeps a
+                # pid number allocated while any process still uses it as its
+                # group id (`__change_pid` in kernel/pid.c frees it only when
+                # no task holds it as pid, group or session), so while a
+                # grandchild lingers this kill can only reach our own group,
+                # which is the point of it. Only an EMPTY group's number can
+                # be reused, by a new group leader, inside the microseconds
+                # before this line: accepted, because skipping the kill on a
+                # reaped leader would leave a lingering grandchild running.
                 # `proc.pid`, not `os.getpgid(proc.pid)`: `start_new_session`
                 # above makes this child its own group leader, so its pid IS
                 # the group id. Asking the OS for "this pid's group" instead

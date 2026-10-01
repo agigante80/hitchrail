@@ -1008,8 +1008,10 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # Most of its length is the docstrings saying which race each of
         # `RunningChild`'s two checks closes. Measured 533 at the split, and
         # 550 after #353 gave `_shown` a tail and a backslash rule, each with
-        # the reason a reviewer would otherwise undo.
-        "claude_ipc/plugins.py": 555,
+        # the reason a reviewer would otherwise undo. 570 after #363 and #384:
+        # why the group is killed after a reap, with the kernel rule that
+        # makes it safe, and why `kill()` clears the pid it takes.
+        "claude_ipc/plugins.py": 570,
         # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
         # `except` arm: the adapter can now decline to type, and the marker has
         # to come back the same way a vanished tmux takes it back.
@@ -1220,8 +1222,9 @@ def test_every_module_is_under_the_size_guideline() -> None:
         # `os.killpg` `proc.pid` directly so a dropped `start_new_session`
         # raises instead of killing this process's own group (M3), and bound
         # the reap after the kill by closing the pipes rather than a second
-        # unbounded `communicate()` (H1).
-        "tmux.py": 678,
+        # unbounded `communicate()` (H1). 680 for #363's pointer to why the
+        # group is killed even after the child was reaped.
+        "tmux.py": 680,
         # 413, and thirteen lines over the guideline is not a second job. #18
         # already took the host vocabulary out of this file, and what is left
         # is one dataclass and its startup refusals, which is one thing. The
