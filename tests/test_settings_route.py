@@ -619,10 +619,11 @@ def test_the_editable_subset_is_exactly_the_literal() -> None:
 
 # Every name a route reads out of a request body, as a literal. `name` is a
 # project identifier, `key` is one of ANSWER_KEYS, `token` is the grant's
-# credential, and the settings PATCH reads the two literal sets above plus
-# one integer. None of them is a path, and a new one has to be added here on
-# purpose.
-BODY_KEYS = frozenset({"name", "key", "token", "roots", "enabled", "stop_timeout"})
+# credential, the settings PATCH reads the two literal sets above plus one
+# integer, and `pid` is the positive integer a detached stop or kill binds its
+# signal to (#279). None of them is a path, and a new one has to be added here
+# on purpose.
+BODY_KEYS = frozenset({"name", "key", "token", "roots", "enabled", "stop_timeout", "pid"})
 
 
 class RouteSurfaces:
