@@ -182,6 +182,10 @@ batches 1 to 5 are done, the phase closes re-shaped and the rest go back to
 Backlog: re-shape, never extend. Their milestones moved when the phase
 opened. Each is ticked here by number as it closes.
 
+All 25 closed by 2026-10-01, #30 last. Its review lows and those of #242 and
+#239 went to Backlog (#410 to #418), not this milestone, so the phase is never
+held open by a low.
+
 ## Done looks like
 
 - [ ] A session with `stop_prompt` configured, stopped from the interface,
@@ -192,8 +196,8 @@ opened. Each is ticked here by number as it closes.
 - [x] `stop_prompt` cannot be set through any HTTP route, and a test says so
 - [x] With `stop_prompt` unset, which is the default, Stop is byte for byte
       today's sequence
-- [ ] Every task ticked, or marked MOVED OUT or NOT BUILT with an issue number
-- [ ] No `from-review` ticket open in the milestone without a decision
+- [x] Every task ticked, or marked MOVED OUT or NOT BUILT with an issue number
+- [x] No `from-review` ticket open in the milestone without a decision
 - [ ] Roadmap says done, milestone closed, `check-phases.sh` passes
 
 ## Fails if
