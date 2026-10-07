@@ -4,7 +4,8 @@ The design says what to build. This file says which phases exist, what state
 each is in, and why each one sits where it does. One phase at a time, each
 ending in something that runs and has been watched running.
 
-Design: [`superpowers/specs/2026-08-25-hitchrail-design.md`](superpowers/specs/2026-08-25-hitchrail-design.md)
+Design:
+[`superpowers/specs/2026-08-25-hitchrail-design.md`](superpowers/specs/2026-08-25-hitchrail-design.md)
 Rules: [`tech-guidelines.md`](tech-guidelines.md)
 
 ## How to read this file
@@ -93,36 +94,80 @@ against it rather than around it: the prompt is configuration on the machine,
 never text from the page, and the page's only verb is still Stop.
 
 Two tickets joined it from Backlog on 2026-09-29, each because this is the
-next phase to change the file it names: the split of `claude_ipc.py` into a package, which
+next phase to change the file it names: the split of `claude_ipc.py` into a
+package, which
 this phase adds the wrap up to before Phase 23 adds anything, so the split goes
 first; and `Config`'s surviving mutants, which are pinned before this phase
 adds `stop_prompt`'s refusals beside them.
 
-## Phase: Phase 23: Decide on more than one agent
+Built 2026-10-01 and released as 0.12.0: every ticket in the milestone is
+closed. It stays open on one criterion only, the one no test stands in for:
+Andrea watching a real session with `stop_prompt` configured wrap up and
+exit, with the journal showing the prompt, the wait and the exit. Its review
+findings are Phase 25, not this milestone, so nothing else holds it open.
+
+## Phase: Phase 25: The wrap up, hardened
 state: planned
 
-Answer design section 3.1 before anybody builds against it. The spec says more
-than one agent is "not built, not closed off". An epic filed on 2026-09-22
-proposes building it, with a registry of command templates written from the
-settings page, and that collides with three things the product rests on: the
-settings file is read once and never written, no vendor name enters the
-operator or API contract, and no text from a page reaches a spawn.
+Every finding the Phase 19 reviews filed is fixed or closed with its reason,
+and the journal says what a stop did. The roadmap's second Backlog rule,
+applied a third time: 20 followed 14, 22 followed 21, and this follows 19.
 
-Those are decisions rather than obstacles, so the answer is one of three: stay
-single agent and close the epic with the reason; widen the vendor seam that
-`claude_ipc` already is, one quarantined package per agent and no templates;
-or change the security argument deliberately and say so in the spec.
+Phase 19 stopped its review loops where the global rules say they stop, and
+filed what was left, 29 tickets, in Backlog so a low never held the phase
+open. All 29 were checked against the tree on 2026-10-07 and all still
+describe the code. Two needed a decision, both taken by Andrea that day: #391
+stops deriving a plain http origin for an https only host, and #419 records
+the stop policy when the stop is confirmed. `engine.py`'s split (#274) goes
+first, because nine of the findings edit the functions it would move, and #181
+joins from Phase 17 by the first Backlog rule.
 
-Delivers: the decision, written into the design spec and into what
-`docs/versioning.md` means by 1.0, and every ticket in this milestone rewritten
-against it or closed with it.
+Its plan is written ahead of opening, in
+`docs/superpowers/plans/2026-10-07-hitchrail-phase-25-wrap-up-hardened.md`,
+and the phase opens the day Phase 19 closes.
 
-Done when section 3.1 says built, not built, or closed off, with the reason,
-and no open ticket asks for something the decision refused.
+Done when every finding is closed or moved with a number, a kill nobody tapped
+is bound to the agent that was looked at, every kill leaves a journal line and
+none carries a token, and a stop watched from two browsers on the phone shows
+the same phase in both.
 
-Placed before Phase 16 because both would add the first state the product
-writes, and a reboot restore designed for one agent is rework if the answer is
-several.
+Placed before 23 on the first ordering rule: 23 adds an agent seam beside
+`engine.py`'s stop path, and adding to the path before it is hardened is how a
+second agent inherits its defects.
+
+## Phase: Phase 23: More than one agent, one package each
+state: planned
+
+Build more than one agent through the seam `claude_ipc` already is: one
+quarantined package per agent, the agents chosen on the machine, and no
+command template anywhere.
+
+Decided by Andrea on 2026-10-07, on #334, between three answers to design
+section 3.1's "not built, not closed off": stay single agent; widen the vendor
+seam; or change the security argument so a page could edit a registry of
+command templates, as the epic filed on 2026-09-22 proposed. The seam won, so
+the three things the product rests on still hold: the settings file is read
+once and never written, no vendor name enters the operator or API contract,
+and no text from a page reaches a spawn. #291, the settings page that edited
+templates, closed with that reason.
+
+The phase's first task is #334 itself: the answer written into section 3.1 and
+into what `docs/versioning.md` means by 1.0. Then every epic ticket is
+rewritten against it when the phase opens, because each was written for the
+registry. Two questions are left for the plan rather than assumed here:
+whether the page may choose among the agents the operator configured when it
+starts a project (#292), which is a choice from an allowlist but changes the
+start route's contract; and whether a daemon one agent needs (#293) is a
+process Hitchrail should own at all, since it would be the first long lived
+child that is not a session.
+
+Done when a second agent starts, stops and is derived exactly as Claude Code
+is, through its own package, the stop sequence included, with no vendor name
+outside that package and nothing an agent runs coming from a page.
+
+Placed before Phase 16 because a reboot restore has to record which agent a
+session was, and designing it for one is rework. After Phase 25 because the
+stop path the second agent plugs into should be hardened first.
 
 ## Phase: Phase 16: What survives a reboot
 state: planned
@@ -141,12 +186,14 @@ survived, a command line kill switch, protection against a restart loop, and
 restored rows visibly restored. If any of those is not built, the default is
 off and the feature still ships.
 
-The unit's own behaviour across a reboot belongs here too, with one caveat
-written down before the phase opens: on the operator's machine the LAN address
-lives on a removable adapter that is often absent at boot, so no retry budget
-reaches it, and that ticket may close as a documented limitation rather than a
-fix. `server.py`'s split lands here, first, because the restore adds to the
-file that is already past the guideline.
+The unit's own behaviour across a reboot belongs here too. On the operator's
+machine the LAN address lives on a removable adapter that is often absent at
+boot, so no retry budget reaches it; #201 has since decided the fix is a
+recovery timer that starts the unit once the address appears, not a longer
+budget. Socket activation (#220) sits here as its alternative, P3, and
+helps nobody while the unit binds loopback, so it is the first ticket to move
+out if the phase runs long. `server.py`'s split (#205) lands here, first,
+because the restore adds to the file that is already past the guideline.
 
 Done when a reboot brings back what was running, exactly once each, without a
 person tapping anything, and the security argument has been rewritten rather
@@ -159,10 +206,15 @@ Everything the phone offers can be found by looking at it. Filed together from
 using it: settings is a text link at the end of the footer, the button that
 creates a project disappears under every filter and does not say what it
 creates, a chosen theme cannot go back to following the system, the mark
-never appears in the header, and the browser's implicit favicon request is
-refused. Two display defects on the plugin update page join them, and so does
-`app.js`'s split, because every one of these edits `app.js` and the split is
-cheaper before them than after.
+never appears in the header, the title does not lead back to the list, and
+the browser's implicit favicon request is refused. The plugin update page's
+display defects join them, and so does `app.js`'s split, because every one of
+these edits `app.js` and the split is cheaper before them than after. The
+`innerHTML` guard's gaps (#342) come with the split, since the guard has to
+read the files the split creates.
+
+#321 and #322 rewrite the same control: decide #321 first, and #322 closes if
+the bar button it renames is gone.
 
 Delivers: settings and project creation as bar controls that survive a filter,
 a theme choice that includes the system's, the mark in the header, the favicon
@@ -194,8 +246,15 @@ Narrowed on 2026-09-26 to the documents themselves. The tickets about the
 governance machinery, a lockstep guard that proves only its marker moved, a
 skipped guard that looks like a passed one, checks that read only the ticket
 list, moved to Backlog: they are about the process around the product, and
-several belong upstream in forge-kit. Placed last because every phase before
-it changes what the documents describe.
+several belong upstream in forge-kit. Narrowed again on 2026-10-07 by the
+same test: the mypy matrix gap (#10) and the missing area labels (#143) are a
+gate and a governance change, not documents, and went to Backlog; #181's
+engine docstrings went to Phase 25, which changes `engine.py`. What is left is
+small document fixes plus the two guards the done line names, which no ticket
+builds yet: the plan files them when the phase opens. #244 needs the private
+design canvas re-exported, so it is Andrea's, not an agent's.
+
+Placed last because every phase before it changes what the documents describe.
 
 ## Phase: Backlog
 state: backlog
@@ -216,10 +275,12 @@ they stay here.
 ## Toward 1.0
 
 `versioning.md` says 1.0 comes when the HTTP interface is one worth keeping.
-Three open questions decide whether it is, and each is a phase above rather
-than a promise here: whether anything survives a reboot (Phase 16), what Stop
-does (Phase 19), and whether there is more than one agent (Phase 23). A 1.0
-before all three are answered is a promise about an interface still moving.
+Three questions decide whether it is, and each is a phase above rather than a
+promise here. What Stop does is answered and built (Phase 19), waiting only
+on its watch. Whether there is more than one agent is answered, yes and one
+package each, but not built, and building it changes the start route
+(Phase 23). Whether anything survives a reboot is still open (Phase 16). A 1.0
+before all three are built is a promise about an interface still moving.
 
 ## Deliberately later
 
@@ -271,3 +332,11 @@ Not scheduled, and not to be smuggled into an earlier phase:
   the agent binary resolved twice to 22, as the defect it is. The rest wait in
   Backlog for a phase that edits their files, which the Backlog's first rule
   then hands them to.
+- **Reviewed 2026-10-07, every open ticket against the tree.** Phase 25 was
+  inserted to hold Phase 19's 29 review findings, by the second Backlog rule.
+  Phase 23 was renamed from "Decide on more than one agent" once Andrea
+  decided it, so the old milestone is left on the host, emptied. #360 closed
+  as a premise that did not hold (`procs.py` runs only `ps`, which does not
+  fork), and #291 closed with #334's decision. Phase 17 and 24 each lost a
+  ticket that was not about what the phase is for (#10, #143, #339 to Backlog).
+
