@@ -167,7 +167,10 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # 1659 for the #387 regression: the marker's `withdrawn` flag, and the
     # StopMarker note saying why its owner writes the object and not the
     # table while a failed Kill holds it out.
-    "engine.py": 1659,
+    # 1667 for #408, #411 and #428: the listing carries whether a sequence
+    # is being typed, the stop's age and its recorded policy, so a browser
+    # that did not tap Stop can reopen the wait truthfully.
+    "engine.py": 1667,
     # tmux.py is the module that encodes what tmux actually does
     # rather than what its manual implies, and every entry is a footgun
     # that cost real debugging: prefix matching targets, the colon

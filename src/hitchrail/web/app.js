@@ -1126,20 +1126,19 @@ function confirmClear(project) {
    repaint then rebuilds the dialog every tick, taking focus (#71). */
 const waits = new Map();
 
-function newWait(project) {
+function newWait(project, began = Date.now(), policy = state.server.stop_policy) {
   // `over` lets Exit now's refusal end the ticker, which would otherwise
   // paint "no answer" over the refusal it just showed.
   const previous = waits.get(project.name);
   if (previous) previous.over = true;
   // The policy the person was shown, kept for the whole wait: the server acts
-  // on the one in force at the Stop, whatever is chosen meanwhile (#419). A
-  // wait reopened from another browser can only take today's.
+  // on the one in force at the Stop, whatever is chosen meanwhile (#419).
   const wait = {
-    began: Date.now(),
+    began,
     over: false,
     sawClosing: false,
     exitSeen: false,
-    policy: state.server.stop_policy,
+    policy,
   };
   waits.set(project.name, wait);
   return wait;
@@ -1153,11 +1152,19 @@ function reopenStop(project) {
   }
   // Stopped from another browser, or before this page loaded. The deadline
   // starts now, later than the server's, which errs long as `stopTimeoutMs`
-  // says it should.
-  const wait = newWait(project);
-  wait.sawClosing = project.stopping_phase === "closing";
+  // says it should. The count and the policy come from the row instead: the
+  // count is what a person reads to decide on Exit now (#411), and today's
+  // policy may not be the one the server will act on (#428). The newest row,
+  // since the one this button was drawn from can be a listing old.
+  const current = state.projects.find((p) => p.name === project.name) ?? project;
+  const wait = newWait(
+    project,
+    current.stopBeganHere ?? Date.now(),
+    current.stop_policy ?? state.server.stop_policy,
+  );
+  wait.sawClosing = current.stopping_phase === "closing";
   wait.armed = true;
-  showWaiting(project, wait, waitingPhase(wait, project));
+  showWaiting(project, wait, waitingPhase(wait, current));
   awaitStopped(project, wait);
 }
 
@@ -1190,6 +1197,9 @@ async function beginStop(project) {
    wait is the dialog on screen: a hidden wait must stay hidden, and a
    rebuild on every listing takes focus from under the thumb (#71). */
 function waitingPhase(wait, current) {
+  // #408. Still typing the prompt, which only the tapping browser knew of
+  // itself: a DELETE now is the no-op 202, so no Exit now.
+  if (current?.stopping_phase === "closing" && current.stop_typing) return "sending";
   if (current?.stopping_phase === "closing") return "closing";
   if (current?.stop_ceiling) return "ceiling";
   return wait.sawClosing ? "exiting" : "waiting";
@@ -1240,7 +1250,8 @@ function showWaiting(project, wait, phase) {
   // during `closing` sends the exit now and never retypes the prompt. Not
   // while `sending`, before the first DELETE has answered: the row already
   // reads `closing` while the prompt is typed, and a DELETE then is a no-op
-  // 202, so the button would answer and do nothing.
+  // 202, so the button would answer and do nothing. Another browser learns
+  // of that window from the row's `stop_typing` (#408).
   if (phase === "closing") actions.push(["Exit now", "", () => exitNow(project, wait)]);
   // Phrased as impatience rather than as an alternative, and available
   // for the WHOLE wait rather than only at the end.
@@ -2427,6 +2438,7 @@ function applySession(session) {
     // client per event.
     return;
   }
+  stampStop(session);
   if (fetchesInFlight > 0) {
     // Stamped with the generation current AT ARRIVAL, which is how a listing
     // later decides whether this event predates it or not.
@@ -2449,6 +2461,16 @@ function applySession(session) {
   // is left alone.
   if (session.state !== "running") closeDialog(session.name);
   render();
+}
+
+/* #411. `stop_age_s` is an age, so it becomes an instant on THIS clock at
+   the moment it arrives. Converted later, a row that sat unchanged for a
+   minute would read a minute young. */
+function stampStop(session) {
+  if (typeof session.stop_age_s === "number") {
+    session.stopBeganHere = Date.now() - session.stop_age_s * 1000;
+  }
+  return session;
 }
 
 /* One refetch for a burst, not one per event. Creating several folders in a
@@ -2569,7 +2591,7 @@ async function refresh() {
   }
   // `owed` holds only what arrived after this listing was asked for, so those
   // are newer than it whatever order the two landed in.
-  state.projects = result.body.projects.map((p) => owed.get(p.name) ?? p);
+  state.projects = result.body.projects.map((p) => owed.get(p.name) ?? stampStop(p));
   state.unsupported = result.body.unsupported;
   state.unsupportedTotal = result.body.unsupported_total;
   state.roots = roots;

@@ -156,6 +156,9 @@ One project, as `projects` lists it, as `POST` and `DELETE` on
 | `stopping` | a graceful stop is in flight |
 | `stopping_phase` | while `stopping`: `closing` while the wrap up prompt runs behind the agent's task, `exiting` once the exit is sent; null otherwise |
 | `stop_ceiling` | the exit was sent because the wrap up ran out of `stop_prompt_timeout`, not because it finished |
+| `stop_typing` | while `stopping`: the wrap up prompt or the exit is being typed into the pane this moment, so a `DELETE` now answers 202 and does nothing; false otherwise |
+| `stop_age_s` | while `stopping`: seconds since the stop was requested, as an AGE measured on the server's monotonic clock, never an instant; a client adds it to its own clock at the moment it received the row. A repeated `DELETE` on an `exiting` row starts a new stop and resets it; Exit now does not. Null otherwise |
+| `stop_policy` | while `stopping`: the `stop_policy` the stop was requested under, which is the one its expiry acts on whatever `server.stop_policy` says now (#419); null otherwise |
 | `protected` | the self project; refuses every mutating route |
 | `awaiting_trust` | the agent is sitting on its trust prompt |
 | `awaiting_input` | the agent is sitting on a question only a person can answer |

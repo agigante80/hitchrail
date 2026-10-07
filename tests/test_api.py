@@ -439,6 +439,21 @@ async def test_delete_begins_a_graceful_stop_and_kills_nothing(
     assert tmux.killed == []
 
 
+async def test_a_stopping_row_lists_what_a_reopened_wait_needs(
+    client: httpx.AsyncClient, engine: Engine
+) -> None:
+    """#408, #411, #428: the listing, not the DELETE's reply, is all another
+    browser has. The policy is the one at the Stop, not today's."""
+    await client.delete(f"/api/sessions/{proj('vessel')}", headers=HEADERS)
+    engine.prefs.apply(stop_policy="end_anyway")
+    listed = (await client.get("/api/projects", headers=HEADERS)).json()
+    row = next(s for s in listed["projects"] if s["name"] == proj("vessel"))
+    assert listed["server"]["stop_policy"] == "end_anyway"
+    assert row["stop_policy"] == "ask"
+    assert row["stop_typing"] is False
+    assert isinstance(row["stop_age_s"], float) and row["stop_age_s"] >= 0
+
+
 async def test_a_stop_the_adapter_declined_is_409_stop_unsafe(
     client: httpx.AsyncClient, engine: Engine, tmux: FakeTmux
 ) -> None:

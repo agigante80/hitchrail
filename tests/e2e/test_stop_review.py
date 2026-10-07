@@ -8,6 +8,9 @@ import re
 import pytest
 from playwright.async_api import Page, Route, expect
 
+from hitchrail import claude_ipc
+from hitchrail.engine import StopMarker
+
 from .conftest import Harness
 
 pytestmark = pytest.mark.e2e
@@ -81,3 +84,56 @@ async def test_a_stop_whose_reply_was_lost_is_watched_when_reopened(
     # second it was painted at.
     await expect(dialog).to_contain_text(re.compile(r"\b[3-9]s so far"))
     await expect(dialog).to_be_hidden(timeout=30_000)
+
+
+def _count(text: str) -> int:
+    found = re.search(r"\b(\d+)s so far", text)
+    assert found, text
+    return int(found.group(1))
+
+
+async def test_a_wait_reopened_after_a_reload_counts_from_the_stop(
+    page: Page, server: Harness
+) -> None:
+    """#411. The reloaded page has no wait of its own, and counted from the
+    tap: "1s so far" for a wrap up that had run for longer."""
+    server.seed(running=["vessel"], stop_prompt="/wrapup", wrap_up_takes=120)
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await row.get_by_role("button", name="Stop").click()
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop", exact=True).click()
+    await expect(dialog).to_contain_text(re.compile(r"\b([4-9]|\d\d+)s so far"), timeout=10_000)
+
+    await page.reload()
+    await expect(row).to_have_attribute("data-stopping", "true")
+    await row.get_by_role("button", name="Stop").click()
+    await expect(dialog).to_contain_text("s so far")
+    assert _count(await dialog.inner_text()) >= 4
+
+
+async def test_another_browser_is_offered_no_exit_now_while_the_prompt_is_typed(
+    page: Page, server: Harness
+) -> None:
+    """#408. Only the tapping browser knew it was still sending; any other
+    learned `closing` from the listing and offered an Exit now that answered
+    202 and did nothing. The typing window is planted in the engine, since
+    the real one is a few milliseconds wide."""
+    server.seed(running=["vessel"], stop_prompt="/wrapup", wrap_up_takes=120)
+    engine = server.engine
+    assert engine is not None
+    name = server.project("vessel")
+    marker = StopMarker(engine._clock(), "closing", "ask")
+    engine._stopping[name] = marker
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{name}"]')
+    await expect(row).to_have_attribute("data-stopping", "true")
+    await row.get_by_role("button", name="Stop").click()
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text("Asking it to wrap up, after its current task.")
+    await expect(dialog).to_have_attribute("data-waiting", "sending")
+    assert await dialog.get_by_role("button", name="Exit now").count() == 0
+
+    # The prompt is out: the wait's own ticker moves it on, and Exit now works.
+    marker.watch = claude_ipc.WrapUpWatch(sent_at=engine._clock())
+    await expect(dialog.get_by_role("button", name="Exit now")).to_be_visible()

@@ -59,6 +59,17 @@ Nothing to do on upgrade.
   an unwatched exit's line says how long it took at most, and an unreadable
   machine at expiry no longer drops that the agent was waiting on you (#389,
   #390).
+- A stop's wait reopened in another browser or after a reload now warns of
+  the kill its stop was confirmed under, even if the settings page has since
+  chosen `ask` (#428); counts from the stop rather than from the tap (#411);
+  and offers no Exit now while the wrap up prompt is still being typed, when
+  it would do nothing (#408).
+
+### Added
+
+- Each row of the listing and the event stream carries `stop_typing`,
+  `stop_age_s` and `stop_policy` while it is stopping; a client may ignore
+  them. `docs/api.md` says what each holds.
 
 ## 0.12.0 - 2026-10-01
 

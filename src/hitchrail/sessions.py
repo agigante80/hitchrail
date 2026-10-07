@@ -279,6 +279,14 @@ class Session:
     # from a clock in the browser.
     stopping_phase: str | None = None
     stop_ceiling: bool = False
+    # What a browser that did not tap Stop needs to reopen its wait (#408,
+    # #411, #428): a sequence is being typed into the pane, so a Stop now does
+    # nothing; how long ago the stop began, as an AGE because the engine's
+    # clock is monotonic and shares no epoch with a phone's; and the policy
+    # the stop was confirmed under, which its expiry acts on.
+    stop_typing: bool = False
+    stop_age_s: float | None = None
+    stop_policy: str | None = None
     protected: bool = False
     # An OVERLAY on the four states, like `stopping`, and not a fifth one (#88).
     # The session really is running: the tmux session is alive and owns a live
@@ -347,6 +355,9 @@ class Session:
             "stopping": self.stopping,
             "stopping_phase": self.stopping_phase,
             "stop_ceiling": self.stop_ceiling,
+            "stop_typing": self.stop_typing,
+            "stop_age_s": self.stop_age_s,
+            "stop_policy": self.stop_policy,
             "protected": self.protected,
             "awaiting_trust": self.awaiting_trust,
             "awaiting_input": self.awaiting_input,

@@ -23,6 +23,7 @@ from conftest import (
     procs_from,
     ps_row,
 )
+from hitchrail import claude_ipc
 from hitchrail.claude_ipc import GRACEFUL_STOP_KEYS
 from hitchrail.engine import Engine, MachineUnreadable, Protected, StopMarker, StopRefused
 from hitchrail.tmux import TmuxUnavailable
@@ -630,3 +631,77 @@ def test_a_failed_kill_does_not_restore_a_stop_whose_prompt_failed(root: Path) -
     assert VESSEL not in engine._stopping
     engine.stop(VESSEL)
     assert typed(tmux) == [PROMPT], "a later Stop is a real one again"
+
+
+# -- #408, #411, #428: what another browser needs to reopen a wait ----------
+
+
+def test_a_row_whose_prompt_is_being_typed_says_so(root: Path) -> None:
+    """#408. Every browser but the one that tapped learns of the stop from the
+    listing, and a Stop now is the no-op 202, so Exit now must not be offered."""
+    engine, _, clock = wrap_engine(root)
+    marker = StopMarker(clock(), "closing", "ask")
+    engine._stopping[VESSEL] = marker
+    session = engine.get(VESSEL)
+    assert session.stopping_phase == "closing"
+    assert session.stop_typing is True
+    assert session.as_dict()["stop_typing"] is True
+    marker.watch = claude_ipc.WrapUpWatch(sent_at=clock())
+    assert engine.get(VESSEL).stop_typing is False, "the prompt is out: Exit now works"
+
+
+def test_a_row_whose_exit_is_being_typed_says_so(root: Path) -> None:
+    engine, _, clock = wrap_engine(root)
+    engine._stopping[VESSEL] = StopMarker(
+        clock(), "exiting", "ask", exit_at=clock(), typing=True
+    )
+    assert engine.get(VESSEL).stop_typing is True
+
+
+def test_a_stop_answered_is_not_typing(root: Path) -> None:
+    engine, _, _ = wrap_engine(root)
+    assert engine.stop(VESSEL).stop_typing is False
+    assert engine.get(VESSEL).stop_typing is False
+
+
+def test_a_row_carries_its_stops_age_in_seconds(root: Path) -> None:
+    """#411. An age, never the engine's monotonic instant: a browser compares
+    what it is sent to its own clock, which shares no epoch with this one."""
+    engine, _, clock = wrap_engine(root)
+    engine.stop(VESSEL)
+    began = engine._stopping[VESSEL].began
+    clock.now = began + 20.0
+    session = engine.get(VESSEL)
+    assert session.stop_age_s == 20.0
+    assert session.as_dict()["stop_age_s"] == session.stop_age_s
+
+
+def test_exit_now_keeps_the_stops_age(root: Path) -> None:
+    """Mutated in place (#407), so the wrap up's start survives the exit."""
+    engine, _, clock = wrap_engine(root)
+    engine.stop(VESSEL)
+    began = engine._stopping[VESSEL].began
+    clock.advance(30)
+    engine.stop(VESSEL)
+    assert engine._stopping[VESSEL].began == began
+    assert engine.get(VESSEL).stop_age_s == round(clock() - began, 1)
+
+
+def test_a_row_carries_the_policy_its_stop_was_confirmed_under(root: Path) -> None:
+    """#428. A wait reopened after a reload has no wait of its own to copy the
+    policy from, and the live setting may since have changed."""
+    engine, _, _ = wrap_engine(root)
+    engine.stop(VESSEL)
+    engine.prefs.apply(stop_policy="end_anyway")
+    session = engine.get(VESSEL)
+    assert engine.prefs.stop_policy() == "end_anyway"
+    assert session.stop_policy == "ask"
+    assert session.as_dict()["stop_policy"] == "ask"
+
+
+def test_with_no_stop_in_flight_the_row_carries_no_stop_fields(root: Path) -> None:
+    engine, _, _ = wrap_engine(root)
+    shape = engine.get(VESSEL).as_dict()
+    assert shape["stop_typing"] is False
+    assert shape["stop_age_s"] is None
+    assert shape["stop_policy"] is None

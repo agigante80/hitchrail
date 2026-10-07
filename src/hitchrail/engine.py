@@ -366,7 +366,15 @@ class Engine:
         marker = self._stopping.get(name)
         if session.stopping and marker is not None:
             phase = marker.phase
-            session = replace(session, stopping_phase=phase, stop_ceiling=marker.ceiling)
+            session = replace(
+                session,
+                stopping_phase=phase,
+                stop_ceiling=marker.ceiling,
+                # The condition `stop()` answers with the no-op 202.
+                stop_typing=marker.typing or (phase == "closing" and marker.watch is None),
+                stop_age_s=round(max(0.0, self._clock() - marker.began), 1),
+                stop_policy=marker.policy,
+            )
         return session
 
     def list(self, listing: discovery.Listing | None = None) -> list[Session]:
