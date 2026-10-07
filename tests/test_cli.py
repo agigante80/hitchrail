@@ -1442,6 +1442,37 @@ def test_the_startup_block_says_when_a_proxy_origin_gets_no_secure_cookie(
 
 
 @pytest.mark.parametrize(
+    ("host", "origins", "said"),
+    [
+        ("127.0.0.1", ("https://box.lan",), True),
+        ("127.0.0.1", ("https://box.lan", "http://other.lan"), False),
+        ("127.0.0.1", (), False),
+        ("0.0.0.0", ("https://box.lan",), False),
+    ],
+    ids=["withheld", "one-plain-origin", "no-proxy-origin", "lan-bind"],
+)
+def test_the_startup_block_says_which_plain_origins_are_not_derived(
+    tmp_path: Path, host: str, origins: tuple[str, ...], said: bool
+) -> None:
+    """#391's premortem: an operator on a plain http forwarder upgrades and
+    their grant starts failing. The refusal names the origin; this line is
+    the other half, written before anything is served, saying the origin is
+    not derived, why, and the flag that brings it back."""
+    config = make_config(
+        tmp_path, host=host, token="t" * 24, extra_hosts=("box.lan",), extra_origins=origins
+    )
+    lines = cli.startup_block(
+        config, cli.Preflight([], "/usr/bin/claude", "/usr/bin/tmux"), "info"
+    )
+    found = [line for line in lines if line.startswith("plain http origin not derived")]
+    assert bool(found) is said, lines
+    if said:
+        assert "http://box.lan:8787" in found[0]
+        assert "Secure" in found[0]
+        assert "--allow-origin http://box.lan:8787" in found[0]
+
+
+@pytest.mark.parametrize(
     ("prompt", "said"),
     [
         (None, "stop prompt none"),

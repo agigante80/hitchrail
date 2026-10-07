@@ -127,7 +127,7 @@ global rules say, and findings go to Backlog, not this milestone.
 
 ### Batch 5: bind and command line edges, tasks 192 to 196
 
-- [ ] **Task 192, #391.** No plain http origin derived for an https only
+- [x] **Task 192, #391.** No plain http origin derived for an https only
       declared host under a loopback bind (decided 2026-10-07); the
       docstring says why; `CHANGELOG.md` under Changed. Security auditor
       review required.

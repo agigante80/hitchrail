@@ -400,8 +400,9 @@ class Config:
         proxy's scheme, which is the https one the origins name. Not "that
         path cannot exist": `remote_reach` above says why a bind address is
         not the whole answer, and a plain http forwarder onto our own port
-        would reach the derived origin. What that costs is the flag, on a
-        path the operator arranged themselves.
+        is one. Since #391 that forwarder's origin is not derived, so its
+        grant is refused by name rather than answered with a cookie its
+        browser drops; `plain_origins_withheld` says which hosts.
 
         It stays FALSE for a plain HTTP LAN deployment, which is the failure
         the original rule was avoiding: a `Secure` cookie there is never
@@ -421,6 +422,17 @@ class Config:
             return False
         proxied = [parts for entry in self.extra_origins if (parts := _origin_parts(entry))]
         return bool(proxied) and all(scheme == "https" for scheme, _ in proxied)
+
+    @property
+    def plain_origins_withheld(self) -> tuple[str, ...]:
+        """The allowed hosts whose plain http origin is NOT derived (#391);
+        `_derive_allowed_origins` says why. Asked of the cookie rule rather
+        than restating it, since two readers of one rule drift (#269). A
+        loopback host is kept: Chrome and Firefox send a `Secure` cookie to
+        `http://localhost`."""
+        if self.tls or not self.cookie_is_secure:
+            return ()
+        return tuple(h for h in self._allowed_hosts if not is_loopback_host(h))
 
     def _check_tls(self) -> None:
         """One flag without the other is a configuration error, not half a
@@ -782,9 +794,25 @@ class Config:
         is precisely the case we cannot derive: the scheme is the proxy's, the
         port is the proxy's, and only the operator knows either. So it is
         `extra_origins`, and the README says so.
+
+        **What we can know excludes an origin the cookie cannot work on
+        (#391, decided 2026-10-07).** A loopback bind behind https origins
+        sets a `Secure` cookie, and a browser on `http://box.lan:8787`
+        discards it, so deriving that origin for a declared `--allow-host`
+        accepted a grant and then refused every request after it with a
+        correct token, forever. Two alternatives were declined: keeping it
+        (the loop above), and dropping `Secure` for a request that arrived
+        on it, which brings back the per request cookie rule #269 decided
+        against. Withheld, the grant meets the origin refusal, which names
+        the origin, and the startup block says which ones and how to get
+        them back: `--allow-origin http://box.lan:8787` given explicitly,
+        which also turns `Secure` off, because the cookie rule reads it.
         """
+        withheld = set(self.plain_origins_withheld)
         origins: set[str] = set()
         for host in self._allowed_hosts:
+            if host in withheld:
+                continue
             # `self.scheme`, not "http": with TLS on, a browser sends
             # `https://host:port`, and deriving `http` here refused every
             # mutating request with a 403 blaming the origin check. That is

@@ -44,6 +44,11 @@ The origin check applies to mutating requests only. `GET` is exempt, because
 `EventSource` cannot set headers. The origins derived from the server's own
 bind carry its own scheme, `https` with `--tls-cert` and `http` without; an
 origin a proxy presents is `--allow-origin`, with the proxy's scheme and port.
+One derived origin is withheld (#391): on a loopback bind whose every
+non loopback `--allow-origin` is https, the session cookie is `Secure`, so the
+plain `http` origin of an `--allow-host` is not derived and a grant from it is
+`403 origin_rejected`, naming the origin, rather than a cookie its browser
+would drop. The startup log names each one withheld.
 
 ## What `{name}` is
 

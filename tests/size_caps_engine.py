@@ -328,7 +328,9 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # 789 for #242: `stop_prompt` and its ceiling, with the refusals for
     # a newline or a control character and the 10s floor.
     # 803 for #239: `stop_policy` and its literal refusal.
-    "config.py": 803,
+    # 831 for #391: `plain_origins_withheld`, the one derived origin a
+    # `Secure` cookie cannot return on, and the decision's argument.
+    "config.py": 831,
     # 409, nine lines over, down from 542. #115 deleted the `?token=`
     # carrier: 135 lines once the two blocks inside `TokenMiddleware`
     # that only served it are counted.

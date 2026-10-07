@@ -32,7 +32,20 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
-Nothing to do on upgrade.
+One deployment has something to do: a loopback bind behind an https proxy
+that is ALSO reached over a plain http forwarder or alias. See Changed.
+
+### Changed
+
+- On a loopback bind whose every `--allow-origin` off this machine is https,
+  the plain `http://` origin of an `--allow-host` is no longer accepted: its
+  grant is refused with `origin not allowed` naming the origin, where before
+  it was accepted and then every request was refused, because the session
+  cookie there is `Secure` and a browser on plain http drops it. The startup
+  log names each origin withheld. If you reach Hitchrail that way on
+  purpose, for example through a plain http forwarder onto its port, add
+  that origin with `--allow-origin http://box.lan:8787`, which also turns the
+  cookie's `Secure` flag off, or reach it through the https origin (#391).
 
 ### Fixed
 

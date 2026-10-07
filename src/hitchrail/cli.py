@@ -30,7 +30,7 @@ from hitchrail.config import (
 )
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
-from hitchrail.hostnames import reachable_hosts
+from hitchrail.hostnames import origin_forms, reachable_hosts
 from hitchrail.roots import Root, RootError, parse_root_argument
 from hitchrail.server import create_app
 
@@ -597,6 +597,15 @@ def startup_block(config: Config, found: Preflight, level: str) -> list[str]:
         lines.append(
             "token cookie not Secure: an https origin is set but this plain http bind "
             "is off loopback; bind loopback behind the proxy to get the flag"
+        )
+    # #391: the grant from these is now refused, and an operator on a plain
+    # forwarder needs to learn that before the phone does.
+    for host in config.plain_origins_withheld:
+        plain = min(origin_forms("http", host, config.port), key=len)
+        lines.append(
+            f"plain http origin not derived for {plain}: every --allow-origin is https, "
+            f"so the token cookie is Secure and a browser on plain http would drop it. "
+            f"Give --allow-origin {plain} to serve it, which turns Secure off"
         )
     return lines
 
