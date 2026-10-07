@@ -79,7 +79,7 @@ global rules say, and findings go to Backlog, not this milestone.
 
 ### Batch 1: `engine.py` split along its seam, task 177
 
-- [ ] **Task 177, #274 (P3).** The pidfd and signal path leaves `engine.py`
+- [x] **Task 177, #274 (P3).** The pidfd and signal path leaves `engine.py`
       for its own module, every public name still reached as before. The
       structural guards key on the new path first, as a no-op commit, so the
       move's diff proves one thing. The size cap, `.claude/rules/security.md`'s

@@ -145,7 +145,13 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # wrap up is refused, which ends the stop as expiry does.
     # 1786 for #239's review: one look then act per name, so a later
     # row's look is never stale by the time of its kill.
-    "engine.py": 1786,
+    # 1566 for #274: the pidfd path, the one destructive path scoped by a
+    # check rather than by the prefix, moved to `signals.py` with its seam
+    # and its refusals, which is the split the #107 and #272 notes above
+    # deferred. What remains is the lifecycle and the stop sequence, whose
+    # notes are the footguns and are why the file is still past 400.
+    # `signals.py` itself came in under the guideline and needs no entry.
+    "engine.py": 1566,
     # tmux.py is the module that encodes what tmux actually does
     # rather than what its manual implies, and every entry is a footgun
     # that cost real debugging: prefix matching targets, the colon
