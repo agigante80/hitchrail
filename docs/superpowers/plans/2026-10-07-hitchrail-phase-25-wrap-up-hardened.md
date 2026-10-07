@@ -112,7 +112,7 @@ global rules say, and findings go to Backlog, not this milestone.
 - [x] **Task 186, #408, #411.** One listing change, two fields: the typing
       phase other browsers must see, and the stop's start a reopened wait
       counts from. `docs/api.md` in the same commit.
-- [ ] **Task 187, #416, #414.** A repeated Stop on an exiting row says exit,
+- [x] **Task 187, #416, #414.** A repeated Stop on an exiting row says exit,
       not wrap up; Stop all counts in the singular.
 - [ ] **Task 188, #417.** The lost reply test fails without the fix on a slow
       runner, re-checked after task 186.

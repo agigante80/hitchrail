@@ -15,7 +15,9 @@ import time
 import pytest
 from playwright.async_api import Page, Route, expect
 
-from .conftest import Harness, grant_and_land
+from hitchrail.engine import StopMarker
+
+from .conftest import Harness, e2e_name, grant_and_land
 
 pytestmark = pytest.mark.e2e
 
@@ -744,7 +746,8 @@ async def _open_stop_all(page: Page, server: Harness, expected: int) -> None:
     await expect(page.locator("[data-project]")).to_have_count(50, timeout=15_000)
     await page.get_by_role("button", name="Stop all").click()
     dialog = page.locator("[data-dialog]")
-    await expect(dialog).to_contain_text(f"Stop {expected} sessions?")
+    plural = "session" if expected == 1 else "sessions"
+    await expect(dialog).to_contain_text(f"Stop {expected} {plural}?")
 
 
 async def test_stop_all_issues_the_stops_one_at_a_time_and_never_for_the_self_project(
@@ -1081,3 +1084,46 @@ async def test_a_wait_that_is_over_is_superseded_by_the_next_stop_all(
 
     await page.get_by_role("button", name="Stop all").click()
     await expect(dialog).to_contain_text("Stop 2 sessions?")
+
+
+# -- #414, #416: Stop all's words agree with its set ---------------------------
+
+
+async def test_stop_all_counts_one_session_in_the_singular(page: Page, server: Harness) -> None:
+    """#414. A row wrapping up leaves the set, so two running rows with one
+    stopped are a set of one, which is the common case since #242."""
+    server.seed(running=["vessel", "wharf"], stop_prompt="/wrapup", wrap_up_takes=120)
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await row.get_by_role("button", name="Stop").click()
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop", exact=True).click()
+    await expect(dialog.get_by_role("button", name="Exit now")).to_be_visible()
+    await dialog.get_by_role("button", name="Hide, keep stopping").click()
+
+    await page.get_by_role("button", name="Stop all").click()
+    await expect(dialog).to_contain_text("Stop 1 session?")
+    await dialog.get_by_role("button", name="Stop all", exact=True).click()
+    await expect(dialog).to_contain_text("Stopping 1 session")
+    assert "1 sessions" not in await dialog.inner_text()
+
+
+async def test_stop_all_names_the_rows_it_only_asks_to_exit_again(
+    page: Page, server: Harness
+) -> None:
+    """#416. An `exiting` row is in Stop all's set, and the server resends
+    its exit rather than typing a wrap up."""
+    server.seed(running=["vessel", "wharf"], stop_prompt="/wrapup", wrap_up_takes=120)
+    engine = server.engine
+    assert engine is not None
+    now = engine._clock()
+    engine._stopping[server.project("vessel")] = StopMarker(now, "exiting", "ask", exit_at=now)
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row).to_have_attribute("data-stopping", "true")
+    await page.get_by_role("button", name="Stop all").click()
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text("Stop 2 sessions?")
+    await expect(dialog).to_contain_text(
+        f"{e2e_name('vessel')} is already asked to exit, and will only be asked again."
+    )

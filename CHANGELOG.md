@@ -64,6 +64,10 @@ Nothing to do on upgrade.
   chosen `ask` (#428); counts from the stop rather than from the tap (#411);
   and offers no Exit now while the wrap up prompt is still being typed, when
   it would do nothing (#408).
+- Stop on a row already asked to exit, and Stop all over a set holding one,
+  no longer promise a wrap up the server will not type: they say the exit is
+  asked again (#416). Stop all over one session says "Stop 1 session?"
+  (#414).
 
 ### Added
 

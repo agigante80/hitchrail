@@ -1091,12 +1091,19 @@ function confirmStop(project) {
     // #242: with a wrap up prompt set the first thing sent is the prompt,
     // queued behind the current task, and nothing is interrupted unless the
     // wrap up outlasts its ceiling. The warning moves to that case.
+    //
+    // #416: on an `exiting` row the server resends the exit and types no
+    // prompt, whatever `stop_prompt` says, so promising a wrap up there is
+    // the mismatch #242's round 1 objected to.
     body: [
-      state.server.stop_prompt_set
-        ? "It will be asked to wrap up after its current task, then to exit. "
-          + `If that takes longer than ${wrapUpSeconds()}s, the task is interrupted.`
-        : "It will be interrupted, then asked to exit. "
-          + "Anything it is part way through may be lost.",
+      project.stopping_phase === "exiting"
+        ? "It was asked to exit and has not yet, and will be asked again. "
+          + "Anything it is part way through may be lost."
+        : state.server.stop_prompt_set
+          ? "It will be asked to wrap up after its current task, then to exit. "
+            + `If that takes longer than ${wrapUpSeconds()}s, the task is interrupted.`
+          : "It will be interrupted, then asked to exit. "
+            + "Anything it is part way through may be lost.",
       endAnywayNote(),
     ].filter(Boolean).join(" "),
     // Cancel and Stop, and nothing else. A kill control at this step puts the
@@ -1170,7 +1177,12 @@ function reopenStop(project) {
 
 async function beginStop(project) {
   const wait = newWait(project);
-  showWaiting(project, wait, state.server.stop_prompt_set ? "sending" : "waiting");
+  // A resent exit (#416) is watched as the exit after a wrap up is: its
+  // deadline starts from the first `exiting` reading, not a wrap up away.
+  const resend = project.stopping_phase === "exiting";
+  if (resend) wait.sawClosing = true;
+  const first = resend ? "exiting" : state.server.stop_prompt_set ? "sending" : "waiting";
+  showWaiting(project, wait, first);
   const result = await api(`/api/sessions/${encodeURIComponent(project.name)}`, {
     method: "DELETE",
   });
@@ -1186,7 +1198,7 @@ async function beginStop(project) {
   // it did before #242: from the tap it would end before the server's own
   // expiry most times, and say "no answer" before the server's one look at
   // the pane could say the agent is waiting on a question (#242 review).
-  if (!state.server.stop_prompt_set) wait.armed = true;
+  if (!state.server.stop_prompt_set || resend) wait.armed = true;
   await refresh();
   awaitStopped(project, wait);
 }
@@ -1681,6 +1693,10 @@ function stoppableRows() {
   );
 }
 
+function sessionCount(n) {
+  return n === 1 ? "1 session" : `${n} sessions`;
+}
+
 function renderStopAll() {
   const button = $("[data-stop-all]");
   if (button) button.hidden = stoppableRows().length === 0;
@@ -1705,14 +1721,29 @@ function confirmStopAll() {
   }
   const rows = stoppableRows();
   if (rows.length === 0) return;
+  // #416: an `exiting` row is in the set and gets its exit resent, never a
+  // wrap up, so it is named rather than covered by "each".
+  const again = rows.filter((p) => p.stopping_phase === "exiting");
+  const fresh = rows.length - again.length;
   showDialog({
-    title: `Stop ${rows.length} sessions?`,
+    title: `Stop ${sessionCount(rows.length)}?`,
     body: [
-      state.server.stop_prompt_set
-        ? "Each will be asked to wrap up after its current task, then to exit. "
-          + `A wrap up longer than ${wrapUpSeconds()}s has its task interrupted.`
-        : "Each will be interrupted, then asked to exit, one at a time. "
-          + "Anything they are part way through may be lost.",
+      fresh === 0
+        ? ""
+        : state.server.stop_prompt_set
+          ? `${fresh === 1 ? "It" : "Each"} will be asked to wrap up after its current `
+            + `task, then to exit. A wrap up longer than ${wrapUpSeconds()}s has its task `
+            + "interrupted."
+          : fresh === 1
+            ? "It will be interrupted, then asked to exit. "
+              + "Anything it is part way through may be lost."
+            : "Each will be interrupted, then asked to exit, one at a time. "
+              + "Anything they are part way through may be lost.",
+      again.length === 0
+        ? ""
+        : `${again.map((p) => displayProject(p.name)).join(", ")} `
+          + `${again.length === 1 ? "is" : "are"} already asked to exit, `
+          + "and will only be asked again.",
       endAnywayNote(),
     ].filter(Boolean).join(" "),
     actions: [
@@ -1852,8 +1883,8 @@ function showBulkWait() {
     list.append(item);
   }
   showDialog({
-    title: `Stopping ${bulk.rows.length} sessions`,
-    body: "Waiting for them to exit.",
+    title: `Stopping ${sessionCount(bulk.rows.length)}`,
+    body: bulk.rows.length === 1 ? "Waiting for it to exit." : "Waiting for them to exit.",
     extra: list,
     actions: [
       ["Hide, keep stopping", "ghost", () => closeDialog()],
@@ -1918,7 +1949,7 @@ function renderBulk() {
     // The risk before the kill is offered, as the single row timeout does.
     body.textContent =
       `${unfinished} ${unfinished === 1 ? "has" : "have"} not finished. Killing now ends `
-      + "them immediately, and anything not written to disk is lost.";
+      + `${unfinished === 1 ? "it" : "them"} immediately, and anything not written to disk is lost.`;
   }
 }
 

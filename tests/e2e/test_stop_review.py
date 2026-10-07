@@ -3,6 +3,7 @@ deadline against the server's expiry. Waits are on the page, never a sleep."""
 
 from __future__ import annotations
 
+import asyncio
 import re
 
 import pytest
@@ -137,3 +138,42 @@ async def test_another_browser_is_offered_no_exit_now_while_the_prompt_is_typed(
     # The prompt is out: the wait's own ticker moves it on, and Exit now works.
     marker.watch = claude_ipc.WrapUpWatch(sent_at=engine._clock())
     await expect(dialog.get_by_role("button", name="Exit now")).to_be_visible()
+
+
+def _plant_exiting(server: Harness, folder: str) -> None:
+    """An exit already sent and not yet obeyed: the row reads `exiting`
+    without a ten second ceiling to wait out."""
+    engine = server.engine
+    assert engine is not None
+    now = engine._clock()
+    engine._stopping[server.project(folder)] = StopMarker(now, "exiting", "ask", exit_at=now)
+
+
+async def test_a_repeated_stop_on_an_exiting_row_says_exit_not_wrap_up(
+    page: Page, server: Harness
+) -> None:
+    """#416. The server types no prompt on an `exiting` row, it resends the
+    exit, so neither the confirmation nor the wait may promise a wrap up."""
+    server.seed(running=["vessel"], stop_prompt="/wrapup", wrap_up_takes=120)
+    _plant_exiting(server, "vessel")
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row).to_have_attribute("data-stopping", "true")
+    await row.get_by_role("button", name="Stop").click()
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text("asked again")
+    assert "wrap up" not in (await dialog.inner_text()).lower()
+
+    held = asyncio.Event()
+
+    async def hold(route: Route) -> None:
+        if route.request.method == "DELETE":
+            await held.wait()
+        await route.continue_()
+
+    await page.route("**/api/sessions/*", hold)
+    await dialog.get_by_role("button", name="Stop", exact=True).click()
+    await expect(dialog).to_have_attribute("data-waiting", "exiting")
+    await expect(dialog).to_contain_text("Asking it to exit.")
+    held.set()
+    await expect(row).to_have_attribute("data-state", "stopped", timeout=20_000)
