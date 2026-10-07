@@ -103,7 +103,7 @@ global rules say, and findings go to Backlog, not this milestone.
       carry the attention epoch.
 - [x] **Task 183, #419.** The stop policy is recorded at `stop()` and read
       from the marker at expiry (decided 2026-10-07).
-- [ ] **Task 184, #389, #390.** The start line after the start, the timeout
+- [x] **Task 184, #389, #390.** The start line after the start, the timeout
       line's wording, duration and person wait.
 - [ ] **Task 185, #181.** The two docstrings from #100 say what the code does.
 

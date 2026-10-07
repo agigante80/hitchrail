@@ -3700,6 +3700,75 @@ def test_a_stop_that_worked_unwatched_is_not_logged_as_given_up(
     assert "after the agent had already exited" in caplog.text
 
 
+def test_a_start_that_fails_never_logs_running(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#389. The line before the attempt is intent; only the confirmation
+    after it may say the agent is running."""
+    engine, tmux, _ = start_engine(root)
+    tmux.fail_new_session = TmuxUnavailable("tmux is gone")
+    with caplog.at_level(logging.INFO, logger="hitchrail"), pytest.raises(MachineUnreadable):
+        engine.start(proj("vessel"))
+    assert f"start {proj('vessel')}: starting in" in caplog.text
+    assert "running" not in caplog.text
+
+
+def test_a_start_that_succeeds_logs_its_pid(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    engine, _, _ = start_engine(root, table=running_after())
+    with caplog.at_level(logging.INFO, logger="hitchrail"):
+        started = engine.start(proj("vessel"))
+    assert f"running as pid {started.pid}" in caplog.text
+
+
+def test_a_stale_row_at_expiry_is_not_logged_as_given_up(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#390. The agent exited and only its session outlived it, which is a
+    stop that worked, not one that failed."""
+    engine, _, clock = live_engine(root)
+    engine.stop(proj("vessel"))
+    engine._procs_fn = procs_from(ps_row(PANE, 1))
+    clock.advance(engine.config.stop_timeout + 1)
+    with caplog.at_level(logging.INFO, logger="hitchrail.engine"):
+        engine.expire_stops()
+    assert engine.get(proj("vessel")).state is State.STALE
+    assert "gave up" not in caplog.text
+    assert "the agent exited and its tmux session remains" in caplog.text
+
+
+def test_an_unwatched_exit_says_how_long_it_took_at_most(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#390. The commonest unwatched case, and a one second wrap up is only
+    visible as a number (Phase 19's premortem)."""
+    engine, tmux, clock = live_engine(root)
+    engine.stop(proj("vessel"))
+    engine._procs_fn = procs_from("")
+    tmux.sessions.pop(proj("vessel"))
+    clock.advance(engine.config.stop_timeout + 1)
+    with caplog.at_level(logging.INFO, logger="hitchrail.engine"):
+        engine.expire_stops()
+    assert re.search(r"already exited, within \d+", caplog.text)
+
+
+def test_an_unreadable_expiry_still_says_a_person_is_needed(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#390. The look at the pane happened; the machine read after it failed,
+    and the warning must not drop what the look found."""
+    engine, tmux, clock = live_engine(root)
+    engine.stop(proj("vessel"))
+    tmux.pane_text[proj("vessel")] = MODAL_PANE
+    engine._procs_fn = failing_procs
+    clock.advance(engine.config.stop_timeout + 1)
+    with caplog.at_level(logging.INFO, logger="hitchrail.engine"):
+        engine.expire_stops()
+    assert "machine could not be read" in caplog.text
+    assert "its screen is waiting on a person" in caplog.text
+
+
 def test_a_refused_stop_says_why_in_the_log(
     root: Path, caplog: pytest.LogCaptureFixture
 ) -> None:

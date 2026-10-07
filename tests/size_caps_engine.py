@@ -162,7 +162,9 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # overlay outside the sweep honour the attention epoch as it does.
     # 1635 for #419: the marker records the stop policy at `stop()`, and
     # the note saying why expiry reads it there and not the live setting.
-    "engine.py": 1635,
+    # 1649 for #390: the timeout line's third case, a `stale` row that is a
+    # stop that worked, with why, and the unwatched exit's duration.
+    "engine.py": 1649,
     # tmux.py is the module that encodes what tmux actually does
     # rather than what its manual implies, and every entry is a footgun
     # that cost real debugging: prefix matching targets, the colon

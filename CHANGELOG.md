@@ -54,6 +54,11 @@ Nothing to do on upgrade.
 - A stop ends under the `stop_policy` in force when it was requested, as its
   wait dialog says, so choosing `end_anyway` on the settings page during a
   wait no longer turns that wait into a kill, nor `ask` cancel one (#419).
+- The journal no longer says a start is running before it is attempted, nor
+  that a stop gave up when the agent exited and only its tmux session stayed;
+  an unwatched exit's line says how long it took at most, and an unreadable
+  machine at expiry no longer drops that the agent was waiting on you (#389,
+  #390).
 
 ## 0.12.0 - 2026-10-01
 

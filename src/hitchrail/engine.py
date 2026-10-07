@@ -654,7 +654,7 @@ class Engine:
         argv = claude_ipc.launch_argv(self.config.spawn_agent_binary, name)
         # The argv the scrub left (#113): the environment is withheld from
         # the child, never the arguments, so there is nothing in it to hide.
-        logger.info("start %s: in %s, running %s", name, path_str, argv)
+        logger.info("start %s: starting in %s with %s", name, path_str, argv)
         try:
             if current.state is State.STALE:
                 # A terminal with no agent in it. Reusing it would start the
@@ -1502,13 +1502,15 @@ class Engine:
             # prompt. The protected project is refused after the handle.
             if waiting and seen is not None and signals.end_anyway(self, name, seen):
                 continue
+            person = "; its screen is waiting on a person" if waiting else ""
             try:
                 session = self.get(name)
             except MachineUnreadable:
                 logger.warning(
                     "stop timer for %s expired but the machine could not be "
-                    "read, so no event was sent; the marker is already dropped",
+                    "read, so no event was sent; the marker is already dropped%s",
                     name,
+                    person,
                 )
                 continue
             # Worded from the state read AFTER the timer, never assumed (#167
@@ -1516,9 +1518,21 @@ class Engine:
             # no browser connected nothing calls it, so an agent that exited at
             # 12s still reaches this line at 30s. Saying "still running" there
             # is the journal calling a stop that worked a failure.
+            # `stale` too (#390): the agent went and only its session stayed,
+            # held by another window or a failed `remain-on-exit` clear. The
+            # time is from the Stop, an upper bound nothing watched shrink.
             if session.state is State.STOPPED:
                 logger.info(
-                    "stop %s: the %gs wait ran out after the agent had already exited",
+                    "stop %s: the %gs wait ran out after the agent had already "
+                    "exited, within %.1fs of the stop",
+                    name,
+                    self.prefs.stop_timeout(),
+                    now - marker.began,
+                )
+            elif session.state is State.STALE:
+                logger.info(
+                    "stop %s: the %gs wait ran out; the agent exited and its "
+                    "tmux session remains",
                     name,
                     self.prefs.stop_timeout(),
                 )
@@ -1528,7 +1542,7 @@ class Engine:
                     name,
                     self.prefs.stop_timeout(),
                     session.state.value,
-                    "; its screen is waiting on a person" if waiting else "",
+                    person,
                 )
             self._announce(session)
         return expired
