@@ -219,12 +219,18 @@ async def test_the_stream_carries_the_whole_session_shape(live: Fixture) -> None
         "stopping",
         "stopping_phase",
         "stop_ceiling",
+        "stop_typing",
+        "stop_age_s",
+        "stop_policy",
         "protected",
         "awaiting_trust",
         "awaiting_input",
         "foreign_session",
         "foreign_server_pid",
     }
+    # #411, #428: what another browser reopens a wait from, over the wire.
+    assert isinstance(event["stop_age_s"], float)
+    assert event["stop_policy"] == "ask"
 
 
 async def test_an_idle_stream_survives_its_own_poll_timeout(live: Fixture) -> None:
