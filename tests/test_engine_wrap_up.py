@@ -24,7 +24,7 @@ from conftest import (
     ps_row,
 )
 from hitchrail.claude_ipc import GRACEFUL_STOP_KEYS
-from hitchrail.engine import Engine, Protected, StopMarker, StopRefused
+from hitchrail.engine import Engine, MachineUnreadable, Protected, StopMarker, StopRefused
 from hitchrail.tmux import TmuxUnavailable
 from support import DEFAULT_LABEL, make_config
 from test_wrap_up import BUSY, QUEUED, SETTLE
@@ -558,3 +558,75 @@ def test_the_sweep_reports_only_the_exits_it_sent(root: Path) -> None:
 
     tmux.send_keys = send_keys  # type: ignore[method-assign]
     assert engine.advance_wrap_ups() == []
+
+
+# -- #387: a Kill that fails while the prompt is typed -----------------------
+
+
+def _kill_fails_while_the_stop_types(
+    engine: Engine, tmux: FakeTmux, prompt_raises: bool
+) -> None:
+    """The exact interleaving: Stop claims `closing` and types; Kill takes the
+    marker out; the Stop finishes (or fails) while it is out; then Kill's
+    `kill-session` raises and it hands the marker back. Two threads, but one
+    schedule: the kill releases the typing and joins it before raising."""
+    in_prompt = threading.Event()
+    release = threading.Event()
+    real_send_text = tmux.send_text
+
+    def send_text(project: str, text: str) -> None:
+        in_prompt.set()
+        assert release.wait(timeout=5)
+        if prompt_raises:
+            raise TmuxUnavailable("gone while the prompt was typed")
+        real_send_text(project, text)
+
+    errors: list[BaseException] = []
+
+    def person() -> None:
+        try:
+            engine.stop(VESSEL)
+        except BaseException as exc:  # the failing variant raises by design
+            errors.append(exc)
+
+    stopper = threading.Thread(target=person)
+
+    def kill_session(project: str) -> None:
+        release.set()
+        stopper.join(timeout=5)
+        assert not stopper.is_alive()
+        raise TmuxUnavailable("kill-session failed")
+
+    tmux.send_text = send_text  # type: ignore[method-assign]
+    tmux.kill_session = kill_session  # type: ignore[method-assign]
+    stopper.start()
+    assert in_prompt.wait(timeout=5)
+    with pytest.raises(MachineUnreadable):
+        engine.kill(VESSEL)
+    del tmux.send_text, tmux.kill_session
+    assert len(errors) == int(prompt_raises)
+
+
+def test_a_failed_kill_while_the_prompt_is_typed_leaves_a_wrap_up_the_sweep_ends(
+    root: Path,
+) -> None:
+    """Restored `closing` with no watch, every later Stop was the no-op 202,
+    the sweep skipped it and expiry never saw it: only a Kill that worked
+    cleared it."""
+    engine, tmux, clock = wrap_engine(root)
+    _kill_fails_while_the_stop_types(engine, tmux, prompt_raises=False)
+    marker = engine._stopping[VESSEL]
+    assert marker.phase == "closing"
+    assert marker.watch is not None
+    assert finish(engine, clock) == [VESSEL]
+    assert exits_sent(tmux) == 1
+
+
+def test_a_failed_kill_does_not_restore_a_stop_whose_prompt_failed(root: Path) -> None:
+    """The same stranding by the other road: the Stop gave its marker up while
+    the Kill held it, so handing it back resurrects a wait for nothing."""
+    engine, tmux, _ = wrap_engine(root)
+    _kill_fails_while_the_stop_types(engine, tmux, prompt_raises=True)
+    assert VESSEL not in engine._stopping
+    engine.stop(VESSEL)
+    assert typed(tmux) == [PROMPT], "a later Stop is a real one again"

@@ -140,6 +140,13 @@ class StopMarker:
     now mutates the `closing` marker in place, and a refused exit restores
     `closing` and its watch on the same object (`Engine._give_back`).
 
+    **The owner writes the OBJECT, not the table** (#387): the watch, the
+    give back and `withdrawn`. Kill takes the marker out before its
+    `kill-session` and hands it back if that fails, so a check that the
+    marker is still in the table read false in that window, the outcome was
+    lost, and Kill restored `closing` with no watch: stranded, as #407 was.
+    Writing a marker no table holds costs nothing, since nothing reads one.
+
     A claim writes `exit_at`, `ceiling` and `typing` BEFORE `phase`, and
     `_derive` reads `phase` first without the lock, so a reader that sees
     `exiting` sees the flags that came with it.
@@ -156,6 +163,7 @@ class StopMarker:
     exit_at: float | None = None
     ceiling: bool = False
     typing: bool = False
+    withdrawn: bool = False
 
 
 class Engine:
@@ -449,14 +457,15 @@ class Engine:
             self._drop(name, marker)
             return
         with self._stopping_guard:
-            if self._stopping.get(name) is marker:
-                marker.exit_at, marker.ceiling, marker.typing = None, False, False
-                marker.watch = resume
-                marker.phase = "closing"
+            marker.exit_at, marker.ceiling, marker.typing = None, False, False
+            marker.watch = resume
+            marker.phase = "closing"
 
     def _drop(self, name: str, marker: StopMarker) -> None:
-        """Remove `marker`, and only it: a newer stop's stays (#242)."""
+        """Remove `marker`, and only it: a newer stop's stays (#242). Flagged
+        too, so a failed Kill holding it does not hand it back (#387)."""
         with self._stopping_guard:
+            marker.withdrawn = True
             if self._stopping.get(name) is marker:
                 del self._stopping[name]
 
@@ -926,9 +935,9 @@ class Engine:
         finally:
             self._done_typing(typing)
         if wrapping_up:
+            # On the object whatever the table holds (#387): see StopMarker.
             with self._stopping_guard:
-                if self._stopping.get(name) is typing:
-                    typing.watch = claude_ipc.WrapUpWatch(sent_at=self._clock())
+                typing.watch = claude_ipc.WrapUpWatch(sent_at=self._clock())
             logger.info(
                 "stop %s: wrap up sent, waiting up to %gs for it",
                 name,
@@ -1051,7 +1060,8 @@ class Engine:
         except TmuxUnavailable as exc:
             if marker is not None:
                 with self._stopping_guard:
-                    self._stopping.setdefault(name, marker)
+                    if not marker.withdrawn:
+                        self._stopping.setdefault(name, marker)
             raise MachineUnreadable(str(exc)) from exc
         # Before `_await_gone`, which reads the machine and can raise: the
         # kill happened whatever that read says.
