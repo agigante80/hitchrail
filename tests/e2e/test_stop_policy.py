@@ -91,3 +91,30 @@ async def test_a_policy_the_operator_set_is_text_on_the_settings_page(
     )
     assert await page.locator("[data-stop-policy]").is_hidden()
     assert await page.locator("[data-policy-save]").is_hidden()
+
+
+async def test_a_policy_changed_during_the_wait_does_not_change_its_words(
+    page: Page, server: Harness
+) -> None:
+    """#419. The stop keeps the policy it was confirmed under, so its wait
+    must keep saying what that policy does, whatever the listing now says.
+    A wrap up, because only a `closing` row's Stop reopens the wait, which
+    paints the words afresh from the listing."""
+    server.seed(running=["vessel"], stop_prompt="/wrapup", wrap_up_takes=120)
+    await _confirm(page, server)
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop", exact=True).click()
+    await expect(dialog.get_by_role("button", name="Exit now")).to_be_visible()
+    assert server.engine is not None
+    server.engine.prefs.apply(stop_policy="end_anyway")
+    await page.evaluate("() => window.__hitchrail.refresh()")
+    assert await page.evaluate("() => window.__hitchrail.state.server.stop_policy") == (
+        "end_anyway"
+    )
+    await dialog.get_by_role("button", name="Hide, keep stopping").click()
+    await expect(dialog).to_be_hidden()
+
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await row.get_by_role("button", name="Stop").click()
+    await expect(dialog).to_contain_text("Asking it to wrap up")
+    assert NOTE not in await dialog.inner_text()

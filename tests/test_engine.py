@@ -792,7 +792,7 @@ def test_the_stopping_overlay_applies_to_every_live_state(
     """
     sessions, table = machine
     engine, _ = engine_for(root, sessions=sessions, table=table)
-    engine._stopping[proj("vessel")] = StopMarker(1234.0, "exiting", exit_at=1234.0)
+    engine._stopping[proj("vessel")] = StopMarker(1234.0, "exiting", "ask", exit_at=1234.0)
 
     session = engine.get(proj("vessel"))
     assert session.stopping is True
@@ -819,7 +819,7 @@ def test_the_overlay_does_not_apply_to_a_stopped_session(root: Path) -> None:
     """
     sessions, table = STOPPED_MACHINE
     engine, _ = engine_for(root, sessions=sessions, table=table)
-    engine._stopping[proj("vessel")] = StopMarker(1234.0, "exiting", exit_at=1234.0)
+    engine._stopping[proj("vessel")] = StopMarker(1234.0, "exiting", "ask", exit_at=1234.0)
 
     session = engine.get(proj("vessel"))
     assert session.state is State.STOPPED
@@ -3197,7 +3197,7 @@ def test_a_listing_takes_the_stop_lock_once_per_marker_not_once_per_row(
     # every earlier row, which is where the extra acquisitions appear.
     marked = [row.name for row in stopped[-2:]]
     for name in marked:
-        engine._stopping[name] = StopMarker(0.0, "exiting", exit_at=0.0)
+        engine._stopping[name] = StopMarker(0.0, "exiting", "ask", exit_at=0.0)
     acquisitions = 0
     engine.list()
 

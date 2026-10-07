@@ -51,6 +51,9 @@ Nothing to do on upgrade.
   longer logged as the agent having exited (#387).
 - A row killed and started again while a stop was ending no longer shows the
   fresh agent as waiting for you on the old agent's question (#410).
+- A stop ends under the `stop_policy` in force when it was requested, as its
+  wait dialog says, so choosing `end_anyway` on the settings page during a
+  wait no longer turns that wait into a kill, nor `ask` cancel one (#419).
 
 ## 0.12.0 - 2026-10-01
 

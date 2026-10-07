@@ -143,10 +143,15 @@ class StopMarker:
     A claim writes `exit_at`, `ceiling` and `typing` BEFORE `phase`, and
     `_derive` reads `phase` first without the lock, so a reader that sees
     `exiting` sees the flags that came with it.
+
+    `policy` is the stop policy when Stop was confirmed, and the one its
+    expiry acts on (#419): the dialog promised it, and the page can change
+    the live setting during the wait. Required, so no path forgets it.
     """
 
     began: float
     phase: Literal["closing", "exiting"]
+    policy: str
     watch: claude_ipc.WrapUpWatch | None = None
     exit_at: float | None = None
     ceiling: bool = False
@@ -842,6 +847,7 @@ class Engine:
         if session.state is State.DETACHED:
             raise NoAgent(_no_session_here(session, "no terminal to type into"))
         prompt = self.config.stop_prompt
+        policy = self.prefs.stop_policy()
         now = self._clock()
         # #242. The claim: who may type is decided here, in one critical
         # section, and only the caller that wrote the marker types. The table
@@ -868,12 +874,12 @@ class Engine:
                 # A repeated Stop on `exiting`, as before #242, keeping the
                 # ceiling flag so the dialog still says why it is exiting.
                 typing = StopMarker(
-                    now, "exiting", exit_at=now, ceiling=current.ceiling, typing=True
+                    now, "exiting", policy, exit_at=now, ceiling=current.ceiling, typing=True
                 )
             elif prompt is not None:
-                typing = StopMarker(now, "closing")
+                typing = StopMarker(now, "closing", policy)
             else:
-                typing = StopMarker(now, "exiting", exit_at=now, typing=True)
+                typing = StopMarker(now, "exiting", policy, exit_at=now, typing=True)
             if typing is not None:
                 self._stopping[name] = typing
         if typing is None:
@@ -1410,6 +1416,7 @@ class Engine:
         `stop_policy = end_anyway`, off by default, kills a stop that ended on
         a prompt. Escalation by choice made once in configuration, not by
         default, which is what section 7 forbids; and a kill, not an answer.
+        The policy is the one recorded at that Stop, never the live one (#419).
 
         It announces, because the person watching the timer has to learn the
         wait ended. An expiry visible only on the next poll is one the
@@ -1478,8 +1485,8 @@ class Engine:
         # could be seconds old by its kill, long enough for a person to Kill
         # and Start it again, and the fresh agent, which never saw a prompt,
         # would be killed for the old one's question.
-        for name in expired:
-            end_anyway = self.prefs.stop_policy() == "end_anyway"
+        for name, marker in candidates:
+            end_anyway = marker.policy == "end_anyway"
             # The agent, read BEFORE its screen (#418), and only when the
             # policy could act on it. Read after, a Kill and Start between the
             # two would pair the fresh agent's pid with the old one's question.

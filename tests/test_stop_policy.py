@@ -248,7 +248,7 @@ def test_the_self_project_is_never_killed_by_this_path(root: Path) -> None:
     path nobody has written yet; this asserts the kill refuses it then too."""
     engine, tmux, clock = policy_engine(root, stop_policy="end_anyway", self_project=VESSEL)
     assert engine.get(VESSEL).protected
-    engine._stopping[VESSEL] = StopMarker(clock(), "exiting", exit_at=clock())
+    engine._stopping[VESSEL] = StopMarker(clock(), "exiting", "end_anyway", exit_at=clock())
     tmux.pane_text[VESSEL] = MODAL_PANE
     clock.advance(engine.prefs.stop_timeout() + 1)
     assert engine.expire_stops() == [VESSEL]
@@ -453,6 +453,49 @@ def test_a_policy_set_back_to_ask_kills_nothing(root: Path) -> None:
     engine.prefs.apply(stop_policy="ask")
     assert expire_on(engine, tmux, clock, MODAL_PANE) == [VESSEL]
     assert killed(engine, tmux) == []
+
+
+def test_a_policy_changed_during_the_wait_does_not_turn_it_into_a_kill(root: Path) -> None:
+    """#419, decided 2026-10-07: the policy the stop was confirmed under is
+    the one its expiry acts on. The dialog said "reported, and waits for
+    you", and another tab's choice must not make that a lie."""
+    engine, tmux, clock = policy_engine(root, state_path=root / "state" / "state.toml")
+    engine.stop(VESSEL)
+    engine.prefs.apply(stop_policy="end_anyway")
+    tmux.pane_text[VESSEL] = MODAL_PANE
+    clock.advance(engine.prefs.stop_timeout() + 1)
+    assert engine.expire_stops() == [VESSEL]
+    assert killed(engine, tmux) == []
+    assert engine.get(VESSEL).awaiting_input is True
+
+
+def test_a_policy_changed_during_the_wait_does_not_cancel_its_kill(root: Path) -> None:
+    """The reverse: a wait shown as ending in a kill ends in one."""
+    engine, tmux, clock = policy_engine(root, state_path=root / "state" / "state.toml")
+    engine.prefs.apply(stop_policy="end_anyway")
+    engine.stop(VESSEL)
+    engine.prefs.apply(stop_policy="ask")
+    tmux.pane_text[VESSEL] = MODAL_PANE
+    clock.advance(engine.prefs.stop_timeout() + 1)
+    assert engine.expire_stops() == [VESSEL]
+    assert killed(engine, tmux) == [VESSEL]
+
+
+def test_a_wrap_up_carries_the_policy_it_was_confirmed_under_to_its_exit(
+    root: Path,
+) -> None:
+    """The exit after a wrap up is still the stop the person confirmed, so a
+    change during the wrap up, before the exit is sent, moves nothing."""
+    engine, _tmux, clock = policy_engine(
+        root, state_path=root / "state" / "state.toml", stop_prompt="/wrapup"
+    )
+    engine.stop(VESSEL)
+    engine.prefs.apply(stop_policy="end_anyway")
+    clock.advance(SETTLE)
+    engine.advance_wrap_ups()
+    clock.advance(SETTLE)
+    assert engine.advance_wrap_ups() == [VESSEL]
+    assert engine._stopping[VESSEL].policy == "ask"
 
 
 def test_the_policy_persists_and_a_new_process_reads_it(root: Path) -> None:

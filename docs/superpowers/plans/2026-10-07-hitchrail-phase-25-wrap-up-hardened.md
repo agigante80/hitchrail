@@ -101,7 +101,7 @@ global rules say, and findings go to Backlog, not this milestone.
       auditor review required.
 - [x] **Task 182, #410.** The expiry's and the refused exit's waiting overlay
       carry the attention epoch.
-- [ ] **Task 183, #419.** The stop policy is recorded at `stop()` and read
+- [x] **Task 183, #419.** The stop policy is recorded at `stop()` and read
       from the marker at expiry (decided 2026-10-07).
 - [ ] **Task 184, #389, #390.** The start line after the start, the timeout
       line's wording, duration and person wait.

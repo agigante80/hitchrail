@@ -1131,7 +1131,16 @@ function newWait(project) {
   // paint "no answer" over the refusal it just showed.
   const previous = waits.get(project.name);
   if (previous) previous.over = true;
-  const wait = { began: Date.now(), over: false, sawClosing: false, exitSeen: false };
+  // The policy the person was shown, kept for the whole wait: the server acts
+  // on the one in force at the Stop, whatever is chosen meanwhile (#419). A
+  // wait reopened from another browser can only take today's.
+  const wait = {
+    began: Date.now(),
+    over: false,
+    sawClosing: false,
+    exitSeen: false,
+    policy: state.server.stop_policy,
+  };
   waits.set(project.name, wait);
   return wait;
 }
@@ -1187,14 +1196,14 @@ function waitingPhase(wait, current) {
 }
 
 function waitingBody(wait, phase) {
-  const note = endAnywayNote();
+  const note = endAnywayNote(wait.policy);
   return note ? `${phaseBody(wait, phase)} ${note}` : phaseBody(wait, phase);
 }
 
 /* #239. A kill the operator configured a week ago must not surprise them:
    said on the confirm and through the whole wait, before it happens. */
-function endAnywayNote() {
-  if (state.server.stop_policy !== "end_anyway") return "";
+function endAnywayNote(policy = state.server.stop_policy) {
+  if (policy !== "end_anyway") return "";
   // "Once asked to exit": a wrap up that ends on a question is reported and
   // never killed, since the exit it would refuse was never sent (#239 review).
   return "If it stops on a question once asked to exit, it will be ended, as this server is configured to.";

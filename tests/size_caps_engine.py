@@ -160,7 +160,9 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # by name and why each is safe.
     # 1628 for #410: `_flag_waiting`, so the two looks that add the waiting
     # overlay outside the sweep honour the attention epoch as it does.
-    "engine.py": 1628,
+    # 1635 for #419: the marker records the stop policy at `stop()`, and
+    # the note saying why expiry reads it there and not the live setting.
+    "engine.py": 1635,
     # tmux.py is the module that encodes what tmux actually does
     # rather than what its manual implies, and every entry is a footgun
     # that cost real debugging: prefix matching targets, the colon

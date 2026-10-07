@@ -113,7 +113,8 @@ With `stop_policy = "end_anyway"` (#239, off by default), a stop whose
 `stop_timeout` runs out while the agent's screen shows a prompt is killed by
 the server, exactly as `POST /api/sessions/{name}/kill` would, and the row is
 announced `stopped`. A screen showing anything else reports as it always has.
-Nothing is ever typed into the prompt.
+Nothing is ever typed into the prompt. The policy is the one in force when the
+stop was requested (#419): a change during the wait applies to the next stop.
 
 ### The listing payload
 

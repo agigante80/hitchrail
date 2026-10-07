@@ -203,7 +203,7 @@ def test_a_second_stop_while_closing_is_exit_now_and_never_retypes(root: Path) -
 def test_a_stop_while_the_prompt_is_being_typed_types_nothing(root: Path) -> None:
     """No watch yet means another request is between its claim and its send."""
     engine, tmux, clock = wrap_engine(root)
-    typing = StopMarker(clock(), "closing")
+    typing = StopMarker(clock(), "closing", "ask")
     engine._stopping[VESSEL] = typing
     session = engine.stop(VESSEL)
     assert tmux.sent == []
@@ -215,7 +215,7 @@ def test_a_repeated_stop_on_exiting_keeps_the_ceiling_and_never_types_the_prompt
     root: Path,
 ) -> None:
     engine, tmux, clock = wrap_engine(root)
-    engine._stopping[VESSEL] = StopMarker(0.0, "exiting", exit_at=0.0, ceiling=True)
+    engine._stopping[VESSEL] = StopMarker(0.0, "exiting", "ask", exit_at=0.0, ceiling=True)
     asked_at = clock()
     session = engine.stop(VESSEL)
     assert typed(tmux) == []
@@ -370,7 +370,7 @@ def test_a_marker_replaced_during_the_read_is_not_advanced_by_it(root: Path) -> 
 
 def test_the_ceiling_does_not_touch_a_prompt_still_being_typed(root: Path) -> None:
     engine, tmux, clock = wrap_engine(root, stop_prompt_timeout=10.0)
-    typing = StopMarker(clock(), "closing")
+    typing = StopMarker(clock(), "closing", "ask")
     engine._stopping[VESSEL] = typing
     clock.advance(1000)
     assert engine.advance_wrap_ups() == []
