@@ -509,6 +509,14 @@ exception, so the token path is the main path.
    and it rested on where uvicorn emits that line rather than on anything ASGI
    guarantees. A control whose correctness depends on another project's call
    ordering is one worth not needing.
+
+   **Amended by #388: the log still leaves the query out.** A phone opening a
+   link saved before #115 sends the real token, refused or not, and the
+   journal outlives the session. So uvicorn's lines pass through a filter on
+   the log record that cuts every query string off the target, whatever its
+   parameters are called. It edits no request, which is what #115 objected to,
+   and its dependency on uvicorn's record shape is checked against a real
+   uvicorn in the live tier rather than assumed.
 4. **Root is a hard boundary.** Every path is resolved with `Path.resolve()` and
    confirmed to be a direct child of the configured root before any process is
    spawned or any directory created. Folder names are validated against an

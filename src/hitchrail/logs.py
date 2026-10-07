@@ -23,7 +23,8 @@ and `structlog` would be a fourth runtime dependency on a tool that spawns
 processes as its user, so key and value pairs inside a readable sentence
 it is.
 
-Never the token, and never pane content, at any level. A pane is arbitrary
+Never the token, and never pane content, at any level. That includes a
+token a caller put in a query string, which the server never reads (#388). A pane is arbitrary
 terminal output from an agent reading the operator's private repositories;
 returning it to an authenticated caller is one thing, keeping it in a
 persistent journal is another.
@@ -45,6 +46,8 @@ FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
 _SHOWN_LIMIT = 120
 
+QUERY_OMITTED = "?(query omitted)"
+
 
 class StderrHandler(logging.StreamHandler):  # type: ignore[type-arg]
     """A `StreamHandler` on whatever `sys.stderr` is at the moment of each line.
@@ -65,6 +68,35 @@ class StderrHandler(logging.StreamHandler):  # type: ignore[type-arg]
         super().emit(record)
 
 
+class QueryFilter(logging.Filter):
+    """Cut the query string off every request target in uvicorn's lines (#388).
+
+    A phone opening a link saved before #115 sends `/?token=<the token>`.
+    The server refuses it, and uvicorn's access line still wrote the target
+    verbatim, so the journal kept a secret the request never used. The WHOLE
+    query goes rather than a `token=` parameter: a secret under any other
+    name is the same leak, and a list of names is a denylist.
+
+    A filter on the record, not a rewrite of `scope["query_string"]`, which
+    #115 deleted for editing a caller's request; the application still sees
+    the query as it was sent. It keys on the shape of uvicorn's record, every
+    target an argument beginning `/`, so it fails open if that shape changes:
+    `test_a_query_string_token_reaches_no_journal_line` drives a real uvicorn
+    and is what notices.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple):
+            record.args = tuple(_without_query(arg) for arg in record.args)
+        return True
+
+
+def _without_query(arg: object) -> object:
+    if isinstance(arg, str) and arg.startswith("/") and "?" in arg:
+        return arg.partition("?")[0] + QUERY_OMITTED
+    return arg
+
+
 def configure(level: str = DEFAULT_LEVEL) -> None:
     """Every logger this process writes through, to stderr, in one format.
 
@@ -80,17 +112,22 @@ def configure(level: str = DEFAULT_LEVEL) -> None:
     ours = level.upper()
     theirs = ours if logging.getLevelName(ours) > logging.INFO else "INFO"
     handler = {"class": "hitchrail.logs.StderrHandler", "formatter": "plain"}
+    # On a handler of uvicorn's own rather than on its loggers: a handler is
+    # replaced each time this runs, where a logger's filters would pile up.
+    theirs_handler = {**handler, "filters": ["query"]}
+    uvicorns = {"handlers": ["uvicorn"], "level": theirs, "propagate": False}
     logging.config.dictConfig(
         {
             "version": 1,
             "disable_existing_loggers": False,
             "formatters": {"plain": {"format": FORMAT}},
-            "handlers": {"stderr": handler},
+            "filters": {"query": {"()": "hitchrail.logs.QueryFilter"}},
+            "handlers": {"stderr": handler, "uvicorn": theirs_handler},
             "loggers": {
                 "hitchrail": {"handlers": ["stderr"], "level": ours, "propagate": False},
-                "uvicorn": {"handlers": ["stderr"], "level": theirs, "propagate": False},
+                "uvicorn": uvicorns,
                 "uvicorn.error": {"level": theirs},
-                "uvicorn.access": {"handlers": ["stderr"], "level": theirs, "propagate": False},
+                "uvicorn.access": uvicorns,
             },
         }
     )

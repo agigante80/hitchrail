@@ -49,6 +49,12 @@ that is ALSO reached over a plain http forwarder or alias. See Changed.
 
 ### Fixed
 
+- The journal no longer records a query string from a request line. A link in
+  the old `/?token=<token>` form, which no release printed but a checkout
+  from before the first one did, wrote the real token into the journal when
+  it was opened, although the request was refused, so anyone who can read
+  your journal could read it. If you ever opened such a link,
+  rotate the token (#388).
 - An `--agent-binary` path that is not there says it was looked for
   relative to the current directory when it was relative, which is also
   why a path starting with `~` is not found, since nothing expands it there,

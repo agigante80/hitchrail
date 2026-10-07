@@ -22,6 +22,7 @@ import time
 import warnings
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -31,6 +32,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from conftest import FakeTmux, procs_from
+from hitchrail import logs
 from hitchrail.cli import build_tls_context
 from hitchrail.config import Config
 from hitchrail.engine import Engine
@@ -54,11 +56,19 @@ def free_port() -> int:
 class LiveServer:
     """A real uvicorn on loopback, started and stopped around one test."""
 
-    def __init__(self, app: Starlette, port: int, log_level: str = "warning") -> None:
+    def __init__(
+        self,
+        app: Starlette,
+        port: int,
+        log_level: str = "warning",
+        log_config: dict[str, Any] | None = uvicorn.config.LOGGING_CONFIG,
+    ) -> None:
         self.port = port
         self.base = f"http://127.0.0.1:{port}"
         self._server = uvicorn.Server(
-            uvicorn.Config(app, host="127.0.0.1", port=port, log_level=log_level)
+            uvicorn.Config(
+                app, host="127.0.0.1", port=port, log_level=log_level, log_config=log_config
+            )
         )
         self._thread = threading.Thread(target=self._server.run, daemon=True)
 
@@ -322,59 +332,51 @@ def test_the_fragment_grant_puts_the_token_in_no_access_line(tmp_path: Path) -> 
     assert TOKEN not in logged, f"the token reached the access log: {logged}"
 
 
-def test_a_query_token_now_reaches_the_access_log_and_that_is_correct(tmp_path: Path) -> None:
-    """#115 deleted the scrub, so this asserts the consequence deliberately.
+def test_a_query_string_token_reaches_no_journal_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#388. An old `/?token=` bookmark writes no token into the journal.
 
-    `_scrub_grant_param` rewrote the scope so uvicorn's access line, which it
-    builds from that same dict after the app returns, would not carry the
-    token. That existed because `?token=` WAS a credential. It is not one now:
-    the request below is refused 401.
+    This REVERSES #115's `test_a_query_token_now_reaches_the_access_log_and_`
+    `that_is_correct`, deliberately. Its argument was against the scrub, which
+    rewrote `scope["query_string"]` and so edited a caller's request for a
+    parameter the server no longer reads. That stays true and
+    `test_the_query_string_is_no_longer_rewritten` still holds it. What it
+    missed is that the token is still a secret when the server refuses it: a
+    phone opening a pre #115 link sends the real token, and the journal outlives
+    the session. The fix is a filter on the log record, so the application
+    sees the query untouched and only the written line loses it.
 
-    **This test exists so nobody restores the scrub.** Stripping a parameter
-    the server does not accept would keep the misleading half of the old
-    behaviour, editing a caller's query string for no security benefit, and it
-    would quietly resume depending on where uvicorn emits its access line,
-    which `_maybe_grant`'s own comment flagged as resting on an implementation
-    detail rather than on anything ASGI guarantees.
-
-    What must stay clean is the flow that carries a real credential, and
-    `test_the_fragment_grant_puts_the_token_in_no_access_line` is that test.
+    Through `logs.configure` and `log_config=None`, the way `cli._serve` runs
+    uvicorn, and read from captured stderr: a handler added to the logger in
+    the test would see the record whatever the configured handler wrote.
+    The filter keys on the shape of uvicorn's record, so only a real uvicorn
+    can say it still matches.
     """
     port = free_port()
     config = make_config(tmp_path, host="127.0.0.1", port=port, token=TOKEN)
-    server = LiveServer(make_app(config), port, log_level="info")
-
-    records: list[str] = []
-
-    class Capture(logging.Handler):
-        def emit(self, record: logging.LogRecord) -> None:
-            records.append(record.getMessage())
-
-    handler = Capture()
-    access = logging.getLogger("uvicorn.access")
+    logs.configure("info")
+    server = LiveServer(make_app(config), port, log_level=logs.uvicorn_level(), log_config=None)
     server.start()
-    access.addHandler(handler)
     try:
-        response = httpx.get(
-            f"{server.base}/x?token={TOKEN}&keep=1",
-            headers={"Host": "127.0.0.1"},
-            follow_redirects=False,
-            timeout=TIMEOUT,
-        )
-        assert response.status_code == 401, "a query token is not a carrier any more"
+        host = {"Host": "127.0.0.1"}
+        refused = httpx.get(f"{server.base}/x?token={TOKEN}", headers=host, timeout=TIMEOUT)
+        assert refused.status_code == 401, "a query token is not a carrier"
+        # Any name, not only the old one: the filter is not a list of names.
+        other = httpx.get(f"{server.base}/x?k={TOKEN}&keep=1", headers=auth(), timeout=TIMEOUT)
+        assert other.status_code == 200, other.text
+        err = ""
         deadline = time.monotonic() + TIMEOUT
-        while time.monotonic() < deadline and not records:
+        while time.monotonic() < deadline and err.count("uvicorn.access") < 2:
+            err += capsys.readouterr().err
             time.sleep(0.05)
     finally:
-        access.removeHandler(handler)
         server.stop()
-
-    logged = "\n".join(records)
-    assert records, "uvicorn wrote no access line, so this test proves nothing"
-    assert f"token={TOKEN}" in logged, (
-        "the query string is passed through untouched; if this fails somebody "
-        "has restored the scrub, which #115 removed with the carrier it served"
+    err += capsys.readouterr().err
+    assert '"GET /x?' in err and " 401" in err and " 200" in err, (
+        f"uvicorn wrote no access line naming the path, so this proves nothing: {err}"
     )
+    assert TOKEN not in err, f"the token reached the journal: {err}"
 
 
 def _tls11_client() -> ssl.SSLContext:

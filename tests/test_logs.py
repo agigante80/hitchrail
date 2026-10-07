@@ -78,6 +78,54 @@ def test_uvicorns_access_log_shares_the_handler(capsys: pytest.CaptureFixture[st
     assert "INFO uvicorn.access: GET / 200" in capsys.readouterr().err
 
 
+def _access_line(target: str) -> None:
+    """Logged the way uvicorn's `h11_impl` logs one, arguments and all."""
+    logging.getLogger("uvicorn.access").info(
+        '%s - "%s %s HTTP/%s" %d', "127.0.0.1:5000", "GET", target, "1.1", 401
+    )
+
+
+def test_a_query_string_never_reaches_the_access_line(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """#388. The whole query, whatever the parameter is called."""
+    logs.configure("info")
+    _access_line(f"/?token={TOKEN}")
+    _access_line(f"/api/projects?k={TOKEN}&keep=1")
+    err = capsys.readouterr().err
+    assert TOKEN not in err
+    assert f'"GET /{logs.QUERY_OMITTED} HTTP/1.1" 401' in err
+    assert f'"GET /api/projects{logs.QUERY_OMITTED} HTTP/1.1" 401' in err
+
+
+def test_a_target_without_a_query_is_written_as_it_was(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    logs.configure("info")
+    _access_line("/api/sessions")
+    assert '"GET /api/sessions HTTP/1.1" 401' in capsys.readouterr().err
+
+
+def test_a_websocket_line_loses_its_query_too(capsys: pytest.CaptureFixture[str]) -> None:
+    """uvicorn writes these through `uvicorn.error`, which propagates to the
+    `uvicorn` logger's handler rather than having its own."""
+    logs.configure("info")
+    logging.getLogger("uvicorn.error").info(
+        '%s - "WebSocket %s" 403', "127.0.0.1:5000", f"/ws?token={TOKEN}"
+    )
+    err = capsys.readouterr().err
+    assert TOKEN not in err
+    assert f"/ws{logs.QUERY_OMITTED}" in err
+
+
+def test_our_own_lines_are_not_rewritten(capsys: pytest.CaptureFixture[str]) -> None:
+    """The filter is uvicorn's. A line of ours naming a path is a decision we
+    wrote, and editing it behind our back would make it lie."""
+    logs.configure("info")
+    logging.getLogger("hitchrail.engine").info("saw %s", "/a?b")
+    assert "saw /a?b" in capsys.readouterr().err
+
+
 def test_debug_is_ours_and_not_uvicorns() -> None:
     logs.configure("debug")
     assert logging.getLogger("hitchrail.engine").isEnabledFor(logging.DEBUG)

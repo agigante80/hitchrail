@@ -179,7 +179,8 @@ distinction does not arise.
 
 The older `?token=<token>` form is gone. It is a query parameter now, not a
 credential: a request carrying one is refused like any other request with no
-token, and it appears in the server's log like any other query string.
+token. The server's log leaves out every query string, so an old link opened
+by mistake does not write the token into the journal.
 
 Hitchrail does not sandbox the sessions it starts. It is a launcher. The agent it
 launches has whatever access you have.

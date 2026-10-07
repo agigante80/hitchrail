@@ -142,7 +142,7 @@ global rules say, and findings go to Backlog, not this milestone.
 
 ### Batch 6: the journal, shutdown, and tests that could not fail, tasks 197 to 202
 
-- [ ] **Task 197, #388 (P2).** No query string token reaches the journal
+- [x] **Task 197, #388 (P2).** No query string token reaches the journal
       through uvicorn's access line.
 - [ ] **Task 198, #392.** Shutdown does not re-raise a stuck scan's logged
       error over the kill's own.
