@@ -379,6 +379,9 @@ def test_a_query_string_token_reaches_no_journal_line(
     assert TOKEN not in err, f"the token reached the journal: {err}"
 
 
+SERVER_REFUSALS = ("UNEXPECTED_EOF_WHILE_READING", "TLSV1_ALERT_PROTOCOL_VERSION")
+
+
 def _tls11_client() -> ssl.SSLContext:
     """A client that offers TLS 1.1 and nothing else. `@SECLEVEL=0` lets
     OpenSSL 3 offer it at all; without it the handshake fails on the CLIENT
@@ -478,11 +481,19 @@ def test_a_grant_and_a_start_go_through_our_own_tls(tmp_path: Path) -> None:
             # assertion this replaced read the negotiated version, which is
             # 1.3 with or without a floor and so could not fail.
             with (
-                pytest.raises(ssl.SSLError),
+                pytest.raises(ssl.SSLError) as refused,
                 socket.create_connection(("127.0.0.1", port), timeout=TIMEOUT) as raw,
                 _tls11_client().wrap_socket(raw, server_hostname="localhost"),
             ):
                 pass
+            # #396. Which side refused, since a client that cannot offer 1.1
+            # fails with `NO_PROTOCOLS_AVAILABLE` before the server is asked
+            # and `SSLError` alone passed on that. Only the server can end
+            # the handshake these two ways. The protocol_version alert the
+            # ticket expected is not what arrives: measured on OpenSSL 3.0.13,
+            # uvicorn's asyncio transport closes without flushing it, so the
+            # client reads an EOF; the alert stays for a build that sends it.
+            assert refused.value.reason in SERVER_REFUSALS, refused.value
     finally:
         server.should_exit = True
         thread.join(timeout=10)

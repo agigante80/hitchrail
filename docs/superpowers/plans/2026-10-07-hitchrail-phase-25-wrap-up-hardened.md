@@ -146,7 +146,7 @@ global rules say, and findings go to Backlog, not this milestone.
       through uvicorn's access line.
 - [x] **Task 198, #392.** Shutdown does not re-raise a stuck scan's logged
       error over the kill's own.
-- [ ] **Task 199, #396.** The TLS 1.1 refusal test fails if only the client
+- [x] **Task 199, #396.** The TLS 1.1 refusal test fails if only the client
       refuses.
 - [ ] **Task 200, #403.** `{}` on the signal routes pinned as the unbound
       request.
