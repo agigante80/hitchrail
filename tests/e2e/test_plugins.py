@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -863,7 +864,21 @@ async def test_visibility_regained_refreshes_a_run_the_stream_missed(
     await page.route("**/api/events", lambda route: route.abort())
     server.drop_connections()
     server.release_plugin("alpha@m")
-    await page.wait_for_timeout(300)
+    # #398. The run must be OVER on the server before the page comes back:
+    # `visibilitychange` reads the record once, and a read that lands while
+    # the run is still finishing paints "Refreshing" again and nothing reads
+    # it a second time. A fixed 300ms wait stood in for this and lost under
+    # load, failing every run at a load average of 32 on 8 cores. Polled
+    # from the test's own request context, which `page.route` does not
+    # intercept, so the page's view of the run is still only the stale one.
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        record = await (await page.request.get(f"{server.base}/api/plugins/update")).json()
+        if record["state"] == "done":
+            break
+        await asyncio.sleep(0.05)
+    else:
+        raise AssertionError(f"the released run never finished on the server: {record}")
     await expect(page.locator("[data-plugins-status]")).to_have_text(
         "Refreshing the marketplaces."
     )

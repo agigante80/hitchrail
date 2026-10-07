@@ -152,7 +152,7 @@ global rules say, and findings go to Backlog, not this milestone.
       request.
 - [x] **Task 201, #404.** The kill mid update test opens its pidfds before the
       reap.
-- [ ] **Task 202, #398.** The missed run refresh test: cause found and fixed,
+- [x] **Task 202, #398.** The missed run refresh test: cause found and fixed,
       or quarantined with a ticket naming the cause. Never retried into green.
 
 ## Done looks like
