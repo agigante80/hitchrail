@@ -120,17 +120,21 @@ class StopMarker:
     `closing` is the wrap up: the prompt is queued behind the task and the
     sweep watches for the agent to finish both. `exiting` is the exit
     sequence sent, which is all a stop was before #242 and still is with no
-    prompt configured. `watch` is None while the prompt is being typed, and
-    no path may claim the marker then: that is what stops a second Stop or
-    the sweep typing into the middle of the prompt.
+    prompt configured.
+
+    **No path claims a marker while something types into its pane.** `watch`
+    is None while the prompt is being typed, and `typing` is True while the
+    exit sequence is, whether the sweep or `stop()` types it (#406). A Stop
+    on either is the no-op 202: a second sequence would interleave its keys
+    with the first.
 
     **Every removal is by identity**, through `Engine._drop`. A pop by name
     removes whatever marker is there now, which after a repeated Stop is a
     newer one than the caller holds.
 
-    A claim writes `exit_at` and `ceiling` BEFORE `phase`, and `_derive` reads
-    `phase` first without the lock, so a reader that sees `exiting` sees the
-    ceiling flag that came with it.
+    A claim writes `exit_at`, `ceiling` and `typing` BEFORE `phase`, and
+    `_derive` reads `phase` first without the lock, so a reader that sees
+    `exiting` sees the flags that came with it.
     """
 
     began: float
@@ -138,6 +142,7 @@ class StopMarker:
     watch: claude_ipc.WrapUpWatch | None = None
     exit_at: float | None = None
     ceiling: bool = False
+    typing: bool = False
 
 
 class Engine:
@@ -410,6 +415,11 @@ class Engine:
         with self._stopping_guard:
             marker = self._stopping.get(name)
             return None if marker is None else marker.began
+
+    def _done_typing(self, marker: StopMarker) -> None:
+        """The sequence is out, or failed: a Stop may claim the marker again."""
+        with self._stopping_guard:
+            marker.typing = False
 
     def _drop(self, name: str, marker: StopMarker) -> None:
         """Remove `marker`, and only it: a newer stop's stays (#242)."""
@@ -810,28 +820,33 @@ class Engine:
         # on the ticket is the whole rule.
         with self._stopping_guard:
             current = self._stopping.get(name)
-            if current is not None and current.phase == "closing" and current.watch is None:
-                # Another stop is typing the prompt this moment. Typing the
-                # exit sequence now would land in the middle of it.
+            if current is not None and (
+                current.typing or (current.phase == "closing" and current.watch is None)
+            ):
+                # Something is typing into this pane this moment, the prompt
+                # or an exit sequence (#406). Typing the exit sequence now
+                # would land in the middle of it.
                 typing = None
             elif current is not None and current.phase == "closing":
                 # "Exit now": a second Stop during the wait skips to the exit,
                 # and never retypes the prompt.
-                current.exit_at, current.ceiling = now, False
+                current.exit_at, current.ceiling, current.typing = now, False, True
                 current.phase = "exiting"
                 typing = current
             elif current is not None:
                 # A repeated Stop on `exiting`, as before #242, keeping the
                 # ceiling flag so the dialog still says why it is exiting.
-                typing = StopMarker(now, "exiting", exit_at=now, ceiling=current.ceiling)
+                typing = StopMarker(
+                    now, "exiting", exit_at=now, ceiling=current.ceiling, typing=True
+                )
             elif prompt is not None:
                 typing = StopMarker(now, "closing")
             else:
-                typing = StopMarker(now, "exiting", exit_at=now)
+                typing = StopMarker(now, "exiting", exit_at=now, typing=True)
             if typing is not None:
                 self._stopping[name] = typing
         if typing is None:
-            logger.info("stop %s: the wrap up prompt is still being typed, so nothing is", name)
+            logger.info("stop %s: a sequence is still being typed into it, so nothing is", name)
             return session
         wrapping_up = typing.phase == "closing"
         # One call, and the engine does not learn what a stop physically is.
@@ -865,6 +880,8 @@ class Engine:
             # in the HTTP layer, which is the whole point of the quarantine.
             self._drop(name, typing)
             raise StopRefused(str(exc)) from exc
+        finally:
+            self._done_typing(typing)
         if wrapping_up:
             with self._stopping_guard:
                 if self._stopping.get(name) is typing:
@@ -1291,7 +1308,7 @@ class Engine:
                     # A second Stop claimed it, or a kill or a refusal took it,
                     # while this pane was being read.
                     continue
-                marker.exit_at, marker.ceiling = now, ceiling
+                marker.exit_at, marker.ceiling, marker.typing = now, ceiling, True
                 marker.phase = "exiting"
             logger.info(
                 "stop %s: wrap up %s after %.0fs",
@@ -1312,6 +1329,8 @@ class Engine:
                 if self._pane_needs_a_person(name):
                     with self._stopping_guard:
                         self._awaiting_input.add(name)
+            finally:
+                self._done_typing(marker)
             moved.append(name)
             try:
                 self._announce(self.get(name))

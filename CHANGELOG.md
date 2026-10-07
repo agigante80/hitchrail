@@ -32,6 +32,15 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+Nothing to do on upgrade.
+
+### Fixed
+
+- With `stop_prompt` set, the wrap up's exit is no longer typed into an agent
+  that is still working when its screen also carries an underline colour
+  (#405), and a Stop tapped while an exit is being typed is answered without
+  typing a second exit over the first (#406).
+
 ## 0.12.0 - 2026-10-01
 
 Nothing to do on upgrade. Every new setting is off or unchanged by default,

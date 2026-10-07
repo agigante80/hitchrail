@@ -151,7 +151,10 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # deferred. What remains is the lifecycle and the stop sequence, whose
     # notes are the footguns and are why the file is still past 400.
     # `signals.py` itself came in under the guideline and needs no entry.
-    "engine.py": 1566,
+    # 1585 for #406: the marker's `typing` flag, which the sweep and `stop()`
+    # both set while an exit sequence goes out, and the clear in a `finally`
+    # on each, so a Stop never interleaves a second sequence with the first.
+    "engine.py": 1585,
     # tmux.py is the module that encodes what tmux actually does
     # rather than what its manual implies, and every entry is a footgun
     # that cost real debugging: prefix matching targets, the colon

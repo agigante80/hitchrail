@@ -91,7 +91,7 @@ global rules say, and findings go to Backlog, not this milestone.
 - [x] **Task 178, #405.** Skip SGR 58's operands in `claude_ipc/screen.py`.
       First because it is the only finding whose failure is in the dangerous
       direction: an exit typed into a busy agent.
-- [ ] **Task 179, #406.** A Stop while the sweep types the exit is a no-op.
+- [x] **Task 179, #406.** A Stop while the sweep types the exit is a no-op.
       Decides `StopMarker`'s shape for #407 and #419 as well.
 - [ ] **Task 180, #407.** The four edges: the docstring, a refused Exit now
       restoring `closing`, the stranded marker, the moved list.

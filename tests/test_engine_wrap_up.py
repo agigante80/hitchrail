@@ -316,8 +316,9 @@ def test_the_sweep_and_a_second_stop_racing_type_the_exit_once_per_claim(root: P
     both orders: if the person's Stop claims first, the sweep finds the marker
     no longer `closing` and types nothing; if the sweep claims first, the Stop
     arrives on `exiting`, which is today's repeated Stop and types the exit
-    once more under a NEW marker, as a double tap always has. Either way the
-    exit goes out once per claim and the prompt is never retyped."""
+    once more under a NEW marker, as a double tap always has, unless it lands
+    while the sweep is still typing, when it claims nothing (#406). Either way
+    the exit goes out once per claim and the prompt is never retyped."""
     engine, tmux, clock = wrap_engine(root)
     engine.stop(VESSEL)
     clock.advance(SETTLE)
@@ -423,3 +424,72 @@ def test_with_no_stop_in_flight_the_row_carries_no_phase(root: Path) -> None:
     assert session.stopping_phase is None
     assert session.as_dict()["stopping_phase"] is None
     assert session.as_dict()["stop_ceiling"] is False
+
+
+# -- #406: one sequence typed into a pane at a time --------------------------
+
+
+def _stop_inside_the_first_send(engine: Engine, tmux: FakeTmux) -> list[Any]:
+    """A Stop arriving while the exit sequence is mid typing, on the same
+    thread so the interleaving is the one under test and not a schedule."""
+    answers: list[Any] = []
+    real = tmux.send_keys
+
+    def send_keys(project: str, *keys: str) -> None:
+        tmux.send_keys = real  # type: ignore[method-assign]
+        answers.append(engine.stop(project))
+        real(project, *keys)
+
+    tmux.send_keys = send_keys  # type: ignore[method-assign]
+    return answers
+
+
+def test_a_stop_while_the_sweep_types_the_exit_types_nothing(root: Path) -> None:
+    """#406: the dialog still reads `closing` while the sweep types, and offers
+    Exit now. Taken there, a second exit sequence interleaved with the
+    sweep's C-u, Escape and `/exit`."""
+    engine, tmux, clock = wrap_engine(root)
+    engine.stop(VESSEL)
+    clock.advance(SETTLE)
+    engine.advance_wrap_ups()
+    clock.advance(SETTLE)
+    marker = engine._stopping[VESSEL]
+    answers = _stop_inside_the_first_send(engine, tmux)
+    assert engine.advance_wrap_ups() == [VESSEL]
+    assert len(answers) == 1 and answers[0].stopping is True, "the no-op 202"
+    assert exits_sent(tmux) == 1
+    assert [keys for _p, keys in tmux.sent[-len(GRACEFUL_STOP_KEYS) :]] == list(
+        GRACEFUL_STOP_KEYS
+    ), "one sequence, unbroken"
+    assert engine._stopping[VESSEL] is marker
+    assert marker.typing is False, "cleared once the typing is over"
+
+
+def test_a_stop_while_exit_now_is_typed_types_nothing(root: Path) -> None:
+    """The same rule for a person's own exit: a double tap lands on a marker
+    whose sequence is still going out."""
+    engine, tmux, _ = wrap_engine(root, stop_prompt=None)
+    answers = _stop_inside_the_first_send(engine, tmux)
+    engine.stop(VESSEL)
+    assert len(answers) == 1
+    assert exits_sent(tmux) == 1
+    assert [keys for _p, keys in tmux.sent] == list(GRACEFUL_STOP_KEYS)
+    assert engine._stopping[VESSEL].typing is False
+
+
+def test_a_typing_flag_is_cleared_when_the_exit_fails(root: Path) -> None:
+    """A refusal raised out of the typing must not leave the marker flagged,
+    or every later Stop would be a no-op for a sequence nobody is typing."""
+    engine, tmux, clock = wrap_engine(root)
+    engine.stop(VESSEL)
+    clock.advance(SETTLE)
+    engine.advance_wrap_ups()
+    clock.advance(SETTLE)
+    marker = engine._stopping[VESSEL]
+
+    def send_keys(project: str, *keys: str) -> None:
+        raise TmuxUnavailable("gone mid sequence")
+
+    tmux.send_keys = send_keys  # type: ignore[method-assign]
+    engine.advance_wrap_ups()
+    assert marker.typing is False
