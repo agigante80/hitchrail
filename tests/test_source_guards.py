@@ -234,8 +234,10 @@ def test_every_read_of_agent_binary_is_the_resolved_property_or_allowlisted() ->
         ("cli.py", "build_config", "args.agent_binary"): 1,
         # What preflight is resolving. This function's whole job is finding
         # the absolute path from the raw name: one lookup, one `dirname`, and
-        # three messages quoting what the operator typed (#341).
-        ("cli.py", "preflight", "config.agent_binary"): 5,
+        # three messages quoting what the operator typed (#341), plus whether
+        # a typed path that is not there was relative, so its message can say
+        # where it was looked for (#393).
+        ("cli.py", "preflight", "config.agent_binary"): 6,
         # `hitchrail update-plugins`: no Config exists yet, so this resolves
         # and checks its OWN copy of the raw `--agent-binary` flag before it
         # ever calls `claude_ipc.update_plugins` with the resolved value.
