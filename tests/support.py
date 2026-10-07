@@ -222,6 +222,12 @@ class Orphan:
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "hitchrail"
 
+# The one module that reaches the pidfd seam in `procs.py` (#107), keyed as
+# `source_modules` keys it. Named once, here, so that #274 moving the path is
+# a one line edit the guards follow, rather than a move each guard has to be
+# taught about after it has already passed over the new file.
+PIDFD_MODULE = "engine.py"
+
 
 def keyed_modules(paths: Any, src: Path = SRC) -> dict[str, Path]:
     """`paths` keyed by their POSIX path relative to `src`, refusing a repeat.
