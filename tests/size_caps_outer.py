@@ -68,7 +68,8 @@ OUTER_LAYER_CAPS: dict[str, int] = {
     # 1026 for #421: the state file's startup warnings, logged after the block.
     # 1035 for #391: the startup line naming each plain origin withheld.
     # 1037 for #394: the advice asks the cookie rule and says what #391 costs.
-    "cli.py": 1037,
+    # 1045 for #393: a typed path not there says where it was looked for.
+    "cli.py": 1045,
     # 409 to 418 for #78: two entries in the exemption and the argument
     # beside them, which the set's own rule requires of every entry.
     # 418 to 436 for #160: the unauthenticated asset set and the argument

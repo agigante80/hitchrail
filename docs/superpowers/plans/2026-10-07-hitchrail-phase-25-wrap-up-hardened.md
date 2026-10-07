@@ -135,7 +135,7 @@ global rules say, and findings go to Backlog, not this milestone.
       a uvicorn traceback.
 - [x] **Task 194, #394.** The loopback advice asks the cookie rule it
       describes. After 192, which changes what it should say.
-- [ ] **Task 195, #393.** The absolute typed path that is not there, pinned;
+- [x] **Task 195, #393.** The absolute typed path that is not there, pinned;
       the comment about `which` corrected.
 - [ ] **Task 196, #413.** The spec's two passages that say expiry never kills;
       the startup line naming the policy, pinned.

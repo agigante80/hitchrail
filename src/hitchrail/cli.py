@@ -670,17 +670,25 @@ def preflight(
         )
     found = look(config.agent_binary)
     # #341. A value with a directory in it is a path the operator TYPED, and
-    # `shutil.which` does not search PATH for one: it checks that exact file
-    # and hands it back unchanged. So neither PATH message below is true of
-    # it, and each would send the operator to fix a PATH that was never read.
+    # `shutil.which` does not search PATH for one: it checks that path where
+    # it stands and never makes it absolute. So neither PATH message below is
+    # true of it, and each would send the operator to fix a PATH never read.
     # `os.path.dirname` and not `Path.parent`: `Path("./claude")` normalises
     # the "./" away, and `which` decides by the same `dirname` test this is.
     typed = bool(os.path.dirname(config.agent_binary))  # noqa: PTH120
     if found is None and typed:
+        # #393. Relative, it was looked for from the cwd, and `~` is not
+        # expanded; saying so also saves the round trip of the relative
+        # refusal below once the file is there.
+        where = (
+            ", looked for relative to the current directory; give an absolute path"
+            if not Path(config.agent_binary).is_absolute()
+            else ""
+        )
         problems.append(
-            f"{config.agent_binary!r} is not an executable file. That is the "
-            "agent Hitchrail starts, and a value containing a directory is "
-            "taken as a path to that file, not searched for on PATH"
+            f"{config.agent_binary!r} is not an executable file{where}. That is "
+            "the agent Hitchrail starts, and a value containing a directory is "
+            "taken as a path to that file"
         )
     elif found is None:
         # **"Install it" is the wrong first remedy, and #195 is why.** The case
@@ -893,7 +901,7 @@ def update_plugins_command(argv: list[str]) -> int:
         )
         return 2
     # #298. `shutil.which` hands a name containing a directory component back
-    # UNCHANGED when it is executable, rather than making it absolute: only a
+    # still relative when it is executable, never made absolute: only a
     # bare name searched across PATH comes back joined onto an absolute
     # directory. `resolve()` against THIS process's cwd, before
     # `plugin_runner` starts the child in `Path.home()`, is what makes the

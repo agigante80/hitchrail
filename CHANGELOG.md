@@ -49,6 +49,9 @@ that is ALSO reached over a plain http forwarder or alias. See Changed.
 
 ### Fixed
 
+- An `--agent-binary` path that is not there says it was looked for
+  relative to the current directory when it was relative, which is also
+  why `~/...` is not found, and no longer mentions PATH (#393).
 - The startup line advising a loopback bind for a `Secure` cookie no longer
   appears where the rebind would not set it, such as an https origin on
   `localhost` or one beside a plain http origin (#394).

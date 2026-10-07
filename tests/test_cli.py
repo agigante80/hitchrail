@@ -376,8 +376,8 @@ def test_a_relative_path_on_path_is_refused_rather_than_spawned(tmp_path: Path) 
 def test_a_typed_relative_agent_binary_is_refused_as_typed(tmp_path: Path, typed: str) -> None:
     """#341. A value with a directory in it is never searched on PATH, so
     blaming a "relative PATH entry" sent the operator to fix a PATH that was
-    never read. `which` hands a typed path back unchanged, as the premise
-    pin below shows against the real one."""
+    never read. `which` checks a typed path where it stands and never makes
+    it absolute, as the premise pin below shows against the real one."""
     found = preflight(
         make_config(tmp_path, agent_binary=typed),
         which=lambda n: typed if n == typed else "/usr/bin/tmux",
@@ -390,17 +390,31 @@ def test_a_typed_relative_agent_binary_is_refused_as_typed(tmp_path: Path, typed
     assert found.agent_binary is None
 
 
-def test_a_typed_path_that_is_not_there_is_not_blamed_on_path(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("typed", "relative"),
+    [("bin/claude", True), ("/opt/claude", False), ("~/.local/bin/claude", True)],
+    ids=["relative", "absolute", "tilde"],
+)
+def test_a_typed_path_that_is_not_there_is_not_blamed_on_path(
+    tmp_path: Path, typed: str, relative: bool
+) -> None:
     """#341. The other half: "is not on PATH" is false of a path that was
-    never looked up there, whatever else is wrong with it."""
+    never looked up there, whatever else is wrong with it.
+
+    #393: and a relative one is told where it was looked for, since it
+    would be refused as relative once it was there, which is a second round
+    trip. `which` does not expand `~`, so the tilde case is relative too,
+    and saying so is what explains it."""
     found = preflight(
-        make_config(tmp_path, agent_binary="bin/claude"),
-        which=lambda n: None if n == "bin/claude" else "/usr/bin/tmux",
+        make_config(tmp_path, agent_binary=typed),
+        which=lambda n: None if n == typed else "/usr/bin/tmux",
         meminfo=tmp_path,
     )
     assert len(found.problems) == 1
-    assert "not an executable file" in found.problems[0]
-    assert "is not on PATH" not in found.problems[0]
+    problem = found.problems[0]
+    assert "not an executable file" in problem
+    assert "PATH" not in problem
+    assert ("relative to the current directory" in problem) is relative, problem
     assert found.agent_binary is None
 
 
@@ -416,20 +430,26 @@ def test_an_absolute_agent_binary_is_accepted_as_typed(tmp_path: Path) -> None:
     assert found.agent_binary == "/opt/claude"
 
 
-def test_which_hands_a_typed_relative_path_back_unchanged(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("typed", ["bin/claude", "bin//claude"])
+def test_which_checks_a_typed_relative_path_where_it_stands(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, typed: str
 ) -> None:
     """The premise #341 rests on, pinned against the real `shutil.which`: a
-    name with a directory component is checked where it stands and returned
-    as given, never searched on PATH or made absolute. If a Python release
-    changes that, the typed branch in `preflight` needs rethinking."""
+    name with a directory component is checked where it stands and never
+    searched on PATH or made absolute. Not "returned as given" (#393): 3.12
+    and later rejoin the split, so `bin//claude` comes back `bin/claude`,
+    where 3.11 hands it back as typed. Either is still relative, which is
+    all the typed branch in `preflight` needs."""
     (tmp_path / "bin").mkdir()
     agent = tmp_path / "bin" / "claude"
     agent.write_text("#!/bin/sh\n")
     agent.chmod(0o755)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("PATH", "/nonexistent")
-    assert _REAL_SHUTIL_WHICH("bin/claude") == "bin/claude"
+    found = _REAL_SHUTIL_WHICH(typed)
+    assert found is not None
+    assert not Path(found).is_absolute()
+    assert Path(found) == Path("bin/claude")
 
 
 def test_an_unreadable_meminfo_refuses_rather_than_running_unguarded(
