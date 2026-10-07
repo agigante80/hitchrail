@@ -309,8 +309,9 @@ def _foreground_before(text: str) -> str | None:
     """The SGR foreground in effect at the end of `text`; None is the default.
 
     Only what tmux writes is modelled: a reset, the default, the sixteen
-    colours and the 256 colour and RGB forms. A background or another
-    attribute moves past without changing the answer.
+    colours and the 256 colour and RGB forms. A background, an underline
+    colour (58, which tmux writes as its own SGR after the foreground, #405)
+    or another attribute moves past without changing the answer.
     """
     foreground: str | None = _DEFAULT_FOREGROUND
     for match in _SGR.finditer(text):
@@ -320,7 +321,7 @@ def _foreground_before(text: str) -> str | None:
             code = params[i]
             if code in ("", "0", "39"):
                 foreground = _DEFAULT_FOREGROUND
-            elif code in ("38", "48"):
+            elif code in ("38", "48", "58"):
                 width = 3 if params[i + 1 : i + 2] == ["5"] else 5
                 if code == "38":
                     foreground = ";".join(params[i : i + width])

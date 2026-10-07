@@ -88,7 +88,7 @@ global rules say, and findings go to Backlog, not this milestone.
 
 ### Batch 2: the wrap up's engine edges, tasks 178 to 185
 
-- [ ] **Task 178, #405.** Skip SGR 58's operands in `claude_ipc/screen.py`.
+- [x] **Task 178, #405.** Skip SGR 58's operands in `claude_ipc/screen.py`.
       First because it is the only finding whose failure is in the dangerous
       direction: an exit typed into a busy agent.
 - [ ] **Task 179, #406.** A Stop while the sweep types the exit is a no-op.

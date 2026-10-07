@@ -107,6 +107,21 @@ def test_a_bare_ornament_takes_the_colour_left_by_the_line_above(
     assert ipc_screen.wrap_up_reading(pane) is reading
 
 
+@pytest.mark.parametrize(
+    "underline",
+    ["\x1b[58;5;0m", "\x1b[58;2;31;32;33m"],
+    ids=["256", "rgb-with-basic-colour-components"],
+)
+def test_an_underline_colour_after_the_busy_colour_still_reads_busy(underline: str) -> None:
+    """#405: tmux writes an underline colour as its own SGR 58 after the
+    foreground. Read as foreground codes, `58;5;0` became the default and
+    `31;32;33` a basic colour, and the default is the dangerous answer: a busy
+    agent read as idle gets the exit typed mid task."""
+    assert ipc_screen._foreground_before("\x1b[38;5;246m" + underline) == "38;5;246"
+    pane = f"\x1b[38;5;246m{underline}grey border\n{BARE}\n  bypass permissions on\n"
+    assert ipc_screen.wrap_up_reading(pane) is False
+
+
 def test_an_idle_box_holding_a_draft_is_not_finished() -> None:
     """Someone is typing in the terminal: not the agent's empty box."""
     assert ipc_screen.wrap_up_reading(pane_text(DRAFT_BOX)) is False
