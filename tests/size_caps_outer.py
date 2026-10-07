@@ -67,7 +67,8 @@ OUTER_LAYER_CAPS: dict[str, int] = {
     # 1022 for #239: `--stop-policy`, resolved flag then file then default.
     # 1026 for #421: the state file's startup warnings, logged after the block.
     # 1035 for #391: the startup line naming each plain origin withheld.
-    "cli.py": 1035,
+    # 1037 for #394: the advice asks the cookie rule and says what #391 costs.
+    "cli.py": 1037,
     # 409 to 418 for #78: two entries in the exemption and the argument
     # beside them, which the set's own rule requires of every entry.
     # 418 to 436 for #160: the unauthenticated asset set and the argument

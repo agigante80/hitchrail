@@ -1443,8 +1443,17 @@ def test_the_startup_block_is_logged_in_the_format(
         ("0.0.0.0", ("http://box.lan",), False),
         ("127.0.0.1", ("https://box.lan",), False),
         ("0.0.0.0", (), False),
+        ("0.0.0.0", ("https://localhost:8443",), False),
+        ("0.0.0.0", ("https://box.lan", "http://other.lan"), False),
     ],
-    ids=["https-origin-off-loopback", "plain-origin", "loopback-bind", "no-origin"],
+    ids=[
+        "https-origin-off-loopback",
+        "plain-origin",
+        "loopback-bind",
+        "no-origin",
+        "https-loopback-origin",
+        "https-beside-a-plain-origin",
+    ],
 )
 def test_the_startup_block_says_when_a_proxy_origin_gets_no_secure_cookie(
     tmp_path: Path, host: str, origins: tuple[str, ...], said: bool
@@ -1452,12 +1461,21 @@ def test_the_startup_block_says_when_a_proxy_origin_gets_no_secure_cookie(
     """#283 item 4. The deployment works and only loses a hardening flag, so
     #268's refusal would be wrong here; silence left the operator no way to
     learn why the flag was missing. A plain origin is not a proxy, and a
-    loopback bind already gets the flag, so neither is told anything."""
+    loopback bind already gets the flag, so neither is told anything.
+
+    #394: the advice must be true. A loopback https origin is no proxy and a
+    plain one beside it keeps the flag off, so rebinding as told would not
+    set it in either; the line asks the cookie rule rather than its own
+    test. Since #391 a loopback bind also stops serving the plain LAN
+    address, so the advice says that too."""
     config = make_config(tmp_path, host=host, token="t" * 24, extra_origins=origins)
     lines = cli.startup_block(
         config, cli.Preflight([], "/usr/bin/claude", "/usr/bin/tmux"), "info"
     )
-    assert any(line.startswith("token cookie not Secure") for line in lines) is said, lines
+    found = [line for line in lines if line.startswith("token cookie not Secure")]
+    assert bool(found) is said, lines
+    if said:
+        assert "through the proxy" in found[0], found[0]
 
 
 @pytest.mark.parametrize(

@@ -133,7 +133,7 @@ global rules say, and findings go to Backlog, not this milestone.
       review required.
 - [x] **Task 193, #395.** The IPv4 mapped loopback is refused by name, not by
       a uvicorn traceback.
-- [ ] **Task 194, #394.** The loopback advice asks the cookie rule it
+- [x] **Task 194, #394.** The loopback advice asks the cookie rule it
       describes. After 192, which changes what it should say.
 - [ ] **Task 195, #393.** The absolute typed path that is not there, pinned;
       the comment about `which` corrected.

@@ -49,6 +49,9 @@ that is ALSO reached over a plain http forwarder or alias. See Changed.
 
 ### Fixed
 
+- The startup line advising a loopback bind for a `Secure` cookie no longer
+  appears where the rebind would not set it, such as an https origin on
+  `localhost` or one beside a plain http origin (#394).
 - `--host ::ffff:127.0.0.1` is refused at startup naming `127.0.0.1`, where
   before it reached the bind and failed with a traceback: an IPv4 mapped
   address cannot be bound on the server's IPv6 only socket (#395).

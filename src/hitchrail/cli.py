@@ -591,12 +591,14 @@ def startup_block(config: Config, found: Preflight, level: str) -> list[str]:
     ]
     if config.self_project:
         lines.append(f"self project {config.self_project}, never stopped from here")
-    # #283: the mirror of #268's refusal. It works, so it is a line, not a refusal.
-    proxied = any(o.strip().lower().startswith("https://") for o in config.extra_origins)
-    if proxied and not config.cookie_is_secure and not config.is_loopback:
+    # #283: the mirror of #268's refusal. It works, so it is a line, not a
+    # refusal. #394: only where rebinding to loopback would set the flag.
+    if not config.tls and not config.is_loopback and config.proxied_origins_are_https:
         lines.append(
-            "token cookie not Secure: an https origin is set but this plain http bind "
-            "is off loopback; bind loopback behind the proxy to get the flag"
+            "token cookie not Secure: every proxy origin is https but this plain http "
+            "bind is off loopback; bind loopback behind the proxy to get the flag, "
+            "after which the plain http LAN address is refused and the page is "
+            "reached through the proxy"
         )
     # #391: the grant from these is now refused, and an operator on a plain
     # forwarder needs to learn that before the phone does.

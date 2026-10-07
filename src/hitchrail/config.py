@@ -419,8 +419,12 @@ class Config:
         """
         if self.tls:
             return True
-        if not is_loopback_host(self.host):
-            return False
+        return is_loopback_host(self.host) and self.proxied_origins_are_https
+
+    @property
+    def proxied_origins_are_https(self) -> bool:
+        """The origins' half of `cookie_is_secure`, apart from the bind, so
+        the CLI's advice to bind loopback asks the rule it describes (#394)."""
         proxied = [parts for entry in self.extra_origins if (parts := _origin_parts(entry))]
         return bool(proxied) and all(scheme == "https" for scheme, _ in proxied)
 
