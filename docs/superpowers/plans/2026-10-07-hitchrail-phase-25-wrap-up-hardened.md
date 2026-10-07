@@ -123,7 +123,7 @@ global rules say, and findings go to Backlog, not this milestone.
       reported, so removing the pin never silently restores a kill.
 - [x] **Task 190, #397.** A refused state file is said at startup, not
       forgotten.
-- [ ] **Task 191, #420.** A pinned refusal writes no roots half beside it.
+- [x] **Task 191, #420.** A pinned refusal writes no roots half beside it.
 
 ### Batch 5: bind and command line edges, tasks 192 to 196
 

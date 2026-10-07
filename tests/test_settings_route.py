@@ -885,5 +885,16 @@ async def test_a_stop_policy_the_operator_set_is_pinned(
         assert r.status_code == 409, r.text
         assert r.json()["code"] == "operator_pinned"
         assert (await _listing(c))["server"]["stop_policy"] == "ask"
+        # #420: a valid toggle beside the pinned policy is refused with it.
+        # `apply` checks everything first; only this body would notice a
+        # reorder that wrote the roots half before the pin refused.
+        r = await c.patch(
+            "/api/config",
+            json={"roots": {"work": {"enabled": False}}, "stop_policy": "end_anyway"},
+            headers=HEADERS,
+        )
+        assert r.status_code == 409, r.text
+        assert r.json()["code"] == "operator_pinned"
+        assert "work" in [x["label"] for x in (await _listing(c))["roots"]]
     assert pinned.state_path is not None
     assert not pinned.state_path.exists()
