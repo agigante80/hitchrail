@@ -144,7 +144,7 @@ global rules say, and findings go to Backlog, not this milestone.
 
 - [x] **Task 197, #388 (P2).** No query string token reaches the journal
       through uvicorn's access line.
-- [ ] **Task 198, #392.** Shutdown does not re-raise a stuck scan's logged
+- [x] **Task 198, #392.** Shutdown does not re-raise a stuck scan's logged
       error over the kill's own.
 - [ ] **Task 199, #396.** The TLS 1.1 refusal test fails if only the client
       refuses.

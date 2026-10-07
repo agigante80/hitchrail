@@ -151,5 +151,7 @@ OUTER_LAYER_CAPS: dict[str, int] = {
     # 1057 for #239: the policy in the listing and the settings payload.
     # 1073 for #409: the policy editable, its null refused and its change
     # a journal line.
-    "server.py": 1073,
+    # 1079 for #392: teardown no longer re-raises a watch's logged error
+    # over a clean shutdown or over the kill's own.
+    "server.py": 1079,
 }
