@@ -968,6 +968,39 @@ async def test_the_stop_sweep_outlives_a_failing_tick(
     assert "stop sweep failed" in caplog.text, "the failure was swallowed silently"
 
 
+async def test_a_failing_attention_scan_is_logged_and_the_next_tick_scans_again(
+    config: Config, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#181. `scan_for_stuck` may raise, so what a raise costs is the server's
+    contract: one tick, logged, and the next tick starts another scan."""
+    scans: list[int] = []
+
+    class Boom(Engine):
+        def scan_for_stuck(self) -> list[str]:
+            scans.append(len(scans))
+            if len(scans) == 1:
+                raise RuntimeError("one bad scan")
+            return []
+
+    monkeypatch.setattr(server, "SWEEP_INTERVAL_S", 0.01)
+    engine = Boom(
+        config=config,
+        tmux=FakeTmux(),
+        procs_fn=procs_from(""),
+        meminfo_fn=lambda: PLENTY,
+    )
+    app = create_app(engine=engine, config=config, bus=EventBus())
+    with caplog.at_level(logging.ERROR, logger="hitchrail.server"):
+        async with app.router.lifespan_context(app):
+            for _ in range(200):
+                if len(scans) >= 3:
+                    break
+                await asyncio.sleep(0.01)
+
+    assert len(scans) >= 3, f"no scan ran after the failing one: {scans}"
+    assert "attention scan failed" in caplog.text, "the failure was swallowed silently"
+
+
 async def test_the_sweep_task_is_cancelled_on_shutdown(config: Config) -> None:
     """A task that outlives its app keeps a dead engine alive and keeps
     spawning `ps` after the server is meant to be gone."""

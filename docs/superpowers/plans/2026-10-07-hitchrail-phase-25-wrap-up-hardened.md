@@ -105,7 +105,7 @@ global rules say, and findings go to Backlog, not this milestone.
       from the marker at expiry (decided 2026-10-07).
 - [x] **Task 184, #389, #390.** The start line after the start, the timeout
       line's wording, duration and person wait.
-- [ ] **Task 185, #181.** The two docstrings from #100 say what the code does.
+- [x] **Task 185, #181.** The two docstrings from #100 say what the code does.
 
 ### Batch 3: the stop dialog, tasks 186 to 188
 

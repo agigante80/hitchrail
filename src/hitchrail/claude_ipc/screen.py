@@ -220,8 +220,18 @@ def shows_input_box(pane: str) -> bool | None:
     `is False` rather than falsiness.
 
     **This covers modals nobody has captured yet, but only those that reuse the
-    ornament.** One drawn without it returns `None` and goes unflagged, which
-    is the honest failure direction: a missing warning rather than a false one.
+    ornament.** One drawn without it returns `None` and goes unflagged: a
+    missing warning, the common failure.
+
+    **A false one is possible too, and transient (#181).** The row is the LAST
+    one carrying the ornament. While the box is not drawn, during a repaint or
+    a turn, an output line holding the ornament and an ordinary space after it
+    is that row, and this returns `False` about a working agent. The next
+    sweep reads the pane again and clears it. The source is the agent's own
+    output, so an agent can set this answer and, by printing the ornament with
+    U+00A0 after it, suppress it. That is why the sweep's overlay built on it
+    describes a screen and gates nothing: the answer route reads the pane
+    again inside the send, and `end_anyway` acts on its own look at expiry.
     """
     row = _live_ornament_row(pane)
     if row is None:

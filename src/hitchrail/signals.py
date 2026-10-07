@@ -295,8 +295,8 @@ def end_anyway(engine: Engine, name: str, pid: int) -> bool:
     True when the signal went, and it has announced if the machine could be
     read after. False on any refusal, and the caller reports the expiry
     exactly as `ask` would: the unknown case does the thing that destroys
-    nothing. Never raises, for `expire_stops`' reason: a raise there kills
-    the ticker.
+    nothing. Never raises, for `expire_stops`' reason: a raise there loses
+    the rest of that pass.
     """
     try:
         _end_session_agent(engine, name, pid)

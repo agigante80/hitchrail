@@ -236,7 +236,7 @@ class Engine:
         # Guarded for the same reason `_starting` is: stop, kill and the
         # expiry ticker all run on worker threads. Without it, iterating in
         # `expire_stops` while `stop` adds raises "dictionary changed size
-        # during iteration", and that raise kills the ticker.
+        # during iteration", and that raise costs the tick its expiries.
         #
         # The lock covers MUTATION and ITERATION. `_derive` reads
         # `name in self._stopping` without it, deliberately: a membership test
@@ -1190,8 +1190,9 @@ class Engine:
         `None` means an engine built directly, which is a test asking for one
         scan rather than a process idling, so it scans.
 
-        Never raises. It runs on the loop that expires stops, and an exception
-        there kills that loop for the life of the process.
+        May raise past the look and the root scan (#181). The server's done
+        callback logs it and the next tick scans again; caught here, it would
+        answer "nobody is waiting" on no evidence.
         """
         if self._bus is not None and self._bus.subscriber_count == 0:
             return []
@@ -1300,9 +1301,9 @@ class Engine:
         """Whether this agent's screen is showing something only a human can
         answer. False whenever that cannot be told.
 
-        Never raises. It runs inside the ticker that expires stops, and an
-        exception there kills the ticker for the life of the process, which is
-        the failure `expire_stops` exists to guard against.
+        Never raises. `expire_stops` calls it per name after it has dropped
+        the markers, so a raise would lose every later name's report and
+        announcement, though the server's sweep survives it (#181).
 
         What "clear" means is Claude Code knowledge and stays in `claude_ipc`;
         this asks and does not interpret.
@@ -1343,8 +1344,8 @@ class Engine:
         connected: a wrap up has to finish with the phone in a pocket.
 
         Whether a screen reads finished is `claude_ipc`'s, through the watch;
-        this only asks. Returns the names sent to the exit. Never raises, for
-        the reason `_pane_needs_a_person` gives.
+        this only asks. Returns the names sent to the exit. Never raises: a
+        refused exit's marker is dropped first, so a raise loses its report.
         """
         with self._stopping_guard:
             closing = [
@@ -1425,8 +1426,8 @@ class Engine:
         now = self._clock()
         with self._stopping_guard:
             # A snapshot, taken under the lock. Iterating the live dict while
-            # `stop` adds on another thread raises, and that raise kills the
-            # ticker Phase 5 drives this from.
+            # `stop` adds on another thread raises, and the tick loses its
+            # expiries to that raise.
             # #242. A `closing` marker is the sweep's, not this method's, and
             # the wait is measured from the exit: under a wrap up the time
             # before it is the rest of the agent's task.
@@ -1456,11 +1457,10 @@ class Engine:
         # Outside the lock also means `get` can fail out here, and the markers
         # are already gone by then. `_announce` cannot raise, but `get` can:
         # it reads the machine, and a tmux that has gone away is exactly the
-        # MachineUnreadable case. Uncaught, that raise leaves the ticker dead,
-        # so no stop expires again for the life of the process, which is the
-        # failure this method's own docstring says it guards against. Losing
-        # one announcement is a stale timer on a page; losing the ticker is
-        # every timer, forever.
+        # MachineUnreadable case. Uncaught, that raise ends this pass with its
+        # markers already gone, so every later name in it goes unreported and
+        # unannounced, and their timers sit on the page until the next listing.
+        # The sweep itself survives it, inside the server's loop (#181).
         # ONE look at each expired pane, before announcing (#101).
         #
         # This is the only place the interface can learn that a stop ended

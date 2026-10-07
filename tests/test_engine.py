@@ -2725,6 +2725,23 @@ def test_a_pane_with_no_prompt_row_at_all_is_not_flagged(root: Path) -> None:
     assert engine.scan_for_stuck() == []
 
 
+def test_a_raise_in_the_sweeps_row_derivation_reaches_its_caller(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#181. `scan_for_stuck` does not promise never to raise, and this pins
+    that. Its `try` covers the look and the root scan only; a raise past them
+    goes to the server, whose done callback logs it, and costs one tick of the
+    sweep. Catching it here would answer "nobody is waiting" on no evidence."""
+    engine, _ = sweeping_engine(root, MODAL_PANE)
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("a derivation that broke")
+
+    monkeypatch.setattr(engine, "_derive", boom)
+    with pytest.raises(RuntimeError, match="a derivation that broke"):
+        engine.scan_for_stuck()
+
+
 def test_the_sweep_leaves_a_row_that_has_a_link_alone(root: Path) -> None:
     """A row with a session link is reachable: tap it and you are there.
 
