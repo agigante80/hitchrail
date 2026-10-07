@@ -1166,15 +1166,22 @@ def test_a_kill_mid_update_ends_that_plugin_and_never_spawns_the_next(
     )
     started_a = tmp_path / "started-a@m"
     killed = False
+    # Every process the cleanup may signal, each by a pidfd opened while it
+    # was certainly unreaped (#404). A pid read from a marker after the reap
+    # may be anyone's, and `killpg` on it signals a group the test never
+    # started.
+    held: list[int] = []
     try:
         worker.start()
         deadline = time.monotonic() + 10
         while not started_a.exists() and time.monotonic() < deadline:
             time.sleep(0.02)
         assert started_a.exists(), "plugin a's update never started"
-        # Opened before the kill, while the grandchild is certainly alive, so
-        # the fd names this process and not whatever later reuses its pid.
+        # Opened before the kill, while both are certainly alive, so each fd
+        # names this process and not whatever later reuses its pid.
+        held.append(os.pidfd_open(int(started_a.read_text())))
         grandchild_fd = os.pidfd_open(int(grandchild.read_text()))
+        held.append(grandchild_fd)
         try:
             handle.kill()
             killed = True
@@ -1190,7 +1197,9 @@ def test_a_kill_mid_update_ends_that_plugin_and_never_spawns_the_next(
                 "the grandchild outlived the kill: only the direct child was signalled"
             )
         finally:
-            os.close(grandchild_fd)
+            started_b = _own_child_fd(tmp_path / "started-b@m")
+            if started_b is not None:
+                held.append(started_b)
         assert not (tmp_path / "started-b@m").exists(), (
             "plugin b's interpreter ran after the kill"
         )
@@ -1199,24 +1208,41 @@ def test_a_kill_mid_update_ends_that_plugin_and_never_spawns_the_next(
     finally:
         # Latch first, so nothing further spawns, then wait for the worker.
         # A worker still alive after that is only reachable on a broken latch,
-        # and it is blocked on the NEWEST child, the only marker whose pid is
-        # certainly unreaped: an older one was killed and reaped and its pid
-        # may be anyone's (#385). That one is signalled by group, so its
-        # grandchild goes too, and only after a pidfd says it is still the
-        # process that wrote the marker.
+        # blocked on plugin b, whose fd is opened now if it was not above:
+        # its marker can appear after the body gave up waiting.
         if not killed:
             handle.kill()
         worker.join(10)
-        markers = sorted(tmp_path.glob("started-*@m"), key=lambda m: m.stat().st_mtime_ns)
-        if worker.is_alive() and markers:
-            leader = int(markers[-1].read_text())
+        if worker.is_alive() and len(held) < 3:
+            started_b = _own_child_fd(tmp_path / "started-b@m")
+            if started_b is not None:
+                held.append(started_b)
+        for fd in held:
             with contextlib.suppress(ProcessLookupError):
-                leader_fd = os.pidfd_open(leader)
-                try:
-                    if not select.select([leader_fd], [], [], 0)[0]:
-                        os.killpg(leader, signal.SIGKILL)
-                finally:
-                    os.close(leader_fd)
+                signal.pidfd_send_signal(fd, signal.SIGKILL)
+            os.close(fd)
+
+
+def _own_child_fd(marker: Path) -> int | None:
+    """A pidfd on the process that wrote `marker`, or None when that cannot
+    be known (#404). The pid is checked AFTER the fd is open: a child of this
+    process that is still alive through the fd cannot have been reaped, so
+    `/proc` read in between described the same process and not a reuse."""
+    if not marker.exists():
+        return None
+    pid = int(marker.read_text())
+    try:
+        fd = os.pidfd_open(pid)
+    except ProcessLookupError:
+        return None
+    try:
+        ppid = int(Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()[1])
+    except (FileNotFoundError, ProcessLookupError):
+        ppid = None
+    if ppid == os.getpid() and not select.select([fd], [], [], 0)[0]:
+        return fd
+    os.close(fd)
+    return None
 
 
 def test_kill_on_a_group_that_is_already_gone_still_latches(
