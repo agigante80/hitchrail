@@ -48,6 +48,8 @@ _SHOWN_LIMIT = 120
 
 QUERY_OMITTED = "?(query omitted)"
 
+ACCESS_WITHHELD = "access line withheld: its arguments were not the shape this version expects"
+
 
 class StderrHandler(logging.StreamHandler):  # type: ignore[type-arg]
     """A `StreamHandler` on whatever `sys.stderr` is at the moment of each line.
@@ -79,20 +81,44 @@ class QueryFilter(logging.Filter):
 
     A filter on the record, not a rewrite of `scope["query_string"]`, which
     #115 deleted for editing a caller's request; the application still sees
-    the query as it was sent. It keys on the shape of uvicorn's record, every
-    target an argument beginning `/`, so it fails open if that shape changes:
+    the query as it was sent.
+
+    Every string argument is cut at its first `?`, whatever it starts with.
+    uvicorn's h11 protocol splits the raw target at the first `?` and writes
+    the rest back, so an absolute form target (through a forwarding proxy),
+    a bare `?x` and `x?y` all reach the line with no leading slash. A client
+    address, a method and an http version never contain `?`, so nothing else
+    is touched.
+
+    For `uvicorn.access` it FAILS CLOSED. That line is the one place a
+    changed upstream shape would leak a secret silently, so a record whose
+    args are not the five tuple the installed uvicorn emits (client, method,
+    target, http version, status) is replaced by a fixed line with no args,
+    rather than passed through on the hope that nothing in it is a target.
     `test_a_query_string_token_reaches_no_journal_line` drives a real uvicorn
-    and is what notices.
+    and is what notices that the shape moved.
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        if isinstance(record.args, tuple):
+        if record.name == "uvicorn.access" and not _is_access_shape(record.args):
+            record.msg = ACCESS_WITHHELD
+            record.args = ()
+        elif isinstance(record.args, tuple):
             record.args = tuple(_without_query(arg) for arg in record.args)
         return True
 
 
+def _is_access_shape(args: object) -> bool:
+    return (
+        isinstance(args, tuple)
+        and len(args) == 5
+        and all(isinstance(arg, str) for arg in args[:4])
+        and isinstance(args[4], int)
+    )
+
+
 def _without_query(arg: object) -> object:
-    if isinstance(arg, str) and arg.startswith("/") and "?" in arg:
+    if isinstance(arg, str) and "?" in arg:
         return arg.partition("?")[0] + QUERY_OMITTED
     return arg
 

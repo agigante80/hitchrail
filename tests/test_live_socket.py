@@ -370,13 +370,39 @@ def test_a_query_string_token_reaches_no_journal_line(
         while time.monotonic() < deadline and err.count("uvicorn.access") < 2:
             err += capsys.readouterr().err
             time.sleep(0.05)
+        # Raw bytes: an HTTP client normalises all of these. Absolute form is
+        # what a forwarding proxy sends; the others have no leading slash.
+        raw = {
+            "absolute": f"http%3A//127.0.0.1/?token={TOKEN}2",
+            "bare": f"?token={TOKEN}3",
+            "relative": f"x?token={TOKEN}4",
+        }
+        for target in raw.values():
+            _raw_request(server.port, target)
+        deadline = time.monotonic() + TIMEOUT
+        while time.monotonic() < deadline and err.count("uvicorn.access") < 2 + len(raw):
+            err += capsys.readouterr().err
+            time.sleep(0.05)
     finally:
         server.stop()
     err += capsys.readouterr().err
     assert '"GET /x?' in err and " 401" in err and " 200" in err, (
         f"uvicorn wrote no access line naming the path, so this proves nothing: {err}"
     )
+    assert err.count("uvicorn.access") >= 2 + len(raw), (
+        f"a raw target got no access line, so this proves nothing: {err}"
+    )
     assert TOKEN not in err, f"the token reached the journal: {err}"
+
+
+def _raw_request(port: int, target: str) -> None:
+    """One request line written byte for byte, answered or not."""
+    with socket.create_connection(("127.0.0.1", port), timeout=TIMEOUT) as sock:
+        sock.sendall(
+            f"GET {target} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n".encode()
+        )
+        while sock.recv(4096):
+            pass
 
 
 SERVER_REFUSALS = ("UNEXPECTED_EOF_WHILE_READING", "TLSV1_ALERT_PROTOCOL_VERSION")
