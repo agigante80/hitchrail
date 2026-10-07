@@ -1456,6 +1456,21 @@ def test_the_startup_block_is_logged_in_the_format(
     assert any("tmux /usr/bin/tmux" in line for line in lines)
 
 
+@pytest.mark.parametrize("policy", ["ask", "end_anyway"])
+def test_the_startup_block_names_the_stop_policy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    policy: str,
+) -> None:
+    """#413. The one place an operator who set `end_anyway` in a file they
+    have forgotten sees that a wait may end in a kill nobody tapped."""
+    monkeypatch.setattr(cli, "_serve", lambda *a: 0)
+    assert main(["--root", f"main={tmp_path}", "--stop-policy", policy]) == 0
+    lines = _log_lines(capsys.readouterr().err)
+    assert any(line.endswith(f", stop policy {policy}") for line in lines), lines
+
+
 @pytest.mark.parametrize(
     ("host", "origins", "said"),
     [

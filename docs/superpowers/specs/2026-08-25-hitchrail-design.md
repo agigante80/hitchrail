@@ -268,7 +268,8 @@ three Claude Code assumptions into the layer that is supposed to hold none: that
 stopping is keystrokes, that it is a sequence of them, and that they travel
 through tmux. The engine keeps what is genuinely its own, which is the timeout,
 the in flight marker, the escalation policy and the refusal to escalate
-automatically. Step 3's kill stays in the engine too: killing the tmux session
+automatically, with its one configured exception, `stop_policy =
+"end_anyway"` (#239), which step 4 describes. Step 3's kill stays in the engine too: killing the tmux session
 is not agent specific, which is exactly why it is the reliable backstop.
 
 This introduces the only state Hitchrail holds that is not derived from the
@@ -845,7 +846,11 @@ The canvas linked in section 1 is the reference. The decisions it encodes:
   kill finds the decision here rather than re-arguing it.
 - **The timeout screen states the risk before offering the kill**, because that
   is the moment the user is most likely to reach for it and least likely to have
-  thought about uncommitted work.
+  thought about uncommitted work. The one configured exception is
+  `stop_policy = "end_anyway"` (#239): a wait that runs out on a prompt is
+  killed without this screen, so the risk is stated earlier instead: on the
+  Stop confirm and through the whole wait, and in the startup log line
+  naming the policy.
 - **The token screen states the consequence plainly**, in the words a person
   would use, not in security jargon.
 - **Dark theme is a first class requirement**, not a later addition.
