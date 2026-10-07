@@ -68,6 +68,9 @@ Nothing to do on upgrade.
   no longer promise a wrap up the server will not type: they say the exit is
   asked again (#416). Stop all over one session says "Stop 1 session?"
   (#414).
+- A `stop_policy` saved from the settings page that `--stop-policy` or the
+  config file overrides is now named in a warning at startup, so removing
+  that setting no longer silently brings back an `end_anyway` (#421).
 
 ### Added
 

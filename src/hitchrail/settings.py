@@ -464,6 +464,30 @@ class Preferences:
             return self._config.sources["stop_policy"]
         return "state" if self._state.stop_policy is not None else "default"
 
+    def _pin_words(self) -> str:
+        if self._config.sources.get("stop_policy") == "flag":
+            return "on the command line"
+        return "in the operator's config file"
+
+    def startup_warnings(self) -> tuple[str, ...]:
+        """What the state file holds that this start does not apply, for the
+        CLI to log once beside the startup block.
+
+        A saved policy under a pin is REPORTED, not cleared (#421): clearing
+        would be Hitchrail rewriting a choice because of a line in a file it
+        never writes, and the report is enough for the operator removing the
+        pin to know what comes back. Said only when the two differ, since only
+        then does removing the pin change anything.
+        """
+        saved = self._state.stop_policy
+        if saved is None or self.stop_policy_editable() or saved == self._config.stop_policy:
+            return ()
+        return (
+            f"stop policy {saved!r}, saved from the settings page, is overridden by "
+            f"{self._config.stop_policy!r} set {self._pin_words()}; removing that "
+            f"setting puts {saved!r} back in force",
+        )
+
     def set_roots_enabled(self, changes: Mapping[str, bool]) -> None:
         self.apply(roots=changes)
 
@@ -512,13 +536,8 @@ class Preferences:
         policy: str | None = None
         if stop_policy is not None:
             if not self.stop_policy_editable():
-                where = (
-                    "on the command line"
-                    if self._config.sources.get("stop_policy") == "flag"
-                    else "in the operator's config file"
-                )
                 raise OperatorPinned(
-                    f"stop_policy is set {where}, which a request cannot override"
+                    f"stop_policy is set {self._pin_words()}, which a request cannot override"
                 )
             # The one validator refuses anything but the two words, a
             # non string included, so the cast claims nothing it does not.

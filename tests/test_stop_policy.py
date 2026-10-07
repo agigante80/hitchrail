@@ -540,6 +540,50 @@ def test_the_flag_and_the_file_both_pin_the_policy(root: Path, source: str, wher
 
 
 @pytest.mark.parametrize(
+    ("source", "where"), [("flag", "command line"), ("file", "config file")]
+)
+def test_a_saved_policy_a_pin_overrides_is_said_at_startup(
+    root: Path, source: str, where: str
+) -> None:
+    """#421: the pin hides the saved `end_anyway`, and deleting the pin
+    brings it back, a kill nobody chose at that moment. Reported rather than
+    cleared: the state file keeps what the page chose, and the operator
+    learns, before removing the pin, what removing it restores."""
+    state = root / "state.toml"
+    state.write_text('stop_policy = "end_anyway"\n')
+    state.chmod(0o600)
+    prefs = settings.Preferences(
+        make_config(root, state_path=state, stop_policy="ask", sources={"stop_policy": source})
+    )
+    (warning,) = prefs.startup_warnings()
+    assert "'end_anyway'" in warning
+    assert "'ask'" in warning
+    assert where in warning
+    assert 'stop_policy = "end_anyway"' in state.read_text(), "the saved choice was cleared"
+
+
+@pytest.mark.parametrize(
+    ("saved", "pinned", "source"),
+    [
+        ("end_anyway", "end_anyway", "file"),
+        (None, "ask", "flag"),
+        ("end_anyway", "ask", "default"),
+    ],
+    ids=["pin-agrees", "nothing-saved", "not-pinned"],
+)
+def test_nothing_is_said_when_removing_the_pin_would_change_nothing(
+    root: Path, saved: str | None, pinned: str, source: str
+) -> None:
+    state = root / "state.toml"
+    state.write_text(f'stop_policy = "{saved}"\n' if saved else "disabled = []\n")
+    state.chmod(0o600)
+    prefs = settings.Preferences(
+        make_config(root, state_path=state, stop_policy=pinned, sources={"stop_policy": source})
+    )
+    assert prefs.startup_warnings() == ()
+
+
+@pytest.mark.parametrize(
     "line", ['stop_policy = "kill"', "stop_policy = true", "stop_policy = 1"]
 )
 def test_an_unknown_policy_in_the_state_file_is_ask_and_loses_nothing_beside_it(

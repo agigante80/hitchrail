@@ -1017,6 +1017,10 @@ def main(argv: list[str] | None = None) -> int:
         log.info("%s", line)
 
     engine = Engine(config=config)
+    # After the block rather than inside it: they are what the engine's own
+    # read of the state file found, and that read happens here (#421).
+    for line in engine.prefs.startup_warnings():
+        log.warning("%s", line)
     # One bus, built here and owned here, because the CLI owns the process.
     app = create_app(engine=engine, config=config, bus=EventBus())
     return _serve(app, config, tls)

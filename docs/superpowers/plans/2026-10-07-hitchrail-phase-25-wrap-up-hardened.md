@@ -119,7 +119,7 @@ global rules say, and findings go to Backlog, not this milestone.
 
 ### Batch 4: the stop policy's settings, tasks 189 to 191
 
-- [ ] **Task 189, #421.** A saved `stop_policy` under a pin is cleared or
+- [x] **Task 189, #421.** A saved `stop_policy` under a pin is cleared or
       reported, so removing the pin never silently restores a kill.
 - [ ] **Task 190, #397.** A refused state file is said at startup, not
       forgotten.

@@ -1467,6 +1467,34 @@ def test_the_startup_block_says_what_kind_of_stop_prompt_and_never_the_prompt(
     assert not any("distinctive" in line for line in lines)
 
 
+def test_a_saved_policy_the_config_file_overrides_is_logged_at_startup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#421, through `main`: the operator about to delete their `ask` line
+    reads, in the journal, that the page's `end_anyway` is what returns."""
+    (tmp_path / "work").mkdir()
+    folder = tmp_path / "cfg"
+    folder.mkdir()
+    folder.chmod(0o755)
+    config = folder / "config.toml"
+    config.write_text(
+        f'stop_policy = "ask"\n[[roots]]\nlabel = "work"\npath = "{tmp_path / "work"}"\n'
+    )
+    config.chmod(0o644)
+    state = folder / "state.toml"
+    state.write_text('stop_policy = "end_anyway"\n')
+    state.chmod(0o600)
+    monkeypatch.setattr(cli, "_serve", lambda *a: 0)
+    assert main(["--config", str(config)]) == 0
+    warned = [
+        line
+        for line in _log_lines(capsys.readouterr().err)
+        if " WARNING hitchrail.cli: " in line and "'end_anyway'" in line
+    ]
+    assert len(warned) == 1, warned
+    assert "config file" in warned[0]
+
+
 def test_the_token_never_reaches_a_log(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

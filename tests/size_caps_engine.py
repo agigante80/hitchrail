@@ -372,5 +372,9 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # 495 for #239: the `stop_policy` file key, typed here as the rest.
     # 551 for #409: the policy kept in the state file, pinned by the file
     # as well as the flag, with the reason where a reader would undo it.
-    "settings.py": 551,
+    # 570 for #421: a saved policy a pin overrides is reported at startup,
+    # with why it is reported rather than cleared. Past 550: the seam is the
+    # one the module docstring draws, the operator's file against the state
+    # file and `Preferences`.
+    "settings.py": 570,
 }
