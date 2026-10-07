@@ -2576,6 +2576,24 @@ async def test_a_malformed_body_on_the_signal_route_is_400_and_signals_nothing(
     assert fake.events == []
 
 
+@pytest.mark.parametrize(
+    ("route", "sent"), [("signal", signal.SIGTERM), ("signal/force", signal.SIGKILL)]
+)
+async def test_an_empty_object_on_the_signal_routes_is_the_unbound_request(
+    config: Config, route: str, sent: signal.Signals
+) -> None:
+    """#403. `docs/api.md` promises `{}` means what no body means. Nothing
+    refuses an empty object today, and a later `if not body` would turn a
+    script's `{}` into a 400 with every other test green."""
+    fake = FakePidfd()
+    async with client_for(_signal_engine(config, fake), config) as c:
+        r = await c.post(
+            f"/api/sessions/{proj('vessel')}/{route}", headers=HEADERS, content="{}"
+        )
+    assert r.status_code == 202, r.text
+    assert fake.signals == [sent]
+
+
 # 20000 levels fit in MAX_BODY_BYTES and are past the parser's stack.
 _TOO_DEEP = "[" * 20000 + "]" * 20000
 

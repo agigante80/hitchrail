@@ -148,7 +148,7 @@ global rules say, and findings go to Backlog, not this milestone.
       error over the kill's own.
 - [x] **Task 199, #396.** The TLS 1.1 refusal test fails if only the client
       refuses.
-- [ ] **Task 200, #403.** `{}` on the signal routes pinned as the unbound
+- [x] **Task 200, #403.** `{}` on the signal routes pinned as the unbound
       request.
 - [ ] **Task 201, #404.** The kill mid update test opens its pidfds before the
       reap.
