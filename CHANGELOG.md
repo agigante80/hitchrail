@@ -40,6 +40,9 @@ Nothing to do on upgrade.
   that is still working when its screen also carries an underline colour
   (#405), and a Stop tapped while an exit is being typed is answered without
   typing a second exit over the first (#406).
+- An Exit now that is refused, for example over a draft in the box, leaves
+  the wrap up running and still ends it in an exit, where before it ended the
+  stop with the prompt still queued (#407).
 
 ## 0.12.0 - 2026-10-01
 

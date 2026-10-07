@@ -250,7 +250,7 @@ def test_a_refused_exit_after_the_wrap_up_drops_the_marker(root: Path) -> None:
         return TRUST_MODAL
 
     tmux.capture_pane = capture  # type: ignore[method-assign]
-    assert engine.advance_wrap_ups() == [VESSEL]
+    assert engine.advance_wrap_ups() == [], "refused, so not moved on (#407)"
     assert engine._stopping.get(VESSEL) is not marker
     assert VESSEL not in engine._stopping
     # The stop ended on a screen only a person can answer, and the row says
@@ -275,7 +275,7 @@ def test_a_refused_exit_over_a_draft_is_not_waiting_on_a_person(root: Path) -> N
         return DIRTY_INPUT_BOX
 
     tmux.capture_pane = capture  # type: ignore[method-assign]
-    assert engine.advance_wrap_ups() == [VESSEL]
+    assert engine.advance_wrap_ups() == []
     assert VESSEL not in engine._stopping
     assert VESSEL not in engine._awaiting_input
 
@@ -493,3 +493,68 @@ def test_a_typing_flag_is_cleared_when_the_exit_fails(root: Path) -> None:
     tmux.send_keys = send_keys  # type: ignore[method-assign]
     engine.advance_wrap_ups()
     assert marker.typing is False
+
+
+# -- #407: the edges of the wrap up -----------------------------------------
+
+
+def test_a_refused_exit_now_leaves_the_wrap_up_closing_with_its_watch(root: Path) -> None:
+    """The person saw a refusal and reasonably assumes the wrap up still ends
+    in an exit, so the queued prompt's watch has to survive it."""
+    engine, tmux, clock = wrap_engine(root)
+    engine.stop(VESSEL)
+    marker = engine._stopping[VESSEL]
+    watch = marker.watch
+    tmux.pane_text[VESSEL] = DIRTY_INPUT_BOX
+    with pytest.raises(StopRefused):
+        engine.stop(VESSEL)
+    assert engine._stopping[VESSEL] is marker, "the same object, which `_drop` compares"
+    assert marker.phase == "closing"
+    assert marker.watch is watch
+    assert marker.exit_at is None
+    assert marker.typing is False
+    assert engine.get(VESSEL).stopping_phase == "closing"
+    # And the sweep still ends it in an exit once the wrap up finishes.
+    del tmux.pane_text[VESSEL]
+    assert finish(engine, clock) == [VESSEL]
+    assert exits_sent(tmux) == 1
+
+
+def test_a_refused_first_exit_still_drops_its_marker(root: Path) -> None:
+    """Only Exit now has a wrap up to go back to; a plain stop has none."""
+    engine, tmux, _ = wrap_engine(root, stop_prompt=None)
+    tmux.pane_text[VESSEL] = DIRTY_INPUT_BOX
+    with pytest.raises(StopRefused):
+        engine.stop(VESSEL)
+    assert VESSEL not in engine._stopping
+
+
+def test_an_unexpected_error_while_typing_the_prompt_drops_the_marker(root: Path) -> None:
+    """Stranded `closing` with no watch, every later Stop was a no-op, the
+    sweep skipped it and expiry never saw it: only Kill cleared it."""
+    engine, tmux, _ = wrap_engine(root)
+
+    def send_text(project: str, text: str) -> None:
+        raise RuntimeError("something nobody planned for")
+
+    tmux.send_text = send_text  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError):
+        engine.stop(VESSEL)
+    assert VESSEL not in engine._stopping
+    del tmux.send_text
+    engine.stop(VESSEL)
+    assert typed(tmux) == [PROMPT], "a later Stop is a real one again"
+
+
+def test_the_sweep_reports_only_the_exits_it_sent(root: Path) -> None:
+    engine, tmux, clock = wrap_engine(root)
+    engine.stop(VESSEL)
+    clock.advance(SETTLE)
+    engine.advance_wrap_ups()
+    clock.advance(SETTLE)
+
+    def send_keys(project: str, *keys: str) -> None:
+        raise TmuxUnavailable("gone")
+
+    tmux.send_keys = send_keys  # type: ignore[method-assign]
+    assert engine.advance_wrap_ups() == []

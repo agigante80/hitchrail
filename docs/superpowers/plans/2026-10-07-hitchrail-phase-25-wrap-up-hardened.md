@@ -93,7 +93,7 @@ global rules say, and findings go to Backlog, not this milestone.
       direction: an exit typed into a busy agent.
 - [x] **Task 179, #406.** A Stop while the sweep types the exit is a no-op.
       Decides `StopMarker`'s shape for #407 and #419 as well.
-- [ ] **Task 180, #407.** The four edges: the docstring, a refused Exit now
+- [x] **Task 180, #407.** The four edges: the docstring, a refused Exit now
       restoring `closing`, the stranded marker, the moved list.
 - [ ] **Task 181, #418, #412, #387.** `end_anyway` kills by the agent's pid,
       through batch 1's seam; its fallbacks are tested; every kill writes a

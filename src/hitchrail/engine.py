@@ -128,9 +128,17 @@ class StopMarker:
     on either is the no-op 202: a second sequence would interleave its keys
     with the first.
 
-    **Every removal is by identity**, through `Engine._drop`. A pop by name
-    removes whatever marker is there now, which after a repeated Stop is a
-    newer one than the caller holds.
+    **A caller that holds a marker removes it by identity**, through
+    `Engine._drop`: a pop by name removes whatever marker is there now, which
+    after a repeated Stop is a newer one than the caller holds. Three removals
+    are by name on purpose (#407), because each ends every stop on the row,
+    not one: `_derive` on a row it read `stopped`, `kill` after the session
+    is gone, and `expire_stops`, whose snapshot and removal share one critical
+    section.
+
+    A claim that fails gives the marker back rather than replacing it: Exit
+    now mutates the `closing` marker in place, and a refused exit restores
+    `closing` and its watch on the same object (`Engine._give_back`).
 
     A claim writes `exit_at`, `ceiling` and `typing` BEFORE `phase`, and
     `_derive` reads `phase` first without the lock, so a reader that sees
@@ -420,6 +428,26 @@ class Engine:
         """The sequence is out, or failed: a Stop may claim the marker again."""
         with self._stopping_guard:
             marker.typing = False
+
+    def _give_back(
+        self, name: str, marker: StopMarker, resume: claude_ipc.WrapUpWatch | None
+    ) -> None:
+        """Undo a claim whose sequence never went out.
+
+        A refused Exit now goes back to the wrap up it interrupted (#407): the
+        prompt WAS sent and is still queued, so the person, shown a refusal,
+        is right to expect the wrap up to end in an exit. Every other claim
+        has nothing to go back to and is dropped: a wait must not outlive a
+        request that was never sent.
+        """
+        if resume is None:
+            self._drop(name, marker)
+            return
+        with self._stopping_guard:
+            if self._stopping.get(name) is marker:
+                marker.exit_at, marker.ceiling, marker.typing = None, False, False
+                marker.watch = resume
+                marker.phase = "closing"
 
     def _drop(self, name: str, marker: StopMarker) -> None:
         """Remove `marker`, and only it: a newer stop's stays (#242)."""
@@ -818,6 +846,7 @@ class Engine:
         # #242. The claim: who may type is decided here, in one critical
         # section, and only the caller that wrote the marker types. The table
         # on the ticket is the whole rule.
+        resume: claude_ipc.WrapUpWatch | None = None
         with self._stopping_guard:
             current = self._stopping.get(name)
             if current is not None and (
@@ -829,7 +858,9 @@ class Engine:
                 typing = None
             elif current is not None and current.phase == "closing":
                 # "Exit now": a second Stop during the wait skips to the exit,
-                # and never retypes the prompt.
+                # and never retypes the prompt. Mutated in place, never
+                # replaced, so a refusal can hand the wrap up back (#407).
+                resume = current.watch
                 current.exit_at, current.ceiling, current.typing = now, False, True
                 current.phase = "exiting"
                 typing = current
@@ -862,7 +893,7 @@ class Engine:
             else:
                 claude_ipc.request_stop(self.tmux, name, settle=self._sleep)
         except TmuxUnavailable as exc:
-            self._drop(name, typing)
+            self._give_back(name, typing, resume)
             raise MachineUnreadable(str(exc)) from exc
         except claude_ipc.StopNotSafe as exc:
             logger.info("stop %s: refused, %s", name, exc)
@@ -878,8 +909,14 @@ class Engine:
             # Translated at this boundary rather than let through. The server
             # catching a `claude_ipc` exception would put Claude Code knowledge
             # in the HTTP layer, which is the whole point of the quarantine.
-            self._drop(name, typing)
+            self._give_back(name, typing, resume)
             raise StopRefused(str(exc)) from exc
+        except Exception:
+            # Anything else, too (#407): a marker left `closing` with no watch
+            # made every later Stop a no-op and was invisible to the sweep and
+            # to expiry, so only a Kill could clear it.
+            self._give_back(name, typing, resume)
+            raise
         finally:
             self._done_typing(typing)
         if wrapping_up:
@@ -1318,6 +1355,7 @@ class Engine:
             )
             try:
                 claude_ipc.request_stop(self.tmux, name, settle=self._sleep)
+                moved.append(name)
             except (claude_ipc.StopNotSafe, TmuxUnavailable) as exc:
                 self._drop(name, marker)
                 logger.info("stop %s: exit refused after wrap up, %s", name, exc)
@@ -1331,7 +1369,6 @@ class Engine:
                         self._awaiting_input.add(name)
             finally:
                 self._done_typing(marker)
-            moved.append(name)
             try:
                 self._announce(self.get(name))
             except MachineUnreadable:
