@@ -71,6 +71,11 @@ Nothing to do on upgrade.
 - A `stop_policy` saved from the settings page that `--stop-policy` or the
   config file overrides is now named in a warning at startup, so removing
   that setting no longer silently brings back an `end_anyway` (#421).
+- A state file Hitchrail refuses to read, because its directory is
+  writable by a shared group or others or it does not parse, is now named in
+  a warning at startup, where before every hidden root and saved stop setting
+  was dropped with nothing said; and a choice on the settings page is refused
+  rather than saved into a directory the next start will not read (#397).
 
 ### Added
 

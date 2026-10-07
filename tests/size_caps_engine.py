@@ -376,5 +376,7 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # with why it is reported rather than cleared. Past 550: the seam is the
     # one the module docstring draws, the operator's file against the state
     # file and `Preferences`.
-    "settings.py": 570,
+    # 592 for #397: the state read returns why it refused, and the write
+    # meets the read's directory rule.
+    "settings.py": 592,
 }

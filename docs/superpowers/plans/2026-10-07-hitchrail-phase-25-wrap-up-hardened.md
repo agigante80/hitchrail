@@ -121,7 +121,7 @@ global rules say, and findings go to Backlog, not this milestone.
 
 - [x] **Task 189, #421.** A saved `stop_policy` under a pin is cleared or
       reported, so removing the pin never silently restores a kill.
-- [ ] **Task 190, #397.** A refused state file is said at startup, not
+- [x] **Task 190, #397.** A refused state file is said at startup, not
       forgotten.
 - [ ] **Task 191, #420.** A pinned refusal writes no roots half beside it.
 

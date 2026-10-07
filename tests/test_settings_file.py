@@ -753,6 +753,61 @@ def test_a_state_file_others_can_write_disables_nothing(tmp_path: Path) -> None:
     assert settings.read_state(state).hidden == {"work"}
 
 
+def _shared_state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """#397's directory: group writable, by a group that is not the owner's
+    private one, which is the case the read refuses and the write did not."""
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    shared.chmod(0o770)
+    monkeypatch.setattr(settings, "_group_is_private", lambda gid, uid: False)
+    return shared / "state.toml"
+
+
+def test_a_choice_is_not_saved_where_the_next_start_would_not_read_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#397: `mkstemp` wrote a 0600 file into the shared directory, the save
+    answered success, and the next start's read refused it and forgot the
+    choice. The write meets the read's rule, so the page says it did not save."""
+    state = _shared_state_dir(tmp_path, monkeypatch)
+    prefs = _two_roots(tmp_path, state)
+    with pytest.raises(StateUnwritable, match=r"shared: is writable by group or others"):
+        prefs.set_roots_enabled({"work": False})
+    assert [r.label for r in prefs.active_roots()] == ["work"]
+    assert list(state.parent.iterdir()) == [], "a file was left in the shared directory"
+    with pytest.raises(settings.SettingsError, match="writable by group or others"):
+        settings.write_state(state, settings.State(hidden=frozenset({"work"})), {"work"})
+
+
+def test_a_state_file_the_read_refuses_is_said_once_at_startup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#397: the refusal chose nothing, rightly, and said nothing, so every
+    hidden root came back with no line anywhere saying why."""
+    state = _shared_state_dir(tmp_path, monkeypatch)
+    state.write_text('disabled = ["work"]\n')
+    state.chmod(0o600)
+    prefs = _two_roots(tmp_path, state)
+    assert [r.label for r in prefs.active_roots()] == ["work"]
+    (warning,) = prefs.startup_warnings()
+    assert str(state) in warning
+    assert "writable by group or others" in warning
+
+
+def test_a_state_file_that_does_not_parse_is_said_at_startup(tmp_path: Path) -> None:
+    state = tmp_path / "state.toml"
+    state.write_text("disabled = [1, 2\n")
+    (warning,) = _two_roots(tmp_path, state).startup_warnings()
+    assert str(state) in warning
+
+
+@pytest.mark.parametrize("where", ["state.toml", "missing/state.toml"])
+def test_no_state_file_yet_is_not_a_refusal(tmp_path: Path, where: str) -> None:
+    """A first start has none, and neither the file nor its directory is
+    created until a choice is made."""
+    assert _two_roots(tmp_path, tmp_path / where).startup_warnings() == ()
+
+
 def test_a_config_symlinked_into_a_shared_directory_is_refused_naming_it(
     tmp_path: Path,
 ) -> None:

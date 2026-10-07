@@ -290,7 +290,13 @@ class State:
 
 
 def read_state(path: Path) -> State:
-    """An unreadable file chooses nothing: hiding a running session is the
+    return load_state(path)[0]
+
+
+def load_state(path: Path) -> tuple[State, str | None]:
+    """The state, and why the file was refused, if it was.
+
+    An unreadable file chooses nothing: hiding a running session is the
     dangerous direction, and the operator's file is the perimeter either
     way. Each field is read on its own, so a bad timeout does not lose the
     hidden set beside it.
@@ -298,11 +304,17 @@ def read_state(path: Path) -> State:
     Read by the operator file's rule, `_read_private`, decided rather than
     exempted (#281): a hidden root is the dangerous direction, so a state
     file somebody else could write hides nothing. Refused or not UTF-8, it
-    is unreadable, and chooses nothing."""
+    is unreadable, and chooses nothing. The reason is returned rather than
+    dropped (#397), so the start can say every saved choice was forgotten;
+    a file that is not there yet is a first start, not a refusal."""
     try:
         data = tomllib.loads(_read_private(path))
-    except (OSError, SettingsError, tomllib.TOMLDecodeError):
-        return State()
+    except FileNotFoundError:
+        return State(), None
+    except OSError as exc:
+        return State(), f"cannot be read: {exc}"
+    except (SettingsError, tomllib.TOMLDecodeError) as exc:
+        return State(), str(exc)
     disabled = data.get("disabled", [])
     hidden = (
         frozenset(label for label in disabled if isinstance(label, str))
@@ -325,7 +337,7 @@ def read_state(path: Path) -> State:
     policy = data.get("stop_policy")
     if policy not in STOP_POLICIES:
         policy = None
-    return State(hidden=hidden, stop_timeout=timeout, stop_policy=policy)
+    return State(hidden=hidden, stop_timeout=timeout, stop_policy=policy), None
 
 
 def write_state(path: Path, state: State, configured: set[str]) -> None:
@@ -339,6 +351,11 @@ def write_state(path: Path, state: State, configured: set[str]) -> None:
     if state.stop_policy is not None:
         body += f'stop_policy = "{state.stop_policy}"\n'
     path.parent.mkdir(parents=True, exist_ok=True)
+    # The read's directory rule, so a save never succeeds where the next
+    # start's read refuses and forgets it (#397). The lexical parent only:
+    # the read also checks where a symlinked `state.toml` resolves, but the
+    # rename below replaces the link with a file in this directory.
+    _refuse_if_shared(path.parent, path.parent.stat(), "the directory holding it")
     header = (
         "# Written by hitchrail: what the interface has chosen. The config file is yours.\n"
     )
@@ -392,7 +409,7 @@ class Preferences:
         self._config = config
         self._roots = config.roots
         self._path = config.state_path
-        self._state = read_state(self._path) if self._path else State()
+        self._state, self._refusal = load_state(self._path) if self._path else (State(), None)
         # The listing route and the settings route run on different threads,
         # and two edits racing would lose one of them without this.
         self._guard = threading.Lock()
@@ -479,6 +496,11 @@ class Preferences:
         pin to know what comes back. Said only when the two differ, since only
         then does removing the pin change anything.
         """
+        if self._refusal is not None:
+            return (
+                f"state file {self._path} refused, so nothing saved from the "
+                f"settings page applies: {self._refusal}",
+            )
         saved = self._state.stop_policy
         if saved is None or self.stop_policy_editable() or saved == self._config.stop_policy:
             return ()
@@ -565,6 +587,6 @@ class Preferences:
         if self._path is not None:
             try:
                 write_state(self._path, state, {r.label for r in self._roots})
-            except OSError as exc:
+            except (OSError, SettingsError) as exc:
                 raise StateUnwritable(f"{self._path}: cannot be written: {exc}") from exc
         self._state = state
