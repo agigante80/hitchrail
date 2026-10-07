@@ -114,7 +114,7 @@ global rules say, and findings go to Backlog, not this milestone.
       counts from. `docs/api.md` in the same commit.
 - [x] **Task 187, #416, #414.** A repeated Stop on an exiting row says exit,
       not wrap up; Stop all counts in the singular.
-- [ ] **Task 188, #417.** The lost reply test fails without the fix on a slow
+- [x] **Task 188, #417.** The lost reply test fails without the fix on a slow
       runner, re-checked after task 186.
 
 ### Batch 4: the stop policy's settings, tasks 189 to 191

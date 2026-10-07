@@ -58,8 +58,14 @@ async def test_a_stop_whose_reply_was_lost_is_watched_when_reopened(
     """#242 review round 2. The DELETE reached the server and its reply did
     not reach the page, so the row reads `stopping` while the page's wait
     never started ticking. Reopening it must start one, or the dialog is
-    painted once and its count, phase and deadline never move."""
-    server.seed(running=["vessel"], stop_prompt="/wrapup", wrap_up_takes=8)
+    painted once and its count, phase and deadline never move.
+
+    #417: the count is read, then a LATER one asserted greater. A fixed range
+    passed on a runner slow enough that the one paint already read 3s, and
+    since #411 the paint starts at the stop's age, which made that likelier.
+    The wrap up outlasts any runner, and Exit now ends it, which only a
+    driven wait sees through to a closed dialog."""
+    server.seed(running=["vessel"], stop_prompt="/wrapup", wrap_up_takes=120)
     await page.goto(server.base)
 
     async def deliver_then_drop(route: Route) -> None:
@@ -81,9 +87,20 @@ async def test_a_stop_whose_reply_was_lost_is_watched_when_reopened(
 
     await row.get_by_role("button", name="Stop").click()
     await expect(dialog.get_by_role("button", name="Exit now")).to_be_visible()
+    await expect(dialog).to_contain_text("s so far")
+    first = _count(await dialog.inner_text())
     # Only the ticker repaints the count, so a wait nobody drives stays on the
     # second it was painted at.
-    await expect(dialog).to_contain_text(re.compile(r"\b[3-9]s so far"))
+    await page.wait_for_function(
+        """(first) => {
+          const body = document.querySelector("[data-dialog] .dialog-body");
+          const found = body?.textContent.match(/(\\d+)s so far/);
+          return found !== null && found !== undefined && Number(found[1]) > first;
+        }""",
+        arg=first,
+        timeout=10_000,
+    )
+    await dialog.get_by_role("button", name="Exit now").click()
     await expect(dialog).to_be_hidden(timeout=30_000)
 
 
