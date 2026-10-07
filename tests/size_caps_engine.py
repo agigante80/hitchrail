@@ -158,7 +158,9 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # the wrap up it interrupted, the arm that drops a marker on an error
     # nobody planned for, and the StopMarker note naming the three removals
     # by name and why each is safe.
-    "engine.py": 1622,
+    # 1628 for #410: `_flag_waiting`, so the two looks that add the waiting
+    # overlay outside the sweep honour the attention epoch as it does.
+    "engine.py": 1628,
     # tmux.py is the module that encodes what tmux actually does
     # rather than what its manual implies, and every entry is a footgun
     # that cost real debugging: prefix matching targets, the colon

@@ -1319,6 +1319,13 @@ class Engine:
         # that a modal and a box would both match.
         return claude_ipc.shows_input_box(pane) is False
 
+    def _flag_waiting(self, name: str, epoch: int) -> None:
+        """Add the overlay from a look taken at `epoch`, unless a start or a
+        stop cleared it since (#410): that look was at the old agent's screen."""
+        with self._stopping_guard:
+            if self._attention_epoch == epoch:
+                self._awaiting_input.add(name)
+
     def advance_wrap_ups(self) -> builtins.list[str]:
         """Move each finished or overdue wrap up on to the exit (#242).
 
@@ -1376,9 +1383,9 @@ class Engine:
                 # question the person was never shown (#242 review). Only the
                 # report; `end_anyway` kills a stop that expired after its exit
                 # was SENT, and this one never was.
+                epoch = self._attention_epoch
                 if self._pane_needs_a_person(name):
-                    with self._stopping_guard:
-                        self._awaiting_input.add(name)
+                    self._flag_waiting(name, epoch)
             finally:
                 self._done_typing(marker)
             try:
@@ -1477,10 +1484,10 @@ class Engine:
             # policy could act on it. Read after, a Kill and Start between the
             # two would pair the fresh agent's pid with the old one's question.
             seen = self._agent_pid(name) if end_anyway else None
+            epoch = self._attention_epoch
             waiting = self._pane_needs_a_person(name)
             if waiting:
-                with self._stopping_guard:
-                    self._awaiting_input.add(name)
+                self._flag_waiting(name, epoch)
             # #239. The operator's answer, given in advance, to a stop that
             # ran out of time on a question: the kill the dialog offers at
             # this moment, taken without the tap. Only on THIS look at the

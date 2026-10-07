@@ -99,7 +99,7 @@ global rules say, and findings go to Backlog, not this milestone.
       through batch 1's seam; its fallbacks are tested; every kill writes a
       journal line, written once, before the read that can fail. Security
       auditor review required.
-- [ ] **Task 182, #410.** The expiry's and the refused exit's waiting overlay
+- [x] **Task 182, #410.** The expiry's and the refused exit's waiting overlay
       carry the attention epoch.
 - [ ] **Task 183, #419.** The stop policy is recorded at `stop()` and read
       from the marker at expiry (decided 2026-10-07).

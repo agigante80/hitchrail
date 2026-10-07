@@ -19,6 +19,7 @@ import pytest
 
 from conftest import (
     CLEAR_INPUT_BOX,
+    TRUST_MODAL,
     FakeClock,
     FakePidfd,
     FakeTmux,
@@ -33,6 +34,7 @@ from hitchrail.sessions import InvalidValue, OperatorPinned, State
 from hitchrail.tmux import TmuxUnavailable
 from support import DEFAULT_LABEL, make_config
 from test_engine import MODAL_PANE
+from test_wrap_up import SETTLE
 
 PANE = 500
 VESSEL = f"{DEFAULT_LABEL}~vessel"
@@ -527,3 +529,62 @@ def test_every_field_survives_a_round_trip(root: Path) -> None:
     )
     settings.write_state(state, written, configured={"home"})
     assert settings.read_state(state) == written
+
+
+# -- #410: an overlay added from a look a restart has since overtaken ------
+
+
+def restart_after_the_look(engine: Engine, tmux: FakeTmux) -> None:
+    """Kill and Start `vessel` straight after the first pane capture taken
+    once its stop has ended, which is the one look both paths take before
+    adding the overlay, as a person can between that look and the add. The
+    fresh agent's screen is a clear box."""
+    real = tmux.capture_pane
+
+    def capture(project: str, lines: int = 40, escapes: bool = False) -> str:
+        pane = real(project, lines, escapes)
+        if VESSEL not in engine._stopping:
+            tmux.capture_pane = real  # type: ignore[method-assign]
+            engine.kill(VESSEL)
+            tmux.pane_text[VESSEL] = CLEAR_INPUT_BOX
+            engine.start(VESSEL)
+        return pane
+
+    tmux.capture_pane = capture  # type: ignore[method-assign]
+
+
+def test_an_expiry_whose_look_predates_a_restart_flags_nothing(root: Path) -> None:
+    engine, tmux, clock = policy_engine(root)
+    engine.stop(VESSEL)
+    tmux.pane_text[VESSEL] = MODAL_PANE
+    clock.advance(engine.prefs.stop_timeout() + 1)
+    restart_after_the_look(engine, tmux)
+    assert engine.expire_stops() == [VESSEL]
+    restarted = engine.get(VESSEL)
+    assert restarted.state is State.RUNNING
+    assert restarted.pid != PANE + 1, "the restart happened"
+    assert restarted.awaiting_input is False, "the old agent's question"
+
+
+def test_a_refused_exit_whose_look_predates_a_restart_flags_nothing(root: Path) -> None:
+    engine, tmux, clock = policy_engine(root, stop_prompt="/wrapup")
+    engine.stop(VESSEL)
+    clock.advance(SETTLE)
+    engine.advance_wrap_ups()
+    clock.advance(SETTLE)
+    # The watch's read finds it idle; the exit's checks and the one look
+    # after its refusal find a modal.
+    tmux.pane_text[VESSEL] = TRUST_MODAL
+    restart_after_the_look(engine, tmux)
+    real = tmux.capture_pane
+
+    def capture(project: str, lines: int = 40, escapes: bool = False) -> str:
+        tmux.capture_pane = real  # type: ignore[method-assign]
+        return CLEAR_INPUT_BOX
+
+    tmux.capture_pane = capture  # type: ignore[method-assign]
+    assert engine.advance_wrap_ups() == []
+    restarted = engine.get(VESSEL)
+    assert restarted.state is State.RUNNING
+    assert restarted.pid != PANE + 1, "the restart happened"
+    assert restarted.awaiting_input is False, "the old agent's question"

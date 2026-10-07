@@ -49,6 +49,8 @@ Nothing to do on upgrade.
   it (#418, #412).
 - Every kill now writes a line to the journal, and a stop a Kill ended is no
   longer logged as the agent having exited (#387).
+- A row killed and started again while a stop was ending no longer shows the
+  fresh agent as waiting for you on the old agent's question (#410).
 
 ## 0.12.0 - 2026-10-01
 
