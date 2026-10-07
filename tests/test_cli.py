@@ -1511,17 +1511,32 @@ def test_the_startup_block_says_when_a_proxy_origin_gets_no_secure_cookie(
     assert bool(found) is said, lines
     if said:
         assert "through the proxy" in found[0], found[0]
+        assert "is no longer served" in found[0], found[0]
+        assert "is refused" not in found[0], found[0]
 
 
 @pytest.mark.parametrize(
     ("host", "origins", "said"),
     [
-        ("127.0.0.1", ("https://box.lan",), True),
-        ("127.0.0.1", ("https://box.lan", "http://other.lan"), False),
+        ("127.0.0.1", ("https://proxy.lan",), True),
+        ("127.0.0.1", ("https://box.lan",), False),
+        ("127.0.0.1", ("https://proxy.lan", "http://other.lan"), False),
         ("127.0.0.1", (), False),
         ("0.0.0.0", ("https://box.lan",), False),
+        ("127.0.0.1", ("https://proxy.lan", "http://localhost:8787"), True),
+        ("127.0.0.1", ("https://box.lan:8443",), False),
+        ("127.0.0.1", ("https://BOX.lan.",), False),
     ],
-    ids=["withheld", "one-plain-origin", "no-proxy-origin", "lan-bind"],
+    ids=[
+        "forwarder-withheld",
+        "phone-access-https-origin-of-this-host",
+        "one-plain-origin",
+        "no-proxy-origin",
+        "lan-bind",
+        "loopback-origin-beside",
+        "https-origin-of-this-host-other-port",
+        "https-origin-of-this-host-spelled-differently",
+    ],
 )
 def test_the_startup_block_says_which_plain_origins_are_not_derived(
     tmp_path: Path, host: str, origins: tuple[str, ...], said: bool
@@ -1529,7 +1544,15 @@ def test_the_startup_block_says_which_plain_origins_are_not_derived(
     """#391's premortem: an operator on a plain http forwarder upgrades and
     their grant starts failing. The refusal names the origin; this line is
     the other half, written before anything is served, saying the origin is
-    not derived, why, and the flag that brings it back."""
+    not derived, why, and the flag that brings it back.
+
+    The host of a configured https origin is the phone-access.md deployment
+    (loopback bind, `--allow-host` plus `--allow-origin https://` for the
+    same name): the operator reaches it over https, so the line and its
+    advice to turn Secure off would only invite the one change that breaks
+    a working setup. The forwarder case, a withheld host with no https
+    origin of its own, keeps the line. Loopback origins are ignored by the
+    cookie rule, so the line says "non loopback", not "every origin"."""
     config = make_config(
         tmp_path, host=host, token="t" * 24, extra_hosts=("box.lan",), extra_origins=origins
     )
@@ -1542,6 +1565,7 @@ def test_the_startup_block_says_which_plain_origins_are_not_derived(
         assert "http://box.lan:8787" in found[0]
         assert "Secure" in found[0]
         assert "--allow-origin http://box.lan:8787" in found[0]
+        assert "every non loopback --allow-origin is https" in found[0]
 
 
 @pytest.mark.parametrize(

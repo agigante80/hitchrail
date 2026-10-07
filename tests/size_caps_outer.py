@@ -69,7 +69,9 @@ OUTER_LAYER_CAPS: dict[str, int] = {
     # 1035 for #391: the startup line naming each plain origin withheld.
     # 1037 for #394: the advice asks the cookie rule and says what #391 costs.
     # 1045 for #393: a typed path not there says where it was looked for.
-    "cli.py": 1045,
+    # 1061 for #391's review: the withheld line skips a host the operator
+    # reaches over https, so its advice is not given on a working setup.
+    "cli.py": 1061,
     # 409 to 418 for #78: two entries in the exemption and the argument
     # beside them, which the set's own rule requires of every entry.
     # 418 to 436 for #160: the unauthenticated asset set and the argument
