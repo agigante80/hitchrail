@@ -8,6 +8,7 @@ and the derived allowlists; that one owns what a valid host or origin IS.
 from __future__ import annotations
 
 import contextlib
+import ipaddress
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -602,6 +603,19 @@ class Config:
             raise ConfigError(
                 f"not a bare host to bind to: {self.host!r}. Give the host on its "
                 "own, with no port, scheme or path; the port is --port"
+            )
+        # #395. uvicorn's socket is IPv6 only (asyncio sets IPV6_V6ONLY), and
+        # binding a mapped address on one is EINVAL: a startup traceback.
+        # Not `contextlib.suppress(ValueError)` round the raise: ConfigError
+        # is a ValueError, and the refusal would be suppressed with it.
+        try:
+            mapped = ipaddress.IPv6Address(self.host).ipv4_mapped
+        except ValueError:
+            mapped = None
+        if mapped is not None:
+            raise ConfigError(
+                f"{self.host!r} is an IPv4 mapped address, which cannot be "
+                f"bound here: give {mapped} instead"
             )
 
     def _check_extra_hosts(self) -> None:

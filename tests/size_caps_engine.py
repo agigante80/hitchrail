@@ -330,7 +330,8 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # 803 for #239: `stop_policy` and its literal refusal.
     # 831 for #391: `plain_origins_withheld`, the one derived origin a
     # `Secure` cookie cannot return on, and the decision's argument.
-    "config.py": 831,
+    # 845 for #395: the IPv4 mapped bind refused by name, not by uvicorn.
+    "config.py": 845,
     # 409, nine lines over, down from 542. #115 deleted the `?token=`
     # carrier: 135 lines once the two blocks inside `TokenMiddleware`
     # that only served it are counted.

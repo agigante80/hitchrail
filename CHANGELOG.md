@@ -49,6 +49,9 @@ that is ALSO reached over a plain http forwarder or alias. See Changed.
 
 ### Fixed
 
+- `--host ::ffff:127.0.0.1` is refused at startup naming `127.0.0.1`, where
+  before it reached the bind and failed with a traceback: an IPv4 mapped
+  address cannot be bound on the server's IPv6 only socket (#395).
 - With `stop_prompt` set, the wrap up's exit is no longer typed into an agent
   that is still working when its screen also carries an underline colour
   (#405), and a Stop tapped while an exit is being typed is answered without

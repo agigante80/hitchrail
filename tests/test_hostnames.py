@@ -28,12 +28,21 @@ from hitchrail.config import (
         # #283: what the bind makes of these is loopback, so the answer is too.
         "127.1",
         "0177.0.0.1",
-        "::ffff:127.0.0.1",
-        "[::ffff:127.0.0.1]",
     ],
 )
 def test_loopback_forms_are_recognised(tmp_path: Path, host: str) -> None:
     assert Config(roots=_r(tmp_path), host=host).is_loopback
+
+
+@pytest.mark.parametrize("host", ["::ffff:127.0.0.1", "[::ffff:127.0.0.1]"])
+def test_the_ipv4_mapped_loopback_is_loopback_as_a_host_but_not_a_bind(
+    tmp_path: Path, host: str
+) -> None:
+    """#283 made the mapped spelling loopback, which holds for a Host header
+    and an origin. It never binds (#395), so `Config` refuses it as `host`
+    and the token rule meets it only as an allowlist entry."""
+    assert is_loopback_host(host)
+    assert Config(roots=_r(tmp_path), extra_hosts=(host,)).token is None
 
 
 @pytest.mark.parametrize("host", ["0.0.0.0", "::"])

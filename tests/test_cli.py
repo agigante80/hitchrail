@@ -486,6 +486,25 @@ def test_main_refuses_to_start_and_prints_what_is_missing(
     assert "tmux" in err
 
 
+def test_the_ipv4_mapped_loopback_is_refused_before_the_bind_naming_127_0_0_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#395: it reached uvicorn and died there as a startup traceback."""
+    served: list[object] = []
+
+    def record(*a: object) -> int:
+        served.append(a)
+        return 0
+
+    monkeypatch.setattr(cli, "_serve", record)
+    code = main(["--root", f"main={tmp_path}", "--host", "::ffff:127.0.0.1"])
+    assert code == 2
+    assert served == []
+    err = capsys.readouterr().err
+    assert "give 127.0.0.1 instead" in err
+    assert "Traceback" not in err
+
+
 def test_a_refusal_prints_no_token(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

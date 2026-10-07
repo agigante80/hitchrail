@@ -131,7 +131,7 @@ global rules say, and findings go to Backlog, not this milestone.
       declared host under a loopback bind (decided 2026-10-07); the
       docstring says why; `CHANGELOG.md` under Changed. Security auditor
       review required.
-- [ ] **Task 193, #395.** The IPv4 mapped loopback is refused by name, not by
+- [x] **Task 193, #395.** The IPv4 mapped loopback is refused by name, not by
       a uvicorn traceback.
 - [ ] **Task 194, #394.** The loopback advice asks the cookie rule it
       describes. After 192, which changes what it should say.
