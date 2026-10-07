@@ -95,7 +95,7 @@ global rules say, and findings go to Backlog, not this milestone.
       Decides `StopMarker`'s shape for #407 and #419 as well.
 - [x] **Task 180, #407.** The four edges: the docstring, a refused Exit now
       restoring `closing`, the stranded marker, the moved list.
-- [ ] **Task 181, #418, #412, #387.** `end_anyway` kills by the agent's pid,
+- [x] **Task 181, #418, #412, #387.** `end_anyway` kills by the agent's pid,
       through batch 1's seam; its fallbacks are tested; every kill writes a
       journal line, written once, before the read that can fail. Security
       auditor review required.

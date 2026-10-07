@@ -43,6 +43,12 @@ Nothing to do on upgrade.
 - An Exit now that is refused, for example over a draft in the box, leaves
   the wrap up running and still ends it in an exit, where before it ended the
   stop with the prompt still queued (#407).
+- Under `stop_policy = end_anyway`, the kill at expiry now ends the agent
+  whose screen was read, through a process handle, and nothing if the row
+  was restarted in between; any refusal is reported as `ask` would report
+  it (#418, #412).
+- Every kill now writes a line to the journal, and a stop a Kill ended is no
+  longer logged as the agent having exited (#387).
 
 ## 0.12.0 - 2026-10-01
 

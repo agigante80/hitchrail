@@ -1,12 +1,14 @@
-"""Ending an agent nothing addressable owns, by pid, through a handle (#107).
+"""Ending an agent by pid, through a handle (#107, #418).
 
-The one destructive path in Hitchrail that is not scoped by the tmux prefix,
-so it is scoped by a check. It has its own seam (the pidfd callables in
-`procs.py`), its own refusals and its own safety argument (design 5.2b), and
-it depends on nothing in the stop machinery beside it in `engine.py`, which
-is why it left that file at #274: a reader auditing what can signal a process
-by pid should find one file, and `tests/test_source_guards.py` holds it to
-being this one.
+Two paths. `signal_detached` ends an agent nothing addressable owns: the one
+destructive path in Hitchrail that is not scoped by the tmux prefix, so it
+is scoped by a check, with its own refusals and its own safety argument
+(design 5.2b). `end_anyway` ends the agent a prefixed session owns, the one
+`stop_policy = end_anyway` looked at, bound to it by its pid because a kill
+by session name cannot say which agent it ended. Both go through one seam,
+the pidfd callables in `procs.py`, which is why the second joined the first
+here: a reader auditing what can signal a process by pid should find one
+file, and `tests/test_source_guards.py` holds it to being this one.
 
 `Engine.signal_detached` is a one line delegate, so the route and the tests
 reach it where they always did. The function here takes the engine for its
@@ -21,6 +23,7 @@ This module is in the engine layer and imports nothing from the web layer;
 from __future__ import annotations
 
 import errno
+import logging
 import os
 import signal
 from collections.abc import Callable
@@ -44,9 +47,12 @@ from hitchrail.sessions import (
     State,
     UnknownProject,
 )
+from hitchrail.tmux import TmuxUnavailable
 
 if TYPE_CHECKING:
     from hitchrail.engine import Engine
+
+logger = logging.getLogger(__name__)
 
 _NO_PIDFD = (
     "this machine cannot signal through a race free handle (no pidfd support), "
@@ -272,16 +278,102 @@ def signal_detached(
                 f"configured ({root.path}): another instance's agent, or a root that "
                 "moved since it started. Nothing was signalled"
             )
-        try:
-            engine._pidfd.send_signal(pidfd, signal.SIGKILL if force else signal.SIGTERM)
-        except AttributeError as exc:
-            raise PidfdUnavailable(_NO_PIDFD) from exc
-        except OSError as exc:
-            raise _refusal_for(exc, pid, "signal") from exc
+        sig = signal.SIGKILL if force else signal.SIGTERM
+        _send(engine, pidfd, pid, sig)
+        # #387: the kill a person asked for, in the journal, once it happened.
+        logger.info("signal %s: sent %s to pid %d through a handle", name, sig.name, pid)
     finally:
         engine._pidfd.close_pidfd(pidfd)
     engine._announce(verified)
     return verified
+
+
+def end_anyway(engine: Engine, name: str, pid: int) -> bool:
+    """End an expired stop's agent under `stop_policy = end_anyway` (#239).
+
+    By the pid `expire_stops` read at the look, through a handle (#418).
+    True when the signal went, and it has announced if the machine could be
+    read after. False on any refusal, and the caller reports the expiry
+    exactly as `ask` would: the unknown case does the thing that destroys
+    nothing. Never raises, for `expire_stops`' reason: a raise there kills
+    the ticker.
+    """
+    try:
+        _end_session_agent(engine, name, pid)
+    except (EngineError, TmuxUnavailable) as exc:
+        logger.warning(
+            "stop %s: ended on a prompt, and end_anyway did not kill it: %s",
+            name,
+            type(exc).__name__,
+        )
+        return False
+    # Before any read that can fail (#412): the kill happened whatever the
+    # machine says next.
+    logger.info(
+        "stop %s: ended on a prompt after %gs; killed pid %d, as stop_policy end_anyway says",
+        name,
+        engine.prefs.stop_timeout(),
+        pid,
+    )
+    # The row reads `running` while the agent dies, so the wait is for the
+    # pid to leave it, bounded like `Engine._await_gone`.
+    deadline = engine._clock() + engine.kill_grace
+    try:
+        settled = engine.get(name)
+        while settled.pid == pid and engine._clock() < deadline:
+            engine._sleep(engine.poll_interval)
+            settled = engine.get(name)
+    except MachineUnreadable:
+        logger.warning("stop %s: killed, but the machine could not be read after", name)
+        return True
+    engine._announce(settled)
+    return True
+
+
+def _end_session_agent(engine: Engine, name: str, pid: int) -> None:
+    """End the agent `end_anyway` looked at, and no other (#418).
+
+    `pid` was read before the screen, so the question seen is this agent's
+    or a later one's. This binds the look to the signal in
+    `signal_detached`'s order, handle then verification then signal: after
+    a Kill and Start the handle's pid is not the row's and nothing is sent.
+
+    SIGHUP, what `kill-session` delivers by closing the pane, so the agent
+    ends as a person's Kill ends it, and the pane and session close with
+    it. Scoped like the tmux path: the pid must be the agent a prefixed
+    session on the configured server owns, so no uid or directory check,
+    which a detached agent needs in place of that ownership; the kernel's
+    EPERM is the backstop. Raises the engine's refusals, never `OSError`.
+    """
+    _refuse_our_own_tree(engine._procs_fn, pid)
+    try:
+        pidfd = engine._pidfd.open_pidfd(pid)
+    except AttributeError as exc:
+        raise PidfdUnavailable(_NO_PIDFD) from exc
+    except OSError as exc:
+        raise _refusal_for(exc, pid, "open a handle to", opening=True) from exc
+    try:
+        verified = engine._derive(name, engine._look())
+        if verified.protected:
+            raise Protected(name)
+        if verified.state is not State.RUNNING or verified.pid != pid:
+            raise Gone(
+                f"pid {pid} is no longer the agent {name}'s session owns (now "
+                f"{verified.state.value}, pid {verified.pid}): the row moved after "
+                "the look, so nothing was signalled"
+            )
+        _send(engine, pidfd, pid, signal.SIGHUP)
+    finally:
+        engine._pidfd.close_pidfd(pidfd)
+
+
+def _send(engine: Engine, pidfd: int, pid: int, sig: int) -> None:
+    try:
+        engine._pidfd.send_signal(pidfd, sig)
+    except AttributeError as exc:
+        raise PidfdUnavailable(_NO_PIDFD) from exc
+    except OSError as exc:
+        raise _refusal_for(exc, pid, "signal") from exc
 
 
 def _refuse_our_own_tree(procs_fn: Callable[[], ProcTable], pid: int) -> None:

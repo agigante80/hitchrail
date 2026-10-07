@@ -1120,6 +1120,92 @@ def test_kill_is_reachable_during_a_stop(root: Path) -> None:
     assert engine.stopping_since(proj("vessel")) is None, "killing ends the wait"
 
 
+def _kill_lines(caplog: pytest.LogCaptureFixture, name: str) -> list[str]:
+    return [
+        r.getMessage()
+        for r in caplog.records
+        if r.getMessage().startswith("kill ") and name in r.getMessage()
+    ]
+
+
+def test_a_kill_writes_one_journal_line(root: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """#387. A Kill wrote nothing of its own, so a Stop then a Kill read as an
+    exit requested and then silence."""
+    engine, _tmux, _ = live_engine(root)
+    with caplog.at_level(logging.INFO, logger="hitchrail.engine"):
+        engine.kill(proj("vessel"))
+    assert _kill_lines(caplog, proj("vessel")) == [f"kill {proj('vessel')}: session killed"]
+
+
+def test_the_kill_line_is_written_before_the_read_that_can_fail(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#387. `_await_gone` reads the machine; a tmux gone by then raises, and
+    a line written after it would never be written for a kill that happened."""
+    engine, tmux, _ = live_engine(root)
+    kill = tmux.kill_session
+
+    def kill_then_lose_tmux(project: str) -> None:
+        kill(project)
+
+        def gone() -> Panes:
+            raise TmuxUnavailable("no server")
+
+        tmux.panes = gone  # type: ignore[method-assign]
+
+    tmux.kill_session = kill_then_lose_tmux  # type: ignore[method-assign]
+    with (
+        caplog.at_level(logging.INFO, logger="hitchrail.engine"),
+        pytest.raises(MachineUnreadable),
+    ):
+        engine.kill(proj("vessel"))
+    assert _kill_lines(caplog, proj("vessel")) == [f"kill {proj('vessel')}: session killed"]
+
+
+def test_a_failed_kill_writes_no_kill_line(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    engine, tmux, _ = live_engine(root)
+
+    def refuse(project: str) -> None:
+        raise TmuxUnavailable("no server")
+
+    tmux.kill_session = refuse  # type: ignore[method-assign]
+    with (
+        caplog.at_level(logging.INFO, logger="hitchrail.engine"),
+        pytest.raises(MachineUnreadable),
+    ):
+        engine.kill(proj("vessel"))
+    assert _kill_lines(caplog, proj("vessel")) == []
+
+
+def test_a_stop_a_kill_ended_is_never_logged_as_an_exit(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#387. A listing landing between `kill_session` and the marker's removal
+    read the row `stopped` with the marker still there, and logged the kill as
+    "the agent exited after 10.2s", a graceful exit that never happened."""
+    engine, tmux, _ = live_engine(root)
+    table = procs_from(ps_row(PANE, 1) + ps_row(AGENT, PANE, project=proj("vessel")))
+    # The agent leaves with its session, so the listing in the window reads
+    # `stopped`, which is the read that logged the exit.
+    engine._procs_fn = lambda: table() if proj("vessel") in tmux.sessions else procs_from("")()
+    engine.stop(proj("vessel"))
+    kill = tmux.kill_session
+    listed: list[State] = []
+
+    def kill_then_list(project: str) -> None:
+        kill(project)
+        listed.append(engine.get(project).state)
+
+    tmux.kill_session = kill_then_list  # type: ignore[method-assign]
+    with caplog.at_level(logging.INFO, logger="hitchrail.engine"):
+        engine.kill(proj("vessel"))
+    assert listed == [State.STOPPED], "the listing did land in the window"
+    assert "exited after" not in caplog.text
+    assert engine.stopping_since(proj("vessel")) is None
+
+
 def test_expiry_drops_the_marker_and_does_not_escalate(root: Path) -> None:
     """The behaviour most likely to be "helpfully" changed later.
 
@@ -3444,6 +3530,16 @@ def test_the_ceiling_cache_survives_two_threads_pruning_at_once(root: Path) -> N
     for thread in threads:
         thread.join()
     assert failures == [], failures
+
+
+@pytest.mark.parametrize("call", ["open_pidfd", "send_signal", "close_pidfd"])
+def test_no_engine_built_with_defaults_reaches_a_real_pidfd_call(root: Path, call: str) -> None:
+    """#418. The guard for `no_real_pidfd`: an engine built with no pidfd
+    seam resolves each call through the refusal, never the syscall, so a
+    fake pid from a hermetic test is never signalled on this machine."""
+    engine = Engine(make_config(root))
+    with pytest.raises(AssertionError, match="a real pidfd call was reached"):
+        getattr(engine._pidfd, call)(4242, *([0] if call == "send_signal" else []))
 
 
 def test_no_engine_built_with_defaults_reads_the_real_cgroup_tree(root: Path) -> None:

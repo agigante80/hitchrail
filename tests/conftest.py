@@ -12,6 +12,7 @@ import re
 import subprocess
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import TypedDict
 
 import pytest
 
@@ -97,6 +98,27 @@ def no_real_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
 REAL_CWD_OF = procs.cwd_of
 
 
+# And the pidfd calls, for the same tiers, passed as `Engine(**REAL_PIDFD)`.
+class PidfdCalls(TypedDict):
+    open_pidfd: Callable[[int], int]
+    send_signal: Callable[[int, int], None]
+    close_pidfd: Callable[[int], None]
+
+
+REAL_PIDFD: PidfdCalls = {
+    "open_pidfd": procs.open_pidfd,
+    "send_signal": procs.send_signal,
+    "close_pidfd": procs.close_pidfd,
+}
+
+
+def _no_pidfd(*args: object) -> None:
+    raise AssertionError(
+        f"a real pidfd call was reached with {args}: pass open_pidfd=, send_signal= and "
+        "close_pidfd= to Engine, or use FakePidfd"
+    )
+
+
 def _no_proc_cwd(pid: int) -> Path:
     raise AssertionError(
         f"the real /proc/{pid}/cwd reader was reached: pass cwd_of= to Engine, or use "
@@ -169,6 +191,17 @@ def no_real_proc_cwd(monkeypatch: pytest.MonkeyPatch) -> None:
     built with no `cwd_of` seam would read `/proc/<pid>/cwd` for a fake pid
     and answer by whatever this machine happens to be running there."""
     monkeypatch.setattr("hitchrail.procs.cwd_of", _no_proc_cwd)
+
+
+@pytest.fixture(autouse=True)
+def no_real_pidfd(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The same rule for the calls that signal (#418). Since `end_anyway`
+    kills through a handle, an engine built with no pidfd seam whose stop
+    expired on a prompt would `pidfd_open` a fake pid on the machine running
+    the suite and send whatever holds it a SIGHUP. A tier with a real child
+    passes `**REAL_PIDFD`."""
+    for name in ("open_pidfd", "send_signal", "close_pidfd"):
+        monkeypatch.setattr(f"hitchrail.procs.{name}", _no_pidfd)
 
 
 @pytest.fixture(autouse=True)

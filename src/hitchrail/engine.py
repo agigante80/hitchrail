@@ -132,9 +132,9 @@ class StopMarker:
     `Engine._drop`: a pop by name removes whatever marker is there now, which
     after a repeated Stop is a newer one than the caller holds. Three removals
     are by name on purpose (#407), because each ends every stop on the row,
-    not one: `_derive` on a row it read `stopped`, `kill` after the session
-    is gone, and `expire_stops`, whose snapshot and removal share one critical
-    section.
+    not one: `_derive` on a row it read `stopped`, `kill` before its
+    `kill-session` and again after it, and `expire_stops`, whose snapshot and
+    removal share one critical section.
 
     A claim that fails gives the marker back rather than replacing it: Exit
     now mutates the `closing` marker in place, and a refused exit restores
@@ -1032,13 +1032,25 @@ class Engine:
         session = self._require_live(name)
         if session.state is State.DETACHED:
             raise NoAgent(_no_session_here(session, "nothing here to kill"))
+        # Taken out BEFORE the kill, and handed back if it fails (#387). Taken
+        # out only after, a listing landing between the two read the row
+        # `stopped` with the marker still there and journalled the kill as
+        # "the agent exited after", a graceful exit that never happened. The
+        # give back is what the old order was for: a kill that failed must
+        # not take the indicator of a stop still in flight with it.
+        with self._stopping_guard:
+            marker = self._stopping.pop(name, None)
         try:
             self.tmux.kill_session(name)
         except TmuxUnavailable as exc:
+            if marker is not None:
+                with self._stopping_guard:
+                    self._stopping.setdefault(name, marker)
             raise MachineUnreadable(str(exc)) from exc
-        # AFTER the kill, not before. Popping first meant a kill that failed
-        # took the indicator with it, so a graceful stop still in flight looked
-        # as though nobody had asked.
+        # Before `_await_gone`, which reads the machine and can raise: the
+        # kill happened whatever that read says.
+        logger.info("kill %s: session killed", name)
+        # A Stop that landed while the kill ran marked a row that is gone.
         with self._stopping_guard:
             self._stopping.pop(name, None)
         updated = self._await_gone(name)
@@ -1460,6 +1472,11 @@ class Engine:
         # and Start it again, and the fresh agent, which never saw a prompt,
         # would be killed for the old one's question.
         for name in expired:
+            end_anyway = self.prefs.stop_policy() == "end_anyway"
+            # The agent, read BEFORE its screen (#418), and only when the
+            # policy could act on it. Read after, a Kill and Start between the
+            # two would pair the fresh agent's pid with the old one's question.
+            seen = self._agent_pid(name) if end_anyway else None
             waiting = self._pane_needs_a_person(name)
             if waiting:
                 with self._stopping_guard:
@@ -1468,10 +1485,8 @@ class Engine:
             # ran out of time on a question: the kill the dialog offers at
             # this moment, taken without the tap. Only on THIS look at the
             # pane, never the sweep's overlay, and never a key typed into the
-            # prompt. `kill` refuses the protected project itself, the same
-            # refusal its route gives.
-            end_anyway = self.prefs.stop_policy() == "end_anyway"
-            if waiting and end_anyway and self._end_anyway(name):
+            # prompt. The protected project is refused after the handle.
+            if waiting and seen is not None and signals.end_anyway(self, name, seen):
                 continue
             try:
                 session = self.get(name)
@@ -1504,29 +1519,13 @@ class Engine:
             self._announce(session)
         return expired
 
-    def _end_anyway(self, name: str) -> bool:
-        """Kill an expired stop under `stop_policy = end_anyway` (#239).
-
-        True when the kill went through, and it has announced. False on any
-        refusal, and the caller reports the expiry exactly as `ask` would:
-        the unknown case does the thing that destroys nothing. Never raises,
-        for `expire_stops`' reason.
-        """
+    def _agent_pid(self, name: str) -> int | None:
+        """The running agent's pid, or None when there is none or no look."""
         try:
-            self.kill(name)
-        except EngineError as exc:
-            logger.warning(
-                "stop %s: ended on a prompt, and end_anyway did not kill it: %s",
-                name,
-                type(exc).__name__,
-            )
-            return False
-        logger.info(
-            "stop %s: ended on a prompt after %gs; killed, as stop_policy end_anyway says",
-            name,
-            self.prefs.stop_timeout(),
-        )
-        return True
+            session = self.get(name)
+        except MachineUnreadable:
+            return None
+        return session.pid if session.state is State.RUNNING else None
 
     def locate(self, name: str) -> Session:
         """The row a client may address by name, or the refusal the API gives.
