@@ -310,6 +310,15 @@ a confirmation whose entries decide what happens to that work, and waits. The
 row then reads `running` while the interface says the session "has not finished"
 and offers a kill, which is true and useless.
 
+**#453 answers that one confirmation, and only it.** Its entries do decide what
+happens to the work, but the operator tapped Stop on the session that owns it,
+and "Exit and stop tasks" is what Stop means. So after `/exit` the stop presses
+`Enter` when the selected entry reads exactly that under "Background work is
+running". Matched by text, never position: "Move to background and exit" would
+create a `detached` agent on purpose, and a reworded or reordered menu reads as
+unknown and falls back to everything below, nothing pressed. The trust prompt
+and every other dialog stay unanswered.
+
 Found by looking at the pane when a stop's wait expires, and, since #100, also
 by a bounded sweep that looks for the same thing without a stop having happened.
 
@@ -348,8 +357,11 @@ It remains an overlay on one attempt rather than a property of the session: a
 fresh stop clears BOTH sources, and the sweep re establishes its own within a
 second if it is still true.
 
-Hitchrail does not answer that prompt either, for the same reason and with more
-force: those entries decide the fate of work the operator did not ask to end.
+Hitchrail does not answer any other prompt a stop meets, for the reason #88
+gave, and a confirmation like this one adds another: its entries decide the
+fate of work the operator did not ask to end. The one exception is #453's, above: the background work menu
+with "Exit and stop tasks" selected, which is the work the operator did ask to
+end.
 
 ### 4.4 Claude Code internals are quarantined
 

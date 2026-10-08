@@ -172,7 +172,9 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # that did not tap Stop can reopen the wait truthfully.
     # 1707 for #429: the second look end_anyway takes a settle after the
     # first, and the note on why one look is not evidence of a question.
-    "engine.py": 1707,
+    # 1712 for #453: the sweep leaves a marker whose exit is still being typed,
+    # since the exit menu's look outlives the agent, and the note saying so.
+    "engine.py": 1712,
     # tmux.py is the module that encodes what tmux actually does
     # rather than what its manual implies, and every entry is a footgun
     # that cost real debugging: prefix matching targets, the colon

@@ -1,6 +1,6 @@
 [project]
 name = "hitchrail"
-version = "0.13.0"
+version = "0.14.0"
 description = "Start and stop headless Claude Code sessions across a folder of projects, from a phone-first web UI."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -310,6 +310,7 @@ also_copy = [
   "src/hitchrail/__init__.py",
   # #368: the package around the one mutated module.
   "src/hitchrail/claude_ipc/__init__.py",
+  "src/hitchrail/claude_ipc/exit_menu.py",
   "src/hitchrail/claude_ipc/keys.py",
   "src/hitchrail/claude_ipc/launch.py",
   "src/hitchrail/claude_ipc/screen.py",

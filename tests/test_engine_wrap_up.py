@@ -178,8 +178,14 @@ def test_expiry_skips_a_closing_marker_and_measures_from_the_exit(root: Path) ->
     assert engine.expire_stops() == [], "the wait before the exit is the agent's task"
     assert VESSEL in engine._stopping
     tmux.pane_text.pop(VESSEL)
-    assert finish(engine, clock) == [VESSEL]
-    clock.advance(engine.prefs.stop_timeout() - 1)
+    clock.advance(SETTLE)
+    assert engine.advance_wrap_ups() == []
+    clock.advance(SETTLE)
+    exit_at = clock.now
+    assert engine.advance_wrap_ups() == [VESSEL]
+    # From the exit, not from the return: the exit's own settles, the exit
+    # menu's look among them (#453), are spent inside the timeout.
+    clock.advance(exit_at + engine.prefs.stop_timeout() - 1 - clock.now)
     assert engine.expire_stops() == []
     clock.advance(1)
     assert engine.expire_stops() == [VESSEL]

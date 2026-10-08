@@ -29,6 +29,7 @@ from hitchrail.claude_ipc import (
     shows_input_box,
     trusted_folders,
 )
+from hitchrail.claude_ipc import exit_menu as ipc_exit_menu
 from hitchrail.claude_ipc import screen as ipc_screen
 from support import in_claude_ipc, source_modules
 
@@ -178,10 +179,11 @@ def test_request_stop_clears_before_it_interrupts() -> None:
 
 def test_request_stop_verifies_the_box_before_typing_into_it() -> None:
     """Two captures, and both before `/exit`. The first guards a draft that was
-    already there, the second guards whatever `Escape` did."""
+    already there, the second guards whatever `Escape` did. The looks after it
+    are #453's wait for the background work menu, which a clear box never is."""
     pane = FakePane()
     request_stop(pane, "vessel", settle=lambda _s: None)
-    assert len(pane.captured) == 2
+    assert len(pane.captured) == 2 + ipc_exit_menu.MENU_TRIES
 
 
 def test_request_stop_refuses_when_a_draft_survived_the_clear() -> None:
@@ -1109,7 +1111,7 @@ def _submodule_imports(tree: ast.AST) -> list[str]:
                 found += [
                     f"{node.module}.{a.name}"
                     for a in node.names
-                    if a.name in {"screen", "keys", "launch", "plugins"}
+                    if a.name in {"screen", "keys", "launch", "plugins", "exit_menu"}
                 ]
     return found
 

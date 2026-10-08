@@ -778,6 +778,24 @@ async def test_the_waiting_dialog_goes_when_the_agent_does(page: Page, server: H
     await expect(dialog).not_to_be_visible(timeout=15_000)
 
 
+async def test_one_stop_ends_a_session_whose_exit_asks_about_background_work(
+    page: Page, server: Harness
+) -> None:
+    """#453, the scenario it was filed on.
+
+    Before it, `/exit` on a session with a Monitor running raised a menu, the
+    wait ran out, and the row asked for a second tap on a key it did not
+    explain. The stop now presses `Enter` on "Exit and stop tasks" itself, so
+    the row reaches `stopped` well inside the wait and the waiting dialog never
+    appears. The wait is long enough that only the answer can explain it.
+    """
+    server.seed(running=["vessel"], exit_menu_after_stop=True, stop_timeout=20.0)
+    await _stop_and_hold(page, server, patience_ms=20_000)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row).to_have_attribute("data-state", "stopped", timeout=10_000)
+    assert "is waiting for you" not in await page.locator("body").inner_text()
+
+
 # -- #240: Stop all, composed from the stop each row already has --------------
 
 

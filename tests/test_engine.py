@@ -1206,6 +1206,36 @@ def test_a_stop_a_kill_ended_is_never_logged_as_an_exit(
     assert engine.stopping_since(proj("vessel")) is None
 
 
+def test_a_listing_while_the_exit_is_typed_leaves_the_marker(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#453. `request_stop` looks for the exit menu after `/exit`, so an agent
+    that simply exits is gone while the stop is still typing. A listing in that
+    window logged "exited after" ahead of "exit requested", and the log is how
+    a person reads what Stop did (#167)."""
+    engine, tmux, _ = live_engine(root)
+    table = procs_from(ps_row(PANE, 1) + ps_row(AGENT, PANE, project=proj("vessel")))
+    engine._procs_fn = lambda: table() if proj("vessel") in tmux.sessions else procs_from("")()
+    send = tmux.send_keys
+    listed: list[State] = []
+
+    def exit_and_list(project: str, *keys: str) -> None:
+        send(project, *keys)
+        if "/exit" in keys:
+            tmux.sessions.pop(project)
+            listed.append(engine.get(project).state)
+
+    tmux.send_keys = exit_and_list  # type: ignore[method-assign]
+    with caplog.at_level(logging.INFO, logger="hitchrail.engine"):
+        assert engine.stop(proj("vessel")).state is State.STOPPED
+    assert listed == [State.STOPPED], "the listing did land in the window"
+    lines = [r.getMessage() for r in caplog.records]
+    requested = next(i for i, m in enumerate(lines) if "exit requested" in m)
+    exited = next(i for i, m in enumerate(lines) if "exited after" in m)
+    assert requested < exited, lines
+    assert engine.stopping_since(proj("vessel")) is None, "reconciled once typing ended"
+
+
 def test_expiry_drops_the_marker_and_does_not_escalate(root: Path) -> None:
     """The behaviour most likely to be "helpfully" changed later.
 
@@ -1228,8 +1258,11 @@ def test_expiry_drops_the_marker_and_does_not_escalate(root: Path) -> None:
 
 def test_expiry_leaves_a_stop_that_is_still_within_its_timeout(root: Path) -> None:
     engine, _, clock = live_engine(root)
+    began = clock.now
     engine.stop(proj("vessel"))
-    clock.advance(engine.config.stop_timeout - 1)
+    # From the marker, not from the return: the stop's own settles, the exit
+    # menu's look among them (#453), are spent inside its timeout.
+    clock.advance(began + engine.config.stop_timeout - 1 - clock.now)
     assert engine.expire_stops() == []
     assert engine.stopping_since(proj("vessel")) is not None
 
