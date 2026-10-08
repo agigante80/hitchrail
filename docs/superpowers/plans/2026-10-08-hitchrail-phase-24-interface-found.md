@@ -95,12 +95,12 @@ batch, bounded as the global rules say; lows go to Backlog.
 
 ### Batch 0: the release check's flake, task 205
 
-- [ ] **Task 205, #457.** A captured failure, its cause named, fixed there or
+- [x] **Task 205, #457.** A captured failure, its cause named, fixed there or
       quarantined naming the ticket. Never retried into green.
 
 ### Batch 1: `app.js` split along its seams, task 206
 
-- [ ] **Task 206, #68, #342.** ES modules along the section comments, a pure
+- [x] **Task 206, #68, #342.** ES modules along the section comments, a pure
       move first; every new file served from the wheel and asserted so; the
       web assets gain a size guard with argued caps; the `innerHTML` guard
       reads every split file and catches the four shapes #342 names. The dead
@@ -108,58 +108,69 @@ batch, bounded as the global rules say; lows go to Backlog.
 
 ### Batch 2: the list as the phone holds it, tasks 207 to 209
 
-- [ ] **Task 207, #447.** The footer's real height reserves the list's end.
-- [ ] **Task 208, #448.** Chips and tabs never shrink into each other.
-- [ ] **Task 209, #449.** The name has its own line in every state.
+- [x] **Task 207, #447.** The footer's real height reserves the list's end.
+- [x] **Task 208, #448.** Chips and tabs never shrink into each other.
+- [x] **Task 209, #449.** The name has its own line in every state.
 
 ### Batch 3: the scale and the search, tasks 210 and 211
 
-- [ ] **Task 210, #450.** The realistic fixture, the Material 3 scale, the
+- [x] **Task 210, #450.** The realistic fixture, the Material 3 scale, the
       computed sizes asserted, a phone capture of the busy list.
-- [ ] **Task 211, #451.** A clear control inside the search field.
+- [x] **Task 211, #451.** A clear control inside the search field.
 
 ### Batch 4: the controls, found, tasks 212 to 215
 
-- [ ] **Task 212, #320.** Settings as a gear in the bar; the footer link goes.
-- [ ] **Task 213, #321, #322.** `New project` in the bar; the empty search
+- [x] **Task 212, #320.** Settings as a gear in the bar; the footer link goes.
+- [x] **Task 213, #321, #322.** `New project` in the bar; the empty search
       offers to create what was typed. #321 closes as decided above.
-- [ ] **Task 214, #324, #333.** The mark before the title on the three pages,
+- [x] **Task 214, #324, #333.** The mark before the title on the three pages,
       the title a link home; `icon.svg`'s stale dark fill corrected.
-- [ ] **Task 215, #323.** Light, Dark and System in settings.
+- [x] **Task 215, #323.** Light, Dark and System in settings.
 
 ### Batch 5: the perimeter, task 216
 
-- [ ] **Task 216, #325.** `/favicon.ico` answered with the mark, by decision.
-      Security auditor review required.
+- [x] **Task 216, #325.** `/favicon.ico` answered with the mark, by decision.
+      Security auditor review required. Built as an entry in
+      `UNAUTHENTICATED_ASSETS`, GET and HEAD only, with its refusals tested;
+      the audit passed and its two lows were fixed in the merge.
 
 ### Batch 6: the plugin update rows, tasks 217 to 219
 
-- [ ] **Task 217, #311.** `updated` splits into moved (from and to) and
+- [x] **Task 217, #311.** `updated` splits into moved (from and to) and
       current, from a second listing; an unreadable one falls back.
-- [ ] **Task 218, #312.** Identical skipped rows collapse into one with a
+- [x] **Task 218, #312.** Identical skipped rows collapse into one with a
       count, in the page and the CLI; the record keeps every row.
-- [ ] **Task 219, #344.** `failureText`'s fallback normalised; the n=0 case.
+- [x] **Task 219, #344.** `failureText`'s fallback normalised; the n=0 case.
 
 ### Batch 7: seen, task 220
 
-- [ ] **Task 220.** Screenshots regenerated; watched on the S25 at 360 px on
+- [x] **Task 220.** Screenshots regenerated; watched on the S25 at 360 px on
       a throwaway root, every control reached from the first screen and the
-      busy list read. The S25's screenshots stay private.
+      busy list read. The S25's screenshots stay private. The screenshots were
+      regenerated for 0.15.0; the watch is MOVED OUT, #468: the S25's wireless
+      debugging was off and the Pixel was PIN locked.
 
 ## Done looks like
 
-- [ ] Every task ticked, or marked MOVED OUT or NOT BUILT with an issue number
-- [ ] No file under `src/hitchrail/web/` past 400 lines without an argued cap,
+- [x] Every task ticked, or marked MOVED OUT or NOT BUILT with an issue number
+- [x] No file under `src/hitchrail/web/` past 400 lines without an argued cap,
       held by a test
-- [ ] At 360 and 320 px on the realistic fixture: no horizontal scroll, no
+- [x] At 360 and 320 px on the realistic fixture: no horizontal scroll, no
       chip overlap, every name on its own line, the last row clear of the
       footer, the bar on one line with every control of this phase in it
-- [ ] `GET /favicon.ico` answers 200 with no token, and the exemption test
-      names exactly one more triple
-- [ ] Watched on the S25: each control reached from the first screen, the
-      busy list read at 360 px
-- [ ] Screenshots regenerated
-- [ ] Roadmap says done, milestone closed, `check-phases.sh` passes
+- [x] `GET /favicon.ico` answers 200 with no token, and the exemption test
+      names exactly one more triple. It is a set entry rather than a triple,
+      the reason written in `security.py`, and the test names it
+- [x] Watched on the S25: each control reached from the first screen, the
+      busy list read at 360 px. MOVED OUT, #468
+- [x] Screenshots regenerated
+- [x] Roadmap says done, milestone closed, `check-phases.sh` passes.
+      Closed 2026-10-08 as **re-shaped**: all 18 tickets in the milestone
+      landed and shipped in 0.15.0, #321 closing as decided (no trailing row;
+      a failed search offers to create the name, only when no project has
+      it). The phone watch did not happen, moved to #468. The reviews' lows
+      went to Backlog as #463 to #467. The block then left the roadmap under
+      the 2026-09-26 rule.
 
 ## Out of scope
 

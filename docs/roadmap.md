@@ -46,49 +46,6 @@ suite is green. It is finished when the behaviour has been watched working in
 the running application, on the phone it is for. See
 [`tech-guidelines.md`](tech-guidelines.md) section 7.
 
-## Phase: Phase 24: The interface, found
-state: open
-plan: docs/superpowers/plans/2026-10-08-hitchrail-phase-24-interface-found.md
-
-Everything the phone offers can be found by looking at it. Filed together from
-using it: settings is a text link at the end of the footer, the button that
-creates a project disappears under every filter and does not say what it
-creates, a chosen theme cannot go back to following the system, the mark
-never appears in the header, the title does not lead back to the list, and
-the browser's implicit favicon request is refused. The plugin update page's
-display defects join them, and so does `app.js`'s split, because every one of
-these edits `app.js` and the split is cheaper before them than after. The
-`innerHTML` guard's gaps (#342) come with the split, since the guard has to
-read the files the split creates.
-
-#321 and #322 rewrite the same control: decide #321 first, and #322 closes if
-the bar button it renames is gone.
-
-**The list as a real phone holds it** (added 2026-10-08, from the owner's
-phone: five roots, 67 folders, 360 CSS px, default font settings). Three
-layout defects nobody had seen, because every test and screenshot uses one
-root and short names: a stopped row crushes its name again (#449, #179
-regressed), the root chips overlap (#448), and the footer covers the last row
-under a filter (#447). Order: those three first, then #450 (a fixture with
-that data, and the type scale at phone width, which is the owner's call),
-then #451 (a clear control for the search).
-
-Delivers: settings and project creation as bar controls that survive a filter,
-a theme choice that includes the system's, the mark in the header, the favicon
-request answered by decision rather than by accident, plugin update rows that
-say what moved and do not repeat, and `app.js` split along the seam it
-already follows.
-
-Done when each control is reached from the first screen on the phone the
-design is for, watched there, the busy list reads at 360px on that phone, and
-the screenshots have been regenerated.
-
-Moved ahead of 23 and 16 on 2026-10-08, at the owner's request: the layout
-defects are daily use pain on the phone, while 23 and 16 are new capability.
-Only the favicon touches the perimeter, and that one is a refusal the
-operator never sees, so nothing in 16 needs to come first. Before 17 because
-interface changes are what the documents then describe.
-
 ## Phase: Phase 23: More than one agent, one package each
 state: planned
 
