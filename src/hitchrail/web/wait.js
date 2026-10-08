@@ -212,6 +212,15 @@ async function showTimedOut(project) {
   // arrives on the stream after the expiry, so the object this was called with
   // predates it.
   const current = state.projects.find((p) => p.name === project.name) ?? project;
+  // #457. The page's deadline and the server's expiry are independent timers,
+  // and under `end_anyway` the server kills on its own: a row that already
+  // left `running` has nothing to answer and nothing to kill, and the stream's
+  // close for it may have run before this. Captured as "No answer" offering
+  // Kill over a row the list already showed stopped.
+  if (current.state !== "running") {
+    closeDialog(project.name);
+    return;
+  }
   if (current.awaiting_input) {
     // #165. The engine captured this pane one screen ago to set the flag this
     // dialog renders, and the first version then sent the reader to "that
@@ -256,6 +265,9 @@ async function showTimedOut(project) {
     body:
       "It has not finished. Killing it now ends the process immediately, "
       + "and anything it has not written to disk is lost.",
+    // A `for` like the rest of the stop sequence, so a row leaving `running`
+    // after this opened closes it rather than leaving a Kill for nothing.
+    forProject: project.name,
     actions: [
       ["Leave it", "ghost", () => closeDialog()],
       ["Kill it", "danger", () => killNow(project)],

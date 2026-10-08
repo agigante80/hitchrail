@@ -442,6 +442,29 @@ async def test_leave_it_leaves_it(page: Page, server: Harness) -> None:
     assert server.is_running("vessel")
 
 
+async def test_no_answer_closes_when_the_row_stops_after_it(
+    page: Page, server: Harness
+) -> None:
+    """#457. The page's deadline and the server's expiry are separate timers,
+    and under `end_anyway` the server kills after the page has given up. The
+    "No answer" screen then offered Kill over a row the list showed stopped,
+    because it was the one dialog of the stop sequence with no `for`."""
+    server.seed(running=["vessel"], ignores_graceful_stop=True)
+    await page.goto(server.base)
+    await page.evaluate("() => window.__hitchrail.setStopPatience(1200)")
+
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row).to_be_visible()
+    await row.get_by_role("button", name="Stop").click()
+    await page.locator("[data-dialog]").get_by_role("button", name="Stop", exact=True).click()
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text("No answer from", timeout=15_000)
+
+    server.kill("vessel")
+    await expect(row).to_have_attribute("data-state", "stopped", timeout=10_000)
+    await expect(dialog).to_be_hidden()
+
+
 async def test_a_finishing_stop_does_not_close_a_dialog_opened_since(
     page: Page, server: Harness
 ) -> None:
