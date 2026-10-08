@@ -32,8 +32,12 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+## 0.13.0 - 2026-10-08
+
 One deployment has something to do: a loopback bind behind an https proxy
-that is ALSO reached over a plain http forwarder or alias. See Changed.
+that is ALSO reached over a plain http forwarder or alias. See Changed. And if
+you ever opened a link of the old `/?token=` form, rotate the token: see the
+first line under Fixed (#388).
 
 ### Changed
 
