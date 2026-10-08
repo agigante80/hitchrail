@@ -325,13 +325,12 @@ async def test_the_footer_says_since_when_and_as_whom_in_the_viewers_clock(
     """#148. Absolute with the relative beside it, formatted by the BROWSER:
     the server's timezone is the machine's and the phone's is the person's,
     and a server rendered 15:45 is wrong for anybody elsewhere in a way that
-    looks right. The harness runs as this user, so the name is known."""
-    import getpass
-
+    looks right. The harness names a neutral account through the `user`
+    seam, so its screenshots never publish the developer's login."""
     server.seed(stopped=["alpha"])
     await page.goto(server.base)
     about = page.locator("[data-about]")
-    await expect(about).to_contain_text(f"as {getpass.getuser()}")
+    await expect(about).to_contain_text("as operator")
     await expect(about).to_contain_text("since ")
     assert re.search(r"\((just now|\d+[mhd] ago)\)", await about.inner_text())
     # Formatted where the viewer is: the same instant reads differently from

@@ -992,6 +992,10 @@ class Harness:
             config=self._config,
             bus=self.bus,
             plugin_operation=self._plugin_operation,
+            # The footer names the account the server runs as, and the
+            # screenshots this harness takes are published: the developer's
+            # login is not theirs to publish.
+            user=lambda: "operator",
         )
         self._server = uvicorn.Server(
             uvicorn.Config(app, host="127.0.0.1", port=self.port, log_level="warning")
