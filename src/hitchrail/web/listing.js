@@ -173,6 +173,8 @@ export async function refresh() {
   if (rootEl) {
     rootEl.textContent =
       roots.length === 1 ? roots[0].path : roots.map((r) => r.label).join(", ");
+    // One line in the bar (#320), so the full text is what a long press shows.
+    rootEl.title = rootEl.textContent;
   }
   // `owed` holds only what arrived after this listing was asked for, so those
   // are newer than it whatever order the two landed in.

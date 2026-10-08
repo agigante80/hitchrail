@@ -1,6 +1,7 @@
 import { $ } from "/dom.js";
 import { emptyReason, isRunning, renderChips, renderTabs, visibleProjects } from "/filters.js";
 import { formatMb } from "/format.js";
+import { showNewFolder } from "/new_folder.js";
 import { renderRow } from "/row.js";
 import { renderSuggestions } from "/search.js";
 import { state } from "/state.js";
@@ -31,6 +32,13 @@ export function renderList() {
     const empty = template.content.cloneNode(true);
     const reason = empty.querySelector("[data-empty-reason]");
     if (reason) reason.textContent = emptyReason();
+    const create = empty.querySelector("[data-empty-create]");
+    const typed = state.query.trim();
+    if (create && typed) {
+      create.textContent = `Create folder "${typed}"`;
+      create.hidden = false;
+      create.addEventListener("click", () => showNewFolder("", typed));
+    }
     list.replaceChildren(empty);
     return;
   }

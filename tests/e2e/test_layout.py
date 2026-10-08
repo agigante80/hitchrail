@@ -269,3 +269,61 @@ async def test_every_tap_target_is_still_44px(
     assert targets, "nothing to measure"
     small = [t for t in targets if t["height"] < 43.99 or t["width"] < 43.99]
     assert not small, f"tap targets under 44px: {small}"
+
+
+# -- the bar, with every control of Phase 24 in it at once --------------------
+
+# 390 is the default viewport, 360 the daily phone, 320 Reflow's width. Each
+# control fitted alone when it was added (#320, #322, #324), and together they
+# wrapped the bar at 360: Phase 13's premortem 3 again, which is why the bar is
+# measured with all of them present rather than one at a time.
+BAR_WIDTHS = (
+    {"width": 390, "height": 844},
+    {"width": 360, "height": 740},
+    {"width": 320, "height": 640},
+)
+
+_BAR = """bar => {
+  const box = (el) => { const r = el.getBoundingClientRect();
+    return { width: r.width, height: r.height, top: r.top, bottom: r.bottom,
+             left: r.left, right: r.right }; };
+  const actions = [...bar.querySelectorAll('.bar-actions > *')].map(box);
+  const title = bar.querySelector('h1');
+  const style = getComputedStyle(title);
+  const lineHeight = parseFloat(style.lineHeight) || 1.2 * parseFloat(style.fontSize);
+  const mark = bar.querySelector('.bar-mark');
+  return {
+    bar: box(bar), actions, title: box(title), mark: mark ? box(mark) : null,
+    titleLines: Math.round(title.getBoundingClientRect().height / lineHeight),
+    overflow: bar.scrollWidth - bar.clientWidth,
+  };
+}"""
+
+
+@pytest.mark.parametrize("viewport", BAR_WIDTHS, ids=[str(v["width"]) for v in BAR_WIDTHS])
+async def test_the_bar_stays_on_one_line_with_every_control_present(
+    page: Page, server: Harness, viewport: dict[str, int]
+) -> None:
+    await _busy_list(page, server, viewport)
+    bar = page.locator("header.bar")
+    gear = bar.get_by_role("link", name="Settings")
+    theme = bar.locator("[data-theme-toggle]")
+    new = bar.get_by_role("button", name="New project")
+    for control in (gear, theme, new):
+        await expect(control).to_be_visible()
+
+    got = await bar.evaluate(_BAR)
+    where = f"at {viewport['width']}px: {got}"
+    assert got["titleLines"] == 1, f"the title wrapped {where}"
+    assert got["overflow"] <= 0, f"the bar overflows {where}"
+    centres = {round((a["top"] + a["bottom"]) / 2) for a in got["actions"]}
+    assert len(centres) == 1, f"the controls are on different lines {where}"
+    assert got["bar"]["right"] <= viewport["width"], f"the bar leaves the screen {where}"
+    for a in got["actions"]:
+        assert a["height"] >= 43.99 and a["width"] >= 43.99, f"a control is under 44px {where}"
+    first = got["actions"][0]["left"]
+    assert got["title"]["right"] <= first, f"the title meets a control {where}"
+    page_overflow = await page.evaluate(
+        "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
+    )
+    assert page_overflow <= 0, f"the page scrolls sideways {where}"

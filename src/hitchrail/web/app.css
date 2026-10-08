@@ -239,11 +239,28 @@ button[disabled] { color: var(--muted-3); cursor: not-allowed; }
 :root[data-scrolled] .bar h1 { font-size: 18px; }
 :root[data-scrolled] .root { display: none; }
 .bar h1 { font-size: 22px; font-weight: 700; }
-.root { margin: 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+/* One line, cut with an ellipsis. It used to wrap, which cost nothing while the
+   title had the bar to itself; beside the gear and the icon toggle the title
+   block is 133px at 390 and a path wrapped to two lines, growing the header by
+   18px against Phase 13's premortem 3. The full text is the element's title. */
+.bar-titles { min-width: 0; }
+.root {
+  margin: 0; font-size: 13px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .bar-actions { display: flex; gap: 8px; flex-shrink: 0; }
+/* The bar holds the title, the gear, the theme toggle and "New project" on one
+   line at 320px (#320, #322, #324). The words keep their size; the room comes
+   from the gaps and the title, and the numbers are held by test_layout.py. */
+@media (max-width: 380px) {
+  .bar { padding-inline: 12px; gap: 8px; }
+  .bar-actions { gap: 2px; }
+  .bar-actions button:not(.icon-btn) { padding-inline: 10px; }
+  :root[data-scrolled] .bar { padding-inline: 12px; }
+}
 /* #320. A glyph in a 44px box: the padding a text button carries would make
    it 56px for nothing. Drawn like the badge glyphs, from the same set. */
-.icon-btn { padding: 0; }
+.icon-btn { padding: 0; position: relative; }
 .icon-glyph { width: 24px; height: 24px; fill: none; stroke: currentColor;
   stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 

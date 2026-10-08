@@ -60,6 +60,9 @@
        so under the licence above. Not a badge, so it is not named `badge-`: the
        guard that pins the badge words to the badge glyphs counts those. -->
   <symbol id="icon-settings" viewBox="0 0 24 24"><path d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z"/><path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"/></symbol>  <!-- settings -->
+  <!-- #322. The theme toggle's two faces: it shows the theme you will get. -->
+  <symbol id="icon-moon" viewBox="0 0 24 24"><path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z"/></symbol>  <!-- moon -->
+  <symbol id="icon-sun" viewBox="0 0 24 24"><path d="M8 12a4 4 0 1 0 8 0a4 4 0 1 0 -8 0"/><path d="M3 12h1m8 -9v1m8 8h1m-9 8v1m-6.4 -15.4l.7 .7m12.1 -.7l-.7 .7m0 11.4l.7 .7m-12.1 -.7l-.7 .7"/></symbol>  <!-- sun -->
   <symbol id="badge-controller" viewBox="0 0 24 24"><path d="M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3"/></symbol>  <!-- shield -->
 </svg>
 <!-- #149. Everything that acts on the whole list stays on screen: the bar
@@ -80,8 +83,11 @@
          390, 360 and 320 with every control present, so the old finding does
          not carry over by assumption. The accessible name is on the link. -->
     <a class="btn ghost icon-btn" href="/settings" data-settings-link aria-label="Settings"><svg class="icon-glyph" aria-hidden="true" focusable="false"><use href="#icon-settings"/></svg></a>
-    <button type="button" class="ghost" data-theme-toggle aria-live="polite">Dark</button>
-    <button type="button" class="accent" data-new>New</button>
+    <!-- #322. An icon with the same accessible name the label had ("Dark" or
+         "Light", set by theme.js): "New project" needs the room, and the premortem
+         said the toggle gives way before any label shrinks. -->
+    <button type="button" class="ghost icon-btn" data-theme-toggle aria-live="polite"></button>
+    <button type="button" class="accent" data-new>New project</button>
   </div>
 </header>
 
@@ -126,6 +132,11 @@
 <template data-empty-template>
   <p class="empty-title">Nothing matches</p>
   <p class="empty-body" data-empty-reason>No folder here is called that.</p>
+  <!-- #321. The moment a person most wants to create a folder is the search
+       that found nothing. The bar's New project already survives every filter
+       and every scroll (#149), so a trailing create row was not built; this
+       is the part of that idea the bar cannot do, which is knowing the name. -->
+  <button type="button" class="accent" data-empty-create hidden></button>
 </template>
 
 <section class="unsupported" data-unsupported hidden>

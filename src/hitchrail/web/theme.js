@@ -27,8 +27,19 @@ export function applyTheme(theme) {
     : window.matchMedia("(prefers-color-scheme: dark)").matches;
   const toggle = $("[data-theme-toggle]");
   if (toggle) {
-    // The button offers the OTHER theme, so its label is what you will get.
-    toggle.textContent = dark ? "Light" : "Dark";
+    // The button offers the OTHER theme, so its name is what you will get. An
+    // icon since #322, with the word kept as its accessible name.
+    const glyph = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    glyph.setAttribute("class", "icon-glyph");
+    glyph.setAttribute("aria-hidden", "true");
+    glyph.setAttribute("focusable", "false");
+    const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+    use.setAttribute("href", dark ? "#icon-sun" : "#icon-moon");
+    glyph.append(use);
+    const word = document.createElement("span");
+    word.className = "offscreen";
+    word.textContent = dark ? "Light" : "Dark";
+    toggle.replaceChildren(glyph, word);
   }
 }
 

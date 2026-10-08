@@ -180,7 +180,7 @@ async def test_the_log_drawer_shows_the_pane_tail(page: Page, server: Harness) -
 async def test_the_new_folder_sheet_creates(page: Page, server: Harness) -> None:
     server.seed(stopped=["vessel"])
     await page.goto(server.base)
-    await page.get_by_role("button", name="New").click()
+    await page.get_by_role("button", name="New project").click()
     await page.get_by_label("Folder name").fill("new-thing")
     await page.get_by_role("button", name="Create").click()
     # `server.project` would add the run's collision prefix, and this folder
@@ -192,6 +192,30 @@ async def test_the_new_folder_sheet_creates(page: Page, server: Harness) -> None
     )
 
 
+async def test_a_search_that_matches_nothing_offers_to_create_that_folder(
+    page: Page, server: Harness
+) -> None:
+    """#321. The empty state knows the name the person typed, which the bar
+    button cannot. It opens the same sheet with the name filled in, and offers
+    nothing when the list is empty for any reason but a search."""
+    server.seed(stopped=["vessel"])
+    await page.goto(server.base)
+    offer = page.locator("[data-empty-create]")
+    await page.get_by_role("tab", name="Running").click()
+    await expect(page.get_by_text("Nothing matches")).to_be_visible()
+    await expect(offer).to_be_hidden()
+    await page.get_by_role("tab", name="All").click()
+
+    await page.get_by_role("combobox", name="Search folders").fill("fresh-idea")
+    await expect(offer).to_have_text('Create folder "fresh-idea"')
+    await offer.click()
+    await expect(page.get_by_label("Folder name")).to_have_value("fresh-idea")
+    await page.get_by_role("button", name="Create", exact=True).click()
+    await expect(page.locator(f'[data-project="{DEFAULT_LABEL}~fresh-idea"]')).to_be_visible(
+        timeout=15_000
+    )
+
+
 async def test_a_refused_creation_reports_it_and_leaves_nothing_on_disk(
     page: Page, server: Harness
 ) -> None:
@@ -199,7 +223,7 @@ async def test_a_refused_creation_reports_it_and_leaves_nothing_on_disk(
     and the interface is now a second way to reach that path."""
     server.seed(stopped=["vessel"])
     await page.goto(server.base)
-    await page.get_by_role("button", name="New").click()
+    await page.get_by_role("button", name="New project").click()
     await page.get_by_label("Folder name").fill("../escape")
     await page.get_by_role("button", name="Create").click()
 
@@ -216,7 +240,7 @@ async def test_the_sheet_does_not_reimplement_the_name_rule(
     must SEND a bad name and report what came back."""
     server.seed(stopped=["vessel"])
     await page.goto(server.base)
-    await page.get_by_role("button", name="New").click()
+    await page.get_by_role("button", name="New project").click()
     await page.get_by_label("Folder name").fill("has  two")
     await page.get_by_role("button", name="Create").click()
     # The message is the server's, not one the page invented.

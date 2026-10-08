@@ -914,7 +914,7 @@ async def test_new_and_the_filters_are_reachable_at_the_bottom_of_fifty_rows(
     await page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
     await page.wait_for_timeout(200)
 
-    new = page.get_by_role("button", name="New")
+    new = page.get_by_role("button", name="New project")
     box = await new.bounding_box()
     assert box is not None and box["y"] >= 0 and box["y"] + box["height"] <= 844, box
     for control in (

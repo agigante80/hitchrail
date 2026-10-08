@@ -467,7 +467,7 @@ async def test_a_finishing_stop_does_not_close_a_dialog_opened_since(
     # intercepted by the backdrop until it has actually closed.
     await expect(page.locator("[data-dialog]")).to_be_hidden()
 
-    await page.get_by_role("button", name="New").click()
+    await page.get_by_role("button", name="New project").click()
     dialog = page.locator("[data-dialog]")
     await expect(dialog).to_contain_text("New folder")
     await page.get_by_label("Folder name").fill("half-typed")

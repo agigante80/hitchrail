@@ -336,7 +336,7 @@ async def test_capture_the_new_folder_sheet(page: Page, shots_server: Harness) -
     _seed_the_world(shots_server)
     await page.goto(shots_server.base)
     await _settled(page, shots_server)
-    await page.get_by_role("button", name="New").click()
+    await page.get_by_role("button", name="New project").click()
     sheet = page.locator("[data-dialog]")
     await expect(sheet).to_contain_text("New folder")
     await _shoot(page, "phone-new-folder", sheet)
