@@ -439,6 +439,21 @@ async def test_delete_begins_a_graceful_stop_and_kills_nothing(
     assert tmux.killed == []
 
 
+async def test_a_stopping_row_lists_what_a_reopened_wait_needs(
+    client: httpx.AsyncClient, engine: Engine
+) -> None:
+    """#408, #411, #428: the listing, not the DELETE's reply, is all another
+    browser has. The policy is the one at the Stop, not today's."""
+    await client.delete(f"/api/sessions/{proj('vessel')}", headers=HEADERS)
+    engine.prefs.apply(stop_policy="end_anyway")
+    listed = (await client.get("/api/projects", headers=HEADERS)).json()
+    row = next(s for s in listed["projects"] if s["name"] == proj("vessel"))
+    assert listed["server"]["stop_policy"] == "end_anyway"
+    assert row["stop_policy"] == "ask"
+    assert row["stop_typing"] is False
+    assert isinstance(row["stop_age_s"], float) and row["stop_age_s"] >= 0
+
+
 async def test_a_stop_the_adapter_declined_is_409_stop_unsafe(
     client: httpx.AsyncClient, engine: Engine, tmux: FakeTmux
 ) -> None:
@@ -966,6 +981,39 @@ async def test_the_stop_sweep_outlives_a_failing_tick(
 
     assert len(ticks) >= 3, f"the sweep stopped after the failing tick: {ticks}"
     assert "stop sweep failed" in caplog.text, "the failure was swallowed silently"
+
+
+async def test_a_failing_attention_scan_is_logged_and_the_next_tick_scans_again(
+    config: Config, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#181. `scan_for_stuck` may raise, so what a raise costs is the server's
+    contract: one tick, logged, and the next tick starts another scan."""
+    scans: list[int] = []
+
+    class Boom(Engine):
+        def scan_for_stuck(self) -> list[str]:
+            scans.append(len(scans))
+            if len(scans) == 1:
+                raise RuntimeError("one bad scan")
+            return []
+
+    monkeypatch.setattr(server, "SWEEP_INTERVAL_S", 0.01)
+    engine = Boom(
+        config=config,
+        tmux=FakeTmux(),
+        procs_fn=procs_from(""),
+        meminfo_fn=lambda: PLENTY,
+    )
+    app = create_app(engine=engine, config=config, bus=EventBus())
+    with caplog.at_level(logging.ERROR, logger="hitchrail.server"):
+        async with app.router.lifespan_context(app):
+            for _ in range(200):
+                if len(scans) >= 3:
+                    break
+                await asyncio.sleep(0.01)
+
+    assert len(scans) >= 3, f"no scan ran after the failing one: {scans}"
+    assert "attention scan failed" in caplog.text, "the failure was swallowed silently"
 
 
 async def test_the_sweep_task_is_cancelled_on_shutdown(config: Config) -> None:
@@ -2526,6 +2574,24 @@ async def test_a_malformed_body_on_the_signal_route_is_400_and_signals_nothing(
     assert r.status_code == 400, r.text
     assert r.json()["code"] == "invalid_body"
     assert fake.events == []
+
+
+@pytest.mark.parametrize(
+    ("route", "sent"), [("signal", signal.SIGTERM), ("signal/force", signal.SIGKILL)]
+)
+async def test_an_empty_object_on_the_signal_routes_is_the_unbound_request(
+    config: Config, route: str, sent: signal.Signals
+) -> None:
+    """#403. `docs/api.md` promises `{}` means what no body means. Nothing
+    refuses an empty object today, and a later `if not body` would turn a
+    script's `{}` into a 400 with every other test green."""
+    fake = FakePidfd()
+    async with client_for(_signal_engine(config, fake), config) as c:
+        r = await c.post(
+            f"/api/sessions/{proj('vessel')}/{route}", headers=HEADERS, content="{}"
+        )
+    assert r.status_code == 202, r.text
+    assert fake.signals == [sent]
 
 
 # 20000 levels fit in MAX_BODY_BYTES and are past the parser's stack.

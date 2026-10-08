@@ -376,8 +376,8 @@ def test_a_relative_path_on_path_is_refused_rather_than_spawned(tmp_path: Path) 
 def test_a_typed_relative_agent_binary_is_refused_as_typed(tmp_path: Path, typed: str) -> None:
     """#341. A value with a directory in it is never searched on PATH, so
     blaming a "relative PATH entry" sent the operator to fix a PATH that was
-    never read. `which` hands a typed path back unchanged, as the premise
-    pin below shows against the real one."""
+    never read. `which` checks a typed path where it stands and never makes
+    it absolute, as the premise pin below shows against the real one."""
     found = preflight(
         make_config(tmp_path, agent_binary=typed),
         which=lambda n: typed if n == typed else "/usr/bin/tmux",
@@ -390,17 +390,31 @@ def test_a_typed_relative_agent_binary_is_refused_as_typed(tmp_path: Path, typed
     assert found.agent_binary is None
 
 
-def test_a_typed_path_that_is_not_there_is_not_blamed_on_path(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("typed", "relative"),
+    [("bin/claude", True), ("/opt/claude", False), ("~/.local/bin/claude", True)],
+    ids=["relative", "absolute", "tilde"],
+)
+def test_a_typed_path_that_is_not_there_is_not_blamed_on_path(
+    tmp_path: Path, typed: str, relative: bool
+) -> None:
     """#341. The other half: "is not on PATH" is false of a path that was
-    never looked up there, whatever else is wrong with it."""
+    never looked up there, whatever else is wrong with it.
+
+    #393: and a relative one is told where it was looked for, since it
+    would be refused as relative once it was there, which is a second round
+    trip. `which` does not expand `~`, so the tilde case is relative too,
+    and saying so is what explains it."""
     found = preflight(
-        make_config(tmp_path, agent_binary="bin/claude"),
-        which=lambda n: None if n == "bin/claude" else "/usr/bin/tmux",
+        make_config(tmp_path, agent_binary=typed),
+        which=lambda n: None if n == typed else "/usr/bin/tmux",
         meminfo=tmp_path,
     )
     assert len(found.problems) == 1
-    assert "not an executable file" in found.problems[0]
-    assert "is not on PATH" not in found.problems[0]
+    problem = found.problems[0]
+    assert "not an executable file" in problem
+    assert "PATH" not in problem
+    assert ("relative to the current directory" in problem) is relative, problem
     assert found.agent_binary is None
 
 
@@ -416,20 +430,26 @@ def test_an_absolute_agent_binary_is_accepted_as_typed(tmp_path: Path) -> None:
     assert found.agent_binary == "/opt/claude"
 
 
-def test_which_hands_a_typed_relative_path_back_unchanged(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("typed", ["bin/claude", "bin//claude"])
+def test_which_checks_a_typed_relative_path_where_it_stands(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, typed: str
 ) -> None:
     """The premise #341 rests on, pinned against the real `shutil.which`: a
-    name with a directory component is checked where it stands and returned
-    as given, never searched on PATH or made absolute. If a Python release
-    changes that, the typed branch in `preflight` needs rethinking."""
+    name with a directory component is checked where it stands and never
+    searched on PATH or made absolute. Not "returned as given" (#393): 3.12
+    and later rejoin the split, so `bin//claude` comes back `bin/claude`,
+    where 3.11 hands it back as typed. Either is still relative, which is
+    all the typed branch in `preflight` needs."""
     (tmp_path / "bin").mkdir()
     agent = tmp_path / "bin" / "claude"
     agent.write_text("#!/bin/sh\n")
     agent.chmod(0o755)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("PATH", "/nonexistent")
-    assert _REAL_SHUTIL_WHICH("bin/claude") == "bin/claude"
+    found = _REAL_SHUTIL_WHICH(typed)
+    assert found is not None
+    assert not Path(found).is_absolute()
+    assert Path(found) == Path("bin/claude")
 
 
 def test_an_unreadable_meminfo_refuses_rather_than_running_unguarded(
@@ -484,6 +504,25 @@ def test_main_refuses_to_start_and_prints_what_is_missing(
     err = capsys.readouterr().err
     assert "cannot start" in err
     assert "tmux" in err
+
+
+def test_the_ipv4_mapped_loopback_is_refused_before_the_bind_naming_127_0_0_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#395: it reached uvicorn and died there as a startup traceback."""
+    served: list[object] = []
+
+    def record(*a: object) -> int:
+        served.append(a)
+        return 0
+
+    monkeypatch.setattr(cli, "_serve", record)
+    code = main(["--root", f"main={tmp_path}", "--host", "::ffff:127.0.0.1"])
+    assert code == 2
+    assert served == []
+    err = capsys.readouterr().err
+    assert "give 127.0.0.1 instead" in err
+    assert "Traceback" not in err
 
 
 def test_a_refusal_prints_no_token(
@@ -1417,6 +1456,21 @@ def test_the_startup_block_is_logged_in_the_format(
     assert any("tmux /usr/bin/tmux" in line for line in lines)
 
 
+@pytest.mark.parametrize("policy", ["ask", "end_anyway"])
+def test_the_startup_block_names_the_stop_policy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    policy: str,
+) -> None:
+    """#413. The one place an operator who set `end_anyway` in a file they
+    have forgotten sees that a wait may end in a kill nobody tapped."""
+    monkeypatch.setattr(cli, "_serve", lambda *a: 0)
+    assert main(["--root", f"main={tmp_path}", "--stop-policy", policy]) == 0
+    lines = _log_lines(capsys.readouterr().err)
+    assert any(line.endswith(f", stop policy {policy}") for line in lines), lines
+
+
 @pytest.mark.parametrize(
     ("host", "origins", "said"),
     [
@@ -1424,8 +1478,17 @@ def test_the_startup_block_is_logged_in_the_format(
         ("0.0.0.0", ("http://box.lan",), False),
         ("127.0.0.1", ("https://box.lan",), False),
         ("0.0.0.0", (), False),
+        ("0.0.0.0", ("https://localhost:8443",), False),
+        ("0.0.0.0", ("https://box.lan", "http://other.lan"), False),
     ],
-    ids=["https-origin-off-loopback", "plain-origin", "loopback-bind", "no-origin"],
+    ids=[
+        "https-origin-off-loopback",
+        "plain-origin",
+        "loopback-bind",
+        "no-origin",
+        "https-loopback-origin",
+        "https-beside-a-plain-origin",
+    ],
 )
 def test_the_startup_block_says_when_a_proxy_origin_gets_no_secure_cookie(
     tmp_path: Path, host: str, origins: tuple[str, ...], said: bool
@@ -1433,12 +1496,76 @@ def test_the_startup_block_says_when_a_proxy_origin_gets_no_secure_cookie(
     """#283 item 4. The deployment works and only loses a hardening flag, so
     #268's refusal would be wrong here; silence left the operator no way to
     learn why the flag was missing. A plain origin is not a proxy, and a
-    loopback bind already gets the flag, so neither is told anything."""
+    loopback bind already gets the flag, so neither is told anything.
+
+    #394: the advice must be true. A loopback https origin is no proxy and a
+    plain one beside it keeps the flag off, so rebinding as told would not
+    set it in either; the line asks the cookie rule rather than its own
+    test. Since #391 a loopback bind also stops serving the plain LAN
+    address, so the advice says that too."""
     config = make_config(tmp_path, host=host, token="t" * 24, extra_origins=origins)
     lines = cli.startup_block(
         config, cli.Preflight([], "/usr/bin/claude", "/usr/bin/tmux"), "info"
     )
-    assert any(line.startswith("token cookie not Secure") for line in lines) is said, lines
+    found = [line for line in lines if line.startswith("token cookie not Secure")]
+    assert bool(found) is said, lines
+    if said:
+        assert "through the proxy" in found[0], found[0]
+        assert "is no longer served" in found[0], found[0]
+        assert "is refused" not in found[0], found[0]
+
+
+@pytest.mark.parametrize(
+    ("host", "origins", "said"),
+    [
+        ("127.0.0.1", ("https://proxy.lan",), True),
+        ("127.0.0.1", ("https://box.lan",), False),
+        ("127.0.0.1", ("https://proxy.lan", "http://other.lan"), False),
+        ("127.0.0.1", (), False),
+        ("0.0.0.0", ("https://box.lan",), False),
+        ("127.0.0.1", ("https://proxy.lan", "http://localhost:8787"), True),
+        ("127.0.0.1", ("https://box.lan:8443",), False),
+        ("127.0.0.1", ("https://BOX.lan.",), False),
+    ],
+    ids=[
+        "forwarder-withheld",
+        "phone-access-https-origin-of-this-host",
+        "one-plain-origin",
+        "no-proxy-origin",
+        "lan-bind",
+        "loopback-origin-beside",
+        "https-origin-of-this-host-other-port",
+        "https-origin-of-this-host-spelled-differently",
+    ],
+)
+def test_the_startup_block_says_which_plain_origins_are_not_derived(
+    tmp_path: Path, host: str, origins: tuple[str, ...], said: bool
+) -> None:
+    """#391's premortem: an operator on a plain http forwarder upgrades and
+    their grant starts failing. The refusal names the origin; this line is
+    the other half, written before anything is served, saying the origin is
+    not derived, why, and the flag that brings it back.
+
+    The host of a configured https origin is the phone-access.md deployment
+    (loopback bind, `--allow-host` plus `--allow-origin https://` for the
+    same name): the operator reaches it over https, so the line and its
+    advice to turn Secure off would only invite the one change that breaks
+    a working setup. The forwarder case, a withheld host with no https
+    origin of its own, keeps the line. Loopback origins are ignored by the
+    cookie rule, so the line says "non loopback", not "every origin"."""
+    config = make_config(
+        tmp_path, host=host, token="t" * 24, extra_hosts=("box.lan",), extra_origins=origins
+    )
+    lines = cli.startup_block(
+        config, cli.Preflight([], "/usr/bin/claude", "/usr/bin/tmux"), "info"
+    )
+    found = [line for line in lines if line.startswith("plain http origin not derived")]
+    assert bool(found) is said, lines
+    if said:
+        assert "http://box.lan:8787" in found[0]
+        assert "Secure" in found[0]
+        assert "--allow-origin http://box.lan:8787" in found[0]
+        assert "every non loopback --allow-origin is https" in found[0]
 
 
 @pytest.mark.parametrize(
@@ -1465,6 +1592,54 @@ def test_the_startup_block_says_what_kind_of_stop_prompt_and_never_the_prompt(
     )
     assert said in lines, lines
     assert not any("distinctive" in line for line in lines)
+
+
+def test_a_saved_policy_the_config_file_overrides_is_logged_at_startup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#421, through `main`: the operator about to delete their `ask` line
+    reads, in the journal, that the page's `end_anyway` is what returns."""
+    (tmp_path / "work").mkdir()
+    folder = tmp_path / "cfg"
+    folder.mkdir()
+    folder.chmod(0o755)
+    config = folder / "config.toml"
+    config.write_text(
+        f'stop_policy = "ask"\n[[roots]]\nlabel = "work"\npath = "{tmp_path / "work"}"\n'
+    )
+    config.chmod(0o644)
+    state = folder / "state.toml"
+    state.write_text('stop_policy = "end_anyway"\n')
+    state.chmod(0o600)
+    monkeypatch.setattr(cli, "_serve", lambda *a: 0)
+    assert main(["--config", str(config)]) == 0
+    warned = [
+        line
+        for line in _log_lines(capsys.readouterr().err)
+        if " WARNING hitchrail.cli: " in line and "'end_anyway'" in line
+    ]
+    assert len(warned) == 1, warned
+    assert "config file" in warned[0]
+
+
+def test_a_refused_state_file_is_logged_once_at_startup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#397, through `main`, from flags alone: nothing else at startup reads
+    the config directory, so this line is the only place the refusal shows."""
+    folder = tmp_path / "xdg" / "hitchrail"
+    folder.mkdir(parents=True)
+    state = folder / "state.toml"
+    state.write_text('disabled = ["main"\n')
+    state.chmod(0o600)
+    monkeypatch.setattr(cli, "_serve", lambda *a: 0)
+    assert main(["--root", f"main={tmp_path}"]) == 0
+    warned = [
+        line
+        for line in _log_lines(capsys.readouterr().err)
+        if " WARNING hitchrail.cli: " in line and str(state) in line
+    ]
+    assert len(warned) == 1, warned
 
 
 def test_the_token_never_reaches_a_log(

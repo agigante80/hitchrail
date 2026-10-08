@@ -7,12 +7,26 @@ already offers at expiry, never a key typed into the prompt.
 
 from __future__ import annotations
 
+import errno
+import logging
+import os
+import signal
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from conftest import CLEAR_INPUT_BOX, FakeClock, FakeTmux, procs_from, ps_row
+from conftest import (
+    CLEAR_INPUT_BOX,
+    TRUST_MODAL,
+    FakeClock,
+    FakePidfd,
+    FakeTmux,
+    failing_procs,
+    procs_from,
+    ps_row,
+)
 from hitchrail import settings
 from hitchrail.config import Config, ConfigError
 from hitchrail.engine import Engine, StopMarker
@@ -20,6 +34,7 @@ from hitchrail.sessions import InvalidValue, OperatorPinned, State
 from hitchrail.tmux import TmuxUnavailable
 from support import DEFAULT_LABEL, make_config
 from test_engine import MODAL_PANE
+from test_wrap_up import SETTLE
 
 PANE = 500
 VESSEL = f"{DEFAULT_LABEL}~vessel"
@@ -31,22 +46,67 @@ def root(tmp_path: Path) -> Path:
     return tmp_path
 
 
+class AgentEnder(FakePidfd):
+    """The pidfd seam for these tests (#418): a signal sent through a handle
+    ends that agent, and its pane and session with it, as a real agent that
+    is the pane's own process does. `ended` names the rows it ended.
+
+    Never the real syscalls: without this the engine would `pidfd_open` the
+    fake pid 501 on the machine running the suite and signal whatever it is.
+    """
+
+    def __init__(self, tmux: FakeTmux, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.tmux = tmux
+        self.handles: dict[int, int] = {}
+        self.ended: list[str] = []
+
+    def open(self, pid: int) -> int:
+        pidfd = super().open(pid)
+        self.handles[pidfd] = pid
+        return pidfd
+
+    def send(self, pidfd: int, sig: int) -> None:
+        super().send(pidfd, sig)
+        pid = self.handles[pidfd]
+        for name, pane in list(self.tmux.sessions.items()):
+            if pane + 1 == pid:
+                self.ended.append(name)
+                self.tmux.sessions.pop(name)
+                self.tmux.pane_text.pop(name, None)
+
+
+def ender(engine: Engine) -> AgentEnder:
+    seam = engine._pidfd.open_pidfd
+    assert isinstance(seam.__self__, AgentEnder)  # type: ignore[attr-defined]
+    return seam.__self__  # type: ignore[attr-defined]
+
+
+def killed(engine: Engine, tmux: FakeTmux) -> list[str]:
+    """The rows `end_anyway` ended. Always through a handle on the agent it
+    looked at, never `kill-session` by name (#418)."""
+    assert tmux.killed == [], "end_anyway never kills a session by name"
+    return ender(engine).ended
+
+
 def policy_engine(
     root: Path, projects: tuple[str, ...] = (VESSEL,), **config: Any
 ) -> tuple[Engine, FakeTmux, FakeClock]:
     """An engine with `vessel` running whose process leaves when its tmux
-    session does, so a kill reads `stopped` rather than `detached`."""
+    session does, so a kill reads `stopped` rather than `detached`. Each
+    agent is its pane's pid plus one, read from the live session map, so a
+    test restarts a row by giving it a new pane."""
     panes = {name: PANE + 10 * i for i, name in enumerate(projects)}
     tmux = FakeTmux(sessions=dict(panes))
     for name in projects:
         tmux.pane_text[name] = CLEAR_INPUT_BOX
+    pidfd = AgentEnder(tmux)
 
     def procs() -> Any:
         return procs_from(
             "".join(
                 ps_row(pane, 1) + ps_row(pane + 1, pane, project=name)
-                for name, pane in panes.items()
-                if name in tmux.sessions
+                for name, pane in tmux.sessions.items()
             )
         )()
 
@@ -62,6 +122,11 @@ def policy_engine(
         meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
         clock=clock,
         sleep=clock.sleep,
+        open_pidfd=pidfd.open,
+        send_signal=pidfd.send,
+        close_pidfd=pidfd.close,
+        owner_uid=pidfd.owner,
+        cwd_of=pidfd.cwd_of,
     )
     return engine, tmux, clock
 
@@ -96,7 +161,7 @@ def test_end_anyway_kills_a_stop_that_ended_on_a_prompt(root: Path) -> None:
 
     engine.attach_bus(Recorder())  # type: ignore[arg-type]
     assert expire_on(engine, tmux, clock, MODAL_PANE) == [VESSEL]
-    assert tmux.killed == [VESSEL]
+    assert killed(engine, tmux) == [VESSEL]
     assert engine.get(VESSEL).state is State.STOPPED
     assert [e["state"] for e in published if e["name"] == VESSEL][-1] == "stopped"
 
@@ -106,14 +171,14 @@ def test_end_anyway_kills_nothing_when_the_pane_shows_no_prompt(root: Path) -> N
     one, and killing every slow stop is the option the ticket rejected."""
     engine, tmux, clock = policy_engine(root, stop_policy="end_anyway")
     assert expire_on(engine, tmux, clock, CLEAR_INPUT_BOX) == [VESSEL]
-    assert tmux.killed == []
+    assert killed(engine, tmux) == []
     assert engine.get(VESSEL).state is State.RUNNING
 
 
 def test_ask_kills_nothing_on_a_prompt(root: Path) -> None:
     engine, tmux, clock = policy_engine(root)
     assert expire_on(engine, tmux, clock, MODAL_PANE) == [VESSEL]
-    assert tmux.killed == []
+    assert killed(engine, tmux) == []
     assert engine.get(VESSEL).awaiting_input is True, "reported, as before #239"
 
 
@@ -126,7 +191,7 @@ def test_the_pane_is_read_at_expiry_not_the_sweeps_overlay(root: Path) -> None:
     engine._stuck[VESSEL] = clock()
     clock.advance(engine.prefs.stop_timeout() + 1)
     engine.expire_stops()
-    assert tmux.killed == []
+    assert killed(engine, tmux) == []
 
 
 @pytest.mark.parametrize("unreadable", ["tmux_gone", "no_box_drawn"])
@@ -150,7 +215,7 @@ def test_an_unreadable_pane_at_expiry_kills_nothing(root: Path, unreadable: str)
         tmux.pane_text[VESSEL] = ""
     clock.advance(engine.prefs.stop_timeout() + 1)
     engine.expire_stops()
-    assert tmux.killed == []
+    assert killed(engine, tmux) == []
 
 
 def test_a_row_restarted_during_another_rows_kill_is_not_killed(root: Path) -> None:
@@ -164,17 +229,18 @@ def test_a_row_restarted_during_another_rows_kill_is_not_killed(root: Path) -> N
     engine.stop(other)
     tmux.pane_text[VESSEL] = MODAL_PANE
     tmux.pane_text[other] = MODAL_PANE
-    kill = tmux.kill_session
+    agents = ender(engine)
+    send = agents.send
 
-    def kill_then_restart_the_other(project: str) -> None:
-        kill(project)
-        if project == VESSEL:
+    def kill_then_restart_the_other(pidfd: int, sig: int) -> None:
+        send(pidfd, sig)
+        if agents.ended == [VESSEL]:
             tmux.pane_text[other] = CLEAR_INPUT_BOX
 
-    tmux.kill_session = kill_then_restart_the_other  # type: ignore[method-assign]
+    engine._pidfd = replace(engine._pidfd, send_signal=kill_then_restart_the_other)
     clock.advance(engine.prefs.stop_timeout() + 1)
     assert sorted(engine.expire_stops()) == sorted([VESSEL, other])
-    assert tmux.killed == [VESSEL]
+    assert killed(engine, tmux) == [VESSEL]
 
 
 def test_the_self_project_is_never_killed_by_this_path(root: Path) -> None:
@@ -182,12 +248,332 @@ def test_the_self_project_is_never_killed_by_this_path(root: Path) -> None:
     path nobody has written yet; this asserts the kill refuses it then too."""
     engine, tmux, clock = policy_engine(root, stop_policy="end_anyway", self_project=VESSEL)
     assert engine.get(VESSEL).protected
-    engine._stopping[VESSEL] = StopMarker(clock(), "exiting", exit_at=clock())
+    engine._stopping[VESSEL] = StopMarker(clock(), "exiting", "end_anyway", exit_at=clock())
     tmux.pane_text[VESSEL] = MODAL_PANE
     clock.advance(engine.prefs.stop_timeout() + 1)
     assert engine.expire_stops() == [VESSEL]
-    assert tmux.killed == []
+    assert killed(engine, tmux) == []
     assert engine.get(VESSEL).state is State.RUNNING
+
+
+# -- #418, #412: bound to the agent looked at, and every way it can refuse --
+
+
+RESTARTED_PANE = PANE + 100
+
+
+def restart(tmux: FakeTmux) -> None:
+    """A person's Kill and Start: a fresh agent for the same row, on a new
+    pane, showing the startup modal the old one's question looked like."""
+    tmux.sessions[VESSEL] = RESTARTED_PANE
+    tmux.pane_text[VESSEL] = MODAL_PANE
+
+
+def test_end_anyway_signals_the_agent_it_looked_at_through_a_handle(root: Path) -> None:
+    engine, tmux, clock = policy_engine(root, stop_policy="end_anyway")
+    expire_on(engine, tmux, clock, MODAL_PANE)
+    events = ender(engine).events
+    assert [kind for kind, _ in events] == ["open", "send", "close"]
+    assert events[0] == ("open", PANE + 1)
+    assert ender(engine).signals == [signal.SIGHUP]
+
+
+def test_a_row_restarted_between_the_look_and_the_kill_is_not_killed(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#418. The pid is read before the screen, so a restart after it shows
+    the fresh agent's modal under the old agent's pid. Read after the
+    screen, the fresh pid would carry the old question and be killed."""
+    engine, tmux, clock = policy_engine(root, stop_policy="end_anyway")
+    engine.stop(VESSEL)
+    tmux.pane_text[VESSEL] = MODAL_PANE
+    capture = tmux.capture_pane
+
+    reads: list[str] = []
+
+    def restarted_while_looking(project: str, lines: int = 40, escapes: bool = False) -> str:
+        # On the SECOND look: a restart before it is caught by the pid
+        # comparison between the looks, and only the handle is left to prove
+        # the one after (#429 put a look in front of the kill).
+        reads.append(project)
+        if len(reads) == 2:
+            restart(tmux)
+        return capture(project, lines, escapes)
+
+    tmux.capture_pane = restarted_while_looking  # type: ignore[method-assign]
+    clock.advance(engine.prefs.stop_timeout() + 1)
+    with caplog.at_level(logging.INFO, logger="hitchrail"):
+        assert engine.expire_stops() == [VESSEL]
+    assert killed(engine, tmux) == []
+    assert ender(engine).signals == []
+    row = engine.get(VESSEL)
+    assert row.state is State.RUNNING
+    assert row.pid == RESTARTED_PANE + 1
+    assert "end_anyway did not kill it: Gone" in caplog.text
+
+
+def test_a_row_restarted_after_the_handle_opens_is_not_signalled(root: Path) -> None:
+    """The verification is AFTER the handle: a pid that is still open but no
+    longer the row's agent is refused, and nothing goes through the handle."""
+    engine, tmux, clock = policy_engine(root, stop_policy="end_anyway")
+    agents = ender(engine)
+    opened = agents.open
+
+    def restarted_after_opening(pid: int) -> int:
+        pidfd = opened(pid)
+        tmux.sessions[VESSEL] = RESTARTED_PANE
+        # The old agent still runs, outside any session: alive, not the row's.
+        return pidfd
+
+    engine._pidfd = replace(engine._pidfd, open_pidfd=restarted_after_opening)
+    expire_on(engine, tmux, clock, MODAL_PANE)
+    assert agents.signals == []
+    assert [kind for kind, _ in agents.events] == ["open", "close"]
+    assert engine.get(VESSEL).pid == RESTARTED_PANE + 1
+
+
+def test_an_agent_in_this_servers_process_tree_is_never_signalled(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The same refusal `signal_detached` gives, before any handle: a row
+    whose agent is this server or an ancestor of it would end the interface."""
+    engine, tmux, clock = policy_engine(root, stop_policy="end_anyway")
+    tmux.sessions[VESSEL] = os.getpid() - 1
+    with caplog.at_level(logging.INFO, logger="hitchrail"):
+        assert expire_on(engine, tmux, clock, MODAL_PANE) == [VESSEL]
+    assert ender(engine).events == []
+    assert "end_anyway did not kill it: Protected" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("fail_open", "fail_send", "refusal"),
+    [
+        (OSError(errno.ESRCH, "gone"), None, "Gone"),
+        (OSError(errno.EPERM, "seccomp"), None, "PidfdUnavailable"),
+        (AttributeError("no pidfd_open"), None, "PidfdUnavailable"),
+        (OSError(errno.EMFILE, "too many"), None, "MachineUnreadable"),
+        (None, OSError(errno.EPERM, "not yours"), "NotOurs"),
+        (None, OSError(errno.ESRCH, "gone"), "Gone"),
+        (None, AttributeError("no pidfd_send_signal"), "PidfdUnavailable"),
+    ],
+)
+def test_every_refusal_of_the_kill_reports_the_expiry_as_ask_does(
+    root: Path,
+    caplog: pytest.LogCaptureFixture,
+    fail_open: BaseException | None,
+    fail_send: BaseException | None,
+    refusal: str,
+) -> None:
+    """#412. Whatever the handle refuses, the ticker returns, the row is
+    marked waiting and the journal says the policy did not kill it."""
+    engine, tmux, clock = policy_engine(root, stop_policy="end_anyway")
+    agents = ender(engine)
+    agents.fail_open, agents.fail_send = fail_open, fail_send
+    with caplog.at_level(logging.INFO, logger="hitchrail"):
+        assert expire_on(engine, tmux, clock, MODAL_PANE) == [VESSEL]
+    assert agents.ended == []
+    row = engine.get(VESSEL)
+    assert row.state is State.RUNNING
+    assert row.awaiting_input is True
+    assert f"end_anyway did not kill it: {refusal}" in caplog.text
+    if fail_send is not None:
+        assert agents.events[-1][0] == "close", "the handle is closed on a refusal too"
+
+
+@pytest.mark.parametrize("unreadable", ["ps", "tmux"])
+def test_a_machine_unreadable_after_the_handle_kills_nothing(
+    root: Path, caplog: pytest.LogCaptureFixture, unreadable: str
+) -> None:
+    """#412. The verification cannot look, so it cannot verify, so nothing is
+    sent (control 7), and the ticker survives either way the look fails."""
+    engine, tmux, clock = policy_engine(root, stop_policy="end_anyway")
+    agents = ender(engine)
+    opened = agents.open
+    procs = engine._procs_fn
+    broken = {"now": False}
+
+    def unreadable_after_opening(pid: int) -> int:
+        broken["now"] = True
+        return opened(pid)
+
+    def ps() -> Any:
+        return failing_procs() if broken["now"] and unreadable == "ps" else procs()
+
+    def panes() -> Any:
+        if broken["now"]:
+            raise TmuxUnavailable("no server")
+        return FakeTmux.panes(tmux)
+
+    engine._procs_fn = ps
+    if unreadable == "tmux":
+        tmux.panes = panes  # type: ignore[method-assign]
+    engine._pidfd = replace(engine._pidfd, open_pidfd=unreadable_after_opening)
+    with caplog.at_level(logging.INFO, logger="hitchrail"):
+        assert expire_on(engine, tmux, clock, MODAL_PANE) == [VESSEL]
+    assert agents.signals == []
+    assert "end_anyway did not kill it: MachineUnreadable" in caplog.text
+
+
+def test_the_kill_is_journalled_before_a_read_that_fails(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#412. The signal went; then the machine could not be read. The journal
+    still says the policy killed it, and the ticker returns."""
+    engine, tmux, clock = policy_engine(root, stop_policy="end_anyway")
+    agents = ender(engine)
+    send = agents.send
+    procs = engine._procs_fn
+    sent = {"yet": False}
+
+    def send_then_break(pidfd: int, sig: int) -> None:
+        send(pidfd, sig)
+        sent["yet"] = True
+
+    engine._procs_fn = lambda: failing_procs() if sent["yet"] else procs()
+    engine._pidfd = replace(engine._pidfd, send_signal=send_then_break)
+    with caplog.at_level(logging.INFO, logger="hitchrail"):
+        assert expire_on(engine, tmux, clock, MODAL_PANE) == [VESSEL]
+    assert agents.ended == [VESSEL]
+    kill_lines = [r.getMessage() for r in caplog.records if "killed pid" in r.getMessage()]
+    assert kill_lines == [
+        f"stop {VESSEL}: ended on a prompt after {engine.prefs.stop_timeout():g}s; "
+        f"killed pid {PANE + 1}, as stop_policy end_anyway says"
+    ]
+    assert "expired but the machine could not be read" not in caplog.text
+
+
+# -- #429: a redraw is not a question; two looks a settle apart must agree --
+
+
+def looks(tmux: FakeTmux, *panes: str) -> list[str]:
+    """The pane reads one after another, the last one repeating. Returns the
+    list the reads are appended to, so a test counts them."""
+    seen: list[str] = []
+    queue = list(panes)
+
+    def capture(project: str, lines: int = 40, escapes: bool = False) -> str:
+        seen.append(project)
+        return queue.pop(0) if len(queue) > 1 else queue[0]
+
+    tmux.capture_pane = capture  # type: ignore[method-assign]
+    return seen
+
+
+def expire_on_looks(engine: Engine, clock: FakeClock, tmux: FakeTmux, *panes: str) -> list[str]:
+    engine.stop(VESSEL)
+    looks(tmux, *panes)
+    clock.advance(engine.prefs.stop_timeout() + 1)
+    return engine.expire_stops()
+
+
+def test_a_redraw_that_reads_as_a_modal_once_is_not_ended(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The ornament with an ordinary space after it, on one look, is what an
+    output line looks like mid redraw. The next look shows the box again, and
+    reporting it as `ask` does destroys nothing."""
+    engine, tmux, clock = policy_engine(root, stop_policy="end_anyway")
+    with caplog.at_level(logging.INFO, logger="hitchrail"):
+        assert expire_on_looks(engine, clock, tmux, MODAL_PANE, CLEAR_INPUT_BOX) == [VESSEL]
+    assert killed(engine, tmux) == []
+    assert ender(engine).signals == []
+    assert engine.get(VESSEL).state is State.RUNNING
+    assert "killed pid" not in caplog.text
+    assert "did not hold" in caplog.text
+
+
+def test_a_prompt_on_both_looks_is_ended(root: Path) -> None:
+    engine, tmux, clock = policy_engine(root, stop_policy="end_anyway")
+    assert expire_on_looks(engine, clock, tmux, MODAL_PANE, MODAL_PANE) == [VESSEL]
+    assert killed(engine, tmux) == [VESSEL]
+
+
+def test_the_second_look_is_a_settle_after_the_first(root: Path) -> None:
+    engine, tmux, clock = policy_engine(root, stop_policy="end_anyway")
+    engine.stop(VESSEL)
+    tmux.pane_text[VESSEL] = MODAL_PANE
+    clock.advance(engine.prefs.stop_timeout() + 1)
+    reads: list[float] = []
+    capture = tmux.capture_pane
+
+    def timed(project: str, lines: int = 40, escapes: bool = False) -> str:
+        reads.append(clock())
+        return capture(project, lines, escapes)
+
+    tmux.capture_pane = timed  # type: ignore[method-assign]
+    engine.expire_stops()
+    assert len(reads) == 2
+    assert reads[1] - reads[0] >= engine.end_anyway_settle > 0
+
+
+def test_no_second_look_is_taken_under_ask_or_on_a_clear_first_look(root: Path) -> None:
+    engine, tmux, clock = policy_engine(root, stop_policy="end_anyway")
+    engine.stop(VESSEL)
+    seen = looks(tmux, CLEAR_INPUT_BOX)
+    clock.advance(engine.prefs.stop_timeout() + 1)
+    engine.expire_stops()
+    assert len(seen) == 1
+    ask, atmux, aclock = policy_engine(root)
+    ask.stop(VESSEL)
+    aseen = looks(atmux, MODAL_PANE)
+    aclock.advance(ask.prefs.stop_timeout() + 1)
+    ask.expire_stops()
+    assert len(aseen) == 1
+
+
+def test_a_stop_asked_again_between_the_looks_is_not_ended(root: Path) -> None:
+    """A person tapped Stop again during the settle: a newer marker is in the
+    table, and the agent is being dealt with by them."""
+    engine, tmux, clock = policy_engine(root, stop_policy="end_anyway")
+    engine.stop(VESSEL)
+    tmux.pane_text[VESSEL] = MODAL_PANE
+    clock.advance(engine.prefs.stop_timeout() + 1)
+    sleep = engine._sleep
+
+    def stop_again(seconds: float) -> None:
+        sleep(seconds)
+        engine._stopping[VESSEL] = StopMarker(clock(), "exiting", "ask", exit_at=clock())
+
+    engine._sleep = stop_again
+    engine.expire_stops()
+    assert killed(engine, tmux) == []
+
+
+@pytest.mark.parametrize("field", ["withdrawn", "typing"])
+def test_a_marker_withdrawn_or_typing_between_the_looks_is_not_ended(
+    root: Path, field: str
+) -> None:
+    engine, tmux, clock = policy_engine(root, stop_policy="end_anyway")
+    engine.stop(VESSEL)
+    marker = engine._stopping[VESSEL]
+    tmux.pane_text[VESSEL] = MODAL_PANE
+    clock.advance(engine.prefs.stop_timeout() + 1)
+    sleep = engine._sleep
+
+    def flip(seconds: float) -> None:
+        sleep(seconds)
+        setattr(marker, field, True)
+
+    engine._sleep = flip
+    engine.expire_stops()
+    assert killed(engine, tmux) == []
+
+
+def test_a_row_restarted_between_the_looks_is_not_ended(root: Path) -> None:
+    engine, tmux, clock = policy_engine(root, stop_policy="end_anyway")
+    engine.stop(VESSEL)
+    tmux.pane_text[VESSEL] = MODAL_PANE
+    clock.advance(engine.prefs.stop_timeout() + 1)
+    sleep = engine._sleep
+
+    def restart_in_the_settle(seconds: float) -> None:
+        sleep(seconds)
+        restart(tmux)
+
+    engine._sleep = restart_in_the_settle
+    engine.expire_stops()
+    assert killed(engine, tmux) == []
+    assert engine.get(VESSEL).pid == RESTARTED_PANE + 1
 
 
 # -- #409: chosen on the settings page, kept in the state file ------------
@@ -199,7 +585,7 @@ def test_a_policy_set_by_a_request_is_the_one_the_expiry_acts_on(root: Path) -> 
     engine, tmux, clock = policy_engine(root, state_path=root / "state" / "state.toml")
     engine.prefs.apply(stop_policy="end_anyway")
     assert expire_on(engine, tmux, clock, MODAL_PANE) == [VESSEL]
-    assert tmux.killed == [VESSEL]
+    assert killed(engine, tmux) == [VESSEL]
 
 
 def test_a_policy_set_back_to_ask_kills_nothing(root: Path) -> None:
@@ -207,7 +593,50 @@ def test_a_policy_set_back_to_ask_kills_nothing(root: Path) -> None:
     engine.prefs.apply(stop_policy="end_anyway")
     engine.prefs.apply(stop_policy="ask")
     assert expire_on(engine, tmux, clock, MODAL_PANE) == [VESSEL]
-    assert tmux.killed == []
+    assert killed(engine, tmux) == []
+
+
+def test_a_policy_changed_during_the_wait_does_not_turn_it_into_a_kill(root: Path) -> None:
+    """#419, decided 2026-10-07: the policy the stop was confirmed under is
+    the one its expiry acts on. The dialog said "reported, and waits for
+    you", and another tab's choice must not make that a lie."""
+    engine, tmux, clock = policy_engine(root, state_path=root / "state" / "state.toml")
+    engine.stop(VESSEL)
+    engine.prefs.apply(stop_policy="end_anyway")
+    tmux.pane_text[VESSEL] = MODAL_PANE
+    clock.advance(engine.prefs.stop_timeout() + 1)
+    assert engine.expire_stops() == [VESSEL]
+    assert killed(engine, tmux) == []
+    assert engine.get(VESSEL).awaiting_input is True
+
+
+def test_a_policy_changed_during_the_wait_does_not_cancel_its_kill(root: Path) -> None:
+    """The reverse: a wait shown as ending in a kill ends in one."""
+    engine, tmux, clock = policy_engine(root, state_path=root / "state" / "state.toml")
+    engine.prefs.apply(stop_policy="end_anyway")
+    engine.stop(VESSEL)
+    engine.prefs.apply(stop_policy="ask")
+    tmux.pane_text[VESSEL] = MODAL_PANE
+    clock.advance(engine.prefs.stop_timeout() + 1)
+    assert engine.expire_stops() == [VESSEL]
+    assert killed(engine, tmux) == [VESSEL]
+
+
+def test_a_wrap_up_carries_the_policy_it_was_confirmed_under_to_its_exit(
+    root: Path,
+) -> None:
+    """The exit after a wrap up is still the stop the person confirmed, so a
+    change during the wrap up, before the exit is sent, moves nothing."""
+    engine, _tmux, clock = policy_engine(
+        root, state_path=root / "state" / "state.toml", stop_prompt="/wrapup"
+    )
+    engine.stop(VESSEL)
+    engine.prefs.apply(stop_policy="end_anyway")
+    clock.advance(SETTLE)
+    engine.advance_wrap_ups()
+    clock.advance(SETTLE)
+    assert engine.advance_wrap_ups() == [VESSEL]
+    assert engine._stopping[VESSEL].policy == "ask"
 
 
 def test_the_policy_persists_and_a_new_process_reads_it(root: Path) -> None:
@@ -252,6 +681,50 @@ def test_the_flag_and_the_file_both_pin_the_policy(root: Path, source: str, wher
 
 
 @pytest.mark.parametrize(
+    ("source", "where"), [("flag", "command line"), ("file", "config file")]
+)
+def test_a_saved_policy_a_pin_overrides_is_said_at_startup(
+    root: Path, source: str, where: str
+) -> None:
+    """#421: the pin hides the saved `end_anyway`, and deleting the pin
+    brings it back, a kill nobody chose at that moment. Reported rather than
+    cleared: the state file keeps what the page chose, and the operator
+    learns, before removing the pin, what removing it restores."""
+    state = root / "state.toml"
+    state.write_text('stop_policy = "end_anyway"\n')
+    state.chmod(0o600)
+    prefs = settings.Preferences(
+        make_config(root, state_path=state, stop_policy="ask", sources={"stop_policy": source})
+    )
+    (warning,) = prefs.startup_warnings()
+    assert "'end_anyway'" in warning
+    assert "'ask'" in warning
+    assert where in warning
+    assert 'stop_policy = "end_anyway"' in state.read_text(), "the saved choice was cleared"
+
+
+@pytest.mark.parametrize(
+    ("saved", "pinned", "source"),
+    [
+        ("end_anyway", "end_anyway", "file"),
+        (None, "ask", "flag"),
+        ("end_anyway", "ask", "default"),
+    ],
+    ids=["pin-agrees", "nothing-saved", "not-pinned"],
+)
+def test_nothing_is_said_when_removing_the_pin_would_change_nothing(
+    root: Path, saved: str | None, pinned: str, source: str
+) -> None:
+    state = root / "state.toml"
+    state.write_text(f'stop_policy = "{saved}"\n' if saved else "disabled = []\n")
+    state.chmod(0o600)
+    prefs = settings.Preferences(
+        make_config(root, state_path=state, stop_policy=pinned, sources={"stop_policy": source})
+    )
+    assert prefs.startup_warnings() == ()
+
+
+@pytest.mark.parametrize(
     "line", ['stop_policy = "kill"', "stop_policy = true", "stop_policy = 1"]
 )
 def test_an_unknown_policy_in_the_state_file_is_ask_and_loses_nothing_beside_it(
@@ -284,3 +757,62 @@ def test_every_field_survives_a_round_trip(root: Path) -> None:
     )
     settings.write_state(state, written, configured={"home"})
     assert settings.read_state(state) == written
+
+
+# -- #410: an overlay added from a look a restart has since overtaken ------
+
+
+def restart_after_the_look(engine: Engine, tmux: FakeTmux) -> None:
+    """Kill and Start `vessel` straight after the first pane capture taken
+    once its stop has ended, which is the one look both paths take before
+    adding the overlay, as a person can between that look and the add. The
+    fresh agent's screen is a clear box."""
+    real = tmux.capture_pane
+
+    def capture(project: str, lines: int = 40, escapes: bool = False) -> str:
+        pane = real(project, lines, escapes)
+        if VESSEL not in engine._stopping:
+            tmux.capture_pane = real  # type: ignore[method-assign]
+            engine.kill(VESSEL)
+            tmux.pane_text[VESSEL] = CLEAR_INPUT_BOX
+            engine.start(VESSEL)
+        return pane
+
+    tmux.capture_pane = capture  # type: ignore[method-assign]
+
+
+def test_an_expiry_whose_look_predates_a_restart_flags_nothing(root: Path) -> None:
+    engine, tmux, clock = policy_engine(root)
+    engine.stop(VESSEL)
+    tmux.pane_text[VESSEL] = MODAL_PANE
+    clock.advance(engine.prefs.stop_timeout() + 1)
+    restart_after_the_look(engine, tmux)
+    assert engine.expire_stops() == [VESSEL]
+    restarted = engine.get(VESSEL)
+    assert restarted.state is State.RUNNING
+    assert restarted.pid != PANE + 1, "the restart happened"
+    assert restarted.awaiting_input is False, "the old agent's question"
+
+
+def test_a_refused_exit_whose_look_predates_a_restart_flags_nothing(root: Path) -> None:
+    engine, tmux, clock = policy_engine(root, stop_prompt="/wrapup")
+    engine.stop(VESSEL)
+    clock.advance(SETTLE)
+    engine.advance_wrap_ups()
+    clock.advance(SETTLE)
+    # The watch's read finds it idle; the exit's checks and the one look
+    # after its refusal find a modal.
+    tmux.pane_text[VESSEL] = TRUST_MODAL
+    restart_after_the_look(engine, tmux)
+    real = tmux.capture_pane
+
+    def capture(project: str, lines: int = 40, escapes: bool = False) -> str:
+        tmux.capture_pane = real  # type: ignore[method-assign]
+        return CLEAR_INPUT_BOX
+
+    tmux.capture_pane = capture  # type: ignore[method-assign]
+    assert engine.advance_wrap_ups() == []
+    restarted = engine.get(VESSEL)
+    assert restarted.state is State.RUNNING
+    assert restarted.pid != PANE + 1, "the restart happened"
+    assert restarted.awaiting_input is False, "the old agent's question"

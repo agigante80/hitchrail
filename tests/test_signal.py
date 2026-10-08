@@ -8,6 +8,7 @@ test, and the live tmux tier holds the syscall on a real process.
 from __future__ import annotations
 
 import errno
+import logging
 import os
 import signal
 from collections.abc import Callable
@@ -103,6 +104,31 @@ def test_a_detached_agent_with_no_owner_is_signalled_with_sigterm(root: Path) ->
     assert session.state is State.DETACHED and session.pid == ORPHAN
     assert fake.signals == [signal.SIGTERM]
     assert not fake.leaked
+
+
+@pytest.mark.parametrize("force", [False, True])
+def test_a_signal_writes_one_journal_line(
+    root: Path, caplog: pytest.LogCaptureFixture, force: bool
+) -> None:
+    """#387. The kill nobody could read back from the journal, on this path
+    too. Written after the send, so a refusal writes none."""
+    fake = FakePidfd()
+    engine = _engine(root, Watched(fake, DETACHED), fake)
+    with caplog.at_level(logging.INFO, logger="hitchrail.signals"):
+        engine.signal_detached(proj("vessel"), force=force)
+    sent = "SIGKILL" if force else "SIGTERM"
+    lines = [r.getMessage() for r in caplog.records if r.name == "hitchrail.signals"]
+    assert lines == [f"signal {proj('vessel')}: sent {sent} to pid {ORPHAN} through a handle"]
+
+
+def test_a_refused_signal_writes_no_signal_line(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    fake = FakePidfd(fail_send=OSError(errno.EPERM, "no"))
+    engine = _engine(root, Watched(fake, DETACHED), fake)
+    with caplog.at_level(logging.INFO, logger="hitchrail.signals"), pytest.raises(NotOurs):
+        engine.signal_detached(proj("vessel"))
+    assert "sent" not in caplog.text
 
 
 def test_the_handle_is_opened_before_the_verification(root: Path) -> None:

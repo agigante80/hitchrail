@@ -9,13 +9,14 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
-import re
 import time
 
 import pytest
 from playwright.async_api import Page, Route, expect
 
-from .conftest import Harness, grant_and_land
+from hitchrail.engine import StopMarker
+
+from .conftest import Harness, e2e_name, grant_and_land
 
 pytestmark = pytest.mark.e2e
 
@@ -202,38 +203,83 @@ async def test_kill_appears_once_the_wait_is_under_way_and_stays(
     kill = dialog.get_by_role("button", name="Do not wait, kill it now")
     await expect(kill).to_be_visible()
 
-    # **Watched for the WHOLE wait, and bounded by an EVENT rather than a
-    # clock.** The claim is that the control does not appear and then vanish, so
-    # two samples with a guess between them is the wrong shape: it can miss a
-    # gap either side. This polls until the wait actually ends, which is the
-    # timeout screen arriving, and fails on the first frame the control is gone.
+    # **Watched for the WHOLE wait, from inside the page, on every change.**
+    # The claim is that the control does not appear and then vanish. Polling it
+    # from here took two round trips (is the wait over, then is the control
+    # there), and on a loaded machine the dialog flipped to its ending BETWEEN
+    # them: the control is meant to go at the end, so the second read failed a
+    # page that was correct (#435, reproduced 1 in 14 with the test and six busy
+    # loops pinned to one core; the dialog text at the failure was "No answer
+    # from"). A MutationObserver reads the dialog in the same task as each
+    # change to it, so no frame goes unexamined and none can be misread.
     #
     # **A wait has three ends, and this watches until any of them.** "No
     # answer from" is the ordinary one. "Lost track of" is #81's: a listing
-    # that could not be read at the deadline, which on a loaded machine is a
-    # tmux call timing out, and the control then goes deliberately, because
-    # offering a kill on a reading that failed is the thing #81 forbids. It
-    # failed here twice in full runs on a loaded box before that was written
-    # down. "is waiting for you" is #101's, unreachable for this shim, named
-    # for completeness.
-    ended = dialog.get_by_text(re.compile("No answer from|Lost track of|is waiting for you"))
-    watched = 0
-    while not await ended.is_visible():
-        assert await kill.is_visible(), (
-            f"the kill control vanished {watched * 100}ms into the wait, so "
-            f"somebody reaching for it finds it gone"
-        )
-        watched += 1
-        await page.wait_for_timeout(100)
+    # that could not be read at the deadline, and the control then goes
+    # deliberately, because offering a kill on a reading that failed is the
+    # thing #81 forbids. "is waiting for you" is #101's, unreachable for this
+    # shim, named for completeness.
+    # **"Usable" is what a thumb needs, not "in the DOM".** The control counts
+    # only while the dialog is open and the button is connected, visible by
+    # checkVisibility() (which sees an ancestor's style, `hidden`, a class) and
+    # not disabled. Each look runs on every mutation, attribute change and
+    # animation frame, all inside the page, so none of it is a retry. A page
+    # setTimeout guard resolves well past the 3000ms patience so a missing
+    # ending fails with a message rather than hanging.
+    outcome = await page.evaluate(
+        """() => new Promise((resolve) => {
+            const dialog = document.querySelector("[data-dialog]");
+            const ending = /No answer from|Lost track of|is waiting for you/;
+            const usable = () => dialog.open && [...dialog.querySelectorAll("button")].some(
+                (b) => b.textContent.trim() === "Do not wait, kill it now"
+                    && b.isConnected && b.checkVisibility() && !b.disabled);
+            const began = performance.now();
+            let looks = 0;
+            let phase = null;
+            let startedWaiting = null;
+            let done = false;
+            const finish = (over, timedOut) => {
+                done = true;
+                observer.disconnect();
+                clearTimeout(guard);
+                resolve({ over, timedOut, startedWaiting, phase, looks,
+                         ms: performance.now() - began,
+                         text: dialog.textContent });
+            };
+            const look = () => {
+                if (done) return;
+                looks += 1;
+                const over = ending.test(dialog.textContent);
+                if (startedWaiting === null) {
+                    phase = dialog.textContent;
+                    startedWaiting = !over && usable();
+                }
+                if (over || !usable()) return finish(over, false);
+                requestAnimationFrame(look);
+            };
+            const observer = new MutationObserver(look);
+            observer.observe(dialog, { childList: true, subtree: true,
+                characterData: true, attributes: true });
+            const guard = setTimeout(() => finish(false, true), 15000);
+            look();
+        })"""
+    )
 
-    # **The loop must have watched something.** If the timeout screen were
-    # already up on the first check this would pass having asserted nothing,
-    # which is the vacuous-guard shape this phase exists to remove. The patience
-    # is 3000ms, so a healthy run samples the control about thirty times; ten is
-    # a floor that a slow machine still clears.
-    assert watched >= 10, (
-        f"the wait ended after only {watched} samples, so the control was barely "
-        f"observed and this test proves close to nothing"
+    assert not outcome["timedOut"], (
+        f"the wait never ended within 15s of watching, {outcome['looks']} looks: {outcome}"
+    )
+    # **The watch must have started inside the wait.** If the ending were
+    # already up on the first look this would pass having observed nothing,
+    # which is the vacuous-guard shape this phase exists to remove. The first
+    # look's text must be the waiting phase itself, so a 1ms watch cannot pass.
+    assert outcome["startedWaiting"] and "Waiting for it to exit." in outcome["phase"], (
+        f"the watch began outside the waiting phase, so it proved nothing "
+        f"({outcome['looks']} looks): {outcome}"
+    )
+    assert outcome["over"], (
+        f"the kill control stopped being usable {outcome['ms']:.0f}ms into the watch "
+        f"({outcome['looks']} looks) with the wait still under way, so somebody "
+        f"reaching for it finds it gone: {outcome['text']!r}"
     )
 
 
@@ -744,7 +790,8 @@ async def _open_stop_all(page: Page, server: Harness, expected: int) -> None:
     await expect(page.locator("[data-project]")).to_have_count(50, timeout=15_000)
     await page.get_by_role("button", name="Stop all").click()
     dialog = page.locator("[data-dialog]")
-    await expect(dialog).to_contain_text(f"Stop {expected} sessions?")
+    plural = "session" if expected == 1 else "sessions"
+    await expect(dialog).to_contain_text(f"Stop {expected} {plural}?")
 
 
 async def test_stop_all_issues_the_stops_one_at_a_time_and_never_for_the_self_project(
@@ -1081,3 +1128,46 @@ async def test_a_wait_that_is_over_is_superseded_by_the_next_stop_all(
 
     await page.get_by_role("button", name="Stop all").click()
     await expect(dialog).to_contain_text("Stop 2 sessions?")
+
+
+# -- #414, #416: Stop all's words agree with its set ---------------------------
+
+
+async def test_stop_all_counts_one_session_in_the_singular(page: Page, server: Harness) -> None:
+    """#414. A row wrapping up leaves the set, so two running rows with one
+    stopped are a set of one, which is the common case since #242."""
+    server.seed(running=["vessel", "wharf"], stop_prompt="/wrapup", wrap_up_takes=120)
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await row.get_by_role("button", name="Stop").click()
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop", exact=True).click()
+    await expect(dialog.get_by_role("button", name="Exit now")).to_be_visible()
+    await dialog.get_by_role("button", name="Hide, keep stopping").click()
+
+    await page.get_by_role("button", name="Stop all").click()
+    await expect(dialog).to_contain_text("Stop 1 session?")
+    await dialog.get_by_role("button", name="Stop all", exact=True).click()
+    await expect(dialog).to_contain_text("Stopping 1 session")
+    assert "1 sessions" not in await dialog.inner_text()
+
+
+async def test_stop_all_names_the_rows_it_only_asks_to_exit_again(
+    page: Page, server: Harness
+) -> None:
+    """#416. An `exiting` row is in Stop all's set, and the server resends
+    its exit rather than typing a wrap up."""
+    server.seed(running=["vessel", "wharf"], stop_prompt="/wrapup", wrap_up_takes=120)
+    engine = server.engine
+    assert engine is not None
+    now = engine._clock()
+    engine._stopping[server.project("vessel")] = StopMarker(now, "exiting", "ask", exit_at=now)
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row).to_have_attribute("data-stopping", "true")
+    await page.get_by_role("button", name="Stop all").click()
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text("Stop 2 sessions?")
+    await expect(dialog).to_contain_text(
+        f"{e2e_name('vessel')} is already asked to exit, and will only be asked again."
+    )

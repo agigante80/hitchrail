@@ -171,9 +171,11 @@ def is_loopback_host(host: str) -> bool:
     through `getaddrinfo`, not `ipaddress` (#283). Two spellings differ:
     `::ffff:127.0.0.1` is mapped to its IPv4 address first, because whether
     `ipaddress` calls it loopback varies by PATCH release (True on 3.11.13
-    and 3.13, False on 3.12.3). And `127.1` is not an `ipaddress` literal at
-    all, so a dotted decimal form is read by `inet_aton`, the parser the bind
-    uses, which also gives `0177.0.0.1` its octal meaning. Digits and dots
+    and 3.13, False on 3.12.3). That answer is for a Host header or an
+    origin: as a bind it cannot serve, since uvicorn's socket is IPv6 only,
+    and `Config` refuses it there (#395). And `127.1` is not an `ipaddress`
+    literal at all, so a dotted decimal form is read by `inet_aton`, the
+    parser the bind uses, which also gives `0177.0.0.1` its octal meaning. Digits and dots
     only: `inet_aton` would take hex too, and a spelling nobody types is not
     worth widening what reaches it.
     """

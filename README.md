@@ -179,7 +179,8 @@ distinction does not arise.
 
 The older `?token=<token>` form is gone. It is a query parameter now, not a
 credential: a request carrying one is refused like any other request with no
-token, and it appears in the server's log like any other query string.
+token. The server's log leaves out every query string, so an old link opened
+by mistake does not write the token into the journal.
 
 Hitchrail does not sandbox the sessions it starts. It is a launcher. The agent it
 launches has whatever access you have.
@@ -531,7 +532,7 @@ install it first.
 | `--port` | `8787` | Port to bind |
 | `--token` | generated | Required as soon as anything off this machine can reach Hitchrail. Prefer `HITCHRAIL_TOKEN`; see below |
 | `--allow-host` | none | An extra hostname the server will answer to. Repeatable. Needed behind a proxy |
-| `--allow-origin` | none | An exact origin a browser may claim, `scheme://host[:port]`. Repeatable. Needed behind a TLS terminating proxy, whose scheme and port cannot be derived from our own bind. With `--tls-cert` set, a plain `http://` origin off loopback is refused, since the `Secure` cookie would never come back on it; `http://localhost` is allowed, and works in Chrome and Firefox, not Safari. Behind a proxy, bind to loopback: the session cookie is `Secure` there, and on a LAN bind it cannot be, because a browser reaching the LAN address in the clear would throw it away |
+| `--allow-origin` | none | An exact origin a browser may claim, `scheme://host[:port]`. Repeatable. Needed behind a TLS terminating proxy, whose scheme and port cannot be derived from our own bind. With `--tls-cert` set, a plain `http://` origin off loopback is refused, since the `Secure` cookie would never come back on it; `http://localhost` is allowed, and works in Chrome and Firefox, not Safari. Behind a proxy, bind to loopback: the session cookie is `Secure` there, and on a LAN bind it cannot be, because a browser reaching the LAN address in the clear would throw it away. For the same reason, on that loopback bind the plain `http://` origin of an `--allow-host` is not derived; give it here to serve it, which turns `Secure` off |
 | `--self-project` | none | A project that must never be stopped, named as `label~folder`. Point it at the folder Hitchrail itself runs from |
 | `--agent-binary` | `claude` | The agent executable to run. Must be on `PATH` or an absolute path |
 | `--tls-cert`, `--tls-key` | none | A PEM certificate and its key: serve HTTPS from the server itself. Both or neither, refused at startup before the bind when one is missing or the pair cannot be loaded. The key must be unencrypted, and one with a passphrase refuses saying so rather than prompting, because under the unit there is no terminal to prompt at. Derived origins, banner links and the cookie's `Secure` flag follow |

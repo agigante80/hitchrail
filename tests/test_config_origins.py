@@ -20,6 +20,7 @@ from hitchrail.config import (
     normalise_origin,
     origin_forms,
 )
+from support import make_certificate
 
 
 def test_allowed_origins_pin_the_port(tmp_path: Path) -> None:
@@ -396,3 +397,69 @@ def test_origin_forms_brackets_only_a_bare_ipv6_literal() -> None:
     assert "http://[[::1]]:8787" not in origin_forms("http", "[::1]", 8787), (
         "an already bracketed literal was bracketed again"
     )
+
+
+# -- #391: no plain http origin a Secure cookie cannot come back on ----------
+
+
+def _proxied(tmp_path: Path, origins: tuple[str, ...], **kw: object) -> Config:
+    kw.setdefault("host", "127.0.0.1")
+    return Config(
+        roots=_r(tmp_path),
+        token="t",
+        extra_hosts=("box.lan",),
+        extra_origins=origins,
+        **kw,  # type: ignore[arg-type]
+    )
+
+
+def test_a_secure_cookie_loopback_bind_derives_no_plain_origin_for_a_declared_host(
+    tmp_path: Path,
+) -> None:
+    """#391, decided 2026-10-07. Every non loopback origin is https on a
+    loopback bind, so the cookie is `Secure`, and a browser on
+    `http://box.lan:8787` drops it: deriving that origin answered its grant
+    200 and every request after it 401. Not derived, the grant is refused by
+    the origin check instead, which names the origin. Loopback origins stay:
+    `http://localhost` keeps a `Secure` cookie in Chrome and Firefox."""
+    cfg = _proxied(tmp_path, ("https://box.lan",))
+    assert cfg.cookie_is_secure, "the premise: this is the Secure cookie deployment"
+    assert "http://box.lan:8787" not in cfg.allowed_origins
+    assert "https://box.lan" in cfg.allowed_origins
+    assert {"http://localhost:8787", "http://127.0.0.1:8787", "http://[::1]:8787"} <= (
+        cfg.allowed_origins
+    )
+    assert cfg.plain_origins_withheld == ("box.lan",)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "origins"),
+    [
+        ({}, ()),
+        ({}, ("https://box.lan", "http://other.lan")),
+        ({}, ("http://box.lan:8787",)),
+        ({"host": "0.0.0.0", "resolver": lambda: ()}, ("https://box.lan",)),
+    ],
+    ids=["no-proxy-origin", "one-plain-origin", "plain-origin-given", "lan-bind"],
+)
+def test_the_plain_origin_is_still_derived_wherever_the_cookie_is_not_secure(
+    tmp_path: Path, overrides: dict[str, object], origins: tuple[str, ...]
+) -> None:
+    """The narrowing is exactly the `Secure` cookie's reach. Without the
+    flag, a browser on plain http keeps the cookie, so the derived origin
+    works and removing it would only break a working deployment."""
+    cfg = _proxied(tmp_path, origins, **overrides)
+    assert not cfg.cookie_is_secure
+    assert "http://box.lan:8787" in cfg.allowed_origins
+    assert cfg.plain_origins_withheld == ()
+
+
+def test_our_own_tls_still_derives_its_https_origin_for_a_declared_host(
+    tmp_path: Path,
+) -> None:
+    """Under `--tls-cert` the derived origin is https, which a `Secure`
+    cookie survives, so there is nothing to withhold."""
+    cert, key = make_certificate(tmp_path)
+    cfg = _proxied(tmp_path, ("https://box.lan",), tls_cert=cert, tls_key=key)
+    assert "https://box.lan:8787" in cfg.allowed_origins
+    assert cfg.plain_origins_withheld == ()

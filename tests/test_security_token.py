@@ -804,10 +804,9 @@ async def test_the_query_string_is_no_longer_rewritten(tmp_path: Path) -> None:
     accepts a token there now, so nothing rewrites a caller's query string, and
     a route sees exactly what was sent.
 
-    **The token does reach the access log if somebody puts it in a URL**, and
-    that is correct rather than a regression: it is not a credential this
-    server accepts, and scrubbing it would be the misleading half of the old
-    behaviour kept without the useful half.
+    The access log still leaves the query out since #388, but by a filter on
+    the log record in `logs.QueryFilter`, never by editing the scope: a route
+    sees what was sent, and only the journal line loses the query.
     """
     config = make_config(tmp_path, token=TOKEN)
     app, seen = _recording_app(config)

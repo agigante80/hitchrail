@@ -145,7 +145,34 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # wrap up is refused, which ends the stop as expiry does.
     # 1786 for #239's review: one look then act per name, so a later
     # row's look is never stale by the time of its kill.
-    "engine.py": 1786,
+    # 1566 for #274: the pidfd path, the one destructive path scoped by a
+    # check rather than by the prefix, moved to `signals.py` with its seam
+    # and its refusals, which is the split the #107 and #272 notes above
+    # deferred. What remains is the lifecycle and the stop sequence, whose
+    # notes are the footguns and are why the file is still past 400.
+    # `signals.py` itself came in under the guideline and needs no entry.
+    # 1585 for #406: the marker's `typing` flag, which the sweep and `stop()`
+    # both set while an exit sequence goes out, and the clear in a `finally`
+    # on each, so a Stop never interleaves a second sequence with the first.
+    # 1622 for #407: `_give_back`, which hands a refused Exit now back to
+    # the wrap up it interrupted, the arm that drops a marker on an error
+    # nobody planned for, and the StopMarker note naming the three removals
+    # by name and why each is safe.
+    # 1628 for #410: `_flag_waiting`, so the two looks that add the waiting
+    # overlay outside the sweep honour the attention epoch as it does.
+    # 1635 for #419: the marker records the stop policy at `stop()`, and
+    # the note saying why expiry reads it there and not the live setting.
+    # 1649 for #390: the timeout line's third case, a `stale` row that is a
+    # stop that worked, with why, and the unwatched exit's duration.
+    # 1659 for the #387 regression: the marker's `withdrawn` flag, and the
+    # StopMarker note saying why its owner writes the object and not the
+    # table while a failed Kill holds it out.
+    # 1667 for #408, #411 and #428: the listing carries whether a sequence
+    # is being typed, the stop's age and its recorded policy, so a browser
+    # that did not tap Stop can reopen the wait truthfully.
+    # 1707 for #429: the second look end_anyway takes a settle after the
+    # first, and the note on why one look is not evidence of a question.
+    "engine.py": 1707,
     # tmux.py is the module that encodes what tmux actually does
     # rather than what its manual implies, and every entry is a footgun
     # that cost real debugging: prefix matching targets, the colon
@@ -303,7 +330,11 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # 789 for #242: `stop_prompt` and its ceiling, with the refusals for
     # a newline or a control character and the 10s floor.
     # 803 for #239: `stop_policy` and its literal refusal.
-    "config.py": 803,
+    # 831 for #391: `plain_origins_withheld`, the one derived origin a
+    # `Secure` cookie cannot return on, and the decision's argument.
+    # 845 for #395: the IPv4 mapped bind refused by name, not by uvicorn.
+    # 849 for #394: the origins' half of the cookie rule, for the CLI's advice.
+    "config.py": 849,
     # 409, nine lines over, down from 542. #115 deleted the `?token=`
     # carrier: 135 lines once the two blocks inside `TokenMiddleware`
     # that only served it are counted.
@@ -347,5 +378,11 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # 495 for #239: the `stop_policy` file key, typed here as the rest.
     # 551 for #409: the policy kept in the state file, pinned by the file
     # as well as the flag, with the reason where a reader would undo it.
-    "settings.py": 551,
+    # 570 for #421: a saved policy a pin overrides is reported at startup,
+    # with why it is reported rather than cleared. Past 550: the seam is the
+    # one the module docstring draws, the operator's file against the state
+    # file and `Preferences`.
+    # 592 for #397: the state read returns why it refused, and the write
+    # meets the read's directory rule.
+    "settings.py": 592,
 }

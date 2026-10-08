@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from support import in_claude_ipc, module_name, source_modules
+from support import PIDFD_MODULE, in_claude_ipc, module_name, source_modules
 
 # -- #18: the seam holds ---------------------------------------------------
 
@@ -234,8 +234,10 @@ def test_every_read_of_agent_binary_is_the_resolved_property_or_allowlisted() ->
         ("cli.py", "build_config", "args.agent_binary"): 1,
         # What preflight is resolving. This function's whole job is finding
         # the absolute path from the raw name: one lookup, one `dirname`, and
-        # three messages quoting what the operator typed (#341).
-        ("cli.py", "preflight", "config.agent_binary"): 5,
+        # three messages quoting what the operator typed (#341), plus whether
+        # a typed path that is not there was relative, so its message can say
+        # where it was looked for (#393).
+        ("cli.py", "preflight", "config.agent_binary"): 6,
         # `hitchrail update-plugins`: no Config exists yet, so this resolves
         # and checks its OWN copy of the raw `--agent-binary` flag before it
         # ever calls `claude_ipc.update_plugins` with the resolved value.
@@ -376,3 +378,66 @@ def test_projectnames_does_not_import_config() -> None:
     assert "import config" not in source
     assert "from hitchrail.config" not in source
     assert "from .config" not in source
+
+
+# -- #274: what can signal a process by pid is one file ----------------------
+
+_PIDFD_SEAM = {"open_pidfd", "send_signal", "close_pidfd"}
+
+
+def _reaches_the_pidfd_seam(tree: ast.AST) -> bool:
+    """`procs.open_pidfd` and its two siblings, read as an attribute or
+    imported by name. A parameter merely CALLED `open_pidfd` is not a reach:
+    it is how a caller hands a test's recorder through to the module that is."""
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Attribute)
+            and node.attr in _PIDFD_SEAM
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "procs"
+        ):
+            return True
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.module == "hitchrail.procs"
+            and any(a.name in _PIDFD_SEAM for a in node.names)
+        ):
+            return True
+    return False
+
+
+def test_exactly_one_module_reaches_the_pidfd_seam_and_the_contract_names_it() -> None:
+    """The one destructive path scoped by a check rather than by the tmux
+    prefix (#107). A reader auditing what can signal a process by pid should
+    find one file (#274), and that file must be engine layer: a web module
+    holding it would put a signal one import away from a request.
+
+    `procs.py` defines the seam and is excluded; every other module is read
+    as an AST, never as text, so the docstrings naming the seam do not count.
+    """
+    reaching = {
+        rel
+        for rel, path in source_modules().items()
+        if rel != "procs.py" and _reaches_the_pidfd_seam(ast.parse(path.read_text()))
+    }
+    assert reaching == {PIDFD_MODULE}, (
+        f"the pidfd seam is reached from {sorted(reaching)}, and `support.PIDFD_MODULE` "
+        f"says {PIDFD_MODULE!r}. One module holds the path; move the constant with it."
+    )
+    contract = tomllib.loads(
+        (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text()
+    )["tool"]["importlinter"]["contracts"][0]
+    assert module_name(PIDFD_MODULE) in contract["source_modules"], (
+        f"{PIDFD_MODULE} holds the pidfd path and is not named in the engine layer's "
+        "import contract"
+    )
+
+
+def test_the_pidfd_guard_tells_a_reach_from_a_parameter() -> None:
+    """The guard above, able to fail both ways."""
+    assert _reaches_the_pidfd_seam(ast.parse("x = procs.send_signal"))
+    assert _reaches_the_pidfd_seam(ast.parse("from hitchrail.procs import close_pidfd"))
+    assert not _reaches_the_pidfd_seam(
+        ast.parse("def f(open_pidfd=None):\n    return open_pidfd")
+    )
+    assert not _reaches_the_pidfd_seam(ast.parse("x = other.open_pidfd"))

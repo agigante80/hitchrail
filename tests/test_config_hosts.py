@@ -8,6 +8,7 @@ socket.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -275,6 +276,27 @@ def test_a_wildcard_is_not_an_address_to_bind_to(tmp_path: Path) -> None:
     # The real wildcards still work, which is what makes this a narrow fix.
     for bindable in ("0.0.0.0", "::"):
         assert Config(roots=_r(tmp_path), host=bindable, token="t").allowed_hosts
+
+
+@pytest.mark.parametrize(
+    ("given", "instead"),
+    [
+        ("::ffff:127.0.0.1", "127.0.0.1"),
+        ("[::ffff:127.0.0.1]", "127.0.0.1"),
+        ("::FFFF:7f00:1", "127.0.0.1"),
+        ("::ffff:10.0.0.1", "10.0.0.1"),
+    ],
+)
+def test_an_ipv4_mapped_bind_is_refused_naming_the_address_to_give(
+    tmp_path: Path, given: str, instead: str
+) -> None:
+    """#395. #283 called `::ffff:127.0.0.1` loopback, and it is, as a Host
+    or an origin. As a bind it cannot serve at all: uvicorn binds through
+    `loop.create_server`, asyncio sets `IPV6_V6ONLY` on that socket, and a
+    mapped address on a v6 only socket is EINVAL, so the operator got a
+    startup traceback. Refused here instead, naming the IPv4 spelling."""
+    with pytest.raises(ConfigError, match=f"give {re.escape(instead)} instead"):
+        Config(roots=_r(tmp_path), host=given, token="t")
 
 
 @pytest.mark.parametrize(

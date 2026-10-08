@@ -322,7 +322,6 @@ async def test_the_cookie_is_secure_exactly_when_we_terminate_tls(
         ("127.0.0.1", (), False),
         ("0.0.0.0", ("https://box.lan",), False),
         ("127.1", ("https://box.lan",), True),
-        ("::ffff:127.0.0.1", ("https://box.lan",), True),
     ],
     ids=[
         "proxy",
@@ -332,7 +331,6 @@ async def test_the_cookie_is_secure_exactly_when_we_terminate_tls(
         "none",
         "proxy-origin-but-we-are-reachable-in-the-clear",
         "short-loopback-spelling",
-        "ipv4-mapped-loopback",
     ],
 )
 async def test_the_cookie_is_secure_behind_a_proxy_whose_origins_are_all_https(
@@ -360,8 +358,10 @@ async def test_the_cookie_is_secure_behind_a_proxy_whose_origins_are_all_https(
     then 401s forever with a correct token. The bind says what a browser
     can do; the origins only say what the operator meant.
 
-    The two short spellings are #283: each binds loopback, and each lost the
-    flag because `ipaddress` alone did not call it loopback.
+    The short spelling is #283: it binds loopback, and lost the flag because
+    `ipaddress` alone did not call it loopback. #283 had a second, the IPv4
+    mapped `::ffff:127.0.0.1`, which never binds at all and is refused by
+    `Config` since #395.
     """
     (tmp_path / "root").mkdir(exist_ok=True)
     config = make_config(
@@ -394,6 +394,58 @@ async def test_the_cookie_is_secure_behind_a_proxy_whose_origins_are_all_https(
     assert r.status_code == 200
     header = r.headers["set-cookie"].lower()
     assert ("secure" in header.split("; ")) is secure, header
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("origin", "allowed"),
+    [
+        ("http://box.lan:8787", False),
+        ("http://box.lan", False),
+        ("https://box.lan", True),
+        ("http://localhost:8787", True),
+    ],
+    ids=["derived-plain", "plain-default-port", "proxy", "loopback"],
+)
+async def test_a_grant_on_a_plain_origin_a_secure_cookie_cannot_return_on_is_refused(
+    tmp_path: pathlib.Path, origin: str, allowed: bool
+) -> None:
+    """#391, decided 2026-10-07: under a loopback bind whose every proxy
+    origin is https, the grant from `http://box.lan:8787` was answered 200
+    with a `Secure` cookie the browser then dropped, so every request after
+    it was a 401 with a correct token. It is refused by the origin check now,
+    and the refusal names the origin, so an operator on a plain forwarder
+    learns what changed from the response rather than from a loop. The
+    allowed cases prove the narrowing took nothing else away."""
+    (tmp_path / "root").mkdir(exist_ok=True)
+    config = make_config(
+        tmp_path / "root",
+        host="127.0.0.1",
+        token="s3cret",
+        extra_hosts=("box.lan",),
+        extra_origins=("https://box.lan",),
+        sessions_dir=tmp_path / ".s",
+        agent_config_path=NO_AGENT_CONFIG,
+    )
+    engine = make_engine(config, FakeTmux(), procs_from(""), PLENTY)
+    app = create_app(engine=engine, config=config, bus=EventBus())
+    host = "localhost" if "localhost" in origin else "box.lan"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url=f"http://{host}"
+    ) as c:
+        r = await c.post(
+            "/api/grant",
+            json={"token": "s3cret"},
+            headers={"host": host, "origin": origin},
+        )
+    if allowed:
+        assert r.status_code == 200, r.text
+        assert "secure" in r.headers["set-cookie"].lower().split("; ")
+        return
+    assert r.status_code == 403, r.text
+    assert r.json()["code"] == "origin_rejected"
+    assert origin in r.json()["message"], "the refusal names the origin it refused"
+    assert "set-cookie" not in r.headers
 
 
 def test_the_banner_prints_links_in_the_servers_scheme(

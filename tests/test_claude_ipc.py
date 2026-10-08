@@ -832,6 +832,21 @@ def test_the_predicate_does_not_strip_escapes_before_looking() -> None:
     assert shows_input_box(pane_text("\x1b[39m\u276f\x1bM\xa0   ")) is False
 
 
+def test_an_ornament_in_the_output_reads_as_not_a_box_while_the_box_is_away() -> None:
+    """#181. The false answer the docstring used to say could not happen.
+
+    The row is the LAST one carrying the ornament. While the box is not drawn,
+    during a repaint or a turn, an output line with the ornament and an
+    ordinary space after it is that row, and it reads as "not an ordinary
+    input box". The sweep then flags a working agent for one interval. Pinned
+    so the docstring and the behaviour cannot drift apart again.
+    """
+    repainting = "some output\n\u276f fix the build\n  reading src/app.py\n"
+    assert shows_input_box(repainting) is False
+    doc = shows_input_box.__doc__ or ""
+    assert "transient" in doc, "the docstring no longer names the false answer"
+
+
 def test_the_two_predicates_disagree_only_on_a_draft() -> None:
     """Written as a table because the reason for two functions IS the
     difference, and a reader who cannot see it will collapse them back."""

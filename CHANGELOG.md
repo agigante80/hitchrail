@@ -32,6 +32,93 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+## 0.13.0 - 2026-10-08
+
+One deployment has something to do: a loopback bind behind an https proxy
+that is ALSO reached over a plain http forwarder or alias. See Changed. And if
+you ever opened a link of the old `/?token=` form, rotate the token: see the
+first line under Fixed (#388).
+
+### Changed
+
+- On a loopback bind whose every `--allow-origin` off this machine is https,
+  the plain `http://` origin of an `--allow-host` is no longer accepted: its
+  grant is refused with `origin not allowed` naming the origin, where before
+  it was accepted and then every request was refused, because the session
+  cookie there is `Secure` and a browser on plain http drops it. The startup
+  log names each origin withheld. If you reach Hitchrail that way on
+  purpose, for example through a plain http forwarder onto its port, add
+  that origin with `--allow-origin http://box.lan:8787`, which also turns the
+  cookie's `Secure` flag off, or reach it through the https origin (#391).
+
+### Fixed
+
+- The journal no longer records a query string from a request line. A link in
+  the old `/?token=<token>` form, which no release printed but a checkout
+  from before the first one did, wrote the real token into the journal when
+  it was opened, although the request was refused, so anyone who can read
+  your journal could read it. If you ever opened such a link,
+  rotate the token (#388).
+- An `--agent-binary` path that is not there says it was looked for
+  relative to the current directory when it was relative, which is also
+  why a path starting with `~` is not found, since nothing expands it there,
+  and no longer mentions PATH (#393).
+- The startup line advising a loopback bind for a `Secure` cookie no longer
+  appears where the rebind would not set it, such as an https origin on
+  `localhost` or one beside a plain http origin (#394).
+- `--host ::ffff:127.0.0.1` is refused at startup naming `127.0.0.1`, where
+  before it reached the bind and failed with a traceback: an IPv4 mapped
+  address cannot be bound on the server's IPv6 only socket (#395).
+- With `stop_prompt` set, the wrap up's exit is no longer typed into an agent
+  that is still working when its screen also carries an underline colour
+  (#405), and a Stop tapped while an exit is being typed is answered without
+  typing a second exit over the first (#406).
+- An Exit now that is refused, for example over a draft in the box, leaves
+  the wrap up running and still ends it in an exit, where before it ended the
+  stop with the prompt still queued (#407).
+- Under `stop_policy = end_anyway`, a redraw no longer ends a working agent:
+  the kill at expiry needs the screen to show a prompt on two looks a second
+  apart, and otherwise the expiry is reported as `ask` reports it (#429).
+- Under `stop_policy = end_anyway`, the kill at expiry now ends the agent
+  whose screen was read, through a process handle, and nothing if the row
+  was restarted in between; any refusal is reported as `ask` would report
+  it (#418, #412).
+- Every kill now writes a line to the journal, and a stop a Kill ended is no
+  longer logged as the agent having exited (#387).
+- A row killed and started again while a stop was ending no longer shows the
+  fresh agent as waiting for you on the old agent's question (#410).
+- A stop ends under the `stop_policy` in force when it was requested, as its
+  wait dialog says, so choosing `end_anyway` on the settings page during a
+  wait no longer turns that wait into a kill, nor `ask` cancel one (#419).
+- The journal no longer says a start is running before it is attempted, nor
+  that a stop gave up when the agent exited and only its tmux session stayed;
+  an unwatched exit's line says how long it took at most, and an unreadable
+  machine at expiry no longer drops that the agent was waiting on you (#389,
+  #390).
+- A stop's wait reopened in another browser or after a reload now warns of
+  the kill its stop was confirmed under, even if the settings page has since
+  chosen `ask` (#428); counts from the stop rather than from the tap (#411);
+  and offers no Exit now while the wrap up prompt is still being typed, when
+  it would do nothing (#408).
+- Stop on a row already asked to exit, and Stop all over a set holding one,
+  no longer promise a wrap up the server will not type: they say the exit is
+  asked again (#416). Stop all over one session says "Stop 1 session?"
+  (#414).
+- A `stop_policy` saved from the settings page that `--stop-policy` or the
+  config file overrides is now named in a warning at startup, so removing
+  that setting no longer silently brings back an `end_anyway` (#421).
+- A state file Hitchrail refuses to read, because its directory is
+  writable by a shared group or others or it does not parse, is now named in
+  a warning at startup, where before every hidden root and saved stop setting
+  was dropped with nothing said; and a choice on the settings page is refused
+  rather than saved into a directory the next start will not read (#397).
+
+### Added
+
+- Each row of the listing and the event stream carries `stop_typing`,
+  `stop_age_s` and `stop_policy` while it is stopping; a client may ignore
+  them. `docs/api.md` says what each holds.
+
 ## 0.12.0 - 2026-10-01
 
 Nothing to do on upgrade. Every new setting is off or unchanged by default,

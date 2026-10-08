@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from mutation_support import _REPO, _mutmut_config
+from support import PIDFD_MODULE
 
 # -- #198: the rules that load for the modules on the spawn path --------------
 
@@ -213,6 +214,19 @@ def test_every_mutated_module_loads_the_security_rules_when_it_is_edited() -> No
         f"{_SECURITY_RULE} names " + ", ".join(gone) + ", which do not exist. An entry "
         "pointing at nothing loads no rules for anything, and it looks identical to a "
         "module that is covered."
+    )
+
+
+def test_the_module_holding_the_pidfd_path_loads_the_security_rules() -> None:
+    """#274. The one destructive path not scoped by the tmux prefix sits between
+    a web page and a shell whichever file holds it, so the rules load for that
+    file by name. Keyed on `support.PIDFD_MODULE`, which the AST guard in
+    `test_source_guards.py` holds to the code, so a move that forgets this
+    list fails here rather than passing over the new file."""
+    if not _SECURITY_RULE.parent.exists():
+        pytest.skip("`.claude/rules/` is not in this checkout (it is gitignored)")
+    assert f"src/hitchrail/{PIDFD_MODULE}" in _security_rule_paths(), (
+        f"{_SECURITY_RULE} does not load for {PIDFD_MODULE}, which holds the pidfd path"
     )
 
 

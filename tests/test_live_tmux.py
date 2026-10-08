@@ -33,7 +33,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import REAL_CWD_OF
+from conftest import REAL_CWD_OF, REAL_PIDFD
 from hitchrail import claude_ipc, derive
 from hitchrail.claude_ipc import launch_argv
 from hitchrail.config import Config
@@ -1149,6 +1149,7 @@ def test_a_real_detached_agent_is_ended_through_a_real_pidfd(
             tmux=machine.adapter,
             meminfo_fn=lambda: PLENTY,
             cwd_of=REAL_CWD_OF,
+            **REAL_PIDFD,
         )
         deadline = time.monotonic() + 5
         while engine.get(name).state is not State.DETACHED and time.monotonic() < deadline:
@@ -1179,6 +1180,7 @@ def test_an_agent_that_left_between_the_listing_and_the_call_is_refused_with_not
         tmux=machine.adapter,
         meminfo_fn=lambda: PLENTY,
         cwd_of=REAL_CWD_OF,
+        **REAL_PIDFD,
     )
     deadline = time.monotonic() + 5
     while engine.get(name).state is not State.DETACHED and time.monotonic() < deadline:
@@ -1251,6 +1253,7 @@ def test_an_agent_that_outlived_its_pane_under_our_own_server_keeps_end(
         tmux=machine.adapter,
         meminfo_fn=lambda: PLENTY,
         cwd_of=REAL_CWD_OF,
+        **REAL_PIDFD,
     )
     deadline = time.monotonic() + 5
     while engine.get(name).state is not State.RUNNING and time.monotonic() < deadline:
@@ -1322,6 +1325,7 @@ def test_an_agent_under_a_tmux_on_another_socket_is_named_by_its_server(
             tmux=machine.adapter,
             meminfo_fn=lambda: PLENTY,
             cwd_of=REAL_CWD_OF,
+            **REAL_PIDFD,
         )
         row = engine.get(name)
         assert row.state is State.DETACHED, row

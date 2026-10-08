@@ -23,8 +23,9 @@ from conftest import (
     procs_from,
     ps_row,
 )
+from hitchrail import claude_ipc
 from hitchrail.claude_ipc import GRACEFUL_STOP_KEYS
-from hitchrail.engine import Engine, Protected, StopMarker, StopRefused
+from hitchrail.engine import Engine, MachineUnreadable, Protected, StopMarker, StopRefused
 from hitchrail.tmux import TmuxUnavailable
 from support import DEFAULT_LABEL, make_config
 from test_wrap_up import BUSY, QUEUED, SETTLE
@@ -203,7 +204,7 @@ def test_a_second_stop_while_closing_is_exit_now_and_never_retypes(root: Path) -
 def test_a_stop_while_the_prompt_is_being_typed_types_nothing(root: Path) -> None:
     """No watch yet means another request is between its claim and its send."""
     engine, tmux, clock = wrap_engine(root)
-    typing = StopMarker(clock(), "closing")
+    typing = StopMarker(clock(), "closing", "ask")
     engine._stopping[VESSEL] = typing
     session = engine.stop(VESSEL)
     assert tmux.sent == []
@@ -215,7 +216,7 @@ def test_a_repeated_stop_on_exiting_keeps_the_ceiling_and_never_types_the_prompt
     root: Path,
 ) -> None:
     engine, tmux, clock = wrap_engine(root)
-    engine._stopping[VESSEL] = StopMarker(0.0, "exiting", exit_at=0.0, ceiling=True)
+    engine._stopping[VESSEL] = StopMarker(0.0, "exiting", "ask", exit_at=0.0, ceiling=True)
     asked_at = clock()
     session = engine.stop(VESSEL)
     assert typed(tmux) == []
@@ -250,7 +251,7 @@ def test_a_refused_exit_after_the_wrap_up_drops_the_marker(root: Path) -> None:
         return TRUST_MODAL
 
     tmux.capture_pane = capture  # type: ignore[method-assign]
-    assert engine.advance_wrap_ups() == [VESSEL]
+    assert engine.advance_wrap_ups() == [], "refused, so not moved on (#407)"
     assert engine._stopping.get(VESSEL) is not marker
     assert VESSEL not in engine._stopping
     # The stop ended on a screen only a person can answer, and the row says
@@ -275,7 +276,7 @@ def test_a_refused_exit_over_a_draft_is_not_waiting_on_a_person(root: Path) -> N
         return DIRTY_INPUT_BOX
 
     tmux.capture_pane = capture  # type: ignore[method-assign]
-    assert engine.advance_wrap_ups() == [VESSEL]
+    assert engine.advance_wrap_ups() == []
     assert VESSEL not in engine._stopping
     assert VESSEL not in engine._awaiting_input
 
@@ -316,8 +317,9 @@ def test_the_sweep_and_a_second_stop_racing_type_the_exit_once_per_claim(root: P
     both orders: if the person's Stop claims first, the sweep finds the marker
     no longer `closing` and types nothing; if the sweep claims first, the Stop
     arrives on `exiting`, which is today's repeated Stop and types the exit
-    once more under a NEW marker, as a double tap always has. Either way the
-    exit goes out once per claim and the prompt is never retyped."""
+    once more under a NEW marker, as a double tap always has, unless it lands
+    while the sweep is still typing, when it claims nothing (#406). Either way
+    the exit goes out once per claim and the prompt is never retyped."""
     engine, tmux, clock = wrap_engine(root)
     engine.stop(VESSEL)
     clock.advance(SETTLE)
@@ -369,7 +371,7 @@ def test_a_marker_replaced_during_the_read_is_not_advanced_by_it(root: Path) -> 
 
 def test_the_ceiling_does_not_touch_a_prompt_still_being_typed(root: Path) -> None:
     engine, tmux, clock = wrap_engine(root, stop_prompt_timeout=10.0)
-    typing = StopMarker(clock(), "closing")
+    typing = StopMarker(clock(), "closing", "ask")
     engine._stopping[VESSEL] = typing
     clock.advance(1000)
     assert engine.advance_wrap_ups() == []
@@ -423,3 +425,283 @@ def test_with_no_stop_in_flight_the_row_carries_no_phase(root: Path) -> None:
     assert session.stopping_phase is None
     assert session.as_dict()["stopping_phase"] is None
     assert session.as_dict()["stop_ceiling"] is False
+
+
+# -- #406: one sequence typed into a pane at a time --------------------------
+
+
+def _stop_inside_the_first_send(engine: Engine, tmux: FakeTmux) -> list[Any]:
+    """A Stop arriving while the exit sequence is mid typing, on the same
+    thread so the interleaving is the one under test and not a schedule."""
+    answers: list[Any] = []
+    real = tmux.send_keys
+
+    def send_keys(project: str, *keys: str) -> None:
+        tmux.send_keys = real  # type: ignore[method-assign]
+        answers.append(engine.stop(project))
+        real(project, *keys)
+
+    tmux.send_keys = send_keys  # type: ignore[method-assign]
+    return answers
+
+
+def test_a_stop_while_the_sweep_types_the_exit_types_nothing(root: Path) -> None:
+    """#406: the dialog still reads `closing` while the sweep types, and offers
+    Exit now. Taken there, a second exit sequence interleaved with the
+    sweep's C-u, Escape and `/exit`."""
+    engine, tmux, clock = wrap_engine(root)
+    engine.stop(VESSEL)
+    clock.advance(SETTLE)
+    engine.advance_wrap_ups()
+    clock.advance(SETTLE)
+    marker = engine._stopping[VESSEL]
+    answers = _stop_inside_the_first_send(engine, tmux)
+    assert engine.advance_wrap_ups() == [VESSEL]
+    assert len(answers) == 1 and answers[0].stopping is True, "the no-op 202"
+    assert exits_sent(tmux) == 1
+    assert [keys for _p, keys in tmux.sent[-len(GRACEFUL_STOP_KEYS) :]] == list(
+        GRACEFUL_STOP_KEYS
+    ), "one sequence, unbroken"
+    assert engine._stopping[VESSEL] is marker
+    assert marker.typing is False, "cleared once the typing is over"
+
+
+def test_a_stop_while_exit_now_is_typed_types_nothing(root: Path) -> None:
+    """The same rule for a person's own exit: a double tap lands on a marker
+    whose sequence is still going out."""
+    engine, tmux, _ = wrap_engine(root, stop_prompt=None)
+    answers = _stop_inside_the_first_send(engine, tmux)
+    engine.stop(VESSEL)
+    assert len(answers) == 1
+    assert exits_sent(tmux) == 1
+    assert [keys for _p, keys in tmux.sent] == list(GRACEFUL_STOP_KEYS)
+    assert engine._stopping[VESSEL].typing is False
+
+
+def test_a_typing_flag_is_cleared_when_the_exit_fails(root: Path) -> None:
+    """A refusal raised out of the typing must not leave the marker flagged,
+    or every later Stop would be a no-op for a sequence nobody is typing."""
+    engine, tmux, clock = wrap_engine(root)
+    engine.stop(VESSEL)
+    clock.advance(SETTLE)
+    engine.advance_wrap_ups()
+    clock.advance(SETTLE)
+    marker = engine._stopping[VESSEL]
+
+    def send_keys(project: str, *keys: str) -> None:
+        raise TmuxUnavailable("gone mid sequence")
+
+    tmux.send_keys = send_keys  # type: ignore[method-assign]
+    engine.advance_wrap_ups()
+    assert marker.typing is False
+
+
+# -- #407: the edges of the wrap up -----------------------------------------
+
+
+def test_a_refused_exit_now_leaves_the_wrap_up_closing_with_its_watch(root: Path) -> None:
+    """The person saw a refusal and reasonably assumes the wrap up still ends
+    in an exit, so the queued prompt's watch has to survive it."""
+    engine, tmux, clock = wrap_engine(root)
+    engine.stop(VESSEL)
+    marker = engine._stopping[VESSEL]
+    watch = marker.watch
+    tmux.pane_text[VESSEL] = DIRTY_INPUT_BOX
+    with pytest.raises(StopRefused):
+        engine.stop(VESSEL)
+    assert engine._stopping[VESSEL] is marker, "the same object, which `_drop` compares"
+    assert marker.phase == "closing"
+    assert marker.watch is watch
+    assert marker.exit_at is None
+    assert marker.typing is False
+    assert engine.get(VESSEL).stopping_phase == "closing"
+    # And the sweep still ends it in an exit once the wrap up finishes.
+    del tmux.pane_text[VESSEL]
+    assert finish(engine, clock) == [VESSEL]
+    assert exits_sent(tmux) == 1
+
+
+def test_a_refused_first_exit_still_drops_its_marker(root: Path) -> None:
+    """Only Exit now has a wrap up to go back to; a plain stop has none."""
+    engine, tmux, _ = wrap_engine(root, stop_prompt=None)
+    tmux.pane_text[VESSEL] = DIRTY_INPUT_BOX
+    with pytest.raises(StopRefused):
+        engine.stop(VESSEL)
+    assert VESSEL not in engine._stopping
+
+
+def test_an_unexpected_error_while_typing_the_prompt_drops_the_marker(root: Path) -> None:
+    """Stranded `closing` with no watch, every later Stop was a no-op, the
+    sweep skipped it and expiry never saw it: only Kill cleared it."""
+    engine, tmux, _ = wrap_engine(root)
+
+    def send_text(project: str, text: str) -> None:
+        raise RuntimeError("something nobody planned for")
+
+    tmux.send_text = send_text  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError):
+        engine.stop(VESSEL)
+    assert VESSEL not in engine._stopping
+    del tmux.send_text
+    engine.stop(VESSEL)
+    assert typed(tmux) == [PROMPT], "a later Stop is a real one again"
+
+
+def test_the_sweep_reports_only_the_exits_it_sent(root: Path) -> None:
+    engine, tmux, clock = wrap_engine(root)
+    engine.stop(VESSEL)
+    clock.advance(SETTLE)
+    engine.advance_wrap_ups()
+    clock.advance(SETTLE)
+
+    def send_keys(project: str, *keys: str) -> None:
+        raise TmuxUnavailable("gone")
+
+    tmux.send_keys = send_keys  # type: ignore[method-assign]
+    assert engine.advance_wrap_ups() == []
+
+
+# -- #387: a Kill that fails while the prompt is typed -----------------------
+
+
+def _kill_fails_while_the_stop_types(
+    engine: Engine, tmux: FakeTmux, prompt_raises: bool
+) -> None:
+    """The exact interleaving: Stop claims `closing` and types; Kill takes the
+    marker out; the Stop finishes (or fails) while it is out; then Kill's
+    `kill-session` raises and it hands the marker back. Two threads, but one
+    schedule: the kill releases the typing and joins it before raising."""
+    in_prompt = threading.Event()
+    release = threading.Event()
+    real_send_text = tmux.send_text
+
+    def send_text(project: str, text: str) -> None:
+        in_prompt.set()
+        assert release.wait(timeout=5)
+        if prompt_raises:
+            raise TmuxUnavailable("gone while the prompt was typed")
+        real_send_text(project, text)
+
+    errors: list[BaseException] = []
+
+    def person() -> None:
+        try:
+            engine.stop(VESSEL)
+        except BaseException as exc:  # the failing variant raises by design
+            errors.append(exc)
+
+    stopper = threading.Thread(target=person)
+
+    def kill_session(project: str) -> None:
+        release.set()
+        stopper.join(timeout=5)
+        assert not stopper.is_alive()
+        raise TmuxUnavailable("kill-session failed")
+
+    tmux.send_text = send_text  # type: ignore[method-assign]
+    tmux.kill_session = kill_session  # type: ignore[method-assign]
+    stopper.start()
+    assert in_prompt.wait(timeout=5)
+    with pytest.raises(MachineUnreadable):
+        engine.kill(VESSEL)
+    del tmux.send_text, tmux.kill_session
+    assert len(errors) == int(prompt_raises)
+
+
+def test_a_failed_kill_while_the_prompt_is_typed_leaves_a_wrap_up_the_sweep_ends(
+    root: Path,
+) -> None:
+    """Restored `closing` with no watch, every later Stop was the no-op 202,
+    the sweep skipped it and expiry never saw it: only a Kill that worked
+    cleared it."""
+    engine, tmux, clock = wrap_engine(root)
+    _kill_fails_while_the_stop_types(engine, tmux, prompt_raises=False)
+    marker = engine._stopping[VESSEL]
+    assert marker.phase == "closing"
+    assert marker.watch is not None
+    assert finish(engine, clock) == [VESSEL]
+    assert exits_sent(tmux) == 1
+
+
+def test_a_failed_kill_does_not_restore_a_stop_whose_prompt_failed(root: Path) -> None:
+    """The same stranding by the other road: the Stop gave its marker up while
+    the Kill held it, so handing it back resurrects a wait for nothing."""
+    engine, tmux, _ = wrap_engine(root)
+    _kill_fails_while_the_stop_types(engine, tmux, prompt_raises=True)
+    assert VESSEL not in engine._stopping
+    engine.stop(VESSEL)
+    assert typed(tmux) == [PROMPT], "a later Stop is a real one again"
+
+
+# -- #408, #411, #428: what another browser needs to reopen a wait ----------
+
+
+def test_a_row_whose_prompt_is_being_typed_says_so(root: Path) -> None:
+    """#408. Every browser but the one that tapped learns of the stop from the
+    listing, and a Stop now is the no-op 202, so Exit now must not be offered."""
+    engine, _, clock = wrap_engine(root)
+    marker = StopMarker(clock(), "closing", "ask")
+    engine._stopping[VESSEL] = marker
+    session = engine.get(VESSEL)
+    assert session.stopping_phase == "closing"
+    assert session.stop_typing is True
+    assert session.as_dict()["stop_typing"] is True
+    marker.watch = claude_ipc.WrapUpWatch(sent_at=clock())
+    assert engine.get(VESSEL).stop_typing is False, "the prompt is out: Exit now works"
+
+
+def test_a_row_whose_exit_is_being_typed_says_so(root: Path) -> None:
+    engine, _, clock = wrap_engine(root)
+    engine._stopping[VESSEL] = StopMarker(
+        clock(), "exiting", "ask", exit_at=clock(), typing=True
+    )
+    assert engine.get(VESSEL).stop_typing is True
+
+
+def test_a_stop_answered_is_not_typing(root: Path) -> None:
+    engine, _, _ = wrap_engine(root)
+    assert engine.stop(VESSEL).stop_typing is False
+    assert engine.get(VESSEL).stop_typing is False
+
+
+def test_a_row_carries_its_stops_age_in_seconds(root: Path) -> None:
+    """#411. An age, never the engine's monotonic instant: a browser compares
+    what it is sent to its own clock, which shares no epoch with this one."""
+    engine, _, clock = wrap_engine(root)
+    engine.stop(VESSEL)
+    began = engine._stopping[VESSEL].began
+    clock.now = began + 20.0
+    session = engine.get(VESSEL)
+    assert session.stop_age_s == 20.0
+    assert session.as_dict()["stop_age_s"] == session.stop_age_s
+
+
+def test_exit_now_keeps_the_stops_age(root: Path) -> None:
+    """Mutated in place (#407), so the wrap up's start survives the exit."""
+    engine, _, clock = wrap_engine(root)
+    engine.stop(VESSEL)
+    began = engine._stopping[VESSEL].began
+    clock.advance(30)
+    engine.stop(VESSEL)
+    assert engine._stopping[VESSEL].began == began
+    assert engine.get(VESSEL).stop_age_s == round(clock() - began, 1)
+
+
+def test_a_row_carries_the_policy_its_stop_was_confirmed_under(root: Path) -> None:
+    """#428. A wait reopened after a reload has no wait of its own to copy the
+    policy from, and the live setting may since have changed."""
+    engine, _, _ = wrap_engine(root)
+    engine.stop(VESSEL)
+    engine.prefs.apply(stop_policy="end_anyway")
+    session = engine.get(VESSEL)
+    assert engine.prefs.stop_policy() == "end_anyway"
+    assert session.stop_policy == "ask"
+    assert session.as_dict()["stop_policy"] == "ask"
+
+
+def test_with_no_stop_in_flight_the_row_carries_no_stop_fields(root: Path) -> None:
+    engine, _, _ = wrap_engine(root)
+    shape = engine.get(VESSEL).as_dict()
+    assert shape["stop_typing"] is False
+    assert shape["stop_age_s"] is None
+    assert shape["stop_policy"] is None

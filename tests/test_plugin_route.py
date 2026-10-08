@@ -491,3 +491,54 @@ async def test_a_failing_kill_at_shutdown_still_cancels_an_in_flight_scan(
         # Without this the executor's shutdown waits the full five seconds
         # on the blocked worker.
         release.set()
+
+
+class _BrokenWatch(Engine):
+    """A scan and a wrap up watch that each raised once, which their done
+    callbacks logged, and which their tasks still hold at shutdown (#392)."""
+
+    def expire_stops(self) -> list[str]:
+        return []
+
+    def scan_for_stuck(self) -> list[str]:
+        raise RuntimeError("scan broke")
+
+    def advance_wrap_ups(self) -> list[str]:
+        raise RuntimeError("wrap up broke")
+
+
+async def _after_the_watches_broke(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(srv, "SWEEP_INTERVAL_S", 0.02)
+    (tmp_path / "vessel").mkdir()
+    config = make_config(tmp_path)
+    engine = _BrokenWatch(config=config, tmux=FakeTmux(), procs_fn=procs_from(""))
+    app = create_app(engine=engine, config=config, bus=EventBus())
+    async with app.router.lifespan_context(app):
+        for _ in range(100):
+            if "wrap up watch failed" in caplog.text and "attention scan failed" in caplog.text:
+                break
+            await asyncio.sleep(0.02)
+        else:
+            raise AssertionError("neither watch raised, so this proves nothing")
+
+
+async def test_a_scan_that_raised_earlier_does_not_fail_the_shutdown(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#392. The done callback already logged it; awaiting the finished task
+    at teardown raised it a second time, out of a shutdown that had gone
+    well."""
+    await _after_the_watches_broke(tmp_path, monkeypatch, caplog)
+
+
+async def test_a_failing_kill_is_the_error_shutdown_reports(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#392. The scan's old error replaced the kill's, which survived only as
+    its `__context__`, so #365's "the error propagates" was met by the wrong
+    one."""
+    _refused_kill(monkeypatch)
+    with pytest.raises(PermissionError):
+        await _after_the_watches_broke(tmp_path, monkeypatch, caplog)

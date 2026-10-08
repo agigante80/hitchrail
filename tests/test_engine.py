@@ -792,7 +792,7 @@ def test_the_stopping_overlay_applies_to_every_live_state(
     """
     sessions, table = machine
     engine, _ = engine_for(root, sessions=sessions, table=table)
-    engine._stopping[proj("vessel")] = StopMarker(1234.0, "exiting", exit_at=1234.0)
+    engine._stopping[proj("vessel")] = StopMarker(1234.0, "exiting", "ask", exit_at=1234.0)
 
     session = engine.get(proj("vessel"))
     assert session.stopping is True
@@ -819,7 +819,7 @@ def test_the_overlay_does_not_apply_to_a_stopped_session(root: Path) -> None:
     """
     sessions, table = STOPPED_MACHINE
     engine, _ = engine_for(root, sessions=sessions, table=table)
-    engine._stopping[proj("vessel")] = StopMarker(1234.0, "exiting", exit_at=1234.0)
+    engine._stopping[proj("vessel")] = StopMarker(1234.0, "exiting", "ask", exit_at=1234.0)
 
     session = engine.get(proj("vessel"))
     assert session.state is State.STOPPED
@@ -1118,6 +1118,92 @@ def test_kill_is_reachable_during_a_stop(root: Path) -> None:
     engine.kill(proj("vessel"))
     assert tmux.killed == [proj("vessel")]
     assert engine.stopping_since(proj("vessel")) is None, "killing ends the wait"
+
+
+def _kill_lines(caplog: pytest.LogCaptureFixture, name: str) -> list[str]:
+    return [
+        r.getMessage()
+        for r in caplog.records
+        if r.getMessage().startswith("kill ") and name in r.getMessage()
+    ]
+
+
+def test_a_kill_writes_one_journal_line(root: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """#387. A Kill wrote nothing of its own, so a Stop then a Kill read as an
+    exit requested and then silence."""
+    engine, _tmux, _ = live_engine(root)
+    with caplog.at_level(logging.INFO, logger="hitchrail.engine"):
+        engine.kill(proj("vessel"))
+    assert _kill_lines(caplog, proj("vessel")) == [f"kill {proj('vessel')}: session killed"]
+
+
+def test_the_kill_line_is_written_before_the_read_that_can_fail(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#387. `_await_gone` reads the machine; a tmux gone by then raises, and
+    a line written after it would never be written for a kill that happened."""
+    engine, tmux, _ = live_engine(root)
+    kill = tmux.kill_session
+
+    def kill_then_lose_tmux(project: str) -> None:
+        kill(project)
+
+        def gone() -> Panes:
+            raise TmuxUnavailable("no server")
+
+        tmux.panes = gone  # type: ignore[method-assign]
+
+    tmux.kill_session = kill_then_lose_tmux  # type: ignore[method-assign]
+    with (
+        caplog.at_level(logging.INFO, logger="hitchrail.engine"),
+        pytest.raises(MachineUnreadable),
+    ):
+        engine.kill(proj("vessel"))
+    assert _kill_lines(caplog, proj("vessel")) == [f"kill {proj('vessel')}: session killed"]
+
+
+def test_a_failed_kill_writes_no_kill_line(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    engine, tmux, _ = live_engine(root)
+
+    def refuse(project: str) -> None:
+        raise TmuxUnavailable("no server")
+
+    tmux.kill_session = refuse  # type: ignore[method-assign]
+    with (
+        caplog.at_level(logging.INFO, logger="hitchrail.engine"),
+        pytest.raises(MachineUnreadable),
+    ):
+        engine.kill(proj("vessel"))
+    assert _kill_lines(caplog, proj("vessel")) == []
+
+
+def test_a_stop_a_kill_ended_is_never_logged_as_an_exit(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#387. A listing landing between `kill_session` and the marker's removal
+    read the row `stopped` with the marker still there, and logged the kill as
+    "the agent exited after 10.2s", a graceful exit that never happened."""
+    engine, tmux, _ = live_engine(root)
+    table = procs_from(ps_row(PANE, 1) + ps_row(AGENT, PANE, project=proj("vessel")))
+    # The agent leaves with its session, so the listing in the window reads
+    # `stopped`, which is the read that logged the exit.
+    engine._procs_fn = lambda: table() if proj("vessel") in tmux.sessions else procs_from("")()
+    engine.stop(proj("vessel"))
+    kill = tmux.kill_session
+    listed: list[State] = []
+
+    def kill_then_list(project: str) -> None:
+        kill(project)
+        listed.append(engine.get(project).state)
+
+    tmux.kill_session = kill_then_list  # type: ignore[method-assign]
+    with caplog.at_level(logging.INFO, logger="hitchrail.engine"):
+        engine.kill(proj("vessel"))
+    assert listed == [State.STOPPED], "the listing did land in the window"
+    assert "exited after" not in caplog.text
+    assert engine.stopping_since(proj("vessel")) is None
 
 
 def test_expiry_drops_the_marker_and_does_not_escalate(root: Path) -> None:
@@ -2639,6 +2725,23 @@ def test_a_pane_with_no_prompt_row_at_all_is_not_flagged(root: Path) -> None:
     assert engine.scan_for_stuck() == []
 
 
+def test_a_raise_in_the_sweeps_row_derivation_reaches_its_caller(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#181. `scan_for_stuck` does not promise never to raise, and this pins
+    that. Its `try` covers the look and the root scan only; a raise past them
+    goes to the server, whose done callback logs it, and costs one tick of the
+    sweep. Catching it here would answer "nobody is waiting" on no evidence."""
+    engine, _ = sweeping_engine(root, MODAL_PANE)
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("a derivation that broke")
+
+    monkeypatch.setattr(engine, "_derive", boom)
+    with pytest.raises(RuntimeError, match="a derivation that broke"):
+        engine.scan_for_stuck()
+
+
 def test_the_sweep_leaves_a_row_that_has_a_link_alone(root: Path) -> None:
     """A row with a session link is reachable: tap it and you are there.
 
@@ -3111,7 +3214,7 @@ def test_a_listing_takes_the_stop_lock_once_per_marker_not_once_per_row(
     # every earlier row, which is where the extra acquisitions appear.
     marked = [row.name for row in stopped[-2:]]
     for name in marked:
-        engine._stopping[name] = StopMarker(0.0, "exiting", exit_at=0.0)
+        engine._stopping[name] = StopMarker(0.0, "exiting", "ask", exit_at=0.0)
     acquisitions = 0
     engine.list()
 
@@ -3446,6 +3549,16 @@ def test_the_ceiling_cache_survives_two_threads_pruning_at_once(root: Path) -> N
     assert failures == [], failures
 
 
+@pytest.mark.parametrize("call", ["open_pidfd", "send_signal", "close_pidfd"])
+def test_no_engine_built_with_defaults_reaches_a_real_pidfd_call(root: Path, call: str) -> None:
+    """#418. The guard for `no_real_pidfd`: an engine built with no pidfd
+    seam resolves each call through the refusal, never the syscall, so a
+    fake pid from a hermetic test is never signalled on this machine."""
+    engine = Engine(make_config(root))
+    with pytest.raises(AssertionError, match="a real pidfd call was reached"):
+        getattr(engine._pidfd, call)(4242, *([0] if call == "send_signal" else []))
+
+
 def test_no_engine_built_with_defaults_reads_the_real_cgroup_tree(root: Path) -> None:
     """#250. The guard for the autouse stub in conftest: an engine built with
     no `ceiling_fn`, the way twenty-odd tests build one, resolves its
@@ -3602,6 +3715,75 @@ def test_a_stop_that_worked_unwatched_is_not_logged_as_given_up(
     assert "still running" not in caplog.text
     assert "gave up" not in caplog.text
     assert "after the agent had already exited" in caplog.text
+
+
+def test_a_start_that_fails_never_logs_running(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#389. The line before the attempt is intent; only the confirmation
+    after it may say the agent is running."""
+    engine, tmux, _ = start_engine(root)
+    tmux.fail_new_session = TmuxUnavailable("tmux is gone")
+    with caplog.at_level(logging.INFO, logger="hitchrail"), pytest.raises(MachineUnreadable):
+        engine.start(proj("vessel"))
+    assert f"start {proj('vessel')}: starting in" in caplog.text
+    assert "running" not in caplog.text
+
+
+def test_a_start_that_succeeds_logs_its_pid(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    engine, _, _ = start_engine(root, table=running_after())
+    with caplog.at_level(logging.INFO, logger="hitchrail"):
+        started = engine.start(proj("vessel"))
+    assert f"running as pid {started.pid}" in caplog.text
+
+
+def test_a_stale_row_at_expiry_is_not_logged_as_given_up(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#390. The agent exited and only its session outlived it, which is a
+    stop that worked, not one that failed."""
+    engine, _, clock = live_engine(root)
+    engine.stop(proj("vessel"))
+    engine._procs_fn = procs_from(ps_row(PANE, 1))
+    clock.advance(engine.config.stop_timeout + 1)
+    with caplog.at_level(logging.INFO, logger="hitchrail.engine"):
+        engine.expire_stops()
+    assert engine.get(proj("vessel")).state is State.STALE
+    assert "gave up" not in caplog.text
+    assert "the agent exited and its tmux session remains" in caplog.text
+
+
+def test_an_unwatched_exit_says_how_long_it_took_at_most(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#390. The commonest unwatched case, and a one second wrap up is only
+    visible as a number (Phase 19's premortem)."""
+    engine, tmux, clock = live_engine(root)
+    engine.stop(proj("vessel"))
+    engine._procs_fn = procs_from("")
+    tmux.sessions.pop(proj("vessel"))
+    clock.advance(engine.config.stop_timeout + 1)
+    with caplog.at_level(logging.INFO, logger="hitchrail.engine"):
+        engine.expire_stops()
+    assert re.search(r"already exited, within \d+", caplog.text)
+
+
+def test_an_unreadable_expiry_still_says_a_person_is_needed(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#390. The look at the pane happened; the machine read after it failed,
+    and the warning must not drop what the look found."""
+    engine, tmux, clock = live_engine(root)
+    engine.stop(proj("vessel"))
+    tmux.pane_text[proj("vessel")] = MODAL_PANE
+    engine._procs_fn = failing_procs
+    clock.advance(engine.config.stop_timeout + 1)
+    with caplog.at_level(logging.INFO, logger="hitchrail.engine"):
+        engine.expire_stops()
+    assert "machine could not be read" in caplog.text
+    assert "its screen is waiting on a person" in caplog.text
 
 
 def test_a_refused_stop_says_why_in_the_log(

@@ -44,6 +44,11 @@ The origin check applies to mutating requests only. `GET` is exempt, because
 `EventSource` cannot set headers. The origins derived from the server's own
 bind carry its own scheme, `https` with `--tls-cert` and `http` without; an
 origin a proxy presents is `--allow-origin`, with the proxy's scheme and port.
+One derived origin is withheld (#391): on a loopback bind whose every
+non loopback `--allow-origin` is https, the session cookie is `Secure`, so the
+plain `http` origin of an `--allow-host` is not derived and a grant from it is
+`403 origin_rejected`, naming the origin, rather than a cookie its browser
+would drop. The startup log names each one withheld.
 
 ## What `{name}` is
 
@@ -110,10 +115,11 @@ typed answers 202 and types nothing. If a message is already queued in the
 box, the call is 409 `stop_unsafe` and nothing is typed after the clear.
 
 With `stop_policy = "end_anyway"` (#239, off by default), a stop whose
-`stop_timeout` runs out while the agent's screen shows a prompt is killed by
-the server, exactly as `POST /api/sessions/{name}/kill` would, and the row is
+`stop_timeout` runs out while the agent's screen shows a prompt on two looks
+a second apart (#429, so a redraw is not taken for one) is killed by the server, exactly as `POST /api/sessions/{name}/kill` would, and the row is
 announced `stopped`. A screen showing anything else reports as it always has.
-Nothing is ever typed into the prompt.
+Nothing is ever typed into the prompt. The policy is the one in force when the
+stop was requested (#419): a change during the wait applies to the next stop.
 
 ### The listing payload
 
@@ -155,6 +161,9 @@ One project, as `projects` lists it, as `POST` and `DELETE` on
 | `stopping` | a graceful stop is in flight |
 | `stopping_phase` | while `stopping`: `closing` while the wrap up prompt runs behind the agent's task, `exiting` once the exit is sent; null otherwise |
 | `stop_ceiling` | the exit was sent because the wrap up ran out of `stop_prompt_timeout`, not because it finished |
+| `stop_typing` | while `stopping`: the wrap up prompt or the exit is being typed into the pane this moment, so a `DELETE` now answers 202 and does nothing; false otherwise |
+| `stop_age_s` | while `stopping`: seconds since the stop was requested, as an AGE measured on the server's monotonic clock, never an instant; a client adds it to its own clock at the moment it received the row. A repeated `DELETE` on an `exiting` row starts a new stop and resets it; Exit now does not. Null otherwise |
+| `stop_policy` | while `stopping`: the `stop_policy` the stop was requested under, which is the one its expiry acts on whatever `server.stop_policy` says now (#419); null otherwise |
 | `protected` | the self project; refuses every mutating route |
 | `awaiting_trust` | the agent is sitting on its trust prompt |
 | `awaiting_input` | the agent is sitting on a question only a person can answer |

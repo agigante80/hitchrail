@@ -15,7 +15,7 @@ from dataclasses import replace
 from importlib.metadata import PackageNotFoundError, metadata
 from pathlib import Path
 from typing import NamedTuple
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import uvicorn
 from starlette.applications import Starlette
@@ -30,7 +30,7 @@ from hitchrail.config import (
 )
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
-from hitchrail.hostnames import reachable_hosts
+from hitchrail.hostnames import normalise_host, origin_forms, reachable_hosts
 from hitchrail.roots import Root, RootError, parse_root_argument
 from hitchrail.server import create_app
 
@@ -591,12 +591,39 @@ def startup_block(config: Config, found: Preflight, level: str) -> list[str]:
     ]
     if config.self_project:
         lines.append(f"self project {config.self_project}, never stopped from here")
-    # #283: the mirror of #268's refusal. It works, so it is a line, not a refusal.
-    proxied = any(o.strip().lower().startswith("https://") for o in config.extra_origins)
-    if proxied and not config.cookie_is_secure and not config.is_loopback:
+    # #283: the mirror of #268's refusal. It works, so it is a line, not a
+    # refusal. #394: only where rebinding to loopback would set the flag.
+    if not config.tls and not config.is_loopback and config.proxied_origins_are_https:
         lines.append(
-            "token cookie not Secure: an https origin is set but this plain http bind "
-            "is off loopback; bind loopback behind the proxy to get the flag"
+            "token cookie not Secure: every proxy origin is https but this plain http "
+            "bind is off loopback; bind loopback behind the proxy to get the flag, "
+            "after which the plain http LAN address is no longer served and the page is "
+            "reached through the proxy"
+        )
+    # #391: the grant from these is now refused, and an operator on a plain
+    # forwarder needs to learn that before the phone does. Not for a host
+    # that is also the host of an https origin: that is phone-access.md's
+    # own deployment (loopback bind, `--allow-host` and `--allow-origin
+    # https://` for one name), nobody uses the plain origin there, and the
+    # advice to give it would invite the one change that drops Secure from a
+    # working setup. The filter is here and not in `plain_origins_withheld`,
+    # which `_derive_allowed_origins` reads: the 403 must still name a
+    # withheld origin whenever a plain one is refused.
+    https_hosts = {
+        normalise_host(parts.hostname)
+        for entry in config.extra_origins
+        if (parts := urlsplit(entry.strip().rstrip("/").lower())).scheme == "https"
+        and parts.hostname
+    }
+    for host in config.plain_origins_withheld:
+        if host in https_hosts:
+            continue
+        plain = min(origin_forms("http", host, config.port), key=len)
+        lines.append(
+            f"plain http origin not derived for {plain}: every non loopback "
+            f"--allow-origin is https, so the token cookie is Secure and a browser "
+            f"on plain http would drop it. "
+            f"Give --allow-origin {plain} to serve it, which turns Secure off"
         )
     return lines
 
@@ -659,17 +686,25 @@ def preflight(
         )
     found = look(config.agent_binary)
     # #341. A value with a directory in it is a path the operator TYPED, and
-    # `shutil.which` does not search PATH for one: it checks that exact file
-    # and hands it back unchanged. So neither PATH message below is true of
-    # it, and each would send the operator to fix a PATH that was never read.
+    # `shutil.which` does not search PATH for one: it checks that path where
+    # it stands and never makes it absolute. So neither PATH message below is
+    # true of it, and each would send the operator to fix a PATH never read.
     # `os.path.dirname` and not `Path.parent`: `Path("./claude")` normalises
     # the "./" away, and `which` decides by the same `dirname` test this is.
     typed = bool(os.path.dirname(config.agent_binary))  # noqa: PTH120
     if found is None and typed:
+        # #393. Relative, it was looked for from the cwd, and `~` is not
+        # expanded; saying so also saves the round trip of the relative
+        # refusal below once the file is there.
+        where = (
+            ", looked for relative to the current directory; give an absolute path"
+            if not Path(config.agent_binary).is_absolute()
+            else ""
+        )
         problems.append(
-            f"{config.agent_binary!r} is not an executable file. That is the "
-            "agent Hitchrail starts, and a value containing a directory is "
-            "taken as a path to that file, not searched for on PATH"
+            f"{config.agent_binary!r} is not an executable file{where}. That is "
+            "the agent Hitchrail starts, and a value containing a directory is "
+            "taken as a path to that file"
         )
     elif found is None:
         # **"Install it" is the wrong first remedy, and #195 is why.** The case
@@ -882,7 +917,7 @@ def update_plugins_command(argv: list[str]) -> int:
         )
         return 2
     # #298. `shutil.which` hands a name containing a directory component back
-    # UNCHANGED when it is executable, rather than making it absolute: only a
+    # still relative when it is executable, never made absolute: only a
     # bare name searched across PATH comes back joined onto an absolute
     # directory. `resolve()` against THIS process's cwd, before
     # `plugin_runner` starts the child in `Path.home()`, is what makes the
@@ -1017,6 +1052,10 @@ def main(argv: list[str] | None = None) -> int:
         log.info("%s", line)
 
     engine = Engine(config=config)
+    # After the block rather than inside it: they are what the engine's own
+    # read of the state file found, and that read happens here (#421).
+    for line in engine.prefs.startup_warnings():
+        log.warning("%s", line)
     # One bus, built here and owned here, because the CLI owns the process.
     app = create_app(engine=engine, config=config, bus=EventBus())
     return _serve(app, config, tls)

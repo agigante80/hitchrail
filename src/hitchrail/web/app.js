@@ -1091,12 +1091,19 @@ function confirmStop(project) {
     // #242: with a wrap up prompt set the first thing sent is the prompt,
     // queued behind the current task, and nothing is interrupted unless the
     // wrap up outlasts its ceiling. The warning moves to that case.
+    //
+    // #416: on an `exiting` row the server resends the exit and types no
+    // prompt, whatever `stop_prompt` says, so promising a wrap up there is
+    // the mismatch #242's round 1 objected to.
     body: [
-      state.server.stop_prompt_set
-        ? "It will be asked to wrap up after its current task, then to exit. "
-          + `If that takes longer than ${wrapUpSeconds()}s, the task is interrupted.`
-        : "It will be interrupted, then asked to exit. "
-          + "Anything it is part way through may be lost.",
+      project.stopping_phase === "exiting"
+        ? "It was asked to exit and has not yet, and will be asked again. "
+          + "Anything it is part way through may be lost."
+        : state.server.stop_prompt_set
+          ? "It will be asked to wrap up after its current task, then to exit. "
+            + `If that takes longer than ${wrapUpSeconds()}s, the task is interrupted.`
+          : "It will be interrupted, then asked to exit. "
+            + "Anything it is part way through may be lost.",
       endAnywayNote(),
     ].filter(Boolean).join(" "),
     // Cancel and Stop, and nothing else. A kill control at this step puts the
@@ -1126,12 +1133,20 @@ function confirmClear(project) {
    repaint then rebuilds the dialog every tick, taking focus (#71). */
 const waits = new Map();
 
-function newWait(project) {
+function newWait(project, began = Date.now(), policy = state.server.stop_policy) {
   // `over` lets Exit now's refusal end the ticker, which would otherwise
   // paint "no answer" over the refusal it just showed.
   const previous = waits.get(project.name);
   if (previous) previous.over = true;
-  const wait = { began: Date.now(), over: false, sawClosing: false, exitSeen: false };
+  // The policy the person was shown, kept for the whole wait: the server acts
+  // on the one in force at the Stop, whatever is chosen meanwhile (#419).
+  const wait = {
+    began,
+    over: false,
+    sawClosing: false,
+    exitSeen: false,
+    policy,
+  };
   waits.set(project.name, wait);
   return wait;
 }
@@ -1144,17 +1159,30 @@ function reopenStop(project) {
   }
   // Stopped from another browser, or before this page loaded. The deadline
   // starts now, later than the server's, which errs long as `stopTimeoutMs`
-  // says it should.
-  const wait = newWait(project);
-  wait.sawClosing = project.stopping_phase === "closing";
+  // says it should. The count and the policy come from the row instead: the
+  // count is what a person reads to decide on Exit now (#411), and today's
+  // policy may not be the one the server will act on (#428). The newest row,
+  // since the one this button was drawn from can be a listing old.
+  const current = state.projects.find((p) => p.name === project.name) ?? project;
+  const wait = newWait(
+    project,
+    current.stopBeganHere ?? Date.now(),
+    current.stop_policy ?? state.server.stop_policy,
+  );
+  wait.sawClosing = current.stopping_phase === "closing";
   wait.armed = true;
-  showWaiting(project, wait, waitingPhase(wait, project));
+  showWaiting(project, wait, waitingPhase(wait, current));
   awaitStopped(project, wait);
 }
 
 async function beginStop(project) {
   const wait = newWait(project);
-  showWaiting(project, wait, state.server.stop_prompt_set ? "sending" : "waiting");
+  // A resent exit (#416) is watched as the exit after a wrap up is: its
+  // deadline starts from the first `exiting` reading, not a wrap up away.
+  const resend = project.stopping_phase === "exiting";
+  if (resend) wait.sawClosing = true;
+  const first = resend ? "exiting" : state.server.stop_prompt_set ? "sending" : "waiting";
+  showWaiting(project, wait, first);
   const result = await api(`/api/sessions/${encodeURIComponent(project.name)}`, {
     method: "DELETE",
   });
@@ -1170,7 +1198,7 @@ async function beginStop(project) {
   // it did before #242: from the tap it would end before the server's own
   // expiry most times, and say "no answer" before the server's one look at
   // the pane could say the agent is waiting on a question (#242 review).
-  if (!state.server.stop_prompt_set) wait.armed = true;
+  if (!state.server.stop_prompt_set || resend) wait.armed = true;
   await refresh();
   awaitStopped(project, wait);
 }
@@ -1181,20 +1209,23 @@ async function beginStop(project) {
    wait is the dialog on screen: a hidden wait must stay hidden, and a
    rebuild on every listing takes focus from under the thumb (#71). */
 function waitingPhase(wait, current) {
+  // #408. Still typing the prompt, which only the tapping browser knew of
+  // itself: a DELETE now is the no-op 202, so no Exit now.
+  if (current?.stopping_phase === "closing" && current.stop_typing) return "sending";
   if (current?.stopping_phase === "closing") return "closing";
   if (current?.stop_ceiling) return "ceiling";
   return wait.sawClosing ? "exiting" : "waiting";
 }
 
 function waitingBody(wait, phase) {
-  const note = endAnywayNote();
+  const note = endAnywayNote(wait.policy);
   return note ? `${phaseBody(wait, phase)} ${note}` : phaseBody(wait, phase);
 }
 
 /* #239. A kill the operator configured a week ago must not surprise them:
    said on the confirm and through the whole wait, before it happens. */
-function endAnywayNote() {
-  if (state.server.stop_policy !== "end_anyway") return "";
+function endAnywayNote(policy = state.server.stop_policy) {
+  if (policy !== "end_anyway") return "";
   // "Once asked to exit": a wrap up that ends on a question is reported and
   // never killed, since the exit it would refuse was never sent (#239 review).
   return "If it stops on a question once asked to exit, it will be ended, as this server is configured to.";
@@ -1231,7 +1262,8 @@ function showWaiting(project, wait, phase) {
   // during `closing` sends the exit now and never retypes the prompt. Not
   // while `sending`, before the first DELETE has answered: the row already
   // reads `closing` while the prompt is typed, and a DELETE then is a no-op
-  // 202, so the button would answer and do nothing.
+  // 202, so the button would answer and do nothing. Another browser learns
+  // of that window from the row's `stop_typing` (#408).
   if (phase === "closing") actions.push(["Exit now", "", () => exitNow(project, wait)]);
   // Phrased as impatience rather than as an alternative, and available
   // for the WHOLE wait rather than only at the end.
@@ -1661,6 +1693,10 @@ function stoppableRows() {
   );
 }
 
+function sessionCount(n) {
+  return n === 1 ? "1 session" : `${n} sessions`;
+}
+
 function renderStopAll() {
   const button = $("[data-stop-all]");
   if (button) button.hidden = stoppableRows().length === 0;
@@ -1685,14 +1721,29 @@ function confirmStopAll() {
   }
   const rows = stoppableRows();
   if (rows.length === 0) return;
+  // #416: an `exiting` row is in the set and gets its exit resent, never a
+  // wrap up, so it is named rather than covered by "each".
+  const again = rows.filter((p) => p.stopping_phase === "exiting");
+  const fresh = rows.length - again.length;
   showDialog({
-    title: `Stop ${rows.length} sessions?`,
+    title: `Stop ${sessionCount(rows.length)}?`,
     body: [
-      state.server.stop_prompt_set
-        ? "Each will be asked to wrap up after its current task, then to exit. "
-          + `A wrap up longer than ${wrapUpSeconds()}s has its task interrupted.`
-        : "Each will be interrupted, then asked to exit, one at a time. "
-          + "Anything they are part way through may be lost.",
+      fresh === 0
+        ? ""
+        : state.server.stop_prompt_set
+          ? `${fresh === 1 ? "It" : "Each"} will be asked to wrap up after its current `
+            + `task, then to exit. A wrap up longer than ${wrapUpSeconds()}s has its task `
+            + "interrupted."
+          : fresh === 1
+            ? "It will be interrupted, then asked to exit. "
+              + "Anything it is part way through may be lost."
+            : "Each will be interrupted, then asked to exit, one at a time. "
+              + "Anything they are part way through may be lost.",
+      again.length === 0
+        ? ""
+        : `${again.map((p) => displayProject(p.name)).join(", ")} `
+          + `${again.length === 1 ? "is" : "are"} already asked to exit, `
+          + "and will only be asked again.",
       endAnywayNote(),
     ].filter(Boolean).join(" "),
     actions: [
@@ -1832,8 +1883,8 @@ function showBulkWait() {
     list.append(item);
   }
   showDialog({
-    title: `Stopping ${bulk.rows.length} sessions`,
-    body: "Waiting for them to exit.",
+    title: `Stopping ${sessionCount(bulk.rows.length)}`,
+    body: bulk.rows.length === 1 ? "Waiting for it to exit." : "Waiting for them to exit.",
     extra: list,
     actions: [
       ["Hide, keep stopping", "ghost", () => closeDialog()],
@@ -1898,7 +1949,7 @@ function renderBulk() {
     // The risk before the kill is offered, as the single row timeout does.
     body.textContent =
       `${unfinished} ${unfinished === 1 ? "has" : "have"} not finished. Killing now ends `
-      + "them immediately, and anything not written to disk is lost.";
+      + `${unfinished === 1 ? "it" : "them"} immediately, and anything not written to disk is lost.`;
   }
 }
 
@@ -2418,6 +2469,7 @@ function applySession(session) {
     // client per event.
     return;
   }
+  stampStop(session);
   if (fetchesInFlight > 0) {
     // Stamped with the generation current AT ARRIVAL, which is how a listing
     // later decides whether this event predates it or not.
@@ -2440,6 +2492,16 @@ function applySession(session) {
   // is left alone.
   if (session.state !== "running") closeDialog(session.name);
   render();
+}
+
+/* #411. `stop_age_s` is an age, so it becomes an instant on THIS clock at
+   the moment it arrives. Converted later, a row that sat unchanged for a
+   minute would read a minute young. */
+function stampStop(session) {
+  if (typeof session.stop_age_s === "number") {
+    session.stopBeganHere = Date.now() - session.stop_age_s * 1000;
+  }
+  return session;
 }
 
 /* One refetch for a burst, not one per event. Creating several folders in a
@@ -2560,7 +2622,7 @@ async function refresh() {
   }
   // `owed` holds only what arrived after this listing was asked for, so those
   // are newer than it whatever order the two landed in.
-  state.projects = result.body.projects.map((p) => owed.get(p.name) ?? p);
+  state.projects = result.body.projects.map((p) => owed.get(p.name) ?? stampStop(p));
   state.unsupported = result.body.unsupported;
   state.unsupportedTotal = result.body.unsupported_total;
   state.roots = roots;

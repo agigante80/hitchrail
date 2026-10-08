@@ -1029,10 +1029,16 @@ def create_app(
                 # A capture bounded at `_CALL_TIMEOUT_S` is the worst case, so the
                 # process waits up to ten seconds on shutdown. That is the cost of
                 # not being able to cancel a thread, and it is bounded.
+                #
+                # #392. `Exception` too: a task that already finished by
+                # raising ignores `cancel()`, and awaiting it raised that error
+                # a second time, out of a clean shutdown or in place of the
+                # kill's own. Its done callback has logged it, so nothing is
+                # silenced here.
                 for pending in (scanning, wrapping):
                     if pending is not None:
                         pending.cancel()
-                        with contextlib.suppress(asyncio.CancelledError):
+                        with contextlib.suppress(asyncio.CancelledError, Exception):
                             await pending
 
     return Starlette(

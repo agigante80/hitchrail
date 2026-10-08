@@ -74,8 +74,112 @@ def test_each_line_goes_to_stderr_at_the_moment_it_is_written(
 def test_uvicorns_access_log_shares_the_handler(capsys: pytest.CaptureFixture[str]) -> None:
     """Its own config would have put it on stdout, in a second format."""
     logs.configure("info")
-    logging.getLogger("uvicorn.access").info("GET / 200")
-    assert "INFO uvicorn.access: GET / 200" in capsys.readouterr().err
+    _access_line("/")
+    assert (
+        'INFO uvicorn.access: 127.0.0.1:5000 - "GET / HTTP/1.1" 401' in capsys.readouterr().err
+    )
+
+
+def _access_line(target: str) -> None:
+    """Logged the way uvicorn's `h11_impl` logs one, arguments and all."""
+    logging.getLogger("uvicorn.access").info(
+        '%s - "%s %s HTTP/%s" %d', "127.0.0.1:5000", "GET", target, "1.1", 401
+    )
+
+
+def test_a_query_string_never_reaches_the_access_line(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """#388. The whole query, whatever the parameter is called."""
+    logs.configure("info")
+    _access_line(f"/?token={TOKEN}")
+    _access_line(f"/api/projects?k={TOKEN}&keep=1")
+    err = capsys.readouterr().err
+    assert TOKEN not in err
+    assert f'"GET /{logs.QUERY_OMITTED} HTTP/1.1" 401' in err
+    assert f'"GET /api/projects{logs.QUERY_OMITTED} HTTP/1.1" 401' in err
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        f"http%3A//127.0.0.1/?token={TOKEN}",
+        f"?token={TOKEN}",
+        f"x?token={TOKEN}",
+    ],
+)
+def test_a_target_not_starting_with_a_slash_loses_its_query_too(
+    target: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#388. uvicorn splits the raw target at the first `?` and writes the
+    rest back, so an absolute form (through a forwarding proxy), a bare `?x`
+    and `x?y` reach the line with no leading slash. Keying on `/` let them
+    through."""
+    logs.configure("info")
+    _access_line(target)
+    err = capsys.readouterr().err
+    assert TOKEN not in err
+    assert logs.QUERY_OMITTED in err
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        (),
+        ("127.0.0.1:5000", "GET"),
+        ("127.0.0.1:5000", "GET", "/", "1.1", 401, "extra"),
+        {"target": f"/?token={TOKEN}"},
+    ],
+)
+def test_an_access_record_of_an_unexpected_shape_is_withheld(
+    args: object, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#388. For `uvicorn.access` a changed upstream shape must fail closed:
+    the record is replaced by a fixed line rather than passed through."""
+    logs.configure("info")
+    record = logging.LogRecord(
+        "uvicorn.access", logging.INFO, __file__, 1, f"GET /?token={TOKEN}", (), None
+    )
+    record.args = args  # type: ignore[assignment]
+    assert logs.QueryFilter().filter(record)
+    assert logs.ACCESS_WITHHELD in record.getMessage()
+    assert TOKEN not in record.getMessage()
+    assert record.args == ()
+
+
+def test_an_unexpected_shape_on_another_uvicorn_logger_is_not_withheld() -> None:
+    """Only the access line has a shape to check; `uvicorn.error` carries free text."""
+    record = logging.LogRecord("uvicorn.error", logging.INFO, __file__, 1, "started", (), None)
+    assert logs.QueryFilter().filter(record)
+    assert record.getMessage() == "started"
+
+
+def test_a_target_without_a_query_is_written_as_it_was(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    logs.configure("info")
+    _access_line("/api/sessions")
+    assert '"GET /api/sessions HTTP/1.1" 401' in capsys.readouterr().err
+
+
+def test_a_websocket_line_loses_its_query_too(capsys: pytest.CaptureFixture[str]) -> None:
+    """uvicorn writes these through `uvicorn.error`, which propagates to the
+    `uvicorn` logger's handler rather than having its own."""
+    logs.configure("info")
+    logging.getLogger("uvicorn.error").info(
+        '%s - "WebSocket %s" 403', "127.0.0.1:5000", f"/ws?token={TOKEN}"
+    )
+    err = capsys.readouterr().err
+    assert TOKEN not in err
+    assert f"/ws{logs.QUERY_OMITTED}" in err
+
+
+def test_our_own_lines_are_not_rewritten(capsys: pytest.CaptureFixture[str]) -> None:
+    """The filter is uvicorn's. A line of ours naming a path is a decision we
+    wrote, and editing it behind our back would make it lie."""
+    logs.configure("info")
+    logging.getLogger("hitchrail.engine").info("saw %s", "/a?b")
+    assert "saw /a?b" in capsys.readouterr().err
 
 
 def test_debug_is_ours_and_not_uvicorns() -> None:

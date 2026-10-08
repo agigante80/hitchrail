@@ -220,8 +220,18 @@ def shows_input_box(pane: str) -> bool | None:
     `is False` rather than falsiness.
 
     **This covers modals nobody has captured yet, but only those that reuse the
-    ornament.** One drawn without it returns `None` and goes unflagged, which
-    is the honest failure direction: a missing warning rather than a false one.
+    ornament.** One drawn without it returns `None` and goes unflagged: a
+    missing warning, the common failure.
+
+    **A false one is possible too, and transient (#181).** The row is the LAST
+    one carrying the ornament. While the box is not drawn, during a repaint or
+    a turn, an output line holding the ornament and an ordinary space after it
+    is that row, and this returns `False` about a working agent. The next
+    sweep reads the pane again and clears it. The source is the agent's own
+    output, so an agent can set this answer and, by printing the ornament with
+    U+00A0 after it, suppress it. That is why the sweep's overlay built on it
+    describes a screen and gates nothing: the answer route reads the pane
+    again inside the send, and `end_anyway` acts on its own look at expiry.
     """
     row = _live_ornament_row(pane)
     if row is None:
@@ -309,8 +319,9 @@ def _foreground_before(text: str) -> str | None:
     """The SGR foreground in effect at the end of `text`; None is the default.
 
     Only what tmux writes is modelled: a reset, the default, the sixteen
-    colours and the 256 colour and RGB forms. A background or another
-    attribute moves past without changing the answer.
+    colours and the 256 colour and RGB forms. A background, an underline
+    colour (58, which tmux writes as its own SGR after the foreground, #405)
+    or another attribute moves past without changing the answer.
     """
     foreground: str | None = _DEFAULT_FOREGROUND
     for match in _SGR.finditer(text):
@@ -320,7 +331,7 @@ def _foreground_before(text: str) -> str | None:
             code = params[i]
             if code in ("", "0", "39"):
                 foreground = _DEFAULT_FOREGROUND
-            elif code in ("38", "48"):
+            elif code in ("38", "48", "58"):
                 width = 3 if params[i + 1 : i + 2] == ["5"] else 5
                 if code == "38":
                     foreground = ";".join(params[i : i + width])

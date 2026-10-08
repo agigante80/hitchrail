@@ -268,7 +268,8 @@ three Claude Code assumptions into the layer that is supposed to hold none: that
 stopping is keystrokes, that it is a sequence of them, and that they travel
 through tmux. The engine keeps what is genuinely its own, which is the timeout,
 the in flight marker, the escalation policy and the refusal to escalate
-automatically. Step 3's kill stays in the engine too: killing the tmux session
+automatically, with its one configured exception, `stop_policy =
+"end_anyway"` (#239), which step 4 describes. Step 3's kill stays in the engine too: killing the tmux session
 is not agent specific, which is exactly why it is the reliable backstop.
 
 This introduces the only state Hitchrail holds that is not derived from the
@@ -508,6 +509,14 @@ exception, so the token path is the main path.
    and it rested on where uvicorn emits that line rather than on anything ASGI
    guarantees. A control whose correctness depends on another project's call
    ordering is one worth not needing.
+
+   **Amended by #388: the log still leaves the query out.** A phone opening a
+   link saved before #115 sends the real token, refused or not, and the
+   journal outlives the session. So uvicorn's lines pass through a filter on
+   the log record that cuts every query string off the target, whatever its
+   parameters are called. It edits no request, which is what #115 objected to,
+   and its dependency on uvicorn's record shape is checked against a real
+   uvicorn in the live tier rather than assumed.
 4. **Root is a hard boundary.** Every path is resolved with `Path.resolve()` and
    confirmed to be a direct child of the configured root before any process is
    spawned or any directory created. Folder names are validated against an
@@ -845,7 +854,11 @@ The canvas linked in section 1 is the reference. The decisions it encodes:
   kill finds the decision here rather than re-arguing it.
 - **The timeout screen states the risk before offering the kill**, because that
   is the moment the user is most likely to reach for it and least likely to have
-  thought about uncommitted work.
+  thought about uncommitted work. The one configured exception is
+  `stop_policy = "end_anyway"` (#239): a wait that runs out on a prompt is
+  killed without this screen, so the risk is stated earlier instead: on the
+  Stop confirm and through the whole wait, and in the startup log line
+  naming the policy.
 - **The token screen states the consequence plainly**, in the words a person
   would use, not in security jargon.
 - **Dark theme is a first class requirement**, not a later addition.
