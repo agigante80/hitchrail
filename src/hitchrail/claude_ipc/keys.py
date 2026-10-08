@@ -11,6 +11,7 @@ import logging
 from collections.abc import Callable
 from typing import Protocol
 
+from hitchrail.claude_ipc.exit_menu import exit_menu_appeared
 from hitchrail.claude_ipc.screen import awaits_answer, input_is_clear, queued_message
 
 logger = logging.getLogger(__name__)
@@ -174,7 +175,8 @@ def request_stop(pane: Pane, project: str, settle: Callable[[float], None]) -> N
     than that nothing was, because keys have already gone out by then and
     saying otherwise is the untruth #89 exists to remove, one layer down.
 
-    The second checkpoint guards whatever `Escape` did.
+    The second checkpoint guards whatever `Escape` did. After the exit, one
+    `Enter` answers the background work menu, and nothing else (#453).
 
     **The second check is not "did the pane change".** That was the agreed
     sequence on #89 and it cannot work: an idle agent has nothing to interrupt,
@@ -222,6 +224,11 @@ def request_stop(pane: Pane, project: str, settle: Callable[[float], None]) -> N
     )
     pane.send_keys(project, *quit_keys)
     logger.info("stop %s: box still clear, sent %s", project, " ".join(quit_keys))
+    # #453, reversing #88's line for this one menu; `exit_menu` says why. A
+    # miss presses nothing, which is the behaviour before it.
+    if exit_menu_appeared(lambda: pane.capture_pane(project, escapes=True), wait):
+        pane.send_keys(project, "Enter")
+        logger.info("stop %s: the exit asked about background work, sent Enter", project)
 
 
 def request_wrap_up(

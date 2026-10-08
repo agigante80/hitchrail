@@ -1422,6 +1422,10 @@ async function showTimedOut(project) {
     // Fails closed if the pane cannot be read: a note saying so, never an
     // empty box that reads as "the agent is asking nothing".
     const extra = await paneView(current);
+    // The await is a window. Under `end_anyway` the server kills right after
+    // the flag, and the stream's close for a row leaving `running` can run
+    // before this dialog exists, which then opened over a killed session.
+    if (state.projects.find((p) => p.name === project.name)?.state !== "running") return;
     showDialog({
       title: `${project.name} is waiting for you`,
       body:

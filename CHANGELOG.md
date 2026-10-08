@@ -32,6 +32,22 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+### Changed
+
+- Stop ends a session that has background work running (a Monitor, a
+  background shell or agent) in one tap. Claude Code answers `/exit` there
+  with a menu, and the stop used to wait out `stop_timeout` and then ask you
+  to press a key; it now chooses "Exit and stop tasks" when that is the
+  selected option as the menu appears. Any other menu, or this one worded
+  or ordered differently, is left for you as before, and "Move to background
+  and exit" is never chosen (#453).
+
+### Fixed
+
+- With `stop_policy = "end_anyway"`, the "is waiting for you" dialog could
+  open over a session the server had just ended, showing a pane that could
+  not be read. It now opens only while the session is still running.
+
 ## 0.13.0 - 2026-10-08
 
 One deployment has something to do: a loopback bind behind an https proxy

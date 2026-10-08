@@ -207,6 +207,13 @@ while True:
 # The bright row is the modal's selected entry: prompt ornament, no NBSP, a
 # colour rather than the dim placeholder, which is exactly what makes it read
 # as "somebody typed here" to `input_is_clear`.
+#
+# **"Stay" is the selected row, on purpose (#453).** Since then the stop
+# answers the real menu, whose selected row reads "Exit and stop tasks", so a
+# shim drawing that row would be answered and this would test nothing of
+# #101 or #239. A selection the stop does not recognise is their case now: the
+# fallback, where nothing is pressed and a person is asked. EXIT_MENU_BODY is
+# the menu as captured.
 PROMPTS_AFTER_STOP_BODY = """
 print("\\x1b[39m\\u276f\\u00a0                     ", flush=True)
 while True:
@@ -216,9 +223,39 @@ while True:
         continue
     # Anything sent at it turns into a question rather than an exit.
     print("Background work is running", flush=True)
-    print("\\x1b[39m\\u276f\\x1b[38;5;153m1. Exit and stop tasks", flush=True)
+    print("\\x1b[39m\\u276f\\x1b[38;5;153m1. Stay", flush=True)
+    print("   2. Exit and stop tasks", flush=True)
     while True:
         time.sleep(0.2)
+"""
+
+# #453. The menu `/exit` raises while background work runs, as captured on
+# 2026-10-08 with "Exit and stop tasks" preselected, and an `Enter` takes it:
+# the agent exits. Any other line is ignored, as the real menu ignores typing.
+# The `/exit` arrives as a line with the Escape's 0x1b at its head, for the
+# reason SHIM_BODY gives; the `Enter` arrives as an empty line.
+EXIT_MENU_BODY = """
+print("\\x1b[39m\\u276f\\u00a0                     ", flush=True)
+asked = False
+while True:
+    line = sys.stdin.readline()
+    if line == "":
+        time.sleep(0.2)
+        continue
+    line = line.rsplit("\\x1b", 1)[-1].strip()
+    if asked and line == "":
+        print("hitchrail-shim: exiting and stopping tasks", flush=True)
+        sys.exit(0)
+    if not asked and line == "/exit":
+        asked = True
+        print(" Background work is running", flush=True)
+        print(" The following will stop when you exit:", flush=True)
+        print("   monitor \\u00b7 fixture", flush=True)
+        row = "\\x1b[39m \\x1b[38;5;153m\\u276f\\x1b[39m \\x1b[38;5;153m"
+        print(row + "1. Exit and stop tasks", flush=True)
+        print("   2. Move to background and exit", flush=True)
+        print("   3. Stay", flush=True)
+        print(" Enter to confirm \\u00b7 Esc to cancel", flush=True)
 """
 
 # Paints a modal straight away and sits on it, for #100. The head above has
@@ -572,6 +609,7 @@ class Harness:
         ignores_sigterm: bool = False,
         box_will_not_clear: bool = False,
         prompts_after_stop: bool = False,
+        exit_menu_after_stop: bool = False,
         agent_exits_immediately: bool = False,
         agent_shows_a_modal: bool = False,
         token: str | None = None,
@@ -634,6 +672,8 @@ class Harness:
             body = UNCLEARABLE_BOX_BODY
         if prompts_after_stop:
             body = PROMPTS_AFTER_STOP_BODY
+        if exit_menu_after_stop:
+            body = EXIT_MENU_BODY
         if agent_shows_a_modal:
             body = STUCK_BODY
         if wrap_up_takes is not None:

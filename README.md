@@ -582,17 +582,24 @@ and still interrupts.
 
 ### When a stop ends on a question
 
-Asked to exit with background work running, the agent can answer with a
-question instead, and by default Hitchrail reports that when `stop_timeout`
-runs out and leaves the choice to you. If you have already decided the
-answer for every such stop, say so ahead of time:
+Asked to exit with background work running, Claude Code asks whether to
+stop that work. You tapped Stop, so Hitchrail answers "Exit and stop tasks"
+when that option is the one selected as the menu appears, and the session
+ends on the one tap.
+It never chooses to move the work to the background, which would leave an
+agent running with no session to reach it.
+
+Any other question, or that menu worded or ordered differently, is left
+alone: by default Hitchrail reports it when `stop_timeout` runs out and leaves
+the choice to you. If you have already decided the answer for every such
+stop, say so ahead of time:
 
 ```toml
 stop_policy = "end_anyway"   # default "ask"; also --stop-policy
 ```
 
 Then a stop that runs out of time while the agent's screen shows a question
-is killed, as the Kill button would. Nothing is ever typed into the
+is killed, as the Kill button would. Nothing is typed into that
 question, a stop that is merely slow is never killed, and the confirm and
 wait dialogs say what will happen before it does. It can also be chosen on
 the settings page, which says under its Save what the choice does. Set by the

@@ -356,8 +356,13 @@ class Engine:
             # marker survives a stop that WORKED, and `expire_stops` reports it
             # as a timeout thirty seconds later, telling the user their agent
             # would not stop when it had already gone.
+            # Not while its keys are still going out (#453): `request_stop`
+            # looks for the exit menu after the agent may already have gone,
+            # and the stop's own `get()` reconciles once it returns, so the
+            # log reads "exit requested" before "exited after".
             with self._stopping_guard:
-                gone = self._stopping.pop(name, None)
+                held = self._stopping.get(name)
+                gone = None if held is None or held.typing else self._stopping.pop(name)
             # Only the call that removed the marker says so, since two
             # listings can both see STOPPED and race to this line.
             if gone is not None:
