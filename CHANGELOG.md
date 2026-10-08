@@ -32,6 +32,26 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+Nothing to do on upgrade, unless a script reads the plugin update's record or
+the output of `hitchrail update-plugins`: see Changed.
+
+### Changed
+
+- The plugin update says which plugins actually moved. `updated` used to mean
+  only that the agent's update exited zero, which it also does for a plugin
+  that was already current, so a run could report 16 updated when three
+  versions changed. A plugin that was already current is now `current`, and
+  one that moved is `updated` with its versions, shown as `0.12.9 to 0.15.0`.
+  The record gains `current` in `counts`, and `from_version` and `to_version`
+  on each outcome; `hitchrail update-plugins` prints a `current` count between
+  `updated` and `failed`. If the second reading of the plugin list fails, the
+  result is what it was before (#311).
+- Identical skipped rows are one line. A plugin installed locally in six
+  projects used to be six rows of the same words, with nothing to tell them
+  apart; the page and `hitchrail update-plugins` now show it once, with how
+  many times the agent listed it. The record is unchanged: one outcome per
+  row the agent listed, and the counts cover them all (#312).
+
 ## 0.14.0 - 2026-10-08
 
 Nothing to do on upgrade. One behaviour changes: Stop now answers one

@@ -111,13 +111,21 @@ def test_a_run_is_recorded_and_published_as_each_plugin_finishes() -> None:
     thread.join(5)
     final = plugin_runs.snapshot()
     assert final["state"] == "done"
-    assert final["counts"] == {"updated": 1, "failed": 0, "skipped": 1, "abandoned": 0}
+    assert final["counts"] == {
+        "updated": 1,
+        "current": 0,
+        "failed": 0,
+        "skipped": 1,
+        "abandoned": 0,
+    }
     assert final["outcomes"][1] == {
         "plugin": "adapt@kit",
         "scope": "local",
         "result": "skipped",
         "detail": None,
         "approved_command": None,
+        "from_version": None,
+        "to_version": None,
     }
     # One event on start, one per outcome, one at the end, each the whole
     # record, so a page renders every event the same way it renders the GET.
@@ -128,6 +136,30 @@ def test_a_run_is_recorded_and_published_as_each_plugin_finishes() -> None:
         "done",
     ]
     assert {e["kind"] for e in published.events} == {EVENT_KIND}
+
+
+def test_the_returned_outcomes_are_the_final_record() -> None:
+    """#311. What is reported as it happens is provisional; the list the
+    operation returns, after the second listing, is what the finished record
+    holds and what `counts` counts."""
+    published = Published()
+    plugin_runs = runs(published)
+
+    def operation(report: Report) -> list[PluginOutcome]:
+        report(outcome("a@m"))
+        report(outcome("b@m"))
+        return [
+            PluginOutcome("a@m", "user", "updated", from_version="1.0.0", to_version="2.0.0"),
+            PluginOutcome("b@m", "user", "current"),
+        ]
+
+    plugin_runs.start(operation).join(5)
+    final = plugin_runs.snapshot()
+    assert [o["result"] for o in final["outcomes"]] == ["updated", "current"]
+    assert final["outcomes"][0]["from_version"] == "1.0.0"
+    assert final["outcomes"][0]["to_version"] == "2.0.0"
+    assert final["counts"] is not None
+    assert (final["counts"]["updated"], final["counts"]["current"]) == (1, 1)
 
 
 def test_a_second_start_while_one_runs_is_refused_and_changes_nothing() -> None:
