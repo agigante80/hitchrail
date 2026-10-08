@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
-import re
 import time
 
 import pytest
@@ -204,38 +203,58 @@ async def test_kill_appears_once_the_wait_is_under_way_and_stays(
     kill = dialog.get_by_role("button", name="Do not wait, kill it now")
     await expect(kill).to_be_visible()
 
-    # **Watched for the WHOLE wait, and bounded by an EVENT rather than a
-    # clock.** The claim is that the control does not appear and then vanish, so
-    # two samples with a guess between them is the wrong shape: it can miss a
-    # gap either side. This polls until the wait actually ends, which is the
-    # timeout screen arriving, and fails on the first frame the control is gone.
+    # **Watched for the WHOLE wait, from inside the page, on every change.**
+    # The claim is that the control does not appear and then vanish. Polling it
+    # from here took two round trips (is the wait over, then is the control
+    # there), and on a loaded machine the dialog flipped to its ending BETWEEN
+    # them: the control is meant to go at the end, so the second read failed a
+    # page that was correct (#435, reproduced 1 in 14 with the test and six busy
+    # loops pinned to one core; the dialog text at the failure was "No answer
+    # from"). A MutationObserver reads the dialog in the same task as each
+    # change to it, so no frame goes unexamined and none can be misread.
     #
     # **A wait has three ends, and this watches until any of them.** "No
     # answer from" is the ordinary one. "Lost track of" is #81's: a listing
-    # that could not be read at the deadline, which on a loaded machine is a
-    # tmux call timing out, and the control then goes deliberately, because
-    # offering a kill on a reading that failed is the thing #81 forbids. It
-    # failed here twice in full runs on a loaded box before that was written
-    # down. "is waiting for you" is #101's, unreachable for this shim, named
-    # for completeness.
-    ended = dialog.get_by_text(re.compile("No answer from|Lost track of|is waiting for you"))
-    watched = 0
-    while not await ended.is_visible():
-        assert await kill.is_visible(), (
-            f"the kill control vanished {watched * 100}ms into the wait, so "
-            f"somebody reaching for it finds it gone"
-        )
-        watched += 1
-        await page.wait_for_timeout(100)
+    # that could not be read at the deadline, and the control then goes
+    # deliberately, because offering a kill on a reading that failed is the
+    # thing #81 forbids. "is waiting for you" is #101's, unreachable for this
+    # shim, named for completeness.
+    outcome = await page.evaluate(
+        """() => new Promise((resolve) => {
+            const dialog = document.querySelector("[data-dialog]");
+            const ending = /No answer from|Lost track of|is waiting for you/;
+            const hasKill = () => [...dialog.querySelectorAll("button")].some(
+                (b) => b.textContent.trim() === "Do not wait, kill it now");
+            const began = performance.now();
+            let looks = 0;
+            let startedWaiting = null;
+            const look = () => {
+                looks += 1;
+                const over = ending.test(dialog.textContent);
+                if (startedWaiting === null) startedWaiting = !over && hasKill();
+                if (over || !hasKill()) {
+                    observer.disconnect();
+                    resolve({ over, startedWaiting, looks,
+                             ms: performance.now() - began,
+                             text: dialog.textContent });
+                }
+            };
+            const observer = new MutationObserver(look);
+            observer.observe(dialog, { childList: true, subtree: true, characterData: true });
+            look();
+        })"""
+    )
 
-    # **The loop must have watched something.** If the timeout screen were
-    # already up on the first check this would pass having asserted nothing,
-    # which is the vacuous-guard shape this phase exists to remove. The patience
-    # is 3000ms, so a healthy run samples the control about thirty times; ten is
-    # a floor that a slow machine still clears.
-    assert watched >= 10, (
-        f"the wait ended after only {watched} samples, so the control was barely "
-        f"observed and this test proves close to nothing"
+    # **The watch must have started inside the wait.** If the ending were
+    # already up on the first look this would pass having observed nothing,
+    # which is the vacuous-guard shape this phase exists to remove. This is a
+    # condition the page reports, not a sample count a slow machine can miss.
+    assert outcome["startedWaiting"], (
+        f"the watch began after the wait had ended, so it proved nothing: {outcome}"
+    )
+    assert outcome["over"], (
+        f"the kill control vanished {outcome['ms']:.0f}ms into the watch with the wait "
+        f"still under way, so somebody reaching for it finds it gone: {outcome['text']!r}"
     )
 
 
