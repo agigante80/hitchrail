@@ -1776,6 +1776,50 @@ def test_every_file_the_server_serves_exists() -> None:
     assert not missing, missing
 
 
+def test_every_web_file_is_served_so_the_wheel_ships_and_the_page_can_load_it() -> None:
+    """#68. The split made the page a graph of modules, and the browser asks
+    for each one by URL. A module that is on disk but not in `ASSETS` is
+    shipped in the wheel (the whole package directory is) and answered 404
+    when imported, which blanks the page and fails nowhere before that.
+
+    The disk is walked, not the map, so a file added without a route fails
+    here; and the imports are read out of the scripts, so a route that exists
+    for a file nothing imports is not mistaken for coverage.
+    """
+    web = pages.WEB
+    on_disk = {p.name for p in web.glob("*.js")}
+    routed = {name for name, _ in pages.ASSETS.values()}
+    assert on_disk, "no scripts were found in web/"
+    assert not on_disk - routed, f"scripts on disk with no route: {sorted(on_disk - routed)}"
+    for path, (filename, media_type) in pages.ASSETS.items():
+        if filename.endswith(".js"):
+            assert path == f"/{filename}", path
+            assert media_type.startswith("text/javascript"), path
+    for script in sorted(web.glob("*.js")):
+        for target in re.findall(r'from "(/[^"]+)"', script.read_text(encoding="utf-8")):
+            assert target in pages.ASSETS, (
+                f"{script.name} imports {target}, which is not served"
+            )
+    assert not {p for p in UNAUTHENTICATED_ASSETS if p.endswith(".js")}, (
+        "a script joined the assets served without a token"
+    )
+
+
+@pytest.mark.parametrize(
+    "path", sorted(p for p, (f, _) in pages.ASSETS.items() if f.endswith(".js"))
+)
+async def test_every_script_is_served_behind_the_token_with_a_script_type(
+    client: httpx.AsyncClient, path: str
+) -> None:
+    """The route-level half of the check above: each module answers 200 as
+    JavaScript with a token, so an `import` of it executes rather than being
+    refused by the browser's strict MIME check for module scripts."""
+    response = await client.get(path, headers=HEADERS)
+    assert response.status_code == 200, path
+    assert "javascript" in response.headers["content-type"], path
+    assert response.content, path
+
+
 async def test_every_page_and_asset_is_revalidated_rather_than_heuristically_cached(
     client: httpx.AsyncClient,
 ) -> None:

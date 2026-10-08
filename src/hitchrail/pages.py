@@ -22,16 +22,45 @@ WEB = Path(__file__).parent / "web"
 
 HTML = "text/html; charset=utf-8"
 WOFF2 = "font/woff2"
+JS = "text/javascript; charset=utf-8"
 
 # Fixed names, fixed types, no path parameter anywhere. A route that built a
 # path out of the request would make `/../../etc/passwd` reachable. This does
 # not choose: the mapping is this dict and nothing else can be asked for.
 ASSETS = {
     "/app.css": ("app.css", "text/css; charset=utf-8"),
-    "/app.js": ("app.js", "text/javascript; charset=utf-8"),
-    "/logs.js": ("logs.js", "text/javascript; charset=utf-8"),
-    "/settings.js": ("settings.js", "text/javascript; charset=utf-8"),
-    "/plugins.js": ("plugins.js", "text/javascript; charset=utf-8"),
+    "/app.js": ("app.js", JS),
+    # #68. `app.js` is the entry module and these are the modules it imports,
+    # one route each: the browser fetches `import "/theme.js"` as a request of
+    # its own, so a module missing from here is a blank page, not a build error.
+    "/actions.js": ("actions.js", JS),
+    "/answer.js": ("answer.js", JS),
+    "/api.js": ("api.js", JS),
+    "/chrome.js": ("chrome.js", JS),
+    "/dialogs.js": ("dialogs.js", JS),
+    "/dom.js": ("dom.js", JS),
+    "/filters.js": ("filters.js", JS),
+    "/format.js": ("format.js", JS),
+    "/list.js": ("list.js", JS),
+    "/listing.js": ("listing.js", JS),
+    "/log_drawer.js": ("log_drawer.js", JS),
+    "/new_folder.js": ("new_folder.js", JS),
+    "/patience.js": ("patience.js", JS),
+    "/refusal.js": ("refusal.js", JS),
+    "/roots.js": ("roots.js", JS),
+    "/row.js": ("row.js", JS),
+    "/search.js": ("search.js", JS),
+    "/session_link.js": ("session_link.js", JS),
+    "/start.js": ("start.js", JS),
+    "/state.js": ("state.js", JS),
+    "/stop.js": ("stop.js", JS),
+    "/stop_all.js": ("stop_all.js", JS),
+    "/stream.js": ("stream.js", JS),
+    "/theme.js": ("theme.js", JS),
+    "/wait.js": ("wait.js", JS),
+    "/logs.js": ("logs.js", JS),
+    "/settings.js": ("settings.js", JS),
+    "/plugins.js": ("plugins.js", JS),
     # #160. The mark, the tile a phone makes of it, and the manifest that
     # names the tile. Served without a token, the only assets that are: see
     # `security.UNAUTHENTICATED_ASSETS` for the argument.

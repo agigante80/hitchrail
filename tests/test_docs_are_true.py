@@ -476,7 +476,7 @@ def test_claude_md_states_the_middleware_order_the_code_uses(tmp_path: Path) -> 
 # it into a second document, which is how the `?kill=1` contradiction reached
 # seven files.
 _FEATURES = {
-    "live updates": SRC / "web" / "app.js",
+    "live updates": SRC / "web" / "stream.js",
     "the token screen": SRC / "web" / "grant.html",
     "dark theme": SRC / "web" / "app.css",
 }
@@ -1549,7 +1549,7 @@ def test_the_phone_doc_requires_both_allowlist_flags_for_a_proxy() -> None:
 
 
 def test_the_keypad_offers_exactly_the_keys_the_server_will_send() -> None:
-    """#204. `app.js` and `claude_ipc` name the same keys, or a button lies.
+    """#204. `answer.js` and `claude_ipc` name the same keys, or a button lies.
 
     Two lists rather than one because they are in two languages, and the copy
     in the browser is an AFFORDANCE while the copy on the server is the GUARD.
@@ -1558,13 +1558,13 @@ def test_the_keypad_offers_exactly_the_keys_the_server_will_send() -> None:
     nothing, and a key added only to the server is a widening nobody reviewed
     against the interface.
 
-    Reads the literal out of `app.js` as text, the way this module reads every
+    Reads the literal out of `answer.js` as text, the way this module reads every
     other cross-file claim, because parsing the module would need a JS runtime
     to assert something a regex can see.
     """
-    js = (SRC / "web" / "app.js").read_text(encoding="utf-8")
+    js = (SRC / "web" / "answer.js").read_text(encoding="utf-8")
     block = re.search(r"export const ANSWER_KEYS = \[(.*?)\];", js, re.DOTALL)
-    assert block, "app.js no longer declares ANSWER_KEYS where this test can read it"
+    assert block, "answer.js no longer declares ANSWER_KEYS where this test can read it"
     in_browser = set(re.findall(r'"([^"]+)"', block.group(1)))
     assert in_browser == set(claude_ipc.ANSWER_KEYS), (
         f"the keypad offers {sorted(in_browser)} and the server will send "
@@ -1581,7 +1581,7 @@ def test_no_free_text_field_reaches_the_answer_path() -> None:
     instruction the pane never offered, which is the product the roadmap
     defers, and it would arrive as a small, plausible diff.
     """
-    js = (SRC / "web" / "app.js").read_text(encoding="utf-8")
+    js = (SRC / "web" / "answer.js").read_text(encoding="utf-8")
     pad = re.search(r"function answerPad\(.*?\n}", js, re.DOTALL)
     assert pad, "answerPad is no longer where this test can read it"
     assert 'createElement("input")' not in pad.group(0), (
