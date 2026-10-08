@@ -57,13 +57,36 @@ Answer = subprocess.CompletedProcess[str] | BaseException
 
 
 class FakeAgent:
-    """Answers by argv. Unlisted calls succeed with no output."""
+    """Answers by argv. Unlisted calls succeed with no output.
 
-    def __init__(self, listing: object = (), **answers: Answer) -> None:
+    Like the real agent, a plugin whose update succeeds is listed at a newer
+    version afterwards (#311), unless it is named in `unmoved`; so a test
+    that does not care sees every update as one that moved. `second_listing`
+    replaces what the listing says once an update has been made."""
+
+    def __init__(
+        self,
+        listing: object = (),
+        **answers: Answer,
+    ) -> None:
         self.calls: list[tuple[list[str], float]] = []
         self.answers: dict[str, Answer] = dict(answers)
+        self.unmoved: tuple[str, ...] = ()
+        self.second_listing: Answer | None = None
+        self._rows: list[dict[str, object]] | None = (
+            None if isinstance(listing, str) else [dict(r) for r in listing]  # type: ignore[attr-defined]
+        )
+        self._moved: set[str] = set()
         text = listing if isinstance(listing, str) else json.dumps(list(listing))  # type: ignore[call-overload]
         self.answers.setdefault("list", done(stdout=text))
+
+    def unmoving(self, *plugins: str) -> FakeAgent:
+        self.unmoved = plugins
+        return self
+
+    def then_lists(self, answer: Answer) -> FakeAgent:
+        self.second_listing = answer
+        return self
 
     def __call__(self, argv: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
         self.calls.append((argv, timeout))
@@ -74,6 +97,19 @@ class FakeAgent:
         answer = self.answers.get(key, done())
         if isinstance(answer, BaseException):
             raise answer
+        if argv[2] == "update" and answer.returncode == 0 and argv[3] not in self.unmoved:
+            self._moved.add(argv[3])
+        if key == "list" and self._moved:
+            if self.second_listing is not None:
+                if isinstance(self.second_listing, BaseException):
+                    raise self.second_listing
+                return self.second_listing
+            if self._rows is not None:
+                moved = [
+                    {**r, "version": "2.0.0"} if r["id"] in self._moved else r
+                    for r in self._rows
+                ]
+                return done(stdout=json.dumps(moved))
         return answer
 
     @property
@@ -107,7 +143,7 @@ def results(outcomes: list[PluginOutcome]) -> list[tuple[str, str, str]]:
 def test_the_calls_are_argument_lists_in_order() -> None:
     agent = FakeAgent([row("superpowers@x")])
     run(agent)
-    assert agent.argvs == [REFRESH, LISTING, update_argv("superpowers@x")]
+    assert agent.argvs == [REFRESH, LISTING, update_argv("superpowers@x"), LISTING]
 
 
 def test_every_call_has_a_finite_timeout() -> None:
@@ -122,6 +158,87 @@ def test_the_binary_is_the_configured_one() -> None:
     agent = FakeAgent([row("a@m")])
     update_plugins("/opt/agent/bin/agent", run=agent, report=lambda _o: None)
     assert {argv[0] for argv in agent.argvs} == {"/opt/agent/bin/agent"}
+
+
+# -- which updates changed anything (#311) ------------------------------------
+
+
+def test_a_plugin_whose_version_moved_is_updated_and_the_rest_are_current() -> None:
+    agent = FakeAgent([row("a@m"), row("b@m"), row("c@m")]).unmoving("b@m", "c@m")
+    heard: list[PluginOutcome] = []
+    outcomes = run(agent, heard.append)
+    assert results(outcomes) == [
+        ("a@m", "user", "updated"),
+        ("b@m", "user", "current"),
+        ("c@m", "user", "current"),
+    ]
+    assert (outcomes[0].from_version, outcomes[0].to_version) == ("1.0.0", "2.0.0")
+    assert (outcomes[1].from_version, outcomes[1].to_version) == (None, None)
+    # What is reported as it happens cannot know yet, so it is the weaker claim.
+    assert [o.result for o in heard] == ["updated", "updated", "updated"]
+    assert all(o.from_version is None for o in heard)
+
+
+def test_the_second_listing_is_not_asked_for_when_nothing_was_updated() -> None:
+    agent = FakeAgent([row("a@m"), row("adapt@kit", "local")], **{"a@m": done(1)})
+    outcomes = run(agent)
+    assert [o.result for o in outcomes] == ["failed", "skipped"]
+    assert agent.argvs.count(LISTING) == 1
+
+
+@pytest.mark.parametrize(
+    "second",
+    [
+        done(stdout="not json"),
+        done(1, stderr="boom"),
+        subprocess.TimeoutExpired(["claude"], 60),
+        FileNotFoundError("agent gone"),
+        ipc_plugins.RunnerClosed(),
+    ],
+    ids=["unreadable", "non_zero", "timeout", "agent_gone", "runner_closed"],
+)
+def test_an_unreadable_second_listing_leaves_updated_as_it_was(
+    second: subprocess.CompletedProcess[str] | BaseException,
+) -> None:
+    agent = FakeAgent([row("a@m"), row("b@m")]).then_lists(second)
+    outcomes = run(agent)
+    assert results(outcomes) == [("a@m", "user", "updated"), ("b@m", "user", "updated")]
+    assert [(o.from_version, o.to_version) for o in outcomes] == [(None, None)] * 2
+
+
+def test_a_row_without_a_version_in_either_listing_stays_updated() -> None:
+    bare = {"id": "a@m", "scope": "user"}
+    agent = FakeAgent([bare, row("b@m")]).unmoving("b@m")
+    outcomes = run(agent)
+    assert results(outcomes) == [("a@m", "user", "updated"), ("b@m", "user", "current")]
+
+
+def test_a_plugin_missing_from_the_second_listing_stays_updated() -> None:
+    agent = FakeAgent([row("a@m")]).then_lists(done(stdout=json.dumps([row("z@m")])))
+    assert results(run(agent)) == [("a@m", "user", "updated")]
+
+
+def test_a_failed_update_is_never_reclassified() -> None:
+    agent = FakeAgent([row("a@m"), row("b@m")], **{"a@m": done(1, stderr="no")}).unmoving("b@m")
+    assert [o.result for o in run(agent)] == ["failed", "current"]
+
+
+def test_only_the_first_user_row_of_a_repeated_plugin_is_compared() -> None:
+    """A `local` row for the same id is not the one updated, so its version
+    must not be read as the plugin's."""
+    local = {**row("a@m", "local"), "version": "9.9.9"}
+    agent = FakeAgent([local, row("a@m")])
+    outcomes = run(agent)
+    assert results(outcomes) == [("a@m", "local", "skipped"), ("a@m", "user", "updated")]
+    assert (outcomes[1].from_version, outcomes[1].to_version) == ("1.0.0", "2.0.0")
+
+
+def test_a_version_is_vendor_text_and_is_shown_escaped() -> None:
+    hostile = {**row("a@m"), "version": "1.0\r\x1b[2K\n2.0"}
+    agent = FakeAgent([hostile])
+    (outcome,) = run(agent)
+    assert outcome.from_version is not None
+    assert not {"\r", "\n", "\x1b"} & set(outcome.from_version)
 
 
 # -- the ordinary run --------------------------------------------------------

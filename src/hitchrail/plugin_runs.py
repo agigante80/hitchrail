@@ -215,8 +215,9 @@ class PluginRuns:
         state: State = "failed"
         code: str | None = None
         message: str | None = None
+        final: list[PluginOutcome] | None = None
         try:
-            operation(self._report)
+            final = operation(self._report)
             state = "done"
         except PluginsFailed as exc:
             code, message = exc.code, str(exc)
@@ -225,6 +226,11 @@ class PluginRuns:
             code, message = "internal_error", _INTERNAL_ERROR_MESSAGE
         finally:
             with self._lock:
+                # The returned list is the final one (#311): the rows heard
+                # one by one were provisional, `updated` before the second
+                # listing said which versions moved.
+                if final is not None:
+                    self._outcomes = list(final)
                 self._state = state
                 self._code, self._message = code, message
                 self._finished_at = self._clock()

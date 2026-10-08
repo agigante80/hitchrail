@@ -875,6 +875,18 @@ def _serve(app: Starlette, config: Config, tls: ssl.SSLContext | None) -> int:
 UPDATE_PLUGINS = "update-plugins"
 
 
+def _outcome_line(outcome: claude_ipc.PluginOutcome) -> str:
+    notes = []
+    if outcome.from_version and outcome.to_version:
+        notes.append(f"{outcome.from_version} to {outcome.to_version}")
+    if outcome.detail:
+        notes.append(outcome.detail)
+    elif outcome.approved_command:
+        notes.append(f"approved: {outcome.approved_command}")
+    line = f"{outcome.result:<8} {outcome.plugin}"
+    return f"{line} ({'; '.join(notes)})" if notes else line
+
+
 def update_plugins_command(argv: list[str]) -> int:
     """`hitchrail update-plugins`: 0 when nothing failed, 1 when a plugin
     failed, 2 when the operation could not run (#124).
@@ -931,25 +943,31 @@ def update_plugins_command(argv: list[str]) -> int:
     # `preflight` leaves alone; either names the same executable.
     resolved = str(Path(resolved).resolve())
 
-    def show(outcome: claude_ipc.PluginOutcome) -> None:
-        note = outcome.detail or (
-            f"approved: {outcome.approved_command}" if outcome.approved_command else None
-        )
-        line = f"{outcome.result:<8} {outcome.plugin}"
-        print(f"{line} ({note})" if note else line, flush=True)
+    def progress(outcome: claude_ipc.PluginOutcome) -> None:
+        # Not a result: whether an update changed anything is only known
+        # after the last one (#311), so this says only that the run is alive,
+        # on stderr so stdout is the final account and nothing else.
+        if outcome.result != "skipped":
+            print(f"... {outcome.plugin}", file=sys.stderr, flush=True)
 
     try:
         outcomes = claude_ipc.update_plugins(
-            resolved, run=claude_ipc.plugin_runner(withhold=(TOKEN_ENV,)), report=show
+            resolved, run=claude_ipc.plugin_runner(withhold=(TOKEN_ENV,)), report=progress
         )
     except claude_ipc.PluginsFailed as exc:
         # The code first: it is the same word the route's record carries, so
         # a script or a person can match on it rather than on the prose.
         print(f"hitchrail: {exc.code}: {exc}", file=sys.stderr)
         return 2
-    counts = {r: sum(o.result == r for o in outcomes) for r in ("updated", "failed", "skipped")}
+    for outcome in outcomes:
+        print(_outcome_line(outcome))
+    counts = {
+        r: sum(o.result == r for o in outcomes)
+        for r in ("updated", "current", "failed", "skipped")
+    }
     print(
-        f"{counts['updated']} updated, {counts['failed']} failed, {counts['skipped']} skipped. "
+        f"{counts['updated']} updated, {counts['current']} current, "
+        f"{counts['failed']} failed, {counts['skipped']} skipped. "
         "An update applies when a session next starts: running sessions keep the old "
         "version until they are restarted."
     )

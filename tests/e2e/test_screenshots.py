@@ -374,7 +374,7 @@ async def test_capture_the_settings_page_after_a_plugin_update(
         shots_server.release_plugin(plugin)
     status = page.locator("[data-plugins-status]")
     await expect(status).to_have_text(
-        "3 updated, 0 failed, 0 left alone. "
+        "3 updated, 0 current, 0 failed, 0 left alone. "
         "The running session keeps the old versions until restarted."
     )
     await _shoot(page, "phone-settings-plugins", page.locator("[data-plugins]"))

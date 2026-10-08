@@ -1172,13 +1172,25 @@ def test_update_plugins_reports_each_plugin_and_exits_zero(
     assert agent.updated == ["a@m", "b@m"]
     lines = out.splitlines()
     assert lines[:3] == [
-        "updated  a@m",
+        "updated  a@m (1.0.0 to 2.0.0)",
         "skipped  adapt@kit (local scope is not updated)",
-        "updated  b@m",
+        "updated  b@m (1.0.0 to 2.0.0)",
     ]
-    assert "2 updated, 0 failed, 1 skipped" in out
+    assert "2 updated, 0 current, 0 failed, 1 skipped" in out
     # The vendor's own words: an update applies at the next start.
     assert "restart" in out
+
+
+def test_update_plugins_says_which_moved_and_which_were_already_current(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#311."""
+    agent = FakeAgent([row("a@m"), row("b@m")]).unmoving("b@m")
+    code, _ = _update(monkeypatch, agent)
+    out = capsys.readouterr().out
+    assert code == 0
+    assert out.splitlines()[:2] == ["updated  a@m (1.0.0 to 2.0.0)", "current  b@m"]
+    assert "1 updated, 1 current, 0 failed, 0 skipped" in out
 
 
 def test_update_plugins_needs_no_root_and_no_config_file(
@@ -1197,7 +1209,10 @@ def test_update_plugins_shows_what_y_approved(
     agent = FakeAgent([row("a@m")], **{"a@m": done(0, stdout=line)})
     code, _ = _update(monkeypatch, agent)
     assert code == 0
-    assert "updated  a@m (approved: curl -s https://x/i)" in capsys.readouterr().out
+    assert (
+        "updated  a@m (1.0.0 to 2.0.0; approved: curl -s https://x/i)"
+        in capsys.readouterr().out
+    )
 
 
 def test_update_plugins_exits_one_when_a_plugin_failed(
@@ -1208,8 +1223,8 @@ def test_update_plugins_exits_one_when_a_plugin_failed(
     out = capsys.readouterr().out
     assert code == 1
     assert "failed   a@m (exited 1: no network)" in out
-    assert "updated  b@m" in out
-    assert "1 updated, 1 failed, 0 skipped" in out
+    assert "updated  b@m (1.0.0 to 2.0.0)" in out
+    assert "1 updated, 0 current, 1 failed, 0 skipped" in out
 
 
 @pytest.mark.parametrize(
@@ -1293,7 +1308,7 @@ def test_update_plugins_reports_a_failed_plugin_not_a_traceback_on_invalid_utf8(
     captured = capsys.readouterr()
     assert code == 1
     # #367: "failed" alone matched the summary's own format at a count of 0.
-    assert "0 updated, 1 failed" in captured.out
+    assert "0 updated, 0 current, 1 failed" in captured.out
     assert "Traceback" not in captured.err
     assert "Traceback" not in captured.out
 

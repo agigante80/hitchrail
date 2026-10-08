@@ -65,6 +65,7 @@ function outcomeItem(outcome) {
   // row the listing named more than once), so the detail is shown rather than a
   // fixed scope-shaped sentence that would misname the second one.
   const lines = [];
+  if (outcome.from_version && outcome.to_version) lines.push(`${outcome.from_version} to ${outcome.to_version}`);
   if (outcome.detail) lines.push(outcome.detail);
   if (outcome.approved_command) lines.push(`approved: ${outcome.approved_command}`);
   for (const text of lines) {
@@ -100,7 +101,7 @@ function pluginStatus(record) {
   // #370: a run the server's shutdown cut short is still `done`, with its
   // remaining rows counted as never started rather than left out.
   const cut = c.abandoned ? `, ${c.abandoned} never started` : "";
-  let text = `${c.updated} updated, ${c.failed} failed, ${c.skipped} left alone${cut}.`;
+  let text = `${c.updated} updated, ${c.current} current, ${c.failed} failed, ${c.skipped} left alone${cut}.`;
   if (c.updated && runningSessions) {
     text += ` ${runningSessions === 1 ? "The running session keeps" : `The ${runningSessions} running sessions keep`} the old versions until restarted.`;
   }

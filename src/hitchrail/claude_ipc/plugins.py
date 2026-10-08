@@ -14,7 +14,7 @@ import signal
 import subprocess
 import threading
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
@@ -86,7 +86,7 @@ _CUT_HEAD = 160
 _ABANDONED_DETAIL = "never started: the server was shutting down"
 _SHUTTING_DOWN_MESSAGE = "the server was shutting down, so nothing was updated"
 
-PluginResult = Literal["updated", "failed", "skipped", "abandoned"]
+PluginResult = Literal["updated", "current", "failed", "skipped", "abandoned"]
 PluginFailure = Literal[
     "agent_missing", "marketplace_refresh_failed", "plugins_unreadable", "shutting_down"
 ]
@@ -103,6 +103,10 @@ class PluginOutcome:
     result: PluginResult
     detail: str | None = None
     approved_command: str | None = None
+    # Only on an `updated` row whose version the two listings both named and
+    # that moved (#311); the rest carry neither.
+    from_version: str | None = None
+    to_version: str | None = None
 
 
 class PluginsFailed(Exception):
@@ -376,9 +380,15 @@ def update_plugins(
     """Refresh the marketplaces, then update every `user` scope plugin once.
 
     Each outcome goes to `report` as it happens, and the whole list is
-    returned. `updated` means the vendor's update exited zero, which is also
-    what it does for a plugin that was already current: the vendor does not
-    say which, and a status this code cannot observe would be a guess. A
+    returned. The vendor's update exits zero for a plugin that was already
+    current and does not say so, so what `report` hears is a provisional
+    `updated`, and the RETURNED list is the final one (#311): a second listing,
+    taken after the last update, is compared with the first, and a row whose
+    version did not move becomes `current`, while one that did keeps `updated`
+    and gains `from_version` and `to_version`. A second listing that cannot be
+    read, or a row either listing gives no version for, leaves `updated` as it
+    was: the run did its work, and a guess at which plugins moved is worse than
+    the weaker claim. A
     disabled plugin is updated like any other; enabling is the operator's
     business, staleness is ours. One plugin failing does not stop the rest;
     `PluginsFailed` means the operation itself could not go on, and nothing
@@ -429,7 +439,7 @@ def update_plugins(
     outcomes: list[PluginOutcome] = []
     seen: set[str] = set()
     abandoned = False
-    for plugin, scope in rows:
+    for plugin, scope, _version in rows:
         # Scope and repetition first, abandonment after (#370): a row that
         # would never have been updated is `skipped` for its own reason
         # whether or not the server was shutting down, and "never started"
@@ -457,7 +467,53 @@ def update_plugins(
                 )
         outcomes.append(outcome)
         report(outcome)
+    if any(o.result == "updated" for o in outcomes):
+        return _classified(run, binary, outcomes, rows)
     return outcomes
+
+
+def _classified(
+    run: PluginRunner,
+    binary: str,
+    outcomes: list[PluginOutcome],
+    before: list[tuple[str, str, str | None]],
+) -> list[PluginOutcome]:
+    """`outcomes` with each `updated` split by whether its version moved (#311).
+
+    Every failure of the second listing returns `outcomes` untouched, a closed
+    runner and a missing agent included: the updates already happened, so
+    this call cannot be the reason the run fails.
+    """
+    try:
+        listing = _call(run, [binary, "plugin", "list", "--json"], _LISTING_TIMEOUT_S)
+    except (PluginsFailed, RunnerClosed):
+        return outcomes
+    if listing is None or listing.returncode != 0:
+        return outcomes
+    after = _read_listing(listing.stdout)
+    if after is None:
+        return outcomes
+    was = _user_versions(before)
+    now = _user_versions(after)
+    classified = []
+    for o in outcomes:
+        old, new = was.get(o.plugin), now.get(o.plugin)
+        if o.result != "updated" or old is None or new is None:
+            classified.append(o)
+        elif old == new:
+            classified.append(replace(o, result="current"))
+        else:
+            classified.append(replace(o, from_version=old, to_version=new))
+    return classified
+
+
+def _user_versions(rows: list[tuple[str, str, str | None]]) -> dict[str, str]:
+    """The first `user` row's version per id: the one row that is updated."""
+    versions: dict[str, str] = {}
+    for plugin, scope, version in rows:
+        if scope == _UPDATABLE_SCOPE and plugin not in versions and version is not None:
+            versions[plugin] = version
+    return versions
 
 
 def _call(
@@ -492,8 +548,10 @@ def _update_one(run: PluginRunner, binary: str, plugin: str) -> PluginOutcome:
     )
 
 
-def _read_listing(text: str) -> list[tuple[str, str]] | None:
-    """Every row as `(id, scope)`, or `None` if ANY row is not understood."""
+def _read_listing(text: str) -> list[tuple[str, str, str | None]] | None:
+    """Every row as `(id, scope, version)`, or `None` if ANY row is not
+    understood. A missing or non string version is `None`, not a refusal: it
+    is only ever shown, never put in an argv."""
     try:
         raw = json.loads(text)
     except (ValueError, RecursionError):
@@ -513,7 +571,10 @@ def _read_listing(text: str) -> list[tuple[str, str]] | None:
             return None
         if not (isinstance(scope, str) and _SCOPE.match(scope)):
             return None
-        rows.append((plugin, scope))
+        version = entry.get("version")
+        rows.append(
+            (plugin, scope, _shown(version) if isinstance(version, str) and version else None)
+        )
     return rows
 
 

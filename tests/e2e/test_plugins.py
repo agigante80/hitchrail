@@ -63,10 +63,36 @@ async def test_outcomes_arrive_one_at_a_time_then_a_summary(
     server.release_plugin("charlie@m")
     await expect(items).to_have_count(3)
     status = page.locator("[data-plugins-status]")
-    await expect(status).to_contain_text("3 updated, 0 failed, 0 left alone.")
+    await expect(status).to_contain_text("3 updated, 0 current, 0 failed, 0 left alone.")
     # A session is running, so the page says it keeps the old versions.
     await expect(status).to_contain_text("keeps the old versions until restarted")
     await expect(button).to_be_enabled()
+
+
+async def test_a_plugin_that_did_not_move_is_current_and_one_that_did_shows_its_versions(
+    page: Page, server: Harness
+) -> None:
+    """#311. The agent exits zero for a plugin that was already current, so
+    only a second listing can say which updates changed anything."""
+    server.seed_plugins(THREE)
+    server.seed()
+    await open_settings(page, server)
+    await page.locator("[data-plugins-update]").click()
+    server.release_plugin("alpha@m")
+    server.release_plugin("bravo@m", current=True)
+    server.release_plugin("charlie@m", current=True)
+    await expect(page.locator("[data-plugins-status]")).to_have_text(
+        "1 updated, 2 current, 0 failed, 0 left alone."
+    )
+    updated = page.locator('[data-plugins-list] li[data-result="updated"]')
+    await expect(updated).to_have_count(1)
+    await expect(updated).to_contain_text("alpha@m")
+    await expect(updated).to_contain_text("1.0.0 to 2.0.0")
+    current = page.locator('[data-plugins-list] li[data-result="current"]')
+    await expect(current).to_have_count(2)
+    await expect(current.nth(0)).not_to_contain_text("to 2.0.0")
+    await expect(current.nth(1)).not_to_contain_text("to 2.0.0")
+    await expect(page.locator("[data-plugins]")).to_have_attribute("data-state", "done")
 
 
 async def test_a_partial_failure_names_the_plugin_and_is_not_an_error(
@@ -80,7 +106,7 @@ async def test_a_partial_failure_names_the_plugin_and_is_not_an_error(
     server.release_plugin("bravo@m", fail=True)
     server.release_plugin("charlie@m")
     status = page.locator("[data-plugins-status]")
-    await expect(status).to_have_text("2 updated, 1 failed, 0 left alone.")
+    await expect(status).to_have_text("2 updated, 0 current, 1 failed, 0 left alone.")
     failed = page.locator('[data-plugins-list] li[data-result="failed"]')
     await expect(failed).to_have_count(1)
     await expect(failed).to_contain_text("bravo@m")
@@ -116,7 +142,7 @@ async def test_a_project_scoped_plugin_is_listed_and_left_alone(
     await page.locator("[data-plugins-update]").click()
     server.release_plugin("alpha@m")
     await expect(page.locator("[data-plugins-status]")).to_have_text(
-        "1 updated, 0 failed, 1 left alone."
+        "1 updated, 0 current, 0 failed, 1 left alone."
     )
     skipped = page.locator('[data-plugins-list] li[data-result="skipped"]')
     await expect(skipped).to_contain_text("kit@x")
@@ -145,7 +171,7 @@ async def test_a_page_opened_mid_run_shows_where_the_run_is(
     server.release_plugin("bravo@m")
     server.release_plugin("charlie@m")
     await expect(late.locator("[data-plugins-status]")).to_have_text(
-        "3 updated, 0 failed, 0 left alone."
+        "3 updated, 0 current, 0 failed, 0 left alone."
     )
 
 
@@ -159,7 +185,7 @@ async def test_the_section_holds_at_a_phone_width_with_long_vendor_text(
     await page.locator("[data-plugins-update]").click()
     server.release_plugin(long_id, fail=True)
     await expect(page.locator("[data-plugins-status]")).to_have_text(
-        "0 updated, 1 failed, 0 left alone."
+        "0 updated, 0 current, 1 failed, 0 left alone."
     )
     assert await page.evaluate(
         "() => document.documentElement.scrollWidth <= document.documentElement.clientWidth"
@@ -193,7 +219,7 @@ async def test_a_reconnect_mid_run_catches_up_on_what_it_missed(
 
     await page.unroute("**/api/events")
     await expect(page.locator("[data-plugins-status]")).to_have_text(
-        "3 updated, 0 failed, 0 left alone.", timeout=15_000
+        "3 updated, 0 current, 0 failed, 0 left alone.", timeout=15_000
     )
     await expect(page.locator("[data-plugins-update]")).to_be_enabled()
 
@@ -234,10 +260,10 @@ async def test_a_late_answer_never_paints_an_older_record_over_a_newer_one(
     for plugin in ("alpha@m", "bravo@m", "charlie@m"):
         server.release_plugin(plugin)
     status = page.locator("[data-plugins-status]")
-    await expect(status).to_have_text("3 updated, 0 failed, 0 left alone.")
+    await expect(status).to_have_text("3 updated, 0 current, 0 failed, 0 left alone.")
     # Past the held answer's delivery: it arrived, and it lost.
     await page.wait_for_timeout(3500)
-    await expect(status).to_have_text("3 updated, 0 failed, 0 left alone.")
+    await expect(status).to_have_text("3 updated, 0 current, 0 failed, 0 left alone.")
     await expect(page.locator("[data-plugins-update]")).to_be_enabled()
 
 
@@ -297,7 +323,7 @@ async def test_no_restart_notice_when_nothing_was_updated(page: Page, server: Ha
     server.reset_plugin_releases()
     await page.locator("[data-plugins-update]").click()
     server.release_plugin("alpha@m", fail=True)
-    await expect(status).to_have_text("0 updated, 1 failed, 0 left alone.")
+    await expect(status).to_have_text("0 updated, 0 current, 1 failed, 0 left alone.")
 
 
 async def test_a_run_that_fails_part_way_does_not_say_nothing_was_updated(
@@ -335,7 +361,7 @@ async def test_a_page_left_open_across_a_restart_follows_the_new_server(
         server.reset_plugin_releases()
         await page.locator("[data-plugins-update]").click()
         server.release_plugin("alpha@m")
-        await expect(status).to_have_text("1 updated, 0 failed, 0 left alone.")
+        await expect(status).to_have_text("1 updated, 0 current, 0 failed, 0 left alone.")
 
     server.restart()
     # The reconnect's GET is the new process's truth: nothing has run.
@@ -343,7 +369,7 @@ async def test_a_page_left_open_across_a_restart_follows_the_new_server(
     server.reset_plugin_releases()
     await page.locator("[data-plugins-update]").click()
     server.release_plugin("alpha@m")
-    await expect(status).to_have_text("1 updated, 0 failed, 0 left alone.")
+    await expect(status).to_have_text("1 updated, 0 current, 0 failed, 0 left alone.")
     await expect(page.locator("[data-plugins-update]")).to_be_enabled()
 
 
@@ -673,7 +699,9 @@ async def test_a_second_run_overtaking_during_the_project_count_wins(
     await expect(status).to_have_text("Refreshing the marketplaces.")
 
     server.release_plugin("alpha@m")
-    await expect(status).to_have_text("1 updated, 0 failed, 0 left alone.", timeout=15_000)
+    await expect(status).to_have_text(
+        "1 updated, 0 current, 0 failed, 0 left alone.", timeout=15_000
+    )
 
 
 async def test_an_older_same_epoch_record_painted_during_the_held_count_must_not_win(
@@ -759,7 +787,7 @@ async def test_an_older_same_epoch_record_painted_during_the_held_count_must_not
                 "approved_command": None,
             }
         ],
-        "counts": {"updated": 1, "failed": 0, "skipped": 0, "abandoned": 0},
+        "counts": {"updated": 1, "current": 0, "failed": 0, "skipped": 0, "abandoned": 0},
         "code": None,
         "message": None,
     }
@@ -831,7 +859,7 @@ async def test_an_older_same_epoch_record_painted_during_the_held_count_must_not
     # one and must win, painting over the older record that overtook it.
     count_route, count_response = held_count[0]
     await count_route.fulfill(response=count_response)
-    await expect(status).to_have_text("1 updated, 0 failed, 0 left alone.")
+    await expect(status).to_have_text("1 updated, 0 current, 0 failed, 0 left alone.")
     await expect(page.locator("[data-plugins-update]")).to_be_enabled()
 
 
@@ -894,7 +922,7 @@ async def test_visibility_regained_refreshes_a_run_the_stream_missed(
         "}"
     )
     await expect(page.locator("[data-plugins-status]")).to_have_text(
-        "1 updated, 0 failed, 0 left alone."
+        "1 updated, 0 current, 0 failed, 0 left alone."
     )
     await page.unroute("**/api/events")
 
@@ -979,7 +1007,7 @@ def _synthetic_record(
 # Any, not object: spread into `_synthetic_record`, whose keyword only
 # `boot` and `since_boot_us` mypy would otherwise say it might fill.
 _DONE_UPDATED_ONE: dict[str, Any] = {
-    "counts": {"updated": 1, "failed": 0, "skipped": 0, "abandoned": 0},
+    "counts": {"updated": 1, "current": 0, "failed": 0, "skipped": 0, "abandoned": 0},
     "outcomes": [
         {
             "plugin": "alpha@m",
@@ -1069,7 +1097,7 @@ async def test_a_first_load_done_record_still_wins_over_an_older_same_epoch_answ
     # the two, epoch unchanged since it started, and must win.
     count_route, count_response = held_count[0]
     await count_route.fulfill(response=count_response)
-    await expect(status).to_have_text("1 updated, 0 failed, 0 left alone.")
+    await expect(status).to_have_text("1 updated, 0 current, 0 failed, 0 left alone.")
     await expect(page.locator("[data-plugins-update]")).to_be_enabled()
 
 
@@ -1139,7 +1167,7 @@ async def test_a_reconnect_done_record_still_wins_over_an_older_answer_after_a_r
 
     count_route, count_response = held_count[0]
     await count_route.fulfill(response=count_response)
-    await expect(status).to_have_text("1 updated, 0 failed, 0 left alone.")
+    await expect(status).to_have_text("1 updated, 0 current, 0 failed, 0 left alone.")
     await expect(page.locator("[data-plugins-update]")).to_be_enabled()
 
 
@@ -1212,7 +1240,11 @@ async def test_a_late_record_of_an_older_process_never_paints_over_a_newer_one(
     await page.evaluate("() => { window.__plugins.loadPlugins(); }")
     await fulfill_next(
         _synthetic_record(
-            "e1", 5, "done", since_boot_us=1, counts={"updated": 0, "failed": 0, "skipped": 1}
+            "e1",
+            5,
+            "done",
+            since_boot_us=1,
+            counts={"updated": 0, "current": 0, "failed": 0, "skipped": 1},
         )
     )
     await expect(status).to_have_text("Refreshing the marketplaces.")
@@ -1242,7 +1274,7 @@ async def test_a_restart_during_a_page_load_leaves_the_strip_on_the_new_server(
     button = page.locator("[data-plugins-update]")
     await button.click()
     server.release_plugin("alpha@m")
-    await expect(status).to_have_text("1 updated, 0 failed, 0 left alone.")
+    await expect(status).to_have_text("1 updated, 0 current, 0 failed, 0 left alone.")
 
     held: list[Route] = []
 
@@ -1283,7 +1315,7 @@ async def test_a_restart_during_a_page_load_leaves_the_strip_on_the_new_server(
     await button.click()
     await expect(status).to_have_text("Refreshing the marketplaces.")
     server.release_plugin("alpha@m")
-    await expect(status).to_have_text("1 updated, 0 failed, 0 left alone.")
+    await expect(status).to_have_text("1 updated, 0 current, 0 failed, 0 left alone.")
     await expect(button).to_be_enabled()
 
 
@@ -1408,9 +1440,9 @@ async def test_a_run_cut_short_counts_what_never_started(page: Page, server: Har
                     "detail": "never started: the server was shutting down",
                 },
             ],
-            counts={"updated": 1, "failed": 0, "skipped": 0, "abandoned": 1},
+            counts={"updated": 1, "current": 0, "failed": 0, "skipped": 0, "abandoned": 1},
         ),
     )
     await expect(page.locator("[data-plugins-status]")).to_have_text(
-        "1 updated, 0 failed, 0 left alone, 1 never started."
+        "1 updated, 0 current, 0 failed, 0 left alone, 1 never started."
     )
