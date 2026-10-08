@@ -1252,6 +1252,26 @@ def test_update_plugins_exits_one_when_a_plugin_failed(
     assert "1 updated, 0 current, 1 failed, 0 skipped" in out
 
 
+def test_update_plugins_prints_the_rows_done_before_a_mid_run_failure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A run that fails part way owes every row it got to, then the failure.
+    The rows are the provisional kind: no second listing ran, so the first
+    plugin says `updated` without versions."""
+    agent = FakeAgent(
+        [row("a@m"), row("adapt@kit", "local"), row("b@m")],
+        **{"b@m": FileNotFoundError()},
+    )
+    code, _ = _update(monkeypatch, agent)
+    captured = capsys.readouterr()
+    assert code == 2
+    assert captured.out.splitlines() == [
+        "updated  a@m",
+        "skipped  adapt@kit (local scope is not updated)",
+    ]
+    assert "agent_missing:" in captured.err
+
+
 @pytest.mark.parametrize(
     ("agent", "code_word"),
     [

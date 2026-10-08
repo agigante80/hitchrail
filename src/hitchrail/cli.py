@@ -961,10 +961,15 @@ def update_plugins_command(argv: list[str]) -> int:
     # `preflight` leaves alone; either names the same executable.
     resolved = str(Path(resolved).resolve())
 
+    heard: list[claude_ipc.PluginOutcome] = []
+
     def progress(outcome: claude_ipc.PluginOutcome) -> None:
         # Not a result: whether an update changed anything is only known
         # after the last one (#311), so this says only that the run is alive,
-        # on stderr so stdout is the final account and nothing else.
+        # on stderr so stdout is the final account and nothing else. The rows
+        # are kept for the one run that never gets a final account: a failure
+        # part way still owes the person every row it got to.
+        heard.append(outcome)
         if outcome.result != "skipped":
             print(f"... {outcome.plugin}", file=sys.stderr, flush=True)
 
@@ -973,6 +978,11 @@ def update_plugins_command(argv: list[str]) -> int:
             resolved, run=claude_ipc.plugin_runner(withhold=(TOKEN_ENV,)), report=progress
         )
     except claude_ipc.PluginsFailed as exc:
+        # Provisional rows, with no second listing behind them: `updated`
+        # here may be a plugin that did not move, and says only that the
+        # update exited cleanly.
+        for outcome, times in _grouped(heard):
+            print(_outcome_line(outcome, times))
         # The code first: it is the same word the route's record carries, so
         # a script or a person can match on it rather than on the prose.
         print(f"hitchrail: {exc.code}: {exc}", file=sys.stderr)
