@@ -53,8 +53,10 @@ _COMMON = "frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
 API_CSP = f"default-src 'none'; {_COMMON}"
 
 # The app shell. Everything it loads is same origin: `/app.css`, `/app.js` and
-# six font routes, since #76 stopped fetching faces from Google. That is what
-# makes `'self'` sufficient and a policy worth having possible at all.
+# the modules it imports (#68, each a request of its own under `script-src
+# 'self'`), and six font routes, since #76 stopped fetching faces from Google.
+# That is what makes `'self'` sufficient and a policy worth having possible at
+# all.
 PAGE_CSP = (
     "default-src 'self'; script-src 'self'; style-src 'self'; "
     f"font-src 'self'; img-src 'self'; connect-src 'self'; object-src 'none'; {_COMMON}"
