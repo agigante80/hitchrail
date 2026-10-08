@@ -61,6 +61,13 @@ async def test_the_last_row_scrolls_clear_of_the_footer_under_a_filter(
     rows = page.locator("[data-project]")
     assert await rows.count() >= 5, "the filter left too few rows to need a scroll"
 
+    # The observer writes the taller footer's height a rendering step after the
+    # counter appears, so a scroll before it measures the old padding: CI's 3.11
+    # leg failed by exactly the counter's line on the 0.15.0 release PR.
+    await page.wait_for_function(
+        "() => getComputedStyle(document.documentElement).getPropertyValue('--footer-h') === "
+        "`${Math.ceil(document.querySelector('.footer').getBoundingClientRect().height)}px`"
+    )
     await page.evaluate("() => window.scrollTo(0, document.documentElement.scrollHeight)")
     last_bottom = await rows.last.evaluate("el => el.getBoundingClientRect().bottom")
     footer_top = await page.locator(".footer").evaluate("el => el.getBoundingClientRect().top")
