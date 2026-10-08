@@ -155,6 +155,18 @@ global rules say, and findings go to Backlog, not this milestone.
 - [x] **Task 202, #398.** The missed run refresh test: cause found and fixed,
       or quarantined with a ticket naming the cause. Never retried into green.
 
+### Batch 7: added 2026-10-08, after the build, tasks 203 and 204
+
+Andrea pulled both in on 2026-10-08, the one exception to "findings go to
+Backlog": each is in the direction this phase exists to close.
+
+- [ ] **Task 203, #435 (P1).** The stop dialog flake that failed twice under
+      load on 2026-10-07: reproduced, its cause named, fixed at the cause or
+      quarantined naming the ticket. Never retried into green.
+- [ ] **Task 204, #429.** `end_anyway` ends an agent only on an answer
+      prompt two looks agree on, never on `shows_input_box`'s transient false
+      answer during a redraw.
+
 ## Done looks like
 
 - [ ] Every task ticked, or marked MOVED OUT or NOT BUILT with an issue number
@@ -171,38 +183,113 @@ global rules say, and findings go to Backlog, not this milestone.
 
 ## Fails if
 
-Drafted by the agent on 2026-10-07, to be confirmed or rewritten by Andrea
-when the phase opens: it is the end of this phase and it failed badly; what
-happened?
+**Rewritten 2026-10-08 at Andrea's request**, after batches 1 to 6 were built
+overnight, replacing the agent's draft of 2026-10-07. The question is still the
+premortem's: it is the end of this phase and it failed badly; what happened?
+Each scenario says whether the build already met it, the rule that answers it,
+what that rule costs, and what to do next.
 
-**The split changed behaviour.** A patch point in a test stopped reaching the
-real function after the move, so a test passed against nothing. Rule: the
-guards key on the new path in a no-op commit first, and the mutants that the
-moved tests killed before are reapplied to the new paths.
+**1. The split changed behaviour.** A patch point stopped reaching the real
+function after `signals.py` moved out, so a test passed against nothing.
+- Status: not seen. 140633a keyed the guards on the new path first, 9d43ed0
+  moved the code, and the suite count did not move.
+- Rule: guards first in a no-op commit; the moved tests' mutants reapplied.
+- Pro: the move's diff proves one thing. Con: two commits and a mutation pass
+  for a change that adds nothing.
+- Suggestion: the same recipe for the `settings.py` split (#443), which is the
+  next file past its seam.
 
-**Three fixes to one marker undid each other.** #406, #407 and #419 were each
-built and reviewed alone, and the third reverted a branch the first had fixed,
-green because each test pinned only its own ticket. Rule: task 179 decides the
-marker's shape for all three, and each later task's test runs the earlier
-tasks' scenarios.
+**2. Three fixes to one marker undid each other.** #406, #407 and #419 each
+changed `StopMarker`, and the last reverted a branch the first had fixed.
+- Status: not seen, but close. The batch 2a review found a medium in the
+  interplay (a Kill failing during prompt typing stranded the marker), fixed in
+  7079aea; #431 and #432 are the lows the same seam left.
+- Rule: task 179 fixed the marker's shape for all three before any was built.
+- Pro: one design, reviewed once. Con: the shape was an agent's assumption
+  taken overnight (policy, typing, withdrawn), not a decision Andrea made.
+- Suggestion: Andrea reads the marker's fields in the report before the phase
+  closes; any change is cheaper now than after a release builds on it.
 
-**The kill by pid killed the wrong process.** Binding to a pid read too early
-let a reused pid be signalled. Rule: through the pidfd seam batch 1 extracts,
-never a bare pid, and the security auditor reviews task 181.
+**3. A kill nobody tapped reached the wrong process, or the wrong moment.**
+- Status: the pid half is met. #418 kills by the pid read at the look, through
+  a pidfd, and the security audit of task 181 passed. The moment half was not:
+  #429 found that `end_anyway` can end a working agent on a redraw misread.
+- Rule: never a bare pid; a kill decision on screen content needs two agreeing
+  looks (task 204).
+- Pro: the dangerous direction is closed at both ends. Con: a second look adds
+  a settle delay to every `end_anyway` expiry, and an agent that keeps
+  redrawing may never be ended, which is the safe failure.
+- Suggestion: if two looks are not enough on a real phone, `end_anyway` is
+  better narrowed than made cleverer.
 
-**The hardening never ended.** Thirty one lows produced forty more, each
-review round finding something in the last round's fix. Rule: review per
-batch, the global loop's bounds and trip wire, and what is left goes to
-Backlog. A batch still open when the rest are done closes the phase re-shaped.
+**4. A security fix covered only the shape that motivated it.** #388 removed
+the token from the access line for `/?token=` and nothing else.
+- Status: happened, and caught. The batch 6 review drove a real uvicorn and
+  found absolute form, `?x` and `x?y` targets still journalled the token; fixed
+  in 2d309ac, which also fails closed on an unknown record shape.
+- Rule: a redaction is tested against the inputs the transport can produce,
+  read from the installed source, not against the one in the ticket.
+- Pro: the second round found nothing. Con: the fail closed branch can hide a
+  real access line if uvicorn changes its record, which is the intended trade.
+- Suggestion: #440 (tracebacks) is the same question one layer down; it goes
+  before the next release that touches logging.
 
-**#391 broke somebody's forwarder silently.** An operator on a plain http
+**5. The flaky test hid a regression.** A stop dialog test was rerun until
+green and the release shipped on it.
+- Status: half happened. #398 was found and fixed at its cause (2b9c38d), but
+  a second flake, `test_kill_appears_once_the_wait_is_under_way_and_stays`,
+  failed twice under load and has no cause yet (#435).
+- Rule: a cause or a quarantine naming the ticket; a rerun is never the fix,
+  and a release does not ship over a red run.
+- Pro: the tier keeps meaning something. Con: a quarantine removes coverage of
+  the kill button until the cause is found.
+- Suggestion: task 203 before the next release, and capture the assertion
+  text the first time it fails: neither failure kept it.
+
+**6. develop was red, and nobody noticed for a commit.** An implementer ran
+the files it touched and broke a guard elsewhere.
+- Status: happened twice (d45adf3 to 929331f, 7475e33 to 202870a), each fixed
+  by the next commit, never pushed to `main`.
+- Rule: the guard subset (`-k "docs_are_true or size or guard or dashes or
+  structure"`) before every commit, the full suite before the last.
+- Pro: cheap, about a minute. Con: it is a convention an agent can skip.
+- Suggestion: a pre-commit hook running the guard subset would make it a gate.
+
+**7. #391 broke somebody's forwarder silently.** An operator on a plain http
 forwarder upgraded and their grant started failing with nothing to say why.
-Rule: the refusal names the origin, the startup block says the http origin is
-not derived and why, and the changelog says it under Changed.
+- Status: answered, with a twist. The refusal names the origin and the startup
+  block says it, but the batch 5 review found the startup line fired on the
+  guide's OWN https deployment and advised turning Secure off; f178084 silences
+  it there.
+- Rule: the refusal names the origin, the startup block says why, the
+  changelog says it under Changed.
+- Pro: a forwarder operator is told before the first failure. Con: an https
+  proxy and a plain forwarder on the same host now get no startup line, only
+  the named 403 (#439).
+- Suggestion: read the Changed entry in `CHANGELOG.md` as an operator would
+  before the release.
 
-**The flaky test hid a regression.** #398 was retried until green and the
-release ran on it. Rule: task 202 finds the cause or quarantines with a ticket;
-a retry is never the fix.
+**8. The hardening never ended.** Thirty one lows produced forty more.
+- Status: not seen. Seven batches of review loops, ten rounds, one round that
+  found a defect in a prior fix; the run stopped at its ticket cap of 12 and
+  filed nine more on 2026-10-08 (#435 to #443).
+- Rule: per batch reviews under the global loop's bounds and trip wire;
+  findings to Backlog.
+- Pro: the phase ended. Con: Backlog grew by about twenty tickets from one
+  phase, most of them lows.
+- Suggestion: the next phase that edits the stop path sweeps the stop path's
+  Backlog lows first, as this one did for Phase 19's.
+
+**9. The phase closed without the watch.** Every task ticked, the release out,
+and nobody looked at a phone.
+- Status: open. The "Done looks like" phone watch (two browsers, the same stop
+  phase; a reopened wait shows the real age) is not done, and Phase 19's own
+  watch is still pending.
+- Rule: a done phase needs its watch, not only its suite.
+- Pro: the e2e tier fakes the typing moment (#408); only a phone proves it.
+  Con: a release can reach PyPI before the watch, so the watch can find a
+  defect already shipped.
+- Suggestion: do Phase 19's watch and this one in one sitting, then close both.
 
 ## Out of scope
 
