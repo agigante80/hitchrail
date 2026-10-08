@@ -391,13 +391,15 @@ If your agent needs something outside those directories, add it to that line,
 and prefer a stable path over a version pinned one: a pinned one goes stale at
 the next upgrade and fails at the next boot rather than at the upgrade.
 
-**Settings, from the phone.** The footer's "settings" link shows what this
+**Settings, from the phone.** The gear in the bar shows what this
 instance is pointed at: every root, the bind, the allowlists, the agent, the
 prefix, and where each came from, as text. Three things can be changed there
-and they are the only three: a root already in the file can be hidden from the
-list and shown again, the wait before a stop is reported as unanswered, and
-what a stop that runs out of time on a question does (below). All three are
-kept in `~/.config/hitchrail/state.toml`, which is Hitchrail's own.
+for the server and they are the only three: a root already in the file can be
+hidden from the list and shown again, the wait before a stop is reported as
+unanswered, and what a stop that runs out of time on a question does (below).
+All three are kept in `~/.config/hitchrail/state.toml`, which is Hitchrail's
+own. The page's appearance (Light, Dark, or following the device) is set
+there too, but is kept by that browser and never sent to the server.
 Everything else is the perimeter and changes only in the config file or on
 the command line, on the machine.
 
@@ -624,11 +626,12 @@ hitchrail update-plugins                      # or --agent-binary /path/to/agent
 
 Refreshes the agent's marketplaces, then updates every plugin installed at
 `user` scope, and prints one line per plugin once the run ends (a plugin
-skipped the same way in several projects is one line, with the count). No server is started and no
-root is needed. Exit 0 when nothing failed, 1 when a plugin failed, 2 when
-the update could not run at all: the agent is missing, the marketplaces did
+skipped the same way in several projects is one line, with the count). No
+server is started and no root is needed. Exit 0 when nothing failed, 1 when
+a plugin failed, 2 when the update could not run at all: the agent is missing, the marketplaces did
 not refresh, or the list of installed plugins could not be understood, in
-which case nothing is updated rather than the part that could be read.
+which case nothing is updated rather than the part that could be read. Ctrl-C
+exits 130, after printing the rows it got to.
 
 - **Only `user` scope is updated.** A plugin installed for one project belongs
   to that project's folder, which the agent's list does not name, so it is

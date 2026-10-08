@@ -53,10 +53,28 @@ the output of `hitchrail update-plugins`: see Changed.
   row the agent listed, and the counts cover them all (#312).
 - `hitchrail update-plugins` prints its rows once the run ends, since
   whether a plugin moved is only known after the second reading of the list.
-  While it runs, stderr carries a `... <plugin>` line per update so a slow
-  plugin is visible; stdout is the final account and nothing else. A run
-  that fails partway, or that you interrupt with Ctrl-C, still prints the
-  rows it got to; an interrupt exits 130.
+  While it runs, stderr carries a `... <plugin>` line as each update
+  finishes, so a run that has stopped moving shows where it got to; stdout
+  is the final account and nothing else. A run that fails partway, or that
+  you interrupt with Ctrl-C, still prints the rows it got to, and there
+  `updated` means only that the update exited cleanly, not that the version
+  moved. An interrupt exits 130.
+- Settings is the gear in the bar rather than a link after the footer's
+  version, which a first visit missed (#320). The bar's button says "New
+  project", and the theme toggle beside it is an icon so the bar stays on one
+  line on a phone (#322).
+- The title in the bar is the way back to the list from settings and the
+  log page, with the mark before it (#324, #333).
+- Settings offers Light, Dark and System. The header toggle could store a
+  choice but never return to following the device (#323). The choice is kept
+  by the browser, as the toggle's always was.
+- A search that matches nothing offers to create a folder of that name, in
+  the same sheet as "New project", unless a tab or a root chip is hiding a
+  folder that already has it (#321). The search field has a clear control
+  (#451).
+- `/favicon.ico` is served without a token, as the mark already was, so the
+  401 a browser's unprompted request left in the log is gone. It is the same
+  drawing, readable GET and HEAD only (#325).
 
 ### Fixed
 
