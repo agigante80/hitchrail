@@ -10,10 +10,12 @@ import { refresh } from "/listing.js";
 import { showNewFolder } from "/new_folder.js";
 import { setStopPatience, setWrapUpPatience, stopTimeoutMs } from "/patience.js";
 import {
+  clearSearch,
   closeSuggestions,
   onSearchKey,
   renderSuggestions,
   resetActiveSuggestion,
+  syncClearButton,
 } from "/search.js";
 import { state } from "/state.js";
 import { confirmStopAll } from "/stop_all.js";
@@ -45,9 +47,11 @@ function boot() {
     state.query = event.target.value;
     state.chosen = null;
     resetActiveSuggestion();
+    syncClearButton();
     renderList();
     renderSuggestions();
   });
+  $("[data-search-clear]")?.addEventListener("click", clearSearch);
   search?.addEventListener("keydown", onSearchKey);
   search?.addEventListener("focus", renderSuggestions);
   search?.addEventListener("blur", closeSuggestions);

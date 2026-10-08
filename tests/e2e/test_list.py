@@ -154,6 +154,43 @@ async def test_search_filters_and_says_so_when_nothing_matches(
     await expect(page.get_by_text("No folder here is called that.")).to_be_visible()
 
 
+@pytest.mark.parametrize("how", ["tap", "escape"])
+async def test_the_search_clear_control_empties_only_the_text(
+    page: Page, server: Harness, how: str
+) -> None:
+    """#451. A phone draws no clear button for a search field, so emptying it
+    meant holding backspace. At 360px, the control appears with text, is a
+    real 44px target, clears the field and nothing else, and leaves focus in
+    the field. The tab and the chip chosen first must still be chosen."""
+    await page.set_viewport_size({"width": 360, "height": 740})
+    server.seed(running=["vessel"], stopped=["koala", "media-sync"])
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(3)
+    await page.get_by_role("tab", name="Stopped").click()
+    box = page.get_by_role("combobox", name="Search folders")
+    clear = page.get_by_role("button", name="Clear search")
+    await expect(clear).to_be_hidden()
+
+    await box.fill("med")
+    await expect(clear).to_be_visible()
+    await expect(page.locator("[data-project]")).to_have_count(1)
+    size = await clear.bounding_box()
+    assert size is not None and size["width"] >= 44 and size["height"] >= 44, size
+
+    if how == "tap":
+        await clear.click()
+    else:
+        await box.press("Escape")  # the first Escape closes the suggestions
+        await box.press("Escape")
+    await expect(box).to_have_value("")
+    await expect(box).to_be_focused()
+    await expect(clear).to_be_hidden()
+    await expect(page.locator("[data-project]")).to_have_count(2)
+    await expect(page.get_by_role("tab", name="Stopped")).to_have_attribute(
+        "aria-selected", "true"
+    )
+
+
 async def test_the_tabs_filter_and_carry_their_own_counts(page: Page, server: Harness) -> None:
     """Three tabs from the canvas, each with a count."""
     server.seed(running=["vessel"], stopped=["koala", "media-sync"])

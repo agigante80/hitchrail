@@ -344,7 +344,18 @@ button[disabled] { color: var(--muted-3); cursor: not-allowed; }
      not zoom back. The answer is this, not `maximum-scale=1`, which would take
      pinch zoom from the people who need it. */
   font-size: max(16px, 1em);
+  /* Room for the clear control (#451), so typed text never runs under it. */
+  padding-right: var(--touch);
 }
+/* Desktop Chrome draws its own cancel button in a search field; this one is
+   there on a phone too, so hiding the native one keeps it from showing two. */
+.search input::-webkit-search-cancel-button { appearance: none; display: none; }
+.search-clear {
+  position: absolute; right: 16px; top: 12px;
+  padding: 0; border: 0; background: transparent; color: var(--muted);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.search-clear[hidden] { display: none; }
 
 /* -- rows ---------------------------------------------------------------
    Row ASYMMETRY is the whole mobile argument, per the canvas annotation. A
