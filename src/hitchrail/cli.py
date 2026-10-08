@@ -875,12 +875,30 @@ def _serve(app: Starlette, config: Config, tls: ssl.SSLContext | None) -> int:
 UPDATE_PLUGINS = "update-plugins"
 
 
-def _outcome_line(outcome: claude_ipc.PluginOutcome) -> str:
+def _grouped(
+    outcomes: list[claude_ipc.PluginOutcome],
+) -> list[tuple[claude_ipc.PluginOutcome, int]]:
+    """Identical skipped rows as one, with how many (#312), at the first one's
+    place. Only `skipped` collapses: a `failed` or `updated` row is never
+    noise, and the record keeps every row."""
+    counted: dict[tuple[str, str, str], int] = {}
+    order: list[claude_ipc.PluginOutcome] = []
+    for o in outcomes:
+        key = (o.plugin, o.scope, o.result)
+        if o.result == "skipped" and key in counted:
+            counted[key] += 1
+            continue
+        counted[key] = 1
+        order.append(o)
+    return [(o, counted[(o.plugin, o.scope, o.result)]) for o in order]
+
+
+def _outcome_line(outcome: claude_ipc.PluginOutcome, times: int = 1) -> str:
     notes = []
     if outcome.from_version and outcome.to_version:
         notes.append(f"{outcome.from_version} to {outcome.to_version}")
     if outcome.detail:
-        notes.append(outcome.detail)
+        notes.append(f"{outcome.detail}, listed {times} times" if times > 1 else outcome.detail)
     elif outcome.approved_command:
         notes.append(f"approved: {outcome.approved_command}")
     line = f"{outcome.result:<8} {outcome.plugin}"
@@ -959,8 +977,8 @@ def update_plugins_command(argv: list[str]) -> int:
         # a script or a person can match on it rather than on the prose.
         print(f"hitchrail: {exc.code}: {exc}", file=sys.stderr)
         return 2
-    for outcome in outcomes:
-        print(_outcome_line(outcome))
+    for outcome, times in _grouped(outcomes):
+        print(_outcome_line(outcome, times))
     counts = {
         r: sum(o.result == r for o in outcomes)
         for r in ("updated", "current", "failed", "skipped")

@@ -1193,6 +1193,31 @@ def test_update_plugins_says_which_moved_and_which_were_already_current(
     assert "1 updated, 1 current, 0 failed, 0 skipped" in out
 
 
+def test_update_plugins_prints_identical_skipped_rows_once_with_a_count(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#312. Three `local` rows for one id, one for another, and a `user` one."""
+    agent = FakeAgent(
+        [
+            row("kit@x", "local"),
+            row("a@m"),
+            row("kit@x", "local"),
+            row("other@x", "local"),
+            row("kit@x", "local"),
+        ]
+    )
+    code, _ = _update(monkeypatch, agent)
+    out = capsys.readouterr().out
+    assert code == 0
+    assert out.splitlines()[:3] == [
+        "skipped  kit@x (local scope is not updated, listed 3 times)",
+        "updated  a@m (1.0.0 to 2.0.0)",
+        "skipped  other@x (local scope is not updated)",
+    ]
+    # The count is still every row the listing returned.
+    assert "1 updated, 0 current, 0 failed, 4 skipped" in out
+
+
 def test_update_plugins_needs_no_root_and_no_config_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

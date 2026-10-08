@@ -44,10 +44,33 @@ let arrivals = 0;
 let runningSessions = 0;
 let strip = { note: () => {}, keep: () => {}, settle: () => {} };
 
-function outcomeItem(outcome) {
+// #312. One plugin installed at `local` scope in six projects is six rows of
+// the same words, and the listing names no project to tell them apart, so
+// they collapse into one with a count. Only `skipped` collapses: a failed or
+// updated row is never noise. Presentation only: the record keeps one
+// outcome per listing row, and the status line counts those.
+function groupOutcomes(outcomes) {
+  const groups = new Map();
+  const order = [];
+  for (const outcome of outcomes) {
+    const key = JSON.stringify([outcome.plugin, outcome.scope, outcome.result]);
+    const seen = outcome.result === "skipped" ? groups.get(key) : undefined;
+    if (seen) {
+      seen.count += 1;
+      continue;
+    }
+    const group = { outcome, count: 1 };
+    if (outcome.result === "skipped") groups.set(key, group);
+    order.push(group);
+  }
+  return order;
+}
+
+function outcomeItem({ outcome, count }) {
   const item = document.createElement("li");
   item.className = "plugin-outcome";
   item.dataset.result = outcome.result;
+  if (count > 1) item.dataset.count = String(count);
   const head = document.createElement("span");
   head.className = "plugin-outcome-head";
   const result = document.createElement("span");
@@ -66,7 +89,7 @@ function outcomeItem(outcome) {
   // fixed scope-shaped sentence that would misname the second one.
   const lines = [];
   if (outcome.from_version && outcome.to_version) lines.push(`${outcome.from_version} to ${outcome.to_version}`);
-  if (outcome.detail) lines.push(outcome.detail);
+  if (outcome.detail) lines.push(count > 1 ? `${outcome.detail}, listed ${count} times` : outcome.detail);
   if (outcome.approved_command) lines.push(`approved: ${outcome.approved_command}`);
   for (const text of lines) {
     const line = document.createElement("span");
@@ -114,7 +137,7 @@ function renderPlugins(record) {
   section.dataset.seq = String(record.seq);
   $("[data-plugins-update]").disabled = record.state === "running";
   $("[data-plugins-status]").textContent = pluginStatus(record);
-  $("[data-plugins-list]").replaceChildren(...record.outcomes.map(outcomeItem));
+  $("[data-plugins-list]").replaceChildren(...groupOutcomes(record.outcomes).map(outcomeItem));
 }
 
 async function countRunning() {

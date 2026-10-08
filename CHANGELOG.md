@@ -46,6 +46,11 @@ the output of `hitchrail update-plugins`: see Changed.
   on each outcome; `hitchrail update-plugins` prints a `current` count between
   `updated` and `failed`. If the second reading of the plugin list fails, the
   result is what it was before (#311).
+- Identical skipped rows are one line. A plugin installed locally in six
+  projects used to be six rows of the same words, with nothing to tell them
+  apart; the page and `hitchrail update-plugins` now show it once, with how
+  many times the agent listed it. The record is unchanged: one outcome per
+  row the agent listed, and the counts cover them all (#312).
 
 ## 0.14.0 - 2026-10-08
 

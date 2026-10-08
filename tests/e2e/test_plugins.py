@@ -149,6 +149,37 @@ async def test_a_project_scoped_plugin_is_listed_and_left_alone(
     await expect(skipped).to_contain_text("local scope is not updated")
 
 
+async def test_identical_skipped_rows_collapse_into_one_with_a_count(
+    page: Page, server: Harness
+) -> None:
+    """#312. One plugin installed locally in three projects is three rows in
+    the listing, and nothing on any of them says which project. The page shows
+    one; the status line still counts every row the listing returned."""
+    server.seed_plugins(
+        [
+            {"id": "kit@x", "scope": "local"},
+            {"id": "alpha@m", "scope": "user"},
+            {"id": "kit@x", "scope": "local"},
+            {"id": "other@x", "scope": "local"},
+            {"id": "kit@x", "scope": "local"},
+        ]
+    )
+    server.seed()
+    await open_settings(page, server)
+    await page.locator("[data-plugins-update]").click()
+    server.release_plugin("alpha@m")
+    await expect(page.locator("[data-plugins-status]")).to_have_text(
+        "1 updated, 0 current, 0 failed, 4 left alone."
+    )
+    skipped = page.locator('[data-plugins-list] li[data-result="skipped"]')
+    await expect(skipped).to_have_count(2)
+    grouped = skipped.filter(has_text="kit@x")
+    await expect(grouped).to_have_count(1)
+    await expect(grouped).to_contain_text("local scope is not updated, listed 3 times")
+    alone = skipped.filter(has_text="other@x")
+    await expect(alone).not_to_contain_text("listed")
+
+
 async def test_a_page_opened_mid_run_shows_where_the_run_is(
     page: Page, server: Harness
 ) -> None:

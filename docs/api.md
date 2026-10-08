@@ -297,7 +297,10 @@ work, and which plugins moved is not guessed. A plugin at any scope other than `
 list does not name. A `user` scope plugin the listing names more than once is
 also `skipped`, with detail `listed more than once`, after the first is updated: the
 count then covers every row the listing returned, not only the ones that
-updated. `abandoned` means the server shut down mid run (#361): that row and
+updated. The record keeps one outcome per row, so identical `skipped` rows
+(one plugin installed locally in six projects) are six in `outcomes` and in
+`counts`; the page and `hitchrail update-plugins` show them as one line with
+the number of times it was listed (#312). `abandoned` means the server shut down mid run (#361): that row and
 every `user` scope row still waiting behind it in the listing never started,
 which is not the same claim as `failed`; a row at another scope, or a repeat,
 is still `skipped` for its own reason. A shutdown that lands DURING one of
