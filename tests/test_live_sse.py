@@ -332,6 +332,7 @@ async def test_a_plugin_run_is_a_named_event_and_a_session_is_not(tmp_path: Path
     assert all("kind" not in f for f in plugin_frames)  # type: ignore[operator]
     assert plugin_frames[-1]["counts"] == {  # type: ignore[index]
         "updated": 1,
+        "current": 0,
         "failed": 0,
         "skipped": 0,
         "abandoned": 0,

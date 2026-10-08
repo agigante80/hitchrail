@@ -22,8 +22,10 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # why the group is killed after a reap, with the kernel rule that
     # makes it safe, and why `kill()` clears the pid it takes. 575 for
     # #370: why scope is decided before abandonment. 578 for #401: an
-    # abandoned row is seen too, so its repeat is not a second one.
-    "claude_ipc/plugins.py": 578,
+    # abandoned row is seen too, so its repeat is not a second one. 639 for
+    # #311: the second listing that splits `updated` from `current`, and why
+    # every way it can fail leaves `updated` as it was.
+    "claude_ipc/plugins.py": 639,
     # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
     # `except` arm: the adapter can now decline to type, and the marker has
     # to come back the same way a vanished tmux takes it back.
