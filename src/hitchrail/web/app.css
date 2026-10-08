@@ -96,7 +96,9 @@ body {
   font-family: 'Karla', system-ui, -apple-system, sans-serif;
   font-size: 16px;
   line-height: 1.45;
-  padding-bottom: 96px;              /* clears the fixed footer */
+  /* `--footer-h` is the footer's real height, written by app.js. The 86px
+     fallback is the unfiltered footer, for the moment before the script runs. */
+  padding-bottom: calc(var(--footer-h, 86px) + 10px);
   -webkit-text-size-adjust: 100%;
 }
 
@@ -192,6 +194,9 @@ button, .btn {
   background: var(--surface);
   color: var(--ink);
   font: inherit;
+  /* Material 3's label large (#450): where both platforms put a control, a
+     step under the 16px body. That step is where a 360px row's room went. */
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -289,6 +294,9 @@ button[disabled] { color: var(--muted-3); cursor: not-allowed; }
 .tabs button {
   padding: 0 14px; border-radius: 999px; white-space: nowrap;
   color: var(--muted); font-weight: 600;
+  /* A flex item shrinks by default, so without this the strip squeezed every
+     pill to fit and `nowrap` ran the label out past its own border (#448). */
+  flex-shrink: 0;
 }
 .tabs button[aria-selected="true"] {
   background: var(--accent); border-color: var(--accent); color: #FFFDFA;
@@ -304,6 +312,7 @@ button[disabled] { color: var(--muted-3); cursor: not-allowed; }
 .chips button {
   padding: 0 14px; border-radius: 999px; white-space: nowrap;
   color: var(--muted); font-weight: 600;
+  flex-shrink: 0;
 }
 .chips button[aria-pressed="true"] {
   background: var(--ink); border-color: var(--ink); color: var(--surface);
@@ -331,12 +340,18 @@ button[disabled] { color: var(--muted-3); cursor: not-allowed; }
   width: 100%; min-height: var(--touch); padding: 0 14px;
   border: 1px solid var(--line); border-radius: var(--radius);
   background: var(--surface); color: var(--ink); font: inherit;
+  /* Never under 16px: iOS Safari zooms into a smaller input on focus and does
+     not zoom back. The answer is this, not `maximum-scale=1`, which would take
+     pinch zoom from the people who need it. */
+  font-size: max(16px, 1em);
 }
 
 /* -- rows ---------------------------------------------------------------
    Row ASYMMETRY is the whole mobile argument, per the canvas annotation. A
-   running row is tall because it carries three actions; a stopped row is one
-   line with one button, so the other forty five stay scannable with a thumb.
+   running row is tall because it carries three actions; a stopped row is two
+   short lines with one button (the name, then its chip, badge and Start), so
+   the other forty five stay scannable with a thumb. It was one line until the
+   phone showed that line crushing the name (#449).
    That is why the two shapes are separate rules rather than one rule with a
    modifier: making them converge is exactly the regression to prevent. */
 main { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
@@ -345,8 +360,14 @@ main { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
   background: var(--surface); border: 1px solid var(--line);
   border-radius: var(--radius); padding: 12px 14px;
 }
-.row-head { display: flex; align-items: center; gap: 10px; }
-.row-name { font-weight: 700; overflow-wrap: anywhere; }
+/* #449, and #179 before it. The name takes a whole line and everything else in
+   the head wraps onto the next, because the other items are `flex-shrink: 0`
+   and a name sharing their line is the only thing left to give: it went down
+   to two characters a line. Two short lines that read beat one that does not.
+   The stopped row stays the shorter of the two shapes: it has no actions line
+   of its own, its one control sits beside the badge. */
+.row-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.row-name { flex: 1 1 100%; font-weight: 700; overflow-wrap: anywhere; }
 .row-actions { display: flex; gap: 8px; flex-shrink: 0; margin-left: auto; }
 
 /* #122. Which root a row is in, shown only when there is more than one.
@@ -368,7 +389,6 @@ main { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
 .row[data-state="running"] .row-actions,
 .row[data-state="detached"] .row-actions,
 .row[data-state="stale"] .row-actions { margin-left: 0; }
-.row[data-state="stopped"] .row-head { min-height: var(--touch); }
 
 .meta { font-size: 13px; color: var(--muted-2); }
 
@@ -457,6 +477,9 @@ main { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
 
 /* -- desktop is the same data at a wider viewport, not a second interface */
 @media (min-width: 900px) {
+  /* Room for the one line again: the name shares it with its chip and badge. */
+  .row-head { flex-wrap: nowrap; }
+  .row-name { flex: 0 1 auto; }
   main { max-width: 1100px; margin: 0 auto; }
   .bar, .tabs, .chips, .search, .unsupported { max-width: 1100px; margin-inline: auto; }
   .row[data-state="running"], .row[data-state="detached"], .row[data-state="stale"] {

@@ -99,6 +99,12 @@ Two projects called `vessel` in two roots are two rows, and the chip is the
 only difference between them. Stopping one leaves the other's agent alone,
 which is the thing a browser test asserts on a real tmux rather than a fake.
 
+**A busy list**, as the phone in daily use holds it: five roots and sixty
+folders, so the chips scroll sideways, each name keeps a line of its own, and a
+stopped row stays two short lines.
+
+<img src="docs/screenshots/phone-busy-list.png" alt="The project list on a 360 pixel phone with five roots and sixty folders: a scrolling strip of root chips, then rows whose names have their own full line above the chip, state badge and button" width="300">
+
 **The first page anyone reaches, before any of the above:**
 
 <img src="docs/screenshots/phone-grant.png" alt="The access grant page, asking for the key carried in the link" width="300">
