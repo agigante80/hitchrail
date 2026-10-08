@@ -72,6 +72,9 @@ that is ALSO reached over a plain http forwarder or alias. See Changed.
 - An Exit now that is refused, for example over a draft in the box, leaves
   the wrap up running and still ends it in an exit, where before it ended the
   stop with the prompt still queued (#407).
+- Under `stop_policy = end_anyway`, a redraw no longer ends a working agent:
+  the kill at expiry needs the screen to show a prompt on two looks a second
+  apart, and otherwise the expiry is reported as `ask` reports it (#429).
 - Under `stop_policy = end_anyway`, the kill at expiry now ends the agent
   whose screen was read, through a process handle, and nothing if the row
   was restarted in between; any refusal is reported as `ask` would report

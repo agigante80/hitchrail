@@ -273,6 +273,10 @@ class Engine:
         # to hide a state that, past a second or two, is genuinely true.
         self.kill_grace = 2.0
         self.poll_interval = 0.25
+        # #429. How long `end_anyway` lets a screen settle between its two
+        # looks. A redraw lasts a fraction of a second; a modal waits for a
+        # person, so a second of patience costs the kill nothing.
+        self.end_anyway_settle = 1.0
 
     # -- reading -------------------------------------------------------
 
@@ -1342,7 +1346,34 @@ class Engine:
         # other one was an approximation that also fired on the draft, and it
         # cannot be reused here because #89 shortened its anchor deliberately so
         # that a modal and a box would both match.
-        return claude_ipc.shows_input_box(pane) is False
+        #
+        # **`awaits_answer`, not `shows_input_box` directly (#429).** It is the
+        # same answer today, and it is the one the answer route tests with
+        # `is True`: this asks the vendor module the question it names.
+        return claude_ipc.awaits_answer(pane) is True
+
+    def _held_by_a_second_look(self, name: str, marker: StopMarker, seen: int) -> bool:
+        """Whether `end_anyway` may still end this agent a settle after the
+        first look found a prompt (#429).
+
+        One look is not enough: while the box is not drawn, an output line
+        carrying the ornament reads as a modal for the length of a redraw, and
+        the agent writes that line itself. Ending on it kills a working agent
+        for a question nobody asked. A modal is still there a settle later; a
+        redraw is not. No lock is held across the sleep or the capture, as the
+        sweep does not hold one across its reads.
+
+        False, and the expiry is then reported as `ask` reports it, when
+        anything moved: the stop was withdrawn or is typing (its owner is
+        acting), a newer Stop is in the table, the agent is not the one looked
+        at, or the screen no longer shows a prompt.
+        """
+        self._sleep(self.end_anyway_settle)
+        with self._stopping_guard:
+            moved = marker.withdrawn or marker.typing or name in self._stopping
+        if moved or self._agent_pid(name) != seen:
+            return False
+        return self._pane_needs_a_person(name)
 
     def _flag_waiting(self, name: str, epoch: int) -> None:
         """Add the overlay from a look taken at `epoch`, unless a start or a
@@ -1518,8 +1549,17 @@ class Engine:
             # this moment, taken without the tap. Only on THIS look at the
             # pane, never the sweep's overlay, and never a key typed into the
             # prompt. The protected project is refused after the handle.
-            if waiting and seen is not None and signals.end_anyway(self, name, seen):
-                continue
+            if waiting and seen is not None:
+                if self._held_by_a_second_look(name, marker, seen):
+                    if signals.end_anyway(self, name, seen):
+                        continue
+                else:
+                    logger.info(
+                        "stop %s: end_anyway did not hold: a second look, %gs "
+                        "later, did not agree it was waiting on a person",
+                        name,
+                        self.end_anyway_settle,
+                    )
             person = "; its screen is waiting on a person" if waiting else ""
             try:
                 session = self.get(name)

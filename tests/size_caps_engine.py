@@ -170,7 +170,9 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # 1667 for #408, #411 and #428: the listing carries whether a sequence
     # is being typed, the stop's age and its recorded policy, so a browser
     # that did not tap Stop can reopen the wait truthfully.
-    "engine.py": 1667,
+    # 1707 for #429: the second look end_anyway takes a settle after the
+    # first, and the note on why one look is not evidence of a question.
+    "engine.py": 1707,
     # tmux.py is the module that encodes what tmux actually does
     # rather than what its manual implies, and every entry is a footgun
     # that cost real debugging: prefix matching targets, the colon

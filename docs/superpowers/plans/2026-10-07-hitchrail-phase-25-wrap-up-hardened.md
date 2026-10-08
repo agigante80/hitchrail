@@ -163,7 +163,7 @@ Backlog": each is in the direction this phase exists to close.
 - [x] **Task 203, #435 (P1).** The stop dialog flake that failed twice under
       load on 2026-10-07: reproduced, its cause named, fixed at the cause or
       quarantined naming the ticket. Never retried into green.
-- [ ] **Task 204, #429.** `end_anyway` ends an agent only on an answer
+- [x] **Task 204, #429.** `end_anyway` ends an agent only on an answer
       prompt two looks agree on, never on `shows_input_box`'s transient false
       answer during a redraw.
 

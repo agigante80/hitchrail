@@ -115,8 +115,8 @@ typed answers 202 and types nothing. If a message is already queued in the
 box, the call is 409 `stop_unsafe` and nothing is typed after the clear.
 
 With `stop_policy = "end_anyway"` (#239, off by default), a stop whose
-`stop_timeout` runs out while the agent's screen shows a prompt is killed by
-the server, exactly as `POST /api/sessions/{name}/kill` would, and the row is
+`stop_timeout` runs out while the agent's screen shows a prompt on two looks
+a second apart (#429, so a redraw is not taken for one) is killed by the server, exactly as `POST /api/sessions/{name}/kill` would, and the row is
 announced `stopped`. A screen showing anything else reports as it always has.
 Nothing is ever typed into the prompt. The policy is the one in force when the
 stop was requested (#419): a change during the wait applies to the next stop.
