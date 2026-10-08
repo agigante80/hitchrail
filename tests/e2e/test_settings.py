@@ -26,7 +26,7 @@ async def test_the_page_holds_at_a_phone_width_and_shows_the_perimeter_as_text(
 ) -> None:
     server.seed(running=["vessel"], also_in=TWO_ROOTS)
     await page.goto(server.base)
-    await page.get_by_role("link", name="settings").click()
+    await page.get_by_role("link", name="Settings").click()
     await expect(page.locator("[data-settings]")).to_have_attribute("data-loaded", "")
 
     # No horizontal scroll: the page fits the viewport it was designed for.

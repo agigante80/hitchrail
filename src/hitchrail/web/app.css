@@ -241,6 +241,11 @@ button[disabled] { color: var(--muted-3); cursor: not-allowed; }
 .bar h1 { font-size: 22px; font-weight: 700; }
 .root { margin: 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
 .bar-actions { display: flex; gap: 8px; flex-shrink: 0; }
+/* #320. A glyph in a 44px box: the padding a text button carries would make
+   it 56px for nothing. Drawn like the badge glyphs, from the same set. */
+.icon-btn { padding: 0; }
+.icon-glyph { width: 24px; height: 24px; fill: none; stroke: currentColor;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
 /* Announced, not shown. Not `display: none`, which would take it out of the
    accessibility tree along with the announcement. */
