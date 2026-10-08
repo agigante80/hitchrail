@@ -46,68 +46,9 @@ suite is green. It is finished when the behaviour has been watched working in
 the running application, on the phone it is for. See
 [`tech-guidelines.md`](tech-guidelines.md) section 7.
 
-## Phase: Phase 19: Stop means wrap up, and says so
-state: open
-plan: docs/superpowers/plans/2026-09-29-hitchrail-phase-19-stop-wrap-up.md
-
-A session stopped from a phone leaves the same record as one closed by hand.
-Cut out of Phase 11 on 2026-09-11.
-
-Stop today types `C-u`, `Escape`, `/exit`, `Enter` and nothing else: the agent
-is interrupted mid task and asked to exit, and whatever it knew about the work
-in flight leaves with it. The operator's stated model of Stop is "run the
-closing skill, summarise everything, then close the session", and the code did
-none of that. Decided over the concern that a typed instruction on the
-operator's behalf is impersonation: what keeps it relay is that the prompt is
-authored on the machine only, sent only on a tapped Stop, and sent with
-`send-keys -l`.
-
-A phase rather than a ticket for the reason Phase 16 is one: what it changes,
-not how big it is. It changes design section 4.3, the stop sequence. The
-order the interrupt and the prompt are sent in was the operator's to decide,
-and was decided on 2026-09-29: Stop queues the prompt behind the task in
-flight, and Kill, available throughout the wait, is the interrupt.
-
-Moved ahead of 16, 17 and 18 on 2026-09-16, on the third ordering rule, cost
-of delay, invoked for the second time. Every stop tapped from a phone today
-loses the wrap up the operator's own model of Stop says should happen, and
-nothing in 16, 17 or 18 depends on it or is made cheaper by waiting. It sits
-after Phase 15 rather than before it because #167's logging is what makes
-the new stop sequence diagnosable when it is first watched on a real
-session: "was the prompt sent, and did the pane go idle" has to have an
-answer in the journal before the sequence is trusted.
-
-Delivers: a configured prompt sent before the exit sequence, with no default so
-an unconfigured Stop is today's (decided 2026-10-01: the closing skill is a
-plugin most installs do not have), and a per session wait for the pane to show
-an idle input box under a ceiling; and an opt in, off by default, that lets a
-stop ending on a prompt end the session anyway because the operator said so
-ahead of time.
-
-Done when a session with a prompt configured, stopped from the interface, has
-run the closing skill before it exits, a stop that ends on a prompt still does
-nothing on its own unless the operator opted in before tapping, and
-`stop_prompt` cannot be set through any HTTP route.
-
-The deferral under "Deliberately later" still binds, and this phase is written
-against it rather than around it: the prompt is configuration on the machine,
-never text from the page, and the page's only verb is still Stop.
-
-Two tickets joined it from Backlog on 2026-09-29, each because this is the
-next phase to change the file it names: the split of `claude_ipc.py` into a
-package, which
-this phase adds the wrap up to before Phase 23 adds anything, so the split goes
-first; and `Config`'s surviving mutants, which are pinned before this phase
-adds `stop_prompt`'s refusals beside them.
-
-Built 2026-10-01 and released as 0.12.0: every ticket in the milestone is
-closed. It stays open on one criterion only, the one no test stands in for:
-Andrea watching a real session with `stop_prompt` configured wrap up and
-exit, with the journal showing the prompt, the wait and the exit. Its review
-findings are Phase 25, not this milestone, so nothing else holds it open.
-
 ## Phase: Phase 25: The wrap up, hardened
-state: planned
+state: open
+plan: docs/superpowers/plans/2026-10-07-hitchrail-phase-25-wrap-up-hardened.md
 
 Every finding the Phase 19 reviews filed is fixed or closed with its reason,
 and the journal says what a stop did. The roadmap's second Backlog rule,
@@ -122,9 +63,8 @@ the stop policy when the stop is confirmed. `engine.py`'s split (#274) goes
 first, because nine of the findings edit the functions it would move, and #181
 joins from Phase 17 by the first Backlog rule.
 
-Its plan is written ahead of opening, in
-`docs/superpowers/plans/2026-10-07-hitchrail-phase-25-wrap-up-hardened.md`,
-and the phase opens the day Phase 19 closes.
+Its plan was written ahead of opening, and the phase opened on 2026-10-08,
+the day Phase 19 closed on its real session watch.
 
 Done when every finding is closed or moved with a number, a kill nobody tapped
 is bound to the agent that was looked at, every kill leaves a journal line and
@@ -287,9 +227,9 @@ they stay here.
 ## Toward 1.0
 
 `versioning.md` says 1.0 comes when the HTTP interface is one worth keeping.
-Three questions decide whether it is, and each is a phase above rather than a
-promise here. What Stop does is answered and built (Phase 19), waiting only
-on its watch. Whether there is more than one agent is answered, yes and one
+Three questions decide whether it is. What Stop does is answered, built and
+watched on a real session (Phase 19, closed 2026-10-08). The other two are
+phases above rather than promises here. Whether there is more than one agent is answered, yes and one
 package each, but not built, and building it changes the start route
 (Phase 23). Whether anything survives a reboot is still open (Phase 16). A 1.0
 before all three are built is a promise about an interface still moving.
