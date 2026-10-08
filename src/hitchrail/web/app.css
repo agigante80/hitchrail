@@ -291,6 +291,9 @@ button[disabled] { color: var(--muted-3); cursor: not-allowed; }
 .tabs button {
   padding: 0 14px; border-radius: 999px; white-space: nowrap;
   color: var(--muted); font-weight: 600;
+  /* A flex item shrinks by default, so without this the strip squeezed every
+     pill to fit and `nowrap` ran the label out past its own border (#448). */
+  flex-shrink: 0;
 }
 .tabs button[aria-selected="true"] {
   background: var(--accent); border-color: var(--accent); color: #FFFDFA;
@@ -306,6 +309,7 @@ button[disabled] { color: var(--muted-3); cursor: not-allowed; }
 .chips button {
   padding: 0 14px; border-radius: 999px; white-space: nowrap;
   color: var(--muted); font-weight: 600;
+  flex-shrink: 0;
 }
 .chips button[aria-pressed="true"] {
   background: var(--ink); border-color: var(--ink); color: var(--surface);
