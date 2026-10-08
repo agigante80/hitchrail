@@ -51,6 +51,23 @@ the output of `hitchrail update-plugins`: see Changed.
   apart; the page and `hitchrail update-plugins` now show it once, with how
   many times the agent listed it. The record is unchanged: one outcome per
   row the agent listed, and the counts cover them all (#312).
+- `hitchrail update-plugins` prints its rows once the run ends, since
+  whether a plugin moved is only known after the second reading of the list.
+  While it runs, stderr carries a `... <plugin>` line per update so a slow
+  plugin is visible; stdout is the final account and nothing else. A run
+  that fails partway, or that you interrupt with Ctrl-C, still prints the
+  rows it got to; an interrupt exits 130.
+
+### Fixed
+
+- The list fits a 360 px phone. The type scale is smaller, a project name
+  has its own line in every state rather than being crushed beside a
+  stopped row's buttons, the root chips no longer shrink under their labels
+  and overlap, and the last row is no longer hidden behind the footer when a
+  filter is on (#447, #448, #449, #450).
+- A stop whose wait ran out could leave "No answer" open, offering Kill, over
+  a row that had already stopped, when the server's own deadline ended it a
+  moment after the page's (#457).
 
 ## 0.14.0 - 2026-10-08
 

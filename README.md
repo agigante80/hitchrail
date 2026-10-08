@@ -623,7 +623,8 @@ hitchrail update-plugins                      # or --agent-binary /path/to/agent
 ```
 
 Refreshes the agent's marketplaces, then updates every plugin installed at
-`user` scope, and prints one line per plugin. No server is started and no
+`user` scope, and prints one line per plugin once the run ends (a plugin
+skipped the same way in several projects is one line, with the count). No server is started and no
 root is needed. Exit 0 when nothing failed, 1 when a plugin failed, 2 when
 the update could not run at all: the agent is missing, the marketplaces did
 not refresh, or the list of installed plugins could not be understood, in
