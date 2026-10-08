@@ -53,8 +53,10 @@ _COMMON = "frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
 API_CSP = f"default-src 'none'; {_COMMON}"
 
 # The app shell. Everything it loads is same origin: `/app.css`, `/app.js` and
-# six font routes, since #76 stopped fetching faces from Google. That is what
-# makes `'self'` sufficient and a policy worth having possible at all.
+# the modules it imports (#68, each a request of its own under `script-src
+# 'self'`), and six font routes, since #76 stopped fetching faces from Google.
+# That is what makes `'self'` sufficient and a policy worth having possible at
+# all.
 PAGE_CSP = (
     "default-src 'self'; script-src 'self'; style-src 'self'; "
     f"font-src 'self'; img-src 'self'; connect-src 'self'; object-src 'none'; {_COMMON}"
@@ -146,7 +148,9 @@ def policy_for(path: str) -> str:
         return PAGE_CSP
     if path == "/grant":
         return GRANT_CSP
-    if path == "/icon.svg":
+    # #325. /favicon.ico is the same file, so the same inline style needs the
+    # same hash; under API_CSP it would render black in Firefox, as #253 found.
+    if path in {"/icon.svg", "/favicon.ico"}:
         return ICON_CSP
     # #151. The logs page, one segment under /logs and exactly one: it runs
     # its own script from the same origin under the same self-only policy as

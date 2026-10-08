@@ -96,7 +96,9 @@ body {
   font-family: 'Karla', system-ui, -apple-system, sans-serif;
   font-size: 16px;
   line-height: 1.45;
-  padding-bottom: 96px;              /* clears the fixed footer */
+  /* `--footer-h` is the footer's real height, written by chrome.js. The 86px
+     fallback is the unfiltered footer, for the moment before the script runs. */
+  padding-bottom: calc(var(--footer-h, 86px) + 10px);
   -webkit-text-size-adjust: 100%;
 }
 
@@ -192,6 +194,9 @@ button, .btn {
   background: var(--surface);
   color: var(--ink);
   font: inherit;
+  /* Material 3's label large (#450): where both platforms put a control, a
+     step under the 16px body. That step is where a 360px row's room went. */
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -234,8 +239,51 @@ button[disabled] { color: var(--muted-3); cursor: not-allowed; }
 :root[data-scrolled] .bar h1 { font-size: 18px; }
 :root[data-scrolled] .root { display: none; }
 .bar h1 { font-size: 22px; font-weight: 700; }
-.root { margin: 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+/* #324, #333. The mark and the title, which is a link home. The link reads as
+   the heading it wraps: the page's own ink, no underline. Its box is the 44px
+   target, pulled back into the bar's padding so it costs the bar no height. */
+.bar-title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bar-mark { width: 22px; height: 22px; flex: none; }
+.mark-ink { fill: var(--ink); }
+.mark-live { fill: var(--accent); }
+.bar-home {
+  display: inline-flex; align-items: center; min-height: var(--touch);
+  margin-block: -6px; color: inherit; text-decoration: none;
+}
+.bar-home:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+:root[data-scrolled] .bar-mark { width: 18px; height: 18px; }
+:root[data-scrolled] .bar-home { margin-block: -9px; }
+/* Reflow's 320px: six pixels short with the title at 22px, so the title and the
+   mark give up two points each. The words on the controls do not. */
+@media (max-width: 340px) {
+  .bar h1 { font-size: 20px; }
+  .bar-mark { width: 20px; height: 20px; }
+  .bar-title-row { gap: 6px; }
+}
+/* One line, cut with an ellipsis. It used to wrap, which cost nothing while the
+   title had the bar to itself; beside the gear and the icon toggle the title
+   block is 133px at 390 and a path wrapped to two lines, growing the header by
+   18px against Phase 13's premortem 3. The full text is the element's title. */
+.bar-titles { min-width: 0; }
+.root {
+  margin: 0; font-size: 13px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .bar-actions { display: flex; gap: 8px; flex-shrink: 0; }
+/* The bar holds the title, the gear, the theme toggle and "New project" on one
+   line at 320px (#320, #322, #324). The words keep their size; the room comes
+   from the gaps and the title, and the numbers are held by test_layout.py. */
+@media (max-width: 380px) {
+  .bar { padding-inline: 12px; gap: 8px; }
+  .bar-actions { gap: 2px; }
+  .bar-actions button:not(.icon-btn) { padding-inline: 10px; }
+  :root[data-scrolled] .bar { padding-inline: 12px; }
+}
+/* #320. A glyph in a 44px box: the padding a text button carries would make
+   it 56px for nothing. Drawn like the badge glyphs, from the same set. */
+.icon-btn { padding: 0; position: relative; }
+.icon-glyph { width: 24px; height: 24px; fill: none; stroke: currentColor;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
 /* Announced, not shown. Not `display: none`, which would take it out of the
    accessibility tree along with the announcement. */
@@ -289,6 +337,9 @@ button[disabled] { color: var(--muted-3); cursor: not-allowed; }
 .tabs button {
   padding: 0 14px; border-radius: 999px; white-space: nowrap;
   color: var(--muted); font-weight: 600;
+  /* A flex item shrinks by default, so without this the strip squeezed every
+     pill to fit and `nowrap` ran the label out past its own border (#448). */
+  flex-shrink: 0;
 }
 .tabs button[aria-selected="true"] {
   background: var(--accent); border-color: var(--accent); color: #FFFDFA;
@@ -304,6 +355,7 @@ button[disabled] { color: var(--muted-3); cursor: not-allowed; }
 .chips button {
   padding: 0 14px; border-radius: 999px; white-space: nowrap;
   color: var(--muted); font-weight: 600;
+  flex-shrink: 0;
 }
 .chips button[aria-pressed="true"] {
   background: var(--ink); border-color: var(--ink); color: var(--surface);
@@ -331,12 +383,29 @@ button[disabled] { color: var(--muted-3); cursor: not-allowed; }
   width: 100%; min-height: var(--touch); padding: 0 14px;
   border: 1px solid var(--line); border-radius: var(--radius);
   background: var(--surface); color: var(--ink); font: inherit;
+  /* Never under 16px: iOS Safari zooms into a smaller input on focus and does
+     not zoom back. The answer is this, not `maximum-scale=1`, which would take
+     pinch zoom from the people who need it. */
+  font-size: max(16px, 1em);
+  /* Room for the clear control (#451), so typed text never runs under it. */
+  padding-right: var(--touch);
 }
+/* Desktop Chrome draws its own cancel button in a search field; this one is
+   there on a phone too, so hiding the native one keeps it from showing two. */
+.search input::-webkit-search-cancel-button { appearance: none; display: none; }
+.search-clear {
+  position: absolute; right: 16px; top: 12px;
+  padding: 0; border: 0; background: transparent; color: var(--muted);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.search-clear[hidden] { display: none; }
 
 /* -- rows ---------------------------------------------------------------
    Row ASYMMETRY is the whole mobile argument, per the canvas annotation. A
-   running row is tall because it carries three actions; a stopped row is one
-   line with one button, so the other forty five stay scannable with a thumb.
+   running row is tall because it carries three actions; a stopped row is two
+   short lines with one button (the name, then its chip, badge and Start), so
+   the other forty five stay scannable with a thumb. It was one line until the
+   phone showed that line crushing the name (#449).
    That is why the two shapes are separate rules rather than one rule with a
    modifier: making them converge is exactly the regression to prevent. */
 main { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
@@ -345,8 +414,14 @@ main { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
   background: var(--surface); border: 1px solid var(--line);
   border-radius: var(--radius); padding: 12px 14px;
 }
-.row-head { display: flex; align-items: center; gap: 10px; }
-.row-name { font-weight: 700; overflow-wrap: anywhere; }
+/* #449, and #179 before it. The name takes a whole line and everything else in
+   the head wraps onto the next, because the other items are `flex-shrink: 0`
+   and a name sharing their line is the only thing left to give: it went down
+   to two characters a line. Two short lines that read beat one that does not.
+   The stopped row stays the shorter of the two shapes: it has no actions line
+   of its own, its one control sits beside the badge. */
+.row-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.row-name { flex: 1 1 100%; font-weight: 700; overflow-wrap: anywhere; }
 .row-actions { display: flex; gap: 8px; flex-shrink: 0; margin-left: auto; }
 
 /* #122. Which root a row is in, shown only when there is more than one.
@@ -368,7 +443,6 @@ main { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
 .row[data-state="running"] .row-actions,
 .row[data-state="detached"] .row-actions,
 .row[data-state="stale"] .row-actions { margin-left: 0; }
-.row[data-state="stopped"] .row-head { min-height: var(--touch); }
 
 .meta { font-size: 13px; color: var(--muted-2); }
 
@@ -455,10 +529,11 @@ main { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
 .stop-all[hidden] { display: none; }
 .shown:empty { display: none; }
 
-.scrim { position: fixed; inset: 0; background: rgba(46, 37, 28, 0.55); }
-
 /* -- desktop is the same data at a wider viewport, not a second interface */
 @media (min-width: 900px) {
+  /* Room for the one line again: the name shares it with its chip and badge. */
+  .row-head { flex-wrap: nowrap; }
+  .row-name { flex: 0 1 auto; }
   main { max-width: 1100px; margin: 0 auto; }
   .bar, .tabs, .chips, .search, .unsupported { max-width: 1100px; margin-inline: auto; }
   .row[data-state="running"], .row[data-state="detached"], .row[data-state="stale"] {
@@ -622,6 +697,14 @@ dialog[data-dialog]::backdrop { background: rgba(46, 37, 28, 0.55); }
 .settings-root label:not(:has(input)) .settings-source { grid-column: 1; }
 .settings-root-path { font-family: var(--mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .settings-source { font-size: 12px; color: var(--muted-2); }
+/* #323. Three 44px rows in one line where they fit, wrapping where they do not. */
+.settings-choices { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
+.settings-choice {
+  display: inline-flex; align-items: center; gap: 8px;
+  min-height: var(--touch); padding: 0 14px; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.settings-choice input { width: 20px; height: 20px; margin: 0; accent-color: var(--accent); }
 .settings-field { display: grid; gap: 6px; }
 .settings-label { font-weight: 600; }
 .settings-control { display: flex; gap: 8px; align-items: center; }

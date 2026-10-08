@@ -40,6 +40,12 @@ a test: **host allowlist, then token, then origin**. Token precedes origin so
 an unauthenticated caller cannot enumerate the origin allowlist by watching a
 403 become a 401.
 
+Five static files are readable without a token (`GET` and `HEAD` only):
+`/icon.svg`, `/favicon.ico` (the same drawing, under the path a browser asks
+for unprompted), `/icon-180.png`, `/icon-512.png` and `/manifest.webmanifest`.
+They carry a drawing and a name, nothing from the machine; every other route,
+and every other method on these paths, needs the token.
+
 The origin check applies to mutating requests only. `GET` is exempt, because
 `EventSource` cannot set headers. The origins derived from the server's own
 bind carry its own scheme, `https` with `--tls-cert` and `http` without; an
@@ -281,17 +287,26 @@ does not replay.
 | `since_boot_us` | how long the machine had been up, in integer microseconds of the kernel's boot clock, when this process started. Within one `boot` the larger is the newer process; the boot clock is not the wall clock, so NTP or `date` stepping it back cannot reverse the order. Across two `boot` values nothing orders them, and a client takes the record that arrived later: a reboot closes every connection, so no answer from the old boot can arrive after one from the new |
 | `state` | `idle` before any run, `running`, `done`, or `failed` when the operation itself could not go on |
 | `started_at`, `finished_at` | Unix seconds, null until they happen |
-| `outcomes` | one per row of the agent's plugin list so far, in order: `{plugin, scope, result, detail, approved_command}`, `result` one of `updated`, `failed`, `skipped`, `abandoned` |
-| `counts` | `{updated, failed, skipped, abandoned}` once `done`; **null otherwise, and always null when `failed`**, so a failure is never rendered as a count |
+| `outcomes` | one per row of the agent's plugin list so far, in order: `{plugin, scope, result, detail, approved_command, from_version, to_version}`, `result` one of `updated`, `current`, `failed`, `skipped`, `abandoned` |
+| `counts` | `{updated, current, failed, skipped, abandoned}` once `done`; **null otherwise, and always null when `failed`**, so a failure is never rendered as a count |
 | `code`, `message` | when `failed`, why, in the codes below; null otherwise |
 
-`updated` means the agent's update exited zero, which it also does for a
-plugin that was already current. A plugin at any scope other than `user` is
+The agent's update exits zero for a plugin that was already current, so a
+plugin whose update succeeded reads `updated` with no versions while the run
+is going, and after the last update the agent's plugin list is read again and compared with the
+first reading (#311). A plugin whose version moved is `updated`, with
+`from_version` and `to_version` set; one whose version did not is `current`.
+If the second reading cannot be understood, or either reading gives a row no
+version, that row stays `updated` with both versions null: the run did its
+work, and which plugins moved is not guessed. A plugin at any scope other than `user` is
 `skipped` with its scope, since it belongs to a project folder the agent's
 list does not name. A `user` scope plugin the listing names more than once is
 also `skipped`, with detail `listed more than once`, after the first is updated: the
 count then covers every row the listing returned, not only the ones that
-updated. `abandoned` means the server shut down mid run (#361): that row and
+updated. The record keeps one outcome per row, so identical `skipped` rows
+(one plugin installed locally in six projects) are six in `outcomes` and in
+`counts`; the page and `hitchrail update-plugins` show them as one line with
+the number of times it was listed (#312). `abandoned` means the server shut down mid run (#361): that row and
 every `user` scope row still waiting behind it in the listing never started,
 which is not the same claim as `failed`; a row at another scope, or a repeat,
 is still `skipped` for its own reason. A shutdown that lands DURING one of

@@ -32,6 +32,63 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+## 0.15.0 - 2026-10-08
+
+Nothing to do on upgrade, unless a script reads the plugin update's record or
+the output of `hitchrail update-plugins`: see Changed.
+
+### Changed
+
+- The plugin update says which plugins actually moved. `updated` used to mean
+  only that the agent's update exited zero, which it also does for a plugin
+  that was already current, so a run could report 16 updated when three
+  versions changed. A plugin that was already current is now `current`, and
+  one that moved is `updated` with its versions, shown as `0.12.9 to 0.15.0`.
+  The record gains `current` in `counts`, and `from_version` and `to_version`
+  on each outcome; `hitchrail update-plugins` prints a `current` count between
+  `updated` and `failed`. If the second reading of the plugin list fails, the
+  result is what it was before (#311).
+- Identical skipped rows are one line. A plugin installed locally in six
+  projects used to be six rows of the same words, with nothing to tell them
+  apart; the page and `hitchrail update-plugins` now show it once, with how
+  many times the agent listed it. The record is unchanged: one outcome per
+  row the agent listed, and the counts cover them all (#312).
+- `hitchrail update-plugins` prints its rows once the run ends, since
+  whether a plugin moved is only known after the second reading of the list.
+  While it runs, stderr carries a `... <plugin>` line as each update
+  finishes, so a run that has stopped moving shows where it got to; stdout
+  is the final account and nothing else. A run that fails partway, or that
+  you interrupt with Ctrl-C, still prints the rows it got to, and there
+  `updated` means only that the update exited cleanly, not that the version
+  moved. An interrupt exits 130.
+- Settings is the gear in the bar rather than a link after the footer's
+  version, which a first visit missed (#320). The bar's button says "New
+  project", and the theme toggle beside it is an icon so the bar stays on one
+  line on a phone (#322).
+- The title in the bar is the way back to the list from settings and the
+  log page, with the mark before it (#324, #333).
+- Settings offers Light, Dark and System. The header toggle could store a
+  choice but never return to following the device (#323). The choice is kept
+  by the browser, as the toggle's always was.
+- A search that matches nothing offers to create a folder of that name, in
+  the same sheet as "New project", unless a tab or a root chip is hiding a
+  folder that already has it (#321). The search field has a clear control
+  (#451).
+- `/favicon.ico` is served without a token, as the mark already was, so the
+  401 a browser's unprompted request left in the log is gone. It is the same
+  drawing, readable GET and HEAD only (#325).
+
+### Fixed
+
+- The list fits a 360 px phone. The type scale is smaller, a project name
+  has its own line in every state rather than being crushed beside a
+  stopped row's buttons, the root chips no longer shrink under their labels
+  and overlap, and the last row is no longer hidden behind the footer when a
+  filter is on (#447, #448, #449, #450).
+- A stop whose wait ran out could leave "No answer" open, offering Kill, over
+  a row that had already stopped, when the server's own deadline ended it a
+  moment after the page's (#457).
+
 ## 0.14.0 - 2026-10-08
 
 Nothing to do on upgrade. One behaviour changes: Stop now answers one

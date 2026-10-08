@@ -483,6 +483,12 @@ class Harness:
         # two root tests need: the phase exists for the case where the same
         # folder name appears in two of them.
         self.extra_roots: dict[str, Path] = {}
+        # `mktemp("hr")` gives each test its own root but the same PARENT, and
+        # the extra roots live beside it, so a label one test used came back
+        # to the next with its folders still in it. The first test to seed
+        # five roots made every later one count 60 rows where it made 44.
+        for leftover in root.parent.glob("root-*"):
+            shutil.rmtree(leftover, ignore_errors=True)
         self._sock = sock
         self._server: uvicorn.Server | None = None
         self._thread: threading.Thread | None = None
@@ -530,11 +536,20 @@ class Harness:
         shim = control / "plugin-agent"
         shim.write_text(
             f"#!{sys.executable}\n"
-            "import pathlib, sys, time\n"
+            "import json, pathlib, sys, time\n"
             f"d = pathlib.Path({str(control)!r})\n"
             "args = sys.argv[1:]\n"
             "if args[:2] == ['plugin', 'list']:\n"
-            "    print((d / 'listing.json').read_text())\n"
+            "    text = (d / 'listing.json').read_text()\n"
+            "    try:\n"
+            "        rows = json.loads(text)\n"
+            "    except ValueError:\n"
+            "        print(text)\n"
+            "    else:\n"
+            "        for r in rows:\n"
+            "            moved = (d / ('moved-' + r['id'])).exists()\n"
+            "            r['version'] = '2.0.0' if moved else '1.0.0'\n"
+            "        print(json.dumps(rows))\n"
             "elif args[:2] == ['plugin', 'update']:\n"
             "    while not (d / ('release-' + args[2])).exists():\n"
             "        time.sleep(0.05)\n"
@@ -543,6 +558,8 @@ class Harness:
             "    if (d / ('fail-' + args[2])).exists():\n"
             "        print(args[2] + ': download failed', file=sys.stderr)\n"
             "        sys.exit(1)\n"
+            "    if not (d / ('current-' + args[2])).exists():\n"
+            "        (d / ('moved-' + args[2])).touch()\n"
         )
         shim.chmod(0o755)
         self._plugin_operation = operation_for(str(shim))
@@ -552,17 +569,26 @@ class Harness:
         for marker in (
             *self._plugin_control.glob("release-*"),
             *self._plugin_control.glob("fail-*"),
+            *self._plugin_control.glob("moved-*"),
+            *self._plugin_control.glob("current-*"),
         ):
             marker.unlink()
 
-    def release_plugin(self, plugin: str, fail: bool = False, vanish: bool = False) -> None:
-        """`vanish`: the fake agent deletes itself while updating this one,
+    def release_plugin(
+        self, plugin: str, fail: bool = False, vanish: bool = False, current: bool = False
+    ) -> None:
+        """`current`: the update succeeds without moving the version, as the
+        real agent's does for a plugin that was already current (#311).
+
+        `vanish`: the fake agent deletes itself while updating this one,
         which succeeds, so the NEXT call finds no agent: a run that fails
         part way, with outcomes already listed."""
         if vanish:
             (self._plugin_control / f"vanish-{plugin}").touch()
         if fail:
             (self._plugin_control / f"fail-{plugin}").touch()
+        if current:
+            (self._plugin_control / f"current-{plugin}").touch()
         (self._plugin_control / f"release-{plugin}").touch()
 
     def _write_shim(self, body: str) -> None:
@@ -966,6 +992,10 @@ class Harness:
             config=self._config,
             bus=self.bus,
             plugin_operation=self._plugin_operation,
+            # The footer names the account the server runs as, and the
+            # screenshots this harness takes are published: the developer's
+            # login is not theirs to publish.
+            user=lambda: "operator",
         )
         self._server = uvicorn.Server(
             uvicorn.Config(app, host="127.0.0.1", port=self.port, log_level="warning")

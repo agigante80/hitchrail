@@ -44,10 +44,33 @@ let arrivals = 0;
 let runningSessions = 0;
 let strip = { note: () => {}, keep: () => {}, settle: () => {} };
 
-function outcomeItem(outcome) {
+// #312. One plugin installed at `local` scope in six projects is six rows of
+// the same words, and the listing names no project to tell them apart, so
+// they collapse into one with a count. Only `skipped` collapses: a failed or
+// updated row is never noise. Presentation only: the record keeps one
+// outcome per listing row, and the status line counts those.
+function groupOutcomes(outcomes) {
+  const groups = new Map();
+  const order = [];
+  for (const outcome of outcomes) {
+    const key = JSON.stringify([outcome.plugin, outcome.scope, outcome.result]);
+    const seen = outcome.result === "skipped" ? groups.get(key) : undefined;
+    if (seen) {
+      seen.count += 1;
+      continue;
+    }
+    const group = { outcome, count: 1 };
+    if (outcome.result === "skipped") groups.set(key, group);
+    order.push(group);
+  }
+  return order;
+}
+
+function outcomeItem({ outcome, count }) {
   const item = document.createElement("li");
   item.className = "plugin-outcome";
   item.dataset.result = outcome.result;
+  if (count > 1) item.dataset.count = String(count);
   const head = document.createElement("span");
   head.className = "plugin-outcome-head";
   const result = document.createElement("span");
@@ -65,7 +88,8 @@ function outcomeItem(outcome) {
   // row the listing named more than once), so the detail is shown rather than a
   // fixed scope-shaped sentence that would misname the second one.
   const lines = [];
-  if (outcome.detail) lines.push(outcome.detail);
+  if (outcome.from_version && outcome.to_version) lines.push(`${outcome.from_version} to ${outcome.to_version}`);
+  if (outcome.detail) lines.push(count > 1 ? `${outcome.detail}, listed ${count} times` : outcome.detail);
   if (outcome.approved_command) lines.push(`approved: ${outcome.approved_command}`);
   for (const text of lines) {
     const line = document.createElement("span");
@@ -76,8 +100,18 @@ function outcomeItem(outcome) {
   return item;
 }
 
+// #344. A code this page does not know shows the server's own sentence, which
+// was written to stand alone: lowercase, and ending in a period. Appended
+// clauses make it a sentence's first half, so it starts upper case and its
+// closing period is dropped, or the text reads "...stopped., so nothing...".
+function unknownFailure(message) {
+  const bare = (message ?? "").trim().replace(/[.\s]+$/, "");
+  if (!bare) return "The update did not finish";
+  return bare[0].toUpperCase() + bare.slice(1);
+}
+
 function failureText(record) {
-  const why = PLUGIN_FAILURES[record.code] ?? record.message ?? "The update did not finish";
+  const why = PLUGIN_FAILURES[record.code] ?? unknownFailure(record.message);
   const n = record.outcomes.length;
   // #317. A trailing sentence, not folded into `why`: appended after the
   // outcomes clause so "after N plugins" still reads as attached to "the
@@ -100,7 +134,7 @@ function pluginStatus(record) {
   // #370: a run the server's shutdown cut short is still `done`, with its
   // remaining rows counted as never started rather than left out.
   const cut = c.abandoned ? `, ${c.abandoned} never started` : "";
-  let text = `${c.updated} updated, ${c.failed} failed, ${c.skipped} left alone${cut}.`;
+  let text = `${c.updated} updated, ${c.current} current, ${c.failed} failed, ${c.skipped} left alone${cut}.`;
   if (c.updated && runningSessions) {
     text += ` ${runningSessions === 1 ? "The running session keeps" : `The ${runningSessions} running sessions keep`} the old versions until restarted.`;
   }
@@ -113,7 +147,7 @@ function renderPlugins(record) {
   section.dataset.seq = String(record.seq);
   $("[data-plugins-update]").disabled = record.state === "running";
   $("[data-plugins-status]").textContent = pluginStatus(record);
-  $("[data-plugins-list]").replaceChildren(...record.outcomes.map(outcomeItem));
+  $("[data-plugins-list]").replaceChildren(...groupOutcomes(record.outcomes).map(outcomeItem));
 }
 
 async function countRunning() {

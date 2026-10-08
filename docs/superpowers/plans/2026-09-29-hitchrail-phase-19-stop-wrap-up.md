@@ -189,9 +189,18 @@ held open by a low.
 
 ## Done looks like
 
-- [ ] A session with `stop_prompt` configured, stopped from the interface,
+- [x] A session with `stop_prompt` configured, stopped from the interface,
       ran the closing skill before it exited, observed on a real session by
-      Andrea, and the journal shows the prompt sent, the wait, and the exit
+      Andrea, and the journal shows the prompt sent, the wait, and the exit.
+      First watched 2026-10-08 on 0.13.0: the skill ran and turned in 11s,
+      then `/exit` stalled on the background work menu, which filed #453.
+      Watched again the same evening on 0.14.0, at Andrea's request and on
+      their real instance. The Stop went over `DELETE /api/sessions/{name}`,
+      the route the page's Stop calls, and no tap on the page. The journal
+      shows the prompt typed at 18:47:03, the wrap up finished after 32s, `/exit`, the
+      menu answered 160ms later, and the agent exited 33.3s after the Stop.
+      The skill wrote its handoff in the project 6s before its turn ended,
+      and no process was left in the project's folder.
 - [x] A stop that ends on a prompt does nothing on its own unless the operator
       opted in before tapping
 - [x] `stop_prompt` cannot be set through any HTTP route, and a test says so
@@ -199,7 +208,10 @@ held open by a low.
       today's sequence
 - [x] Every task ticked, or marked MOVED OUT or NOT BUILT with an issue number
 - [x] No `from-review` ticket open in the milestone without a decision
-- [ ] Roadmap says done, milestone closed, `check-phases.sh` passes
+- [x] Roadmap says done, milestone closed, `check-phases.sh` passes.
+      Closed 2026-10-08 as **done**: every ticket in the milestone landed,
+      #453 last, and the review findings sit in Phase 25 and #454. The block
+      then left the roadmap under the 2026-09-26 rule.
 
 ## Fails if
 
@@ -243,7 +255,11 @@ the loop and the remainder is filed.
 ## Out of scope
 
 - A reply channel through a Claude Code Stop hook: Backlog, recorded on #242
-- Choosing a key for the background work modal: never, #204 condition 4
+- Choosing a key for the background work modal: never, #204 condition 4.
+  REVERSED by #453 for that one menu: Stop presses Enter only when the
+  selected row reads exactly "Exit and stop tasks", since that option is
+  what Stop means, and presses nothing on anything else. The argument is in
+  `claude_ipc/exit_menu.py`.
 - Text from the page into a session: "Deliberately later"
 - More than one agent's wrap up: Phase 23
 - The settings page's layout: Phase 24

@@ -63,13 +63,14 @@ def test_update_plugins_runs_with_no_server_and_reports_each_plugin(
         "skipped  adapt@kit (local scope is not updated)",
         "failed   b@m (exited 1: b@m: download failed)",
     ]
-    assert "1 updated, 1 failed, 1 skipped" in result.stdout
+    assert "1 updated, 0 current, 1 failed, 1 skipped" in result.stdout
     seen = calls(tmp_path)
     assert [c["argv"] for c in seen] == [
         ["plugin", "marketplace", "update"],
         ["plugin", "list", "--json"],
         ["plugin", "update", "a@m", "-s", "user", "-y", "--json"],
         ["plugin", "update", "b@m", "-s", "user", "-y", "--json"],
+        ["plugin", "list", "--json"],
     ]
     assert {c["cwd"] for c in seen} == {str(home)}
     assert not any(c["token"] for c in seen), "the token reached a plugin command"

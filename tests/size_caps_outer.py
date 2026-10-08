@@ -71,7 +71,13 @@ OUTER_LAYER_CAPS: dict[str, int] = {
     # 1045 for #393: a typed path not there says where it was looked for.
     # 1061 for #391's review: the withheld line skips a host the operator
     # reaches over https, so its advice is not given on a working setup.
-    "cli.py": 1061,
+    # 1097 for #311 and #312: `update-plugins` prints its account at the end,
+    # since a row's class is not known before the second listing, and groups
+    # identical skipped rows.
+    # 1107 for #311: a failed run still prints the rows it heard.
+    # 1118 for Phase 24's review: so does a Ctrl-C, the likelier way a run
+    # ends without its account.
+    "cli.py": 1118,
     # 409 to 418 for #78: two entries in the exemption and the argument
     # beside them, which the set's own rule requires of every entry.
     # 418 to 436 for #160: the unauthenticated asset set and the argument
@@ -84,7 +90,9 @@ OUTER_LAYER_CAPS: dict[str, int] = {
     # arrived a day after the rule, said where the rule is read.
     # 480 for #167: a line for each refusal, every request value escaped
     # through `logs.shown` and the credential only as offered or not.
-    "security.py": 480,
+    # 487 for #325: why `/favicon.ico` is a set entry, the route Starlette
+    # answers HEAD on, rather than a method keyed exemption.
+    "security.py": 487,
     # rather than one. A refusal handler is the shape this file is made of.
     # 513 to 517 for #120. The listing payload reports every configured
     # root as a labelled list rather than one path string, and the comment
@@ -156,4 +164,17 @@ OUTER_LAYER_CAPS: dict[str, int] = {
     # 1079 for #392: teardown no longer re-raises a watch's logged error
     # over a clean shutdown or over the kill's own.
     "server.py": 1079,
+}
+
+# The web assets' caps (#68), read by `test_every_web_asset_is_under_the_size_guideline`.
+# Keyed by the file name under `src/hitchrail/web/`.
+WEB_CAPS: dict[str, int] = {
+    # 698 at the split. One stylesheet for every page, and each further
+    # stylesheet is a render blocking request on a phone before the first
+    # paint, where a script module is not. Its sections (tokens, the bar,
+    # the row, the dialogs, the settings page) already read as files; split
+    # it along them if it passes roughly 800, or when a build step exists.
+    # 760 for Phase 24's bar: the gear, the mark, the search clear control
+    # and the appearance radiogroup (#320, #324, #451, #323).
+    "app.css": 760,
 }

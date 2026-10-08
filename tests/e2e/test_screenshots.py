@@ -57,6 +57,7 @@ import pytest
 from playwright.async_api import Locator, Page, ViewportSize, expect
 
 from . import conftest as e2e_conftest
+from .busy import seed_busy
 from .conftest import SHOT_PREFIX, Harness
 
 pytestmark = [pytest.mark.e2e, pytest.mark.screenshots]
@@ -282,6 +283,19 @@ async def test_capture_two_roots_on_a_phone(page: Page, shots_server: Harness) -
     await _shoot(page, "phone-two-roots", page.locator("[data-project]").first)
 
 
+async def test_capture_the_busy_phone_list(page: Page, shots_server: Harness) -> None:
+    """What the daily phone holds (#450): five roots, sixty folders, names from
+    short to a full line, every state, at 360 CSS px. The other captures use
+    one root and short names, which is how three layout defects reached a real
+    phone without a picture or a test seeing them."""
+    await page.set_viewport_size(PHONE)
+    busy = seed_busy(shots_server)
+    await page.goto(shots_server.base)
+    await expect(page.locator("[data-project]")).to_have_count(busy.total, timeout=15_000)
+    await page.wait_for_timeout(600)
+    await _shoot(page, "phone-busy-list", page.locator("[data-roots]"))
+
+
 async def test_capture_the_phone_list_dark(page: Page, shots_server: Harness) -> None:
     """Dark is a first class requirement in the design, so it gets a picture
     rather than a sentence."""
@@ -322,7 +336,7 @@ async def test_capture_the_new_folder_sheet(page: Page, shots_server: Harness) -
     _seed_the_world(shots_server)
     await page.goto(shots_server.base)
     await _settled(page, shots_server)
-    await page.get_by_role("button", name="New").click()
+    await page.get_by_role("button", name="New project").click()
     sheet = page.locator("[data-dialog]")
     await expect(sheet).to_contain_text("New folder")
     await _shoot(page, "phone-new-folder", sheet)
@@ -374,7 +388,7 @@ async def test_capture_the_settings_page_after_a_plugin_update(
         shots_server.release_plugin(plugin)
     status = page.locator("[data-plugins-status]")
     await expect(status).to_have_text(
-        "3 updated, 0 failed, 0 left alone. "
+        "3 updated, 0 current, 0 failed, 0 left alone. "
         "The running session keeps the old versions until restarted."
     )
     await _shoot(page, "phone-settings-plugins", page.locator("[data-plugins]"))

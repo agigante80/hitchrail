@@ -1,5 +1,8 @@
-/* The settings page (#238): what this instance is pointed at, and the two
-   things a request may change. Three since #409.
+/* The settings page (#238): what this instance is pointed at, and the things
+   it changes. Two are requests (the stop wait, and the policy since #409).
+   The third, Appearance (#323), is NOT a request: the theme is stored in this
+   browser's localStorage and nothing is sent, so it has no Save and applies
+   the moment it is picked.
 
    Deliberately NOT app.js, for the reason logs.js gives: that file boots the
    list, the stream and the dialogs, and this page shows one document. What
@@ -25,6 +28,7 @@ try {
 }
 
 import { startPlugins } from "/plugins.js";
+import { applyTheme, storedTheme, storeTheme } from "/theme.js";
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -343,6 +347,20 @@ $("[data-stop-timeout]").addEventListener("keydown", (event) => {
     saveStop();
   }
 });
+
+/* #323. Light, Dark and System. System is the stored key's absence, so a
+   value this page did not write (or none) reads as System. */
+const radios = [...document.querySelectorAll("[data-theme-choice]")];
+const current = storedTheme();
+for (const radio of radios) {
+  radio.checked = radio.value === (current === "light" || current === "dark" ? current : "system");
+  radio.addEventListener("change", () => {
+    if (!radio.checked) return;
+    const theme = radio.value === "system" ? null : radio.value;
+    storeTheme(theme);
+    applyTheme(theme);
+  });
+}
 
 window.__settings = { refresh };
 refresh();

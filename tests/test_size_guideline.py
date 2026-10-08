@@ -6,8 +6,10 @@ The caps and their arguments are `size_caps_engine.py` and
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from size_caps_engine import ENGINE_LAYER_CAPS
-from size_caps_outer import OUTER_LAYER_CAPS
+from size_caps_outer import OUTER_LAYER_CAPS, WEB_CAPS
 from support import in_claude_ipc, source_modules
 
 
@@ -64,3 +66,21 @@ def test_every_module_is_under_the_size_guideline() -> None:
     # under the guideline, this fails and the entry must go.
     settled = {n for n in caps if sizes.get(n, 0) < 400}
     assert not settled, f"no longer oversize, remove from `caps`: {sorted(settled)}"
+
+
+WEB = Path(__file__).resolve().parent.parent / "src" / "hitchrail" / "web"
+
+
+def test_every_web_asset_is_under_the_size_guideline() -> None:
+    """#68. `app.js` reached 2752 lines because nothing measured `web/`: the
+    guard above reads Python modules only, and the ticket's own typed counts
+    went stale twice. Every script, stylesheet and page, with the same cap
+    rules as the Python side."""
+    assets = [p for p in WEB.iterdir() if p.suffix in {".js", ".css", ".html"}]
+    assert {"app.js", "app.css", "index.html"} <= {p.name for p in assets}, WEB
+    sizes = {p.name: len(p.read_text(encoding="utf-8").splitlines()) for p in assets}
+
+    over = {n: c for n, c in sizes.items() if c >= 400 and c > WEB_CAPS.get(n, 399)}
+    assert not over, f"past the guideline: {over}. Split it, or argue a cap in `WEB_CAPS`."
+    settled = {n for n in WEB_CAPS if sizes.get(n, 0) < 400}
+    assert not settled, f"no longer oversize, remove from `WEB_CAPS`: {sorted(settled)}"

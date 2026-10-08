@@ -5,6 +5,7 @@ import ast
 import logging
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -1172,13 +1173,50 @@ def test_update_plugins_reports_each_plugin_and_exits_zero(
     assert agent.updated == ["a@m", "b@m"]
     lines = out.splitlines()
     assert lines[:3] == [
-        "updated  a@m",
+        "updated  a@m (1.0.0 to 2.0.0)",
         "skipped  adapt@kit (local scope is not updated)",
-        "updated  b@m",
+        "updated  b@m (1.0.0 to 2.0.0)",
     ]
-    assert "2 updated, 0 failed, 1 skipped" in out
+    assert "2 updated, 0 current, 0 failed, 1 skipped" in out
     # The vendor's own words: an update applies at the next start.
     assert "restart" in out
+
+
+def test_update_plugins_says_which_moved_and_which_were_already_current(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#311."""
+    agent = FakeAgent([row("a@m"), row("b@m")]).unmoving("b@m")
+    code, _ = _update(monkeypatch, agent)
+    out = capsys.readouterr().out
+    assert code == 0
+    assert out.splitlines()[:2] == ["updated  a@m (1.0.0 to 2.0.0)", "current  b@m"]
+    assert "1 updated, 1 current, 0 failed, 0 skipped" in out
+
+
+def test_update_plugins_prints_identical_skipped_rows_once_with_a_count(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#312. Three `local` rows for one id, one for another, and a `user` one."""
+    agent = FakeAgent(
+        [
+            row("kit@x", "local"),
+            row("a@m"),
+            row("kit@x", "local"),
+            row("other@x", "local"),
+            row("kit@x", "local"),
+        ]
+    )
+    code, _ = _update(monkeypatch, agent)
+    out = capsys.readouterr().out
+    assert code == 0
+    assert out.splitlines()[:3] == [
+        "skipped  kit@x (local scope is not updated, listed 3 times)",
+        "updated  a@m (1.0.0 to 2.0.0)",
+        "skipped  other@x (local scope is not updated)",
+    ]
+    # The count is still every row the listing returned.
+    assert "1 updated, 0 current, 0 failed, 4 skipped" in out
 
 
 def test_update_plugins_needs_no_root_and_no_config_file(
@@ -1197,7 +1235,10 @@ def test_update_plugins_shows_what_y_approved(
     agent = FakeAgent([row("a@m")], **{"a@m": done(0, stdout=line)})
     code, _ = _update(monkeypatch, agent)
     assert code == 0
-    assert "updated  a@m (approved: curl -s https://x/i)" in capsys.readouterr().out
+    assert (
+        "updated  a@m (1.0.0 to 2.0.0; approved: curl -s https://x/i)"
+        in capsys.readouterr().out
+    )
 
 
 def test_update_plugins_exits_one_when_a_plugin_failed(
@@ -1208,8 +1249,49 @@ def test_update_plugins_exits_one_when_a_plugin_failed(
     out = capsys.readouterr().out
     assert code == 1
     assert "failed   a@m (exited 1: no network)" in out
-    assert "updated  b@m" in out
-    assert "1 updated, 1 failed, 0 skipped" in out
+    assert "updated  b@m (1.0.0 to 2.0.0)" in out
+    assert "1 updated, 0 current, 1 failed, 0 skipped" in out
+
+
+def test_update_plugins_prints_the_rows_done_before_a_mid_run_failure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A run that fails part way owes every row it got to, then the failure.
+    The rows are the provisional kind: no second listing ran, so the first
+    plugin says `updated` without versions."""
+    agent = FakeAgent(
+        [row("a@m"), row("adapt@kit", "local"), row("b@m")],
+        **{"b@m": FileNotFoundError()},
+    )
+    code, _ = _update(monkeypatch, agent)
+    captured = capsys.readouterr()
+    assert code == 2
+    assert captured.out.splitlines() == [
+        "updated  a@m",
+        "skipped  adapt@kit (local scope is not updated)",
+    ]
+    assert "agent_missing:" in captured.err
+
+
+def test_update_plugins_prints_the_rows_done_before_a_ctrl_c(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Rows print only at the end (#311), so a Ctrl-C on a hanging plugin
+    used to print none of them, the failure the person stopped it to read
+    included (Phase 24 round 1 review)."""
+    behaviour: dict[str, subprocess.CompletedProcess[str] | BaseException] = {
+        "a@m": done(1, stderr="no network"),
+        "c@m": KeyboardInterrupt(),
+    }
+    agent = FakeAgent([row("a@m"), row("b@m"), row("c@m")], **behaviour)
+    code, _ = _update(monkeypatch, agent)
+    captured = capsys.readouterr()
+    assert code == 130
+    assert captured.out.splitlines() == [
+        "failed   a@m (exited 1: no network)",
+        "updated  b@m",
+    ]
+    assert "interrupted:" in captured.err
 
 
 @pytest.mark.parametrize(
@@ -1293,7 +1375,7 @@ def test_update_plugins_reports_a_failed_plugin_not_a_traceback_on_invalid_utf8(
     captured = capsys.readouterr()
     assert code == 1
     # #367: "failed" alone matched the summary's own format at a count of 0.
-    assert "0 updated, 1 failed" in captured.out
+    assert "0 updated, 0 current, 1 failed" in captured.out
     assert "Traceback" not in captured.err
     assert "Traceback" not in captured.out
 
