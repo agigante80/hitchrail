@@ -3,6 +3,7 @@ import { emptyReason, isRunning, renderChips, renderTabs, visibleProjects } from
 import { formatMb } from "/format.js";
 import { showNewFolder } from "/new_folder.js";
 import { renderRow } from "/row.js";
+import { splitProject } from "/roots.js";
 import { renderSuggestions } from "/search.js";
 import { state } from "/state.js";
 import { renderBulk, renderStopAll } from "/stop_all.js";
@@ -34,7 +35,7 @@ export function renderList() {
     if (reason) reason.textContent = emptyReason();
     const create = empty.querySelector("[data-empty-create]");
     const typed = state.query.trim();
-    if (create && typed) {
+    if (create && canCreate(typed)) {
       create.textContent = `Create folder "${typed}"`;
       create.hidden = false;
       create.addEventListener("click", () => showNewFolder("", typed));
@@ -43,6 +44,19 @@ export function renderList() {
     return;
   }
   list.replaceChildren(...visible.map(renderRow));
+}
+
+/* #321. The offer is for a name that is why the list is empty, not for any
+   query beside an empty list: a tab or a root chip can hide a folder that
+   exists, and offering to create it again can only end in a refusal, or in
+   a second folder of that name in another root. So it reads every project,
+   ignoring the filters, and needs a root to create in. */
+function canCreate(typed) {
+  if (!typed || (state.roots ?? []).length === 0) return false;
+  const wanted = typed.toLowerCase();
+  return !state.projects.some(
+    (project) => splitProject(project.name).folder.toLowerCase() === wanted,
+  );
 }
 
 /* #272. `state.signalled` is keyed by `name:pid` and grew for the life of
