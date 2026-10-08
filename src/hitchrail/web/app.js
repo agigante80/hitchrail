@@ -3,7 +3,7 @@
    to compile. See the design's section 9.1. */
 
 import { api } from "/api.js";
-import { trackKeyboardInset, trackScroll } from "/chrome.js";
+import { trackFooterHeight, trackKeyboardInset, trackScroll } from "/chrome.js";
 import { $ } from "/dom.js";
 import { render, renderList } from "/list.js";
 import { refresh } from "/listing.js";
@@ -29,18 +29,6 @@ export { formatMb, formatMemory, formatUptime } from "/format.js";
 export { render } from "/list.js";
 export { setStopPatience, setWrapUpPatience } from "/patience.js";
 export { setReopenPace } from "/stream.js";
-
-/* The list's end reserves the footer's REAL height (#447). The footer is fixed
-   and wraps, so a filter's "12 of 67 shown" line makes it taller than any
-   constant measured for the unfiltered one, and the last row stayed under it. */
-function trackFooterHeight() {
-  const footer = $(".footer");
-  if (!footer || !window.ResizeObserver) return;
-  new ResizeObserver(() => {
-    const height = Math.ceil(footer.getBoundingClientRect().height);
-    document.documentElement.style.setProperty("--footer-h", `${height}px`);
-  }).observe(footer);
-}
 
 function boot() {
   applyTheme(storedTheme());

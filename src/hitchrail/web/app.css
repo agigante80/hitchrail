@@ -96,7 +96,7 @@ body {
   font-family: 'Karla', system-ui, -apple-system, sans-serif;
   font-size: 16px;
   line-height: 1.45;
-  /* `--footer-h` is the footer's real height, written by app.js. The 86px
+  /* `--footer-h` is the footer's real height, written by chrome.js. The 86px
      fallback is the unfiltered footer, for the moment before the script runs. */
   padding-bottom: calc(var(--footer-h, 86px) + 10px);
   -webkit-text-size-adjust: 100%;

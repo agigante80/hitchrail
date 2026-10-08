@@ -52,3 +52,15 @@ export function trackKeyboardInset() {
   vv.addEventListener("scroll", apply);
   apply();
 }
+
+/* The list's end reserves the footer's REAL height (#447). The footer is fixed
+   and wraps, so a filter's "12 of 67 shown" line makes it taller than any
+   constant measured for the unfiltered one, and the last row stayed under it. */
+export function trackFooterHeight() {
+  const footer = document.querySelector(".footer");
+  if (!footer || !window.ResizeObserver) return;
+  new ResizeObserver(() => {
+    const height = Math.ceil(footer.getBoundingClientRect().height);
+    document.documentElement.style.setProperty("--footer-h", `${height}px`);
+  }).observe(footer);
+}
