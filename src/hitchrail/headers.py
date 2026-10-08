@@ -148,7 +148,9 @@ def policy_for(path: str) -> str:
         return PAGE_CSP
     if path == "/grant":
         return GRANT_CSP
-    if path == "/icon.svg":
+    # #325. /favicon.ico is the same file, so the same inline style needs the
+    # same hash; under API_CSP it would render black in Firefox, as #253 found.
+    if path in {"/icon.svg", "/favicon.ico"}:
         return ICON_CSP
     # #151. The logs page, one segment under /logs and exactly one: it runs
     # its own script from the same origin under the same self-only policy as

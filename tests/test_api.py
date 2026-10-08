@@ -1338,6 +1338,7 @@ async def test_the_logs_page_does_not_choose_a_file_by_name(client: httpx.AsyncC
     ("path", "content_type"),
     [
         ("/icon.svg", "image/svg+xml"),
+        ("/favicon.ico", "image/svg+xml"),
         ("/icon-180.png", "image/png"),
         ("/icon-512.png", "image/png"),
         ("/manifest.webmanifest", "application/manifest+json"),
@@ -1347,7 +1348,7 @@ async def test_the_mark_and_the_manifest_are_served_without_a_token(
     config: Config, engine: Engine, path: str, content_type: str
 ) -> None:
     """#160. The grant page is the first one a new phone ever loads and it must
-    not be nameless, and a touch icon cannot be a data URL. These four files
+    not be nameless, and a touch icon cannot be a data URL. These files
     carry nothing from the machine: a drawing, and a manifest that names the
     application. They are the ONLY assets served without a token, pinned in
     `security.UNAUTHENTICATED_ASSETS` with the argument beside them."""
