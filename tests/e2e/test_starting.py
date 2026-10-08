@@ -216,7 +216,9 @@ async def test_a_search_that_matches_nothing_offers_to_create_that_folder(
     )
 
 
-async def test_no_offer_to_create_a_folder_a_filter_is_hiding(page: Page, server: Harness) -> None:
+async def test_no_offer_to_create_a_folder_a_filter_is_hiding(
+    page: Page, server: Harness
+) -> None:
     """Round 1 review of Phase 24's batches 3 to 5. On the Running tab, a
     search for a folder that exists but is stopped empties the list too, and
     offering to create it could only end in a refusal."""
