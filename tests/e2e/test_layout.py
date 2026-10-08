@@ -7,7 +7,7 @@ from itertools import pairwise
 import pytest
 from playwright.async_api import Page, expect
 
-from .conftest import Harness
+from .conftest import Harness, e2e_name
 
 pytestmark = pytest.mark.e2e
 
@@ -75,6 +75,89 @@ async def test_root_chips_keep_their_width_and_the_strip_scrolls(
     assert await strip.evaluate("el => el.scrollWidth > el.clientWidth"), (
         "five long roots fit one screen, so this test no longer proves the strip scrolls"
     )
+
+
+# What a row's name measures. The "natural" height is the same text in a box as
+# wide as it likes, so the line count it implies is the name's own and not a
+# number the test had to assume.
+_NAME = """el => {
+  const row = el.closest('.row');
+  const cs = getComputedStyle(row);
+  const inner = row.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const lineHeight = parseFloat(getComputedStyle(el).lineHeight);
+  const clone = el.cloneNode(true);
+  clone.style.position = 'absolute';
+  clone.style.visibility = 'hidden';
+  clone.style.width = 'max-content';
+  document.body.append(clone);
+  const natural = clone.getBoundingClientRect().height / lineHeight;
+  clone.remove();
+  const box = el.getBoundingClientRect();
+  return {
+    width: box.width, inner, lines: box.height / lineHeight, natural,
+    row: row.getBoundingClientRect().height,
+  };
+}"""
+
+
+def _sixteen(tag: str) -> str:
+    """A folder name 16 characters long once the harness prefix is on it, which
+    is what the ticket's `a-sixteen-letter` is and what the phone showed
+    crushed. The prefix carries the test run's pid, so its length varies."""
+    room = 16 - len(e2e_name(""))
+    return f"{tag}-sixteen-letter"[:room]
+
+
+async def _sixteen_letter_rows(server: Harness, page: Page) -> dict[str, dict[str, float]]:
+    """One row per state, each named to 16 characters, among five roots so the
+    root chip is drawn: the conditions the guard before #449 never had."""
+    names = {state: _sixteen(state) for state in ("stopped", "running", "stale", "detached")}
+    filler = [f"p{i:02d}" for i in range(8)]
+    server.seed(
+        running=[names["running"]],
+        stopped=[names["stopped"], *filler],
+        stale=[names["stale"]],
+        detached=[names["detached"]],
+        stopped_in=dict.fromkeys(LONG_ROOTS, filler),
+    )
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(
+        4 + 8 + 8 * len(LONG_ROOTS), timeout=15_000
+    )
+    measured = {}
+    for state, name in names.items():
+        row = page.locator(f'[data-project="{server.project(name)}"]')
+        await expect(row).to_have_attribute("data-state", state)
+        measured[state] = await row.locator(".row-name").evaluate(_NAME)
+    return measured
+
+
+@pytest.mark.parametrize("state", ["stopped", "running", "stale", "detached"])
+async def test_a_name_has_its_own_line_in_every_state(
+    page: Page, server: Harness, state: str
+) -> None:
+    """#449, and #179 again. A stopped row put the name, the root chip, the
+    badge and Start on one line and the name took all of the squeeze: sixteen
+    characters became six lines of two or three. The running-row guard checked
+    one state at one width with no root chip, so it could not see it.
+
+    The line count is compared with the name's own, and the width with the
+    row's, because a name on one line that is 40px wide in a crushed box would
+    pass the first alone."""
+    await page.set_viewport_size({"width": 360, "height": 740})
+    got = (await _sixteen_letter_rows(server, page))[state]
+    assert round(got["lines"]) == round(got["natural"]) == 1, f"the {state} name wraps: {got}"
+    assert got["width"] >= 0.6 * got["inner"], f"the {state} name is crushed: {got}"
+
+
+async def test_a_stopped_row_stays_shorter_than_a_running_one(
+    page: Page, server: Harness
+) -> None:
+    """#449. The name on its own line must not turn the stopped row into the
+    running one: the design keeps the asymmetry so forty rows stay scannable."""
+    await page.set_viewport_size({"width": 360, "height": 740})
+    got = await _sixteen_letter_rows(server, page)
+    assert got["stopped"]["row"] < got["running"]["row"], got
 
 
 async def test_tabs_keep_their_width_when_the_strip_is_too_narrow(

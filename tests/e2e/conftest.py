@@ -483,6 +483,12 @@ class Harness:
         # two root tests need: the phase exists for the case where the same
         # folder name appears in two of them.
         self.extra_roots: dict[str, Path] = {}
+        # `mktemp("hr")` gives each test its own root but the same PARENT, and
+        # the extra roots live beside it, so a label one test used came back
+        # to the next with its folders still in it. The first test to seed
+        # five roots made every later one count 60 rows where it made 44.
+        for leftover in root.parent.glob("root-*"):
+            shutil.rmtree(leftover, ignore_errors=True)
         self._sock = sock
         self._server: uvicorn.Server | None = None
         self._thread: threading.Thread | None = None

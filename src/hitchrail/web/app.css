@@ -341,8 +341,10 @@ button[disabled] { color: var(--muted-3); cursor: not-allowed; }
 
 /* -- rows ---------------------------------------------------------------
    Row ASYMMETRY is the whole mobile argument, per the canvas annotation. A
-   running row is tall because it carries three actions; a stopped row is one
-   line with one button, so the other forty five stay scannable with a thumb.
+   running row is tall because it carries three actions; a stopped row is two
+   short lines with one button (the name, then its chip, badge and Start), so
+   the other forty five stay scannable with a thumb. It was one line until the
+   phone showed that line crushing the name (#449).
    That is why the two shapes are separate rules rather than one rule with a
    modifier: making them converge is exactly the regression to prevent. */
 main { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
@@ -351,8 +353,14 @@ main { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
   background: var(--surface); border: 1px solid var(--line);
   border-radius: var(--radius); padding: 12px 14px;
 }
-.row-head { display: flex; align-items: center; gap: 10px; }
-.row-name { font-weight: 700; overflow-wrap: anywhere; }
+/* #449, and #179 before it. The name takes a whole line and everything else in
+   the head wraps onto the next, because the other items are `flex-shrink: 0`
+   and a name sharing their line is the only thing left to give: it went down
+   to two characters a line. Two short lines that read beat one that does not.
+   The stopped row stays the shorter of the two shapes: it has no actions line
+   of its own, its one control sits beside the badge. */
+.row-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.row-name { flex: 1 1 100%; font-weight: 700; overflow-wrap: anywhere; }
 .row-actions { display: flex; gap: 8px; flex-shrink: 0; margin-left: auto; }
 
 /* #122. Which root a row is in, shown only when there is more than one.
@@ -374,7 +382,6 @@ main { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
 .row[data-state="running"] .row-actions,
 .row[data-state="detached"] .row-actions,
 .row[data-state="stale"] .row-actions { margin-left: 0; }
-.row[data-state="stopped"] .row-head { min-height: var(--touch); }
 
 .meta { font-size: 13px; color: var(--muted-2); }
 
@@ -465,6 +472,9 @@ main { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
 
 /* -- desktop is the same data at a wider viewport, not a second interface */
 @media (min-width: 900px) {
+  /* Room for the one line again: the name shares it with its chip and badge. */
+  .row-head { flex-wrap: nowrap; }
+  .row-name { flex: 0 1 auto; }
   main { max-width: 1100px; margin: 0 auto; }
   .bar, .tabs, .chips, .search, .unsupported { max-width: 1100px; margin-inline: auto; }
   .row[data-state="running"], .row[data-state="detached"], .row[data-state="stale"] {
