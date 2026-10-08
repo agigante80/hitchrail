@@ -18,6 +18,32 @@ export function resetActiveSuggestion() {
   activeSuggestion = -1;
 }
 
+/* #451. The clear control is present only while the field holds text. */
+export function syncClearButton() {
+  const clear = $("[data-search-clear]");
+  const box = $("[data-search]");
+  if (clear && box) clear.hidden = box.value === "";
+}
+
+/* #451. Clears the TEXT and nothing else. The status tab and the root chips
+   are filters with controls of their own, and a person who tapped X to retype
+   a name did not ask to lose them; a later change that "resets the view" here
+   would re-decide that without anyone having decided it. Focus stays in the
+   field so the keyboard stays up and the next character lands in it. */
+export function clearSearch() {
+  const box = $("[data-search]");
+  state.query = "";
+  state.chosen = null;
+  resetActiveSuggestion();
+  if (box) {
+    box.value = "";
+    box.focus();
+  }
+  syncClearButton();
+  renderList();
+  renderSuggestions();
+}
+
 function suggestions() {
   // #248. A choice is the end of the interaction: the chosen row is the one
   // match and it is on the list already, so the popup stays closed until
@@ -86,6 +112,7 @@ function chooseSuggestion(project) {
   state.query = folder;
   state.chosen = project.name;
   if (box) box.value = folder;
+  syncClearButton();
   closeSuggestions();
   renderList();
 }
@@ -112,10 +139,7 @@ export function onSearchKey(event) {
     if (open) {
       closeSuggestions();
     } else {
-      state.query = "";
-      state.chosen = null;
-      event.target.value = "";
-      renderList();
+      clearSearch();
     }
   }
 }

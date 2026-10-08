@@ -40,6 +40,12 @@ a test: **host allowlist, then token, then origin**. Token precedes origin so
 an unauthenticated caller cannot enumerate the origin allowlist by watching a
 403 become a 401.
 
+Five static files are readable without a token (`GET` and `HEAD` only):
+`/icon.svg`, `/favicon.ico` (the same drawing, under the path a browser asks
+for unprompted), `/icon-180.png`, `/icon-512.png` and `/manifest.webmanifest`.
+They carry a drawing and a name, nothing from the machine; every other route,
+and every other method on these paths, needs the token.
+
 The origin check applies to mutating requests only. `GET` is exempt, because
 `EventSource` cannot set headers. The origins derived from the server's own
 bind carry its own scheme, `https` with `--tls-cert` and `http` without; an

@@ -87,8 +87,15 @@ UNAUTHENTICATED: frozenset[tuple[str, str, str]] = frozenset(
 # only: the middleware admits GET and HEAD to these paths and nothing else,
 # and the set is pinned by a test like the one above. A stylesheet or a
 # script must NOT join it; the grant page inlines its own for that reason.
+#
+# #325. `/favicon.ico` is the fifth, and the argument is the same one: it is
+# `icon.svg` under the name a browser requests unprompted, so it carries the
+# same drawing and nothing else. It goes in THIS set rather than in the triples
+# above because it is the same kind of thing as `/icon.svg` and wants the same
+# GET and HEAD only rule; a triple would have admitted GET alone and answered
+# the HEAD a browser may send with a 401.
 UNAUTHENTICATED_ASSETS: frozenset[str] = frozenset(
-    {"/icon.svg", "/icon-180.png", "/icon-512.png", "/manifest.webmanifest"}
+    {"/icon.svg", "/favicon.ico", "/icon-180.png", "/icon-512.png", "/manifest.webmanifest"}
 )
 # Thirty days. Long enough that a phone is not re-granted every session, short
 # enough that a device left behind stops working eventually.

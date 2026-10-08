@@ -65,6 +65,10 @@ ASSETS = {
     # names the tile. Served without a token, the only assets that are: see
     # `security.UNAUTHENTICATED_ASSETS` for the argument.
     "/icon.svg": ("icon.svg", "image/svg+xml"),
+    # #325. The same drawing at the one path a browser asks for on its own,
+    # whatever the page links, so a tab opened on a bare API path or a page
+    # with no <link> stops logging a 401. SVG, not a real .ico: the type says so.
+    "/favicon.ico": ("icon.svg", "image/svg+xml"),
     "/icon-180.png": ("icon-180.png", "image/png"),
     "/icon-512.png": ("icon-512.png", "image/png"),
     "/manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json"),

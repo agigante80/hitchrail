@@ -5,12 +5,12 @@ import { state } from "/state.js";
 
 /* -- the new folder sheet ---------------------------------------------- */
 
-export function showNewFolder(message) {
+export function showNewFolder(message, name = "") {
   const field = document.createElement("input");
   field.type = "text";
   field.setAttribute("aria-label", "Folder name");
   field.className = "sheet-field";
-  field.value = "";
+  field.value = name;
 
   const wrapper = document.createElement("div");
   const path = document.createElement("p");

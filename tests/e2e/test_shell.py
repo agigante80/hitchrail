@@ -179,7 +179,7 @@ async def test_the_new_folder_sheet_keeps_its_primary_action_on_a_short_viewport
     # a keyboard, not the space a phone starts with.
     await page.set_viewport_size({"width": 390, "height": 380})
 
-    await page.get_by_role("button", name="New").click()
+    await page.get_by_role("button", name="New project").click()
     dialog = page.locator("[data-dialog]")
     await expect(dialog).to_be_visible()
 
@@ -231,7 +231,7 @@ async def test_the_dialog_lifts_clear_of_a_reported_keyboard_inset(
     server.seed(stopped=["alpha"])
     await page.goto(server.base)
     await page.set_viewport_size({"width": 390, "height": 844})
-    await page.get_by_role("button", name="New").click()
+    await page.get_by_role("button", name="New project").click()
     dialog = page.locator("[data-dialog]")
     await expect(dialog).to_be_visible()
 
@@ -276,7 +276,7 @@ async def test_a_dialog_with_no_keyboard_is_centred_in_the_viewport(
     server.seed(stopped=["alpha"])
     await page.set_viewport_size(viewport)
     await page.goto(server.base)
-    await page.get_by_role("button", name="New").click()
+    await page.get_by_role("button", name="New project").click()
     dialog = page.locator("[data-dialog]")
     await expect(dialog).to_be_visible()
 

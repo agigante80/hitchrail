@@ -90,7 +90,9 @@ OUTER_LAYER_CAPS: dict[str, int] = {
     # arrived a day after the rule, said where the rule is read.
     # 480 for #167: a line for each refusal, every request value escaped
     # through `logs.shown` and the credential only as offered or not.
-    "security.py": 480,
+    # 487 for #325: why `/favicon.ico` is a set entry, the route Starlette
+    # answers HEAD on, rather than a method keyed exemption.
+    "security.py": 487,
     # rather than one. A refusal handler is the shape this file is made of.
     # 513 to 517 for #120. The listing payload reports every configured
     # root as a labelled list rather than one path string, and the comment
@@ -172,5 +174,7 @@ WEB_CAPS: dict[str, int] = {
     # paint, where a script module is not. Its sections (tokens, the bar,
     # the row, the dialogs, the settings page) already read as files; split
     # it along them if it passes roughly 800, or when a build step exists.
-    "app.css": 698,
+    # 760 for Phase 24's bar: the gear, the mark, the search clear control
+    # and the appearance radiogroup (#320, #324, #451, #323).
+    "app.css": 760,
 }

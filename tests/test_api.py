@@ -35,6 +35,7 @@ from hitchrail import server as srv
 from hitchrail.config import Config
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
+from hitchrail.headers import policy_for
 from hitchrail.procs import ProcTable
 from hitchrail.security import UNAUTHENTICATED_ASSETS
 from hitchrail.server import create_app
@@ -1338,6 +1339,7 @@ async def test_the_logs_page_does_not_choose_a_file_by_name(client: httpx.AsyncC
     ("path", "content_type"),
     [
         ("/icon.svg", "image/svg+xml"),
+        ("/favicon.ico", "image/svg+xml"),
         ("/icon-180.png", "image/png"),
         ("/icon-512.png", "image/png"),
         ("/manifest.webmanifest", "application/manifest+json"),
@@ -1347,7 +1349,7 @@ async def test_the_mark_and_the_manifest_are_served_without_a_token(
     config: Config, engine: Engine, path: str, content_type: str
 ) -> None:
     """#160. The grant page is the first one a new phone ever loads and it must
-    not be nameless, and a touch icon cannot be a data URL. These four files
+    not be nameless, and a touch icon cannot be a data URL. These files
     carry nothing from the machine: a drawing, and a manifest that names the
     application. They are the ONLY assets served without a token, pinned in
     `security.UNAUTHENTICATED_ASSETS` with the argument beside them."""
@@ -1360,6 +1362,11 @@ async def test_the_mark_and_the_manifest_are_served_without_a_token(
         response = await c.get(path, headers={"host": "localhost"})
     assert response.status_code == 200, path
     assert response.headers["content-type"].startswith(content_type)
+    # Through the real app, not `policy_for` alone: an exempt file that left
+    # the middleware list would still be served, and nothing else would fail.
+    assert response.headers["x-content-type-options"] == "nosniff", path
+    assert response.headers["x-frame-options"] == "DENY", path
+    assert response.headers["content-security-policy"] == policy_for(path), path
 
 
 async def test_the_manifest_names_icons_that_exist(client: httpx.AsyncClient) -> None:

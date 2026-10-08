@@ -559,7 +559,15 @@ def test_the_exemption_is_exactly_these_entries() -> None:
     # it has a token: a drawing and a name, nothing from the machine. Named
     # here for the same reason as the routes above.
     assert (
-        frozenset({"/icon.svg", "/icon-180.png", "/icon-512.png", "/manifest.webmanifest"})
+        frozenset(
+            {
+                "/icon.svg",
+                "/favicon.ico",
+                "/icon-180.png",
+                "/icon-512.png",
+                "/manifest.webmanifest",
+            }
+        )
         == UNAUTHENTICATED_ASSETS
     )
 
@@ -585,6 +593,26 @@ async def test_an_unauthenticated_asset_is_only_ever_read(tmp_path: Path) -> Non
         r = await call(app, method=method, path="/icon.svg", headers=HOST)
         assert r.status_code == 401, method
     for path in ("/icon.svg/", "/icon.svg/x", "/ICON.SVG"):
+        assert (await call(app, path=path, headers=HOST)).status_code == 401, path
+
+
+@pytest.mark.integration
+async def test_the_favicon_exemption_is_read_only_and_exact(tmp_path: Path) -> None:
+    """#325. The new entry is admitted for GET and HEAD alone, over http alone,
+    at that exact path. A write to it, a sibling path and a
+    case variant all still need the token; the websocket case is covered by
+    `test_a_websocket_to_an_exempt_path_is_not_exempt`."""
+    app = Starlette(
+        routes=[Route("/favicon.ico", _ok, methods=["GET", "POST", "PUT", "DELETE", "PATCH"])],
+        middleware=middleware_stack(make_config(tmp_path, host="0.0.0.0", token=TOKEN)),
+    )
+    for method in ("GET", "HEAD"):
+        r = await call(app, method=method, path="/favicon.ico", headers=HOST)
+        assert r.status_code == 200, method
+    for method in ("POST", "PUT", "DELETE", "PATCH", "OPTIONS"):
+        r = await call(app, method=method, path="/favicon.ico", headers=HOST)
+        assert r.status_code == 401, method
+    for path in ("/favicon.ico/", "/favicon.ico/x", "/FAVICON.ICO", "/favicon.png"):
         assert (await call(app, path=path, headers=HOST)).status_code == 401, path
 
 
@@ -626,7 +654,7 @@ async def test_a_websocket_to_an_exempt_path_is_not_exempt(tmp_path: Path) -> No
     argument for the general case: the token middleware once skipped every non
     http scope, so a websocket route added later would have arrived
     unauthenticated. An exemption keyed on the path alone would reopen that,
-    on the two paths where it matters most.
+    on the paths where it matters most, the static files included (#325).
     """
     from hitchrail.security import TokenMiddleware
 
@@ -644,7 +672,7 @@ async def test_a_websocket_to_an_exempt_path_is_not_exempt(tmp_path: Path) -> No
     async def send(message: MutableMapping[str, Any]) -> None:
         sent.append(message)
 
-    for path in ("/grant", "/api/grant"):
+    for path in ("/grant", "/api/grant", "/icon.svg", "/favicon.ico"):
         await middleware(
             {"type": "websocket", "path": path, "headers": [(b"host", b"localhost")]},
             receive,

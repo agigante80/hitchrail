@@ -128,6 +128,7 @@ def test_the_mark_is_served_with_a_policy_that_admits_its_own_style() -> None:
     (style,) = re.findall(r"<style>(.*?)</style>", svg, re.S)
     policy = policy_for("/icon.svg")
     assert policy == ICON_CSP
+    assert policy_for("/favicon.ico") == ICON_CSP, "#325: the same file, the same hash"
     assert policy.startswith("default-src 'none'")
     assert f"style-src {_hash_of(style)}" in policy
     assert "'unsafe-inline'" not in policy and "script-src" not in policy
