@@ -16,6 +16,17 @@ export function storedTheme() {
   }
 }
 
+/* #323. `null` is System: the key is removed, which is the state the header
+   toggle can never return to once it has stored a choice. */
+export function storeTheme(theme) {
+  try {
+    if (theme) localStorage.setItem(THEME_KEY, theme);
+    else localStorage.removeItem(THEME_KEY);
+  } catch {
+    /* The choice still applies to this page view; it just is not remembered. */
+  }
+}
+
 export function applyTheme(theme) {
   if (theme) {
     document.documentElement.setAttribute("data-theme", theme);
@@ -48,10 +59,6 @@ export function toggleTheme() {
     || (!document.documentElement.hasAttribute("data-theme")
         && window.matchMedia("(prefers-color-scheme: dark)").matches);
   const next = dark ? "light" : "dark";
-  try {
-    localStorage.setItem(THEME_KEY, next);
-  } catch {
-    /* A viewer who cannot store still gets the theme for this page view. */
-  }
+  storeTheme(next);
   applyTheme(next);
 }

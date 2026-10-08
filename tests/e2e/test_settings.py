@@ -242,3 +242,63 @@ async def test_a_flag_pins_the_stop_wait_as_text(page: Page, server: Harness) ->
     )
     assert await page.locator("[data-stop-timeout]").is_hidden()
     assert await page.locator("[data-stop-save]").is_hidden()
+
+
+# -- #323: Appearance ---------------------------------------------------------
+
+_BODY = "getComputedStyle(document.body).backgroundColor"
+_DARK, _LIGHT = "rgb(54, 45, 36)", "rgb(243, 236, 225)"
+
+
+async def test_appearance_applies_live_remembers_and_returns_to_the_system(
+    page: Page, server: Harness
+) -> None:
+    """The header toggle can only land on Light or Dark, so this is the one way
+    back to following the device. The key is the toggle's own, so the list page
+    reads what was picked here, and System is its absence."""
+    server.seed(stopped=["vessel"])
+    await page.emulate_media(color_scheme="light")
+    await page.goto(f"{server.base}/settings")
+    group = page.get_by_role("radiogroup", name="Appearance")
+    await expect(group.get_by_role("radio", name="System")).to_be_checked()
+
+    await group.get_by_role("radio", name="Dark").check()
+    assert await page.evaluate(_BODY) == _DARK
+    assert await page.evaluate("localStorage.getItem('hitchrail-theme')") == "dark"
+    await page.reload()
+    await expect(group.get_by_role("radio", name="Dark")).to_be_checked()
+    assert await page.evaluate(_BODY) == _DARK
+    await page.goto(server.base)
+    assert await page.evaluate(_BODY) == _DARK
+
+    await page.goto(f"{server.base}/settings")
+    await group.get_by_role("radio", name="System").check()
+    assert await page.evaluate("localStorage.getItem('hitchrail-theme')") is None
+    assert await page.evaluate(_BODY) == _LIGHT
+    await page.emulate_media(color_scheme="dark")
+    assert await page.evaluate(_BODY) == _DARK, "System no longer follows the device"
+    await group.get_by_role("radio", name="Light").check()
+    assert await page.evaluate(_BODY) == _LIGHT
+
+
+async def test_appearance_still_applies_when_the_browser_will_not_store(
+    page: Page, server: Harness
+) -> None:
+    """A private window throws on localStorage in some browsers. The choice
+    then lasts for the page view, and the page does not stop working."""
+    server.seed(stopped=["vessel"])
+    await page.add_init_script(
+        """
+        Storage.prototype.getItem = () => { throw new Error('blocked'); };
+        Storage.prototype.setItem = () => { throw new Error('blocked'); };
+        Storage.prototype.removeItem = () => { throw new Error('blocked'); };
+        """
+    )
+    await page.emulate_media(color_scheme="light")
+    await page.goto(f"{server.base}/settings")
+    group = page.get_by_role("radiogroup", name="Appearance")
+    await expect(group.get_by_role("radio", name="System")).to_be_checked()
+    await group.get_by_role("radio", name="Dark").check()
+    assert await page.evaluate(_BODY) == _DARK
+    await group.get_by_role("radio", name="System").check()
+    assert await page.evaluate(_BODY) == _LIGHT

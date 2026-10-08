@@ -42,6 +42,19 @@
     <p class="settings-help">Folders whose projects are listed. Hiding one leaves its sessions running; it only leaves the list. Adding one is an edit to the config file on the machine.</p>
     <ul class="settings-roots" data-roots></ul>
   </section>
+  <!-- #323. This browser's, not the server's: stored here and sent nowhere,
+       so there is no Save and nothing for the API to refuse. The header's
+       toggle keeps its one tap between Light and Dark; this is the only way
+       back to following the device. -->
+  <section class="settings-group">
+    <h2 id="appearance">Appearance</h2>
+    <div class="settings-choices" role="radiogroup" aria-labelledby="appearance">
+      <label class="settings-choice"><input type="radio" name="theme" value="light" data-theme-choice> Light</label>
+      <label class="settings-choice"><input type="radio" name="theme" value="dark" data-theme-choice> Dark</label>
+      <label class="settings-choice"><input type="radio" name="theme" value="system" data-theme-choice> System</label>
+    </div>
+    <p class="settings-help">System follows this device and changes with it.</p>
+  </section>
   <section class="settings-group">
     <h2>Stopping</h2>
     <label class="settings-field" data-stop-field>
