@@ -57,6 +57,7 @@ import pytest
 from playwright.async_api import Locator, Page, ViewportSize, expect
 
 from . import conftest as e2e_conftest
+from .busy import seed_busy
 from .conftest import SHOT_PREFIX, Harness
 
 pytestmark = [pytest.mark.e2e, pytest.mark.screenshots]
@@ -280,6 +281,19 @@ async def test_capture_two_roots_on_a_phone(page: Page, shots_server: Harness) -
         row = page.locator(f'[data-project="{shots_server.project("vessel", label)}"]')
         await expect(row.locator(".badge")).to_have_text("running", timeout=15_000)
     await _shoot(page, "phone-two-roots", page.locator("[data-project]").first)
+
+
+async def test_capture_the_busy_phone_list(page: Page, shots_server: Harness) -> None:
+    """What the daily phone holds (#450): five roots, sixty folders, names from
+    short to a full line, every state, at 360 CSS px. The other captures use
+    one root and short names, which is how three layout defects reached a real
+    phone without a picture or a test seeing them."""
+    await page.set_viewport_size(PHONE)
+    busy = seed_busy(shots_server)
+    await page.goto(shots_server.base)
+    await expect(page.locator("[data-project]")).to_have_count(busy.total, timeout=15_000)
+    await page.wait_for_timeout(600)
+    await _shoot(page, "phone-busy-list", page.locator("[data-roots]"))
 
 
 async def test_capture_the_phone_list_dark(page: Page, shots_server: Harness) -> None:

@@ -194,6 +194,9 @@ button, .btn {
   background: var(--surface);
   color: var(--ink);
   font: inherit;
+  /* Material 3's label large (#450): where both platforms put a control, a
+     step under the 16px body. That step is where a 360px row's room went. */
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -337,6 +340,10 @@ button[disabled] { color: var(--muted-3); cursor: not-allowed; }
   width: 100%; min-height: var(--touch); padding: 0 14px;
   border: 1px solid var(--line); border-radius: var(--radius);
   background: var(--surface); color: var(--ink); font: inherit;
+  /* Never under 16px: iOS Safari zooms into a smaller input on focus and does
+     not zoom back. The answer is this, not `maximum-scale=1`, which would take
+     pinch zoom from the people who need it. */
+  font-size: max(16px, 1em);
 }
 
 /* -- rows ---------------------------------------------------------------
