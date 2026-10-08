@@ -176,8 +176,15 @@ Backlog": each is in the direction this phase exists to close.
       restarting the session inside the window proves the new agent survives
 - [ ] Every kill writes a journal line, and no journal line carries a token,
       both asserted from captured stderr in the live tier
-- [ ] Watched on the phone: a Stop with a second browser open shows the same
-      phase in both, and a reopened wait shows the stop's real age
+- [x] Watched on the phone: a Stop with a second browser open shows the same
+      phase in both, and a reopened wait shows the stop's real age. Watched
+      2026-10-08 on the Pixel 2, 0.14.0, Firefox and Chrome on one throwaway
+      root: Stop tapped in Firefox at 19:27:44.8; Chrome's row read stopping,
+      and its Stop reopened a wait reading "Asking it to wrap up, after its
+      current task. 21s so far." about 21s in, then 44s at about 45s after a
+      hide and a reopen, while Firefox read the same phase at 56s. The wrap up
+      hit its 120s ceiling, the exit answered the background work menu, and
+      both browsers read stopped at 121.9s. The watch also found #456.
 - [ ] No `from-review` ticket open in the milestone without a decision
 - [ ] Roadmap says done, milestone closed, `check-phases.sh` passes
 
