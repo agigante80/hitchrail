@@ -16,6 +16,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
+from js_source import SINK, stripped
+
 WEB = Path(__file__).resolve().parents[1] / "src" / "hitchrail" / "web"
 
 
@@ -300,46 +304,6 @@ GRANT = WEB / "grant.html"
 # -- #308: no page renders vendor text as markup ------------------------------
 
 
-def _stripped(source: str) -> str:
-    """The same source with every comment and every string or template
-    literal blanked to spaces, length preserved.
-
-    #308's own defect: a plain substring search for `innerHTML` matches this
-    file's comment saying the code never uses it (see `app.js`, "textContent,
-    never innerHTML"), so a guard that greps the raw text would trip on its
-    own explanation the day someone writes one. Blanking comments and string
-    bodies first means the regex below can only match code that is actually
-    there to run.
-    """
-    out = list(source)
-    i, n = 0, len(source)
-    while i < n:
-        two = source[i : i + 2]
-        c = source[i]
-        if two == "//":
-            end = source.find("\n", i)
-            end = n if end == -1 else end
-        elif two == "/*":
-            close = source.find("*/", i)
-            end = n if close == -1 else close + 2
-        elif c in "\"'`":
-            j = i + 1
-            while j < n and source[j] != c:
-                j += 2 if source[j] == "\\" else 1
-            end = min(j + 1, n)
-        else:
-            i += 1
-            continue
-        for k in range(i, end):
-            if out[k] != "\n":
-                out[k] = " "
-        i = end
-    return "".join(out)
-
-
-_HTML_SINK = re.compile(r"\.(?:inner|outer)HTML\b|\.insertAdjacentHTML\s*\(")
-
-
 def test_no_web_script_assigns_vendor_text_as_markup() -> None:
     """#308. `settings.js` renders every vendor string (a plugin id, its
     `detail`, its `approved_command`) with `textContent`, which is correct
@@ -355,13 +319,60 @@ def test_no_web_script_assigns_vendor_text_as_markup() -> None:
         f"expected settings.js and plugins.js in {WEB}, found {sorted(names)}"
     )
     for path in scripts:
-        stripped = _stripped(path.read_text(encoding="utf-8"))
-        match = _HTML_SINK.search(stripped)
+        match = SINK.search(stripped(path.read_text(encoding="utf-8")))
         assert match is None, (
             f"{path.name} assigns HTML as a string ({match.group(0)!r} once "
             f"comments and literals are stripped); render vendor text with "
             f"textContent instead"
         )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "el.innerHTML = x;",
+        "el.outerHTML = x;",
+        "el.insertAdjacentHTML('beforeend', x);",
+        'el["innerHTML"] = x;',
+        "el['outerHTML'] = x;",
+        "Object.assign(el, {innerHTML: x});",
+        'Object.assign(el, {"innerHTML": x});',
+        "const s = `${(el.innerHTML = x)}`;",
+        "const t = `a ${`b ${el.innerHTML = x}`} c`;",
+        "const y = s.replace(/'/g, ''); el.innerHTML = y;",
+        'const y = s.replace(/"/g, ""); el.innerHTML = y;',
+        "const y = s.replace(/[/']/g, ''); el.innerHTML = y;",
+        "if (ok) return /'/.test(s) && (el.innerHTML = s);",
+    ],
+)
+def test_the_markup_guard_sees_every_shape_of_sink(source: str) -> None:
+    """#342. Each of these renders a string as markup and runs; the guard
+    must see all of them, not only the dotted property."""
+    assert SINK.search(stripped(source)), stripped(source)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "// never innerHTML\nel.textContent = x;",
+        "/* innerHTML is refused */ el.textContent = x;",
+        "el.textContent = 'set with innerHTML elsewhere';",
+        "el.textContent = `not innerHTML ${name}`;",
+        "const half = total / 2 / count; el.textContent = 'no innerHTML';",
+        "const r = /innerHTML/; el.textContent = x;",
+    ],
+)
+def test_the_markup_guard_passes_prose_and_division(source: str) -> None:
+    """The other side of #308: a comment, a sentence or a regex that names a
+    sink is not one, and a division is not a regex that would blank the code
+    after it."""
+    assert SINK.search(stripped(source)) is None, stripped(source)
+
+
+def test_a_division_does_not_hide_the_code_after_it() -> None:
+    """Read as a regex, `a / b` would blank up to the next slash, and a sink
+    between the two would vanish."""
+    assert SINK.search(stripped("const q = a / b; el.innerHTML = q; const r = c / d;"))
 
 
 def test_the_key_field_hints_a_password_manager_and_has_no_name() -> None:

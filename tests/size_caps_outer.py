@@ -161,3 +161,14 @@ OUTER_LAYER_CAPS: dict[str, int] = {
     # over a clean shutdown or over the kill's own.
     "server.py": 1079,
 }
+
+# The web assets' caps (#68), read by `test_every_web_asset_is_under_the_size_guideline`.
+# Keyed by the file name under `src/hitchrail/web/`.
+WEB_CAPS: dict[str, int] = {
+    # 698 at the split. One stylesheet for every page, and each further
+    # stylesheet is a render blocking request on a phone before the first
+    # paint, where a script module is not. Its sections (tokens, the bar,
+    # the row, the dialogs, the settings page) already read as files; split
+    # it along them if it passes roughly 800, or when a build step exists.
+    "app.css": 698,
+}
