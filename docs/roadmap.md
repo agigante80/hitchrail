@@ -47,7 +47,8 @@ the running application, on the phone it is for. See
 [`tech-guidelines.md`](tech-guidelines.md) section 7.
 
 ## Phase: Phase 24: The interface, found
-state: planned
+state: open
+plan: docs/superpowers/plans/2026-10-08-hitchrail-phase-24-interface-found.md
 
 Everything the phone offers can be found by looking at it. Filed together from
 using it: settings is a text link at the end of the footer, the button that
