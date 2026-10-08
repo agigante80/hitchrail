@@ -32,6 +32,11 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+## 0.14.0 - 2026-10-08
+
+Nothing to do on upgrade. One behaviour changes: Stop now answers one
+confirmation it used to leave for you, described below.
+
 ### Changed
 
 - Stop ends a session that has background work running (a Monitor, a
