@@ -219,42 +219,67 @@ async def test_kill_appears_once_the_wait_is_under_way_and_stays(
     # deliberately, because offering a kill on a reading that failed is the
     # thing #81 forbids. "is waiting for you" is #101's, unreachable for this
     # shim, named for completeness.
+    # **"Usable" is what a thumb needs, not "in the DOM".** The control counts
+    # only while the dialog is open and the button is connected, visible by
+    # checkVisibility() (which sees an ancestor's style, `hidden`, a class) and
+    # not disabled. Each look runs on every mutation, attribute change and
+    # animation frame, all inside the page, so none of it is a retry. A page
+    # setTimeout guard resolves well past the 3000ms patience so a missing
+    # ending fails with a message rather than hanging.
     outcome = await page.evaluate(
         """() => new Promise((resolve) => {
             const dialog = document.querySelector("[data-dialog]");
             const ending = /No answer from|Lost track of|is waiting for you/;
-            const hasKill = () => [...dialog.querySelectorAll("button")].some(
-                (b) => b.textContent.trim() === "Do not wait, kill it now");
+            const usable = () => dialog.open && [...dialog.querySelectorAll("button")].some(
+                (b) => b.textContent.trim() === "Do not wait, kill it now"
+                    && b.isConnected && b.checkVisibility() && !b.disabled);
             const began = performance.now();
             let looks = 0;
+            let phase = null;
             let startedWaiting = null;
+            let done = false;
+            const finish = (over, timedOut) => {
+                done = true;
+                observer.disconnect();
+                clearTimeout(guard);
+                resolve({ over, timedOut, startedWaiting, phase, looks,
+                         ms: performance.now() - began,
+                         text: dialog.textContent });
+            };
             const look = () => {
+                if (done) return;
                 looks += 1;
                 const over = ending.test(dialog.textContent);
-                if (startedWaiting === null) startedWaiting = !over && hasKill();
-                if (over || !hasKill()) {
-                    observer.disconnect();
-                    resolve({ over, startedWaiting, looks,
-                             ms: performance.now() - began,
-                             text: dialog.textContent });
+                if (startedWaiting === null) {
+                    phase = dialog.textContent;
+                    startedWaiting = !over && usable();
                 }
+                if (over || !usable()) return finish(over, false);
+                requestAnimationFrame(look);
             };
             const observer = new MutationObserver(look);
-            observer.observe(dialog, { childList: true, subtree: true, characterData: true });
+            observer.observe(dialog, { childList: true, subtree: true,
+                characterData: true, attributes: true });
+            const guard = setTimeout(() => finish(false, true), 15000);
             look();
         })"""
     )
 
+    assert not outcome["timedOut"], (
+        f"the wait never ended within 15s of watching, {outcome['looks']} looks: {outcome}"
+    )
     # **The watch must have started inside the wait.** If the ending were
     # already up on the first look this would pass having observed nothing,
-    # which is the vacuous-guard shape this phase exists to remove. This is a
-    # condition the page reports, not a sample count a slow machine can miss.
-    assert outcome["startedWaiting"], (
-        f"the watch began after the wait had ended, so it proved nothing: {outcome}"
+    # which is the vacuous-guard shape this phase exists to remove. The first
+    # look's text must be the waiting phase itself, so a 1ms watch cannot pass.
+    assert outcome["startedWaiting"] and "Waiting for it to exit." in outcome["phase"], (
+        f"the watch began outside the waiting phase, so it proved nothing "
+        f"({outcome['looks']} looks): {outcome}"
     )
     assert outcome["over"], (
-        f"the kill control vanished {outcome['ms']:.0f}ms into the watch with the wait "
-        f"still under way, so somebody reaching for it finds it gone: {outcome['text']!r}"
+        f"the kill control stopped being usable {outcome['ms']:.0f}ms into the watch "
+        f"({outcome['looks']} looks) with the wait still under way, so somebody "
+        f"reaching for it finds it gone: {outcome['text']!r}"
     )
 
 
