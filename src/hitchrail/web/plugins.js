@@ -100,8 +100,18 @@ function outcomeItem({ outcome, count }) {
   return item;
 }
 
+// #344. A code this page does not know shows the server's own sentence, which
+// was written to stand alone: lowercase, and ending in a period. Appended
+// clauses make it a sentence's first half, so it starts upper case and its
+// closing period is dropped, or the text reads "...stopped., so nothing...".
+function unknownFailure(message) {
+  const bare = (message ?? "").trim().replace(/[.\s]+$/, "");
+  if (!bare) return "The update did not finish";
+  return bare[0].toUpperCase() + bare.slice(1);
+}
+
 function failureText(record) {
-  const why = PLUGIN_FAILURES[record.code] ?? record.message ?? "The update did not finish";
+  const why = PLUGIN_FAILURES[record.code] ?? unknownFailure(record.message);
   const n = record.outcomes.length;
   // #317. A trailing sentence, not folded into `why`: appended after the
   // outcomes clause so "after N plugins" still reads as attached to "the

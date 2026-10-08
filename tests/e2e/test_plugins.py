@@ -958,17 +958,19 @@ async def test_visibility_regained_refreshes_a_run_the_stream_missed(
     await page.unroute("**/api/events")
 
 
-async def test_internal_error_reads_as_one_sentence(page: Page, server: Harness) -> None:
-    """#317. `internal_error` used to carry its own trailing clause, "; the
-    journal has the details", which put the appended "after N plugins" right
-    after "details" and read as though the JOURNAL had details after N
-    plugins rather than as though the UPDATE stopped after N. A synthetic
-    record over the GET (an internal error is not one the fake agent can be
-    made to raise) exercises the same `failureText` a real one would reach."""
+async def paint_failure(
+    page: Page,
+    server: Harness,
+    code: str,
+    message: str | None,
+    *,
+    outcomes: int,
+) -> None:
+    """A failed record over the GET, for a code the fake agent cannot be made
+    to raise, through the same `failureText` a real one would reach."""
     server.seed_plugins([{"id": "alpha@m", "scope": "user"}])
     server.seed()
     await open_settings(page, server)
-
     record = {
         "epoch": "e2e-synthetic-epoch",
         "boot": SYNTHETIC_BOOT,
@@ -985,10 +987,11 @@ async def test_internal_error_reads_as_one_sentence(page: Page, server: Harness)
                 "detail": None,
                 "approved_command": None,
             }
-        ],
+        ]
+        * outcomes,
         "counts": None,
-        "code": "internal_error",
-        "message": "the update stopped on an internal error",
+        "code": code,
+        "message": message,
     }
 
     async def answer(route):  # type: ignore[no-untyped-def]
@@ -1002,11 +1005,67 @@ async def test_internal_error_reads_as_one_sentence(page: Page, server: Harness)
     await page.route("**/api/plugins/update", answer)
     await page.evaluate("() => window.__plugins.loadPlugins()")
 
-    status = page.locator("[data-plugins-status]")
-    await expect(status).to_have_text(
+
+async def test_internal_error_reads_as_one_sentence(page: Page, server: Harness) -> None:
+    """#317. `internal_error` used to carry its own trailing clause, "; the
+    journal has the details", which put the appended "after N plugins" right
+    after "details" and read as though the JOURNAL had details after N
+    plugins rather than as though the UPDATE stopped after N."""
+    await paint_failure(
+        page, server, "internal_error", "the update stopped on an internal error", outcomes=1
+    )
+    await expect(page.locator("[data-plugins-status]")).to_have_text(
         "The update stopped on an error in Hitchrail after 1 plugin, listed "
         "below; the rest were not updated. The journal has the details."
     )
+
+
+async def test_internal_error_before_any_plugin_says_nothing_was_updated(
+    page: Page, server: Harness
+) -> None:
+    """#344. Only n=1 was covered; n=0 takes the other branch of `failureText`."""
+    await paint_failure(
+        page, server, "internal_error", "the update stopped on an internal error", outcomes=0
+    )
+    await expect(page.locator("[data-plugins-status]")).to_have_text(
+        "The update stopped on an error in Hitchrail, so nothing was updated. "
+        "The journal has the details."
+    )
+
+
+@pytest.mark.parametrize(
+    ("message", "outcomes", "expected"),
+    [
+        (
+            "the agent hung up.",
+            0,
+            "The agent hung up, so nothing was updated.",
+        ),
+        (
+            "the agent hung up.",
+            2,
+            "The agent hung up after 2 plugins, listed below; the rest were not updated.",
+        ),
+        ("Already capitalised..", 0, "Already capitalised, so nothing was updated."),
+        (None, 0, "The update did not finish, so nothing was updated."),
+        (".", 0, "The update did not finish, so nothing was updated."),
+    ],
+    ids=[
+        "lowercase_and_period",
+        "with_outcomes",
+        "many_periods",
+        "no_message",
+        "only_a_period",
+    ],
+)
+async def test_an_unknown_failure_code_reads_as_one_sentence(
+    page: Page, server: Harness, message: str | None, outcomes: int, expected: str
+) -> None:
+    """#344. A code the page does not know shows the server's message, which
+    stood alone: it started lowercase and ended in a period, so the appended
+    clauses produced a lowercase start and a doubled period."""
+    await paint_failure(page, server, "a_future_code", message, outcomes=outcomes)
+    await expect(page.locator("[data-plugins-status]")).to_have_text(expected)
 
 
 def _synthetic_record(
