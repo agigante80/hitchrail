@@ -292,8 +292,11 @@ _BAR = """bar => {
   const style = getComputedStyle(title);
   const lineHeight = parseFloat(style.lineHeight) || 1.2 * parseFloat(style.fontSize);
   const mark = bar.querySelector('.bar-mark');
+  const text = document.createRange();
+  text.selectNodeContents(title);
   return {
     bar: box(bar), actions, title: box(title), mark: mark ? box(mark) : null,
+    home: box(bar.querySelector('.bar-home')), textRight: text.getBoundingClientRect().right,
     titleLines: Math.round(title.getBoundingClientRect().height / lineHeight),
     overflow: bar.scrollWidth - bar.clientWidth,
   };
@@ -309,7 +312,9 @@ async def test_the_bar_stays_on_one_line_with_every_control_present(
     gear = bar.get_by_role("link", name="Settings")
     theme = bar.locator("[data-theme-toggle]")
     new = bar.get_by_role("button", name="New project")
-    for control in (gear, theme, new):
+    mark = bar.locator("svg.bar-mark")
+    home = bar.get_by_role("link", name="hitchrail")
+    for control in (mark, home, gear, theme, new):
         await expect(control).to_be_visible()
 
     got = await bar.evaluate(_BAR)
@@ -322,8 +327,41 @@ async def test_the_bar_stays_on_one_line_with_every_control_present(
     for a in got["actions"]:
         assert a["height"] >= 43.99 and a["width"] >= 43.99, f"a control is under 44px {where}"
     first = got["actions"][0]["left"]
-    assert got["title"]["right"] <= first, f"the title meets a control {where}"
+    assert got["textRight"] <= first, f"the title text meets a control {where}"
+    assert got["mark"]["left"] >= 0 and got["mark"]["right"] <= got["home"]["left"], where
+    assert got["home"]["height"] >= 43.99, f"the way home is under 44px {where}"
     page_overflow = await page.evaluate(
         "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
     )
     assert page_overflow <= 0, f"the page scrolls sideways {where}"
+
+
+@pytest.mark.parametrize("path", ["/settings", "/logs/{vessel}"])
+async def test_every_page_with_a_bar_carries_the_mark_and_a_way_home(
+    page: Page, server: Harness, path: str
+) -> None:
+    """#324 and #333 on the pages that are not the list. The logs page sets its
+    heading's text from the URL, which would wipe a mark nested in it, so the
+    mark has to survive that script running."""
+    server.seed(stopped=["vessel"])
+    await page.set_viewport_size(BAR_WIDTHS[1])  # type: ignore[arg-type]
+    await page.goto(server.base + path.format(vessel=server.project("vessel")))
+    bar = page.locator("header.bar")
+    await expect(bar.locator("svg.bar-mark")).to_be_visible()
+    name = "hitchrail home" if path.startswith("/logs") else "hitchrail"
+    link = bar.get_by_role("link", name=name)
+    await expect(link).to_have_attribute("href", "/")
+    box = await link.bounding_box()
+    assert box is not None and box["height"] >= 43.99, box
+    await link.focus()
+    outline = await link.evaluate("e => getComputedStyle(e).outlineStyle")
+    assert outline != "none", "the way home has no visible focus ring"
+
+
+async def test_the_mark_shrinks_with_the_bar_when_scrolled(page: Page, server: Harness) -> None:
+    await _busy_list(page, server, BAR_WIDTHS[1])
+    mark = page.locator("header.bar svg.bar-mark")
+    assert await mark.evaluate("e => e.getBoundingClientRect().width") == 22
+    await page.evaluate("() => window.scrollTo(0, 600)")
+    await expect(page.locator("html")).to_have_attribute("data-scrolled", "")
+    assert await mark.evaluate("e => e.getBoundingClientRect().width") == 18
