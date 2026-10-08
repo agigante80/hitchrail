@@ -987,6 +987,17 @@ def update_plugins_command(argv: list[str]) -> int:
         # a script or a person can match on it rather than on the prose.
         print(f"hitchrail: {exc.code}: {exc}", file=sys.stderr)
         return 2
+    except KeyboardInterrupt:
+        # The other run with no final account, and the likelier one: a plugin
+        # hanging on its timeout is when a person reaches for Ctrl-C. Since
+        # rows print only at the end, letting this escape would print none,
+        # and which plugins already failed is what they stopped it to learn.
+        for outcome, times in _grouped(heard):
+            print(_outcome_line(outcome, times))
+        print(
+            "hitchrail: interrupted: the rows above are every plugin it got to", file=sys.stderr
+        )
+        return 130
     for outcome, times in _grouped(outcomes):
         print(_outcome_line(outcome, times))
     counts = {

@@ -75,7 +75,9 @@ OUTER_LAYER_CAPS: dict[str, int] = {
     # since a row's class is not known before the second listing, and groups
     # identical skipped rows.
     # 1107 for #311: a failed run still prints the rows it heard.
-    "cli.py": 1107,
+    # 1118 for Phase 24's review: so does a Ctrl-C, the likelier way a run
+    # ends without its account.
+    "cli.py": 1118,
     # 409 to 418 for #78: two entries in the exemption and the argument
     # beside them, which the set's own rule requires of every entry.
     # 418 to 436 for #160: the unauthenticated asset set and the argument

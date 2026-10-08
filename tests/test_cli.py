@@ -5,6 +5,7 @@ import ast
 import logging
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -1270,6 +1271,27 @@ def test_update_plugins_prints_the_rows_done_before_a_mid_run_failure(
         "skipped  adapt@kit (local scope is not updated)",
     ]
     assert "agent_missing:" in captured.err
+
+
+def test_update_plugins_prints_the_rows_done_before_a_ctrl_c(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Rows print only at the end (#311), so a Ctrl-C on a hanging plugin
+    used to print none of them, the failure the person stopped it to read
+    included (Phase 24 round 1 review)."""
+    behaviour: dict[str, subprocess.CompletedProcess[str] | BaseException] = {
+        "a@m": done(1, stderr="no network"),
+        "c@m": KeyboardInterrupt(),
+    }
+    agent = FakeAgent([row("a@m"), row("b@m"), row("c@m")], **behaviour)
+    code, _ = _update(monkeypatch, agent)
+    captured = capsys.readouterr()
+    assert code == 130
+    assert captured.out.splitlines() == [
+        "failed   a@m (exited 1: no network)",
+        "updated  b@m",
+    ]
+    assert "interrupted:" in captured.err
 
 
 @pytest.mark.parametrize(
