@@ -46,35 +46,6 @@ suite is green. It is finished when the behaviour has been watched working in
 the running application, on the phone it is for. See
 [`tech-guidelines.md`](tech-guidelines.md) section 7.
 
-## Phase: Phase 25: The wrap up, hardened
-state: open
-plan: docs/superpowers/plans/2026-10-07-hitchrail-phase-25-wrap-up-hardened.md
-
-Every finding the Phase 19 reviews filed is fixed or closed with its reason,
-and the journal says what a stop did. The roadmap's second Backlog rule,
-applied a third time: 20 followed 14, 22 followed 21, and this follows 19.
-
-Phase 19 stopped its review loops where the global rules say they stop, and
-filed what was left, 29 tickets, in Backlog so a low never held the phase
-open. All 29 were checked against the tree on 2026-10-07 and all still
-describe the code. Two needed a decision, both taken by Andrea that day: #391
-stops deriving a plain http origin for an https only host, and #419 records
-the stop policy when the stop is confirmed. `engine.py`'s split (#274) goes
-first, because nine of the findings edit the functions it would move, and #181
-joins from Phase 17 by the first Backlog rule.
-
-Its plan was written ahead of opening, and the phase opened on 2026-10-08,
-the day Phase 19 closed on its real session watch.
-
-Done when every finding is closed or moved with a number, a kill nobody tapped
-is bound to the agent that was looked at, every kill leaves a journal line and
-none carries a token, and a stop watched from two browsers on the phone shows
-the same phase in both.
-
-Placed before 23 on the first ordering rule: 23 adds an agent seam beside
-`engine.py`'s stop path, and adding to the path before it is hardened is how a
-second agent inherits its defects.
-
 ## Phase: Phase 24: The interface, found
 state: planned
 

@@ -169,13 +169,18 @@ Backlog": each is in the direction this phase exists to close.
 
 ## Done looks like
 
-- [ ] Every task ticked, or marked MOVED OUT or NOT BUILT with an issue number
-- [ ] `engine.py` is smaller than at `3d74855`, and the signal path has its own
-      module and its own cap
-- [ ] A kill nobody tapped is bound to the pid that was looked at, and a test
-      restarting the session inside the window proves the new agent survives
-- [ ] Every kill writes a journal line, and no journal line carries a token,
-      both asserted from captured stderr in the live tier
+- [x] Every task ticked, or marked MOVED OUT or NOT BUILT with an issue number
+- [x] `engine.py` is smaller than at `3d74855`, and the signal path has its own
+      module and its own cap: 1712 lines against 1786; `signals.py` is 397,
+      held under 400 by `test_size_guideline`, which fails any module past it
+      without an entry
+- [x] A kill nobody tapped is bound to the pid that was looked at, and a test
+      restarting the session inside the window proves the new agent survives:
+      the three `restarted` tests in `tests/test_stop_policy.py`
+- [x] Every kill writes a journal line, and no journal line carries a token,
+      both asserted from captured stderr in the live tier. The token half is
+      live (`test_a_query_string_token_reaches_no_journal_line`); the kill
+      line is asserted through `caplog` only. MOVED OUT, the live half, #458
 - [x] Watched on the phone: a Stop with a second browser open shows the same
       phase in both, and a reopened wait shows the stop's real age. Watched
       2026-10-08 on the Pixel 2, 0.14.0, Firefox and Chrome on one throwaway
@@ -185,8 +190,13 @@ Backlog": each is in the direction this phase exists to close.
       hide and a reopen, while Firefox read the same phase at 56s. The wrap up
       hit its 120s ceiling, the exit answered the background work menu, and
       both browsers read stopped at 121.9s. The watch also found #456.
-- [ ] No `from-review` ticket open in the milestone without a decision
-- [ ] Roadmap says done, milestone closed, `check-phases.sh` passes
+- [x] No `from-review` ticket open in the milestone without a decision
+- [x] Roadmap says done, milestone closed, `check-phases.sh` passes.
+      Closed 2026-10-08 as **re-shaped**: all 36 tickets in the milestone
+      landed, the phone watch passed, and one half of one criterion did not:
+      the kill's journal line is asserted below the live tier, moved to #458.
+      The watch also found #456 and the close's suite run #457, both Backlog.
+      The block then left the roadmap under the 2026-09-26 rule.
 
 ## Fails if
 
