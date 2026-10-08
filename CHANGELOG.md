@@ -30,7 +30,7 @@ workflow's own script so it fails locally instead.
 
 While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
-## Unreleased
+## 0.15.0 - 2026-10-08
 
 Nothing to do on upgrade, unless a script reads the plugin update's record or
 the output of `hitchrail update-plugins`: see Changed.
