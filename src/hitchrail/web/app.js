@@ -2702,9 +2702,22 @@ function trackKeyboardInset() {
   apply();
 }
 
+/* The list's end reserves the footer's REAL height (#447). The footer is fixed
+   and wraps, so a filter's "12 of 67 shown" line makes it taller than any
+   constant measured for the unfiltered one, and the last row stayed under it. */
+function trackFooterHeight() {
+  const footer = $(".footer");
+  if (!footer || !window.ResizeObserver) return;
+  new ResizeObserver(() => {
+    const height = Math.ceil(footer.getBoundingClientRect().height);
+    document.documentElement.style.setProperty("--footer-h", `${height}px`);
+  }).observe(footer);
+}
+
 function boot() {
   applyTheme(storedTheme());
   trackKeyboardInset();
+  trackFooterHeight();
   $("[data-theme-toggle]")?.addEventListener("click", toggleTheme);
   $("[data-new]")?.addEventListener("click", () => showNewFolder());
   $("[data-stop-all]")?.addEventListener("click", confirmStopAll);
