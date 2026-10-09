@@ -1271,6 +1271,8 @@ def test_update_plugins_prints_the_rows_done_before_a_mid_run_failure(
         "skipped  adapt@kit (local scope is not updated)",
     ]
     assert "agent_missing:" in captured.err
+    # #464. Said on stderr, where the code word is, not left to the changelog.
+    assert "provisional" in captured.err
 
 
 def test_update_plugins_prints_the_rows_done_before_a_ctrl_c(
@@ -1292,6 +1294,11 @@ def test_update_plugins_prints_the_rows_done_before_a_ctrl_c(
         "updated  b@m",
     ]
     assert "interrupted:" in captured.err
+    # #464. The rows are the pre #311 kind, and the update after the last
+    # `...` line is the one in flight: the progress line arrives when an
+    # update FINISHES, so no stream names the one that was running.
+    assert "provisional" in captured.err
+    assert "in flight" in captured.err
 
 
 @pytest.mark.parametrize(

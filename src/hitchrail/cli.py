@@ -907,6 +907,10 @@ def _outcome_line(outcome: claude_ipc.PluginOutcome, times: int = 1) -> str:
     return f"{line} ({'; '.join(notes)})" if notes else line
 
 
+# No second listing ran behind the rows of an interrupt or a failure (#464).
+_PROVISIONAL = "The rows above are provisional: `updated` only means the update ran cleanly."
+
+
 def update_plugins_command(argv: list[str]) -> int:
     """`hitchrail update-plugins`: 0 when nothing failed, 1 when a plugin
     failed, 2 when the operation could not run (#124).
@@ -980,14 +984,13 @@ def update_plugins_command(argv: list[str]) -> int:
             resolved, run=claude_ipc.plugin_runner(withhold=(TOKEN_ENV,)), report=progress
         )
     except claude_ipc.PluginsFailed as exc:
-        # Provisional rows, with no second listing behind them: `updated`
-        # here may be a plugin that did not move, and says only that the
-        # update exited cleanly.
+        # Provisional rows, with no second listing behind them (#464).
         for outcome, times in _grouped(heard):
             print(_outcome_line(outcome, times))
         # The code first: it is the same word the route's record carries, so
         # a script or a person can match on it rather than on the prose.
         print(f"hitchrail: {exc.code}: {exc}", file=sys.stderr)
+        print(f"hitchrail: {_PROVISIONAL}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         # The other run with no final account, and the likelier one: a plugin
@@ -996,8 +999,12 @@ def update_plugins_command(argv: list[str]) -> int:
         # and which plugins already failed is what they stopped it to learn.
         for outcome, times in _grouped(heard):
             print(_outcome_line(outcome, times))
+        # The progress line arrives when an update FINISHES, so the one in
+        # flight is on neither stream: it is the one after the last `...`.
         print(
-            "hitchrail: interrupted: the rows above are every plugin it got to", file=sys.stderr
+            f"hitchrail: interrupted: {_PROVISIONAL} The plugin after the last "
+            "`...` line was in flight.",
+            file=sys.stderr,
         )
         return 130
     for outcome, times in _grouped(outcomes):

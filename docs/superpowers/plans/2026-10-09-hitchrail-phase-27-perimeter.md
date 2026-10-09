@@ -60,8 +60,9 @@ five (`config.py` 121, 134, 472, 841 and `cli.py` 615).
 - **#441: not built.** Closed with the reason above. A one line suppress
   would need a test that cannot fail.
 - **#464: wording only.** `updated` is called provisional after an interrupt
-  or a failure. The plugin in flight is already printed on stderr as each
-  update starts, so naming it needs no new callback. Flagging a failed second
+  or a failure. The progress line arrives when an update finishes, not
+  when it starts (the plan first said otherwise), so the plugin in flight is
+  named by position, as the one after the last `...` line; no new callback. Flagging a failed second
   listing changes what `update_plugins` returns to `plugin_runs`, and stays on
   the ticket for Phase 23, which re-cuts `claude_ipc`.
 
@@ -139,7 +140,7 @@ Serial, in this order, one implementer. Security auditor review at the end.
 
 ### Batch 3: the CLI's words and a ticket that is not true, tasks 249 and 250
 
-- [ ] **Task 249, #464.** The interrupt and failure paths call `updated`
+- [x] **Task 249, #464.** The interrupt and failure paths call `updated`
       provisional; the README line agrees.
 - [ ] **Task 250, #441.** NOT BUILT, premise false, closed with the reason in
       this plan (#441).
