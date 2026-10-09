@@ -33,6 +33,11 @@ _DIM = "\x1b[2m"
 # more, because the failure direction to prefer is a missing warning over a
 # key into a working agent. A number, and a fact about the vendor's layout,
 # which is why it lives here and nowhere else.
+#
+# **The background work menu (#453) uses all three**: "2. Move to background
+# and exit", "3. Stay", and "Enter to confirm". Lowering this to two would make
+# `exit_menu.offers_exit` read that menu as scrolled past and silently turn the
+# answer off, with every stop on such a session back to waiting on a person.
 _MODAL_TAIL_ROWS = 3
 
 
@@ -310,9 +315,51 @@ _SETTLE_DONE_S = 2.0
 
 
 def queued_message(pane: str) -> bool:
-    """Whether the live input row shows a message waiting to be sent (#242)."""
-    row = _live_ornament_row(pane)
+    """Whether the live input row shows a message waiting to be sent (#242).
+
+    Reads the row `wrap_up_reading` reads (#475). Under a background agent
+    panel only the boxed form finds it; reading the plain form alone answered
+    False there, and the wrap up prompt was typed behind a queued message.
+    """
+    row = _input_row(pane)
     return row is not None and _QUEUED in row
+
+
+# #475, captured 2026-10-09 on Claude Code 2.1.295. The input box is a row
+# between two rules, and a running background subagent draws a PANEL of rows
+# below the footer, one per agent, so the rows under the box are not a
+# constant. With one subagent there are five, `_MODAL_TAIL_ROWS` took the box
+# for a modal scrolled past, and every wrap up read unknown for as long as the
+# subagent ran: the full ceiling, on every such Stop. The exit menu that was
+# captured beside it has a rule ABOVE its ornament and none below, so the rule
+# under the row, not a count, is what says "this is the live box".
+_RULE = "\u2500"
+
+
+def _is_rule(row: str) -> bool:
+    text = _without_escapes(row).strip()
+    return text != "" and set(text) == {_RULE}
+
+
+def _boxed_ornament_row(pane: str) -> str | None:
+    """The last ornament row, if a rule is directly above it and directly below."""
+    rows = pane.splitlines()
+    index = next((i for i in range(len(rows) - 1, -1, -1) if _PROMPT in rows[i]), None)
+    if index is None or index == 0 or index + 1 >= len(rows):
+        return None
+    if _is_rule(rows[index - 1]) and _is_rule(rows[index + 1]):
+        return rows[index]
+    return None
+
+
+def _input_row(pane: str) -> str | None:
+    """The live input row, in either layout: plain, or boxed under a panel.
+
+    Deliberately NOT used by `shows_input_box` or `awaits_answer`: widening
+    those would change what the answer keys and the attention overlay act on
+    for a panel screen, which nobody has captured a modal under. Ticketed.
+    """
+    return _live_ornament_row(pane) or _boxed_ornament_row(pane)
 
 
 def _foreground_before(text: str) -> str | None:
@@ -350,7 +397,7 @@ def wrap_up_reading(pane: str) -> bool | None:
     a message is queued. None: no live input row, a modal, or an ornament in a
     colour nobody has captured, which is not evidence either way.
     """
-    row = _live_ornament_row(pane)
+    row = _input_row(pane)
     if row is None:
         return None
     before, after = row.split(_PROMPT, 1)
@@ -381,11 +428,26 @@ class WrapUpWatch:
     def __init__(self, sent_at: float) -> None:
         self.sent_at = sent_at
         self._idle_since: float | None = None
+        # #475: what the looks said, for the journal line that ends the wait.
+        # Counts only, never pane text: the ceiling's line must be able to say
+        # whether the screen was unreadable or the agent was working.
+        self._idle = self._busy = self._unreadable = 0
+
+    def readings(self) -> str:
+        """The looks so far, as `readings: 3 idle, 40 busy, 0 unreadable`."""
+        return f"readings: {self._idle} idle, {self._busy} busy, {self._unreadable} unreadable"
 
     def observe(self, now: float, pane: str) -> bool:
         if now - self.sent_at < _SETTLE_DONE_S:
             return False
-        if wrap_up_reading(pane) is not True:
+        reading = wrap_up_reading(pane)
+        if reading is None:
+            self._unreadable += 1
+        elif reading:
+            self._idle += 1
+        else:
+            self._busy += 1
+        if reading is not True:
             self._idle_since = None
             return False
         if self._idle_since is None:

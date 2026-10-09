@@ -43,10 +43,11 @@ _HEADING = "Background work is running"
 _EXIT_AND_STOP = "Exit and stop tasks"
 _NUMBERING = re.compile(r"^\d+\.\s*")
 
-# How long after `/exit` the menu may take to draw. NOT measured yet: the one
-# real sighting saw it only at the 30 second expiry, so its draw time is unknown
-# and the real session watch that closes #453 times it. 8 looks a settle apart
-# is about 1.2 seconds; a slower draw is missed and falls back to the pre #453
+# How long after `/exit` the menu may take to draw. Measured 2026-10-09 on
+# Claude Code 2.1.295 with a background shell running: 119 to 426 ms over six
+# trials, with eight busy loops on an eight core machine. The first sighting
+# (#454) saw 160 ms. 8 looks a settle apart is about 1.2 seconds, three times
+# the slowest; a slower draw is missed and falls back to the pre #453
 # behaviour, never worse. The cost is that latency on every stop whose agent
 # neither exits nor shows the menu, serially in the sweep's wrap up advance.
 MENU_TRIES = 8
@@ -91,6 +92,13 @@ def exit_menu_appeared(look: Callable[[], str], wait: Callable[[], None]) -> boo
 
     An empty look ends it early: the session went with the agent, which is the
     ordinary exit and needs nothing pressed.
+
+    One look that offers the exit is enough, with no second agreeing look (#454).
+    `offers_exit` wants the heading AND the selected row's exact text, so a frame
+    caught mid draw cannot satisfy it: a partial frame lacks one of the two. The
+    only thing a second look would guard is the menu vanishing in the tens of
+    milliseconds between the look and the key, and the key is `Enter`, which on
+    the box that replaced it submits an empty message and does nothing.
     """
     for _ in range(MENU_TRIES):
         wait()

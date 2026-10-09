@@ -46,8 +46,9 @@ error.
   The moved code reaches the engine through a named interface, the one #424
   gives `signals.py`, so both share one structural test.
 - **#463: the guard stays,** with a comment naming the stale and detached
-  case. A detached row whose stop ran out is shown "No answer" with Kill,
-  since its agent is alive.
+  case. A detached row whose stop ran out says the terminal went and the
+  agent is alive, and offers End through `/signal`, since `/kill` refuses
+  every detached row (corrected in review).
 
 **Backlog's first rule, applied.** Among the open `from-review` tickets in
 Backlog, none is about a file this phase changes. #442 touches the plugin
@@ -158,17 +159,26 @@ Serial, in this order, one implementer.
 
 ### Batch 3: the dialog, the exit menu and the wrap up's watch, tasks 236 to 239
 
-- [ ] **Task 236, #433.** A wait re-reads its policy; the plural strings;
+- [x] **Task 236, #433.** A wait re-reads its policy; the plural strings;
       the lost work sentence in Stop all.
-- [ ] **Task 237, #463.** The guard kept and named; a detached row offered
+      Done as written; `beginStop` repaints from the DELETE answer, which
+      already carried `stop_policy`, so `docs/api.md` needed no change.
+- [x] **Task 237, #463.** The guard kept and named; a detached row offered
       Kill; the stale `log_drawer.js` comment gone.
-- [ ] **Task 238, #454.** A `TmuxUnavailable` during the menu wait is a miss;
+      A stop that ran out on a detached row says the terminal went and the
+      agent is alive, and offers End through `/signal` (never `/kill`, which
+      the engine refuses for every detached row); no new route.
+- [x] **Task 238, #454.** A `TmuxUnavailable` during the menu wait is a miss;
       two looks or the reason one is enough, written; the menu mutated and its
       survivors read; the two doc lines; `MENU_TRIES` sampled once under load.
-- [ ] **Task 239, #475.** Filed after the plan, from a real Stop that waited
+      One look is enough, with the reason written and tested; the survivors
+      were read and the real ones killed; `MENU_TRIES` measured at 119 to 426 ms.
+- [x] **Task 239, #475.** Filed after the plan, from a real Stop that waited
       its full 300s with background work running: capture an idle box with a
       background task on a private socket; if `wrap_up_reading` misses it, add
       the shape from the fixture. The ceiling line counts what the watch saw.
+      The real capture read unknown behind a subagent panel; the boxed row
+      shape was added (6f05cf9).
 
 ### Batch 4: Restart, tasks 240 and 241
 

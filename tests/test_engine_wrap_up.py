@@ -156,6 +156,28 @@ def test_the_ceiling_moves_on_and_says_so(root: Path) -> None:
     assert session.stop_ceiling is True
 
 
+def test_the_ceiling_line_counts_what_the_watch_saw_and_quotes_no_pane(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#475: a 300s wait that could not tell its cause. The counts do, and the
+    pane text, which can hold anything, stays out of the journal."""
+    engine, tmux, clock = wrap_engine(root, stop_prompt_timeout=60.0)
+    engine.stop(VESSEL)
+    tmux.pane_text[VESSEL] = BUSY + "\nsecretish pane words"
+    with caplog.at_level(logging.INFO, logger="hitchrail"):
+        for _ in range(4):
+            clock.advance(SETTLE)
+            engine.advance_wrap_ups()
+        tmux.pane_text[VESSEL] = "nothing like a box"
+        clock.advance(SETTLE)
+        engine.advance_wrap_ups()
+        clock.advance(60)
+        engine.advance_wrap_ups()
+    assert "wrap up hit the ceiling after" in caplog.text
+    assert "(readings: 0 idle, 4 busy, 2 unreadable)" in caplog.text
+    assert "secretish" not in caplog.text
+
+
 def test_an_unreadable_pane_waits_to_the_ceiling_rather_than_reading_done(root: Path) -> None:
     engine, tmux, clock = wrap_engine(root, stop_prompt_timeout=60.0)
     engine.stop(VESSEL)

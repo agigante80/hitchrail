@@ -5,11 +5,9 @@ import { closeDialog, showDialog } from "/dialogs.js";
 /* -- the log drawer ---------------------------------------------------- */
 
 /* The pane, with the keypad when the row is waiting on a person. ONE renderer,
-   used by the log drawer and by the waiting dialog (#165): `app.js` is past
-   the size guideline and #68 is open about it, and the size guard does not
-   read `web/`, so this comment is the rule. Never null: an unreadable pane
-   yields a note saying so, because a dialog built on this must not show an
-   empty box that reads as "nothing is being asked". */
+   used by the log drawer and by the waiting dialog (#165). Never null: an
+   unreadable pane yields a note saying so, because a dialog built on this
+   must not show an empty box that reads as "nothing is being asked". */
 export async function paneView(project) {
   const result = await api(
     `/api/sessions/${encodeURIComponent(project.name)}/logs?lines=40`,
