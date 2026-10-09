@@ -74,6 +74,11 @@ def load_state(path: Path) -> tuple[State, str | None]:
     try:
         data = tomllib.loads(_read_private(path))
     except FileNotFoundError:
+        # A symlink whose target is gone opens as "not found" too, and is not
+        # a first start: the operator pointed the name somewhere, so every
+        # saved choice vanishing needs saying (#434).
+        if path.is_symlink():
+            return State(), f"is a symlink to {path.readlink()}, which does not exist"
         return State(), None
     except OSError as exc:
         return State(), f"cannot be read: {exc}"
@@ -245,8 +250,9 @@ class Preferences:
             return self._config.sources["stop_policy"]
         return "state" if self._state.stop_policy is not None else "default"
 
-    def _pin_words(self) -> str:
-        if self._config.sources.get("stop_policy") == "flag":
+    def _pin_words(self, what: str = "stop policy") -> str:
+        key = what.replace(" ", "_")
+        if self._config.sources.get(key) == "flag":
             return "on the command line"
         return "in the operator's config file"
 
@@ -261,17 +267,54 @@ class Preferences:
         then does removing the pin change anything.
         """
         if self._refusal is not None:
+            reason = self._refusal.rstrip(".")
             return (
                 f"state file {self._path} refused, so nothing saved from the "
-                f"settings page applies: {self._refusal}",
+                f"settings page applies: {reason}. {self._next_save_words()}",
             )
-        saved = self._state.stop_policy
-        if saved is None or self.stop_policy_editable() or saved == self._config.stop_policy:
-            return ()
+        return tuple(
+            warning
+            for warning in (
+                self._pinned_warning(
+                    "stop policy",
+                    self._state.stop_policy,
+                    self._config.stop_policy,
+                    self.stop_policy_editable(),
+                ),
+                self._pinned_warning(
+                    "stop timeout",
+                    self._state.stop_timeout,
+                    self._config.stop_timeout,
+                    self.stop_timeout_editable(),
+                ),
+            )
+            if warning is not None
+        )
+
+    def _pinned_warning(
+        self, what: str, saved: object, pinned: object, editable: bool
+    ) -> str | None:
+        """One pinnable key's report (#434); nothing when the two agree."""
+        if saved is None or editable or saved == pinned:
+            return None
         return (
-            f"stop policy {saved!r}, saved from the settings page, is overridden by "
-            f"{self._config.stop_policy!r} set {self._pin_words()}; removing that "
-            f"setting puts {saved!r} back in force",
+            f"{what} {saved!r}, saved from the settings page, is overridden by "
+            f"{pinned!r} set {self._pin_words(what)}; removing that "
+            f"setting puts {saved!r} back in force"
+        )
+
+    def _next_save_words(self) -> str:
+        """What the first toggle does to a refused file: replaces it, losing
+        what it held, unless the DIRECTORY is the refusal, where the save is
+        refused too (#397)."""
+        assert self._path is not None
+        try:
+            _refuse_if_shared(self._path.parent, self._path.parent.stat(), "the directory")
+        except (OSError, SettingsError):
+            return "A save from the settings page is also refused until that is fixed."
+        return (
+            "The next save from the settings page replaces it, and what it "
+            "holds is lost; fix it first to keep those choices."
         )
 
     def set_roots_enabled(self, changes: Mapping[str, bool]) -> None:

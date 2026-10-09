@@ -34,6 +34,13 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ### Changed
 
+- The startup lines about the saved settings say more. A refused `state.toml`
+  now says the next save from the settings page replaces it (or that saving
+  is refused too, when the directory is the problem). A `state.toml` that is a
+  symlink to nothing is reported instead of read as a first start. A saved
+  stop timeout that `--stop-timeout` overrides is reported, as a saved stop
+  policy already was, because removing the flag brings the saved value back
+  (#434).
 - With a `Secure` cookie (a loopback bind and every non loopback
   `--allow-origin` https), a browser on `http://localhost.localdomain:8787` is
   now refused at the grant with the origin check's 403, naming the origin. It

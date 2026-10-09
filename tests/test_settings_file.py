@@ -805,6 +805,50 @@ def test_a_state_file_that_does_not_parse_is_said_at_startup(tmp_path: Path) -> 
     assert str(state) in warning
 
 
+def test_the_refusal_warning_says_the_next_save_replaces_the_file(
+    tmp_path: Path,
+) -> None:
+    """#434: a refused file holding `disabled = ["work"]` was overwritten by
+    the first toggle, and the warning said only that nothing applied."""
+    state = tmp_path / "state.toml"
+    state.write_text('disabled = ["work"]\n')
+    state.chmod(0o666)
+    prefs = _two_roots(tmp_path, state)
+    (warning,) = prefs.startup_warnings()
+    assert "next save from the settings page replaces it" in warning
+    prefs.set_roots_enabled({"home": False})
+    assert "work" not in state.read_text(), "the claim is what the save really does"
+
+
+def test_the_refusal_warning_does_not_promise_a_replacement_a_shared_directory_forbids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the DIRECTORY is the refusal the save is refused too (#397), so
+    saying it replaces the file would be false."""
+    state = _shared_state_dir(tmp_path, monkeypatch)
+    state.write_text('disabled = ["work"]\n')
+    state.chmod(0o600)
+    (warning,) = _two_roots(tmp_path, state).startup_warnings()
+    assert "replaces" not in warning
+    assert "also refused" in warning
+
+
+def test_a_dangling_symlink_state_file_is_a_reason_and_is_said_at_startup(
+    tmp_path: Path,
+) -> None:
+    """#434: `os.open` raised FileNotFoundError on the link's missing target,
+    which was read as a first start, so every saved choice vanished silently."""
+    state = tmp_path / "state.toml"
+    state.symlink_to(tmp_path / "gone.toml")
+    loaded, reason = statefile.load_state(state)
+    assert loaded == statefile.State()
+    assert reason is not None
+    assert "gone.toml" in reason
+    (warning,) = _two_roots(tmp_path, state).startup_warnings()
+    assert str(state) in warning
+    assert "gone.toml" in warning
+
+
 @pytest.mark.parametrize("where", ["state.toml", "missing/state.toml"])
 def test_no_state_file_yet_is_not_a_refusal(tmp_path: Path, where: str) -> None:
     """A first start has none, and neither the file nor its directory is

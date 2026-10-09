@@ -899,3 +899,39 @@ def test_an_agent_that_outlives_the_sighup_is_journalled_and_reported_as_ask(
     assert f"pid {PANE + 1} outlived the SIGHUP" in caplog.text
     assert "gave up waiting" in caplog.text
     assert "killed pid" not in caplog.text
+
+
+def test_a_saved_timeout_the_flag_overrides_is_said_at_startup(root: Path) -> None:
+    """#434 item 3, checked against the code first: `--stop-timeout` pins the
+    wait, `stop_timeout()` ignores the saved value, and dropping the flag
+    brings it back unannounced, the hazard #421 reported for the policy."""
+    state = root / "state.toml"
+    state.write_text("stop_timeout = 120\n")
+    state.chmod(0o600)
+    prefs = statefile.Preferences(
+        make_config(root, state_path=state, stop_timeout=60, sources={"stop_timeout": "flag"})
+    )
+    assert prefs.stop_timeout() == 60
+    (warning,) = prefs.startup_warnings()
+    assert "120" in warning
+    assert "60" in warning
+    assert "command line" in warning
+    assert "stop_timeout = 120" in state.read_text(), "the saved choice was cleared"
+
+
+@pytest.mark.parametrize(
+    ("saved", "pinned", "source"),
+    [(60, 60, "flag"), (None, 60, "flag"), (120, 30, "default")],
+    ids=["pin-agrees", "nothing-saved", "not-pinned"],
+)
+def test_no_timeout_is_said_when_removing_the_flag_would_change_nothing(
+    root: Path, saved: int | None, pinned: int, source: str
+) -> None:
+    state = root / "state.toml"
+    state.write_text(f"stop_timeout = {saved}\n" if saved else "disabled = []\n")
+    state.chmod(0o600)
+    config = make_config(
+        root, state_path=state, stop_timeout=pinned, sources={"stop_timeout": source}
+    )
+    prefs = statefile.Preferences(config)
+    assert prefs.startup_warnings() == ()

@@ -130,7 +130,7 @@ Serial, in this order, one implementer. Security auditor review at the end.
 
 ### Batch 2: the state file and the log filter, tasks 247 and 248
 
-- [ ] **Task 247, #434.** The refusal warning says the next save replaces
+- [x] **Task 247, #434.** The refusal warning says the next save replaces
       the file; a dangling symlink is logged; a pinned `stop_timeout` with a
       different saved value is reported at startup, as #421 does for
       `stop_policy`.
