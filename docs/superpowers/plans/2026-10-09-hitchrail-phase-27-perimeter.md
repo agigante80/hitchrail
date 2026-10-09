@@ -45,8 +45,9 @@ five (`config.py` 121, 134, 472, 841 and `cli.py` 615).
   Only `plain_origins_withheld` asks a new question, "is this origin a secure
   context", answered from the W3C Secure Contexts spec's potentially
   trustworthy origin rule: `127.0.0.0/8`, `::1`, `localhost` and names
-  ending in `.localhost`. `localhost.localdomain` is not on that list, so its
-  plain origin is withheld with the named 403.
+  ending in `.localhost`. `localhost.localdomain` is not on that list (the
+  spec's algorithm 3.1 step 5, read 2026-10-09), so its plain origin is
+  withheld with the named 403.
 - **#439 item 2: the startup line stays quiet** when a host also has an https
   origin, today's deliberate choice for the phone access setup. The comment
   names the mixed case (https plus a plain forwarder) and why it is accepted.
