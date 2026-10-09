@@ -120,12 +120,25 @@ and never retypes the prompt; one that arrives while the prompt is still being
 typed answers 202 and types nothing. If a message is already queued in the
 box, the call is 409 `stop_unsafe` and nothing is typed after the clear.
 
+If the agent answers the graceful request with its one menu about background
+work (#453), the stop presses `Enter` on "Exit and stop tasks" and on nothing
+else: any other dialog, or that menu with a different option selected, is left
+for a person and the row reports it as waiting on one.
+
 With `stop_policy = "end_anyway"` (#239, off by default), a stop whose
 `stop_timeout` runs out while the agent's screen shows a prompt on two looks
-a second apart (#429, so a redraw is not taken for one) is killed by the server, exactly as `POST /api/sessions/{name}/kill` would, and the row is
-announced `stopped`. A screen showing anything else reports as it always has.
-Nothing is ever typed into the prompt. The policy is the one in force when the
-stop was requested (#419): a change during the wait applies to the next stop.
+a second apart (#429, so a redraw is not taken for one) is sent a hangup
+through a handle on that agent, which ends it as `POST
+/api/sessions/{name}/kill` would, and the row is announced `stopped`. An agent
+that handles the hangup and stays alive is reported as any other expired stop
+(#425). A screen showing anything else reports as it always has. Nothing is
+ever typed into the prompt. The policy is the one in force when the stop was
+requested (#419): a change during the wait applies to the next stop.
+
+The two looks are not a guarantee. A prompt shape that stays on the screen for
+both of them is ended, whatever put it there: nothing the server can read
+tells a question that is not an ordinary input box apart from output that
+looks like one and happens to stay. The settle only removes a redraw.
 
 ### The listing payload
 

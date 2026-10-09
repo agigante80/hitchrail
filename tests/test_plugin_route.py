@@ -20,7 +20,7 @@ import pytest
 
 from conftest import FakeTmux, PluginUpdateGuard, procs_from
 from hitchrail import claude_ipc
-from hitchrail import server as srv
+from hitchrail import lifespan as lifespan_mod
 from hitchrail.claude_ipc import PluginOutcome, PluginsFailed
 from hitchrail.config import Config
 from hitchrail.engine import Engine
@@ -429,7 +429,7 @@ async def test_a_failing_kill_at_shutdown_still_cancels_the_sweep(
     Reverting the `try/finally` in `server.py`, with
     `PYTHONDONTWRITEBYTECODE=1`, fails this on the count.
     """
-    monkeypatch.setattr(srv, "SWEEP_INTERVAL_S", 0.02)
+    monkeypatch.setattr(lifespan_mod, "SWEEP_INTERVAL_S", 0.02)
     _refused_kill(monkeypatch)
     expiries = 0
 
@@ -465,7 +465,7 @@ async def test_a_failing_kill_at_shutdown_still_cancels_an_in_flight_scan(
     is gone, is left pending on a loop that goes on to close. Observed as no
     pending scan task left behind; the worker thread itself runs on, which
     #180 already says cannot be helped."""
-    monkeypatch.setattr(srv, "SWEEP_INTERVAL_S", 0.02)
+    monkeypatch.setattr(lifespan_mod, "SWEEP_INTERVAL_S", 0.02)
     _refused_kill(monkeypatch)
     scanning = threading.Event()
     release = threading.Event()
@@ -516,7 +516,7 @@ class _BrokenWatch(Engine):
 async def _after_the_watches_broke(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    monkeypatch.setattr(srv, "SWEEP_INTERVAL_S", 0.02)
+    monkeypatch.setattr(lifespan_mod, "SWEEP_INTERVAL_S", 0.02)
     (tmp_path / "vessel").mkdir()
     config = make_config(tmp_path)
     engine = _BrokenWatch(config=config, tmux=FakeTmux(), procs_fn=procs_from(""))

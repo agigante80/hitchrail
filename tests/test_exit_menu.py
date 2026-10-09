@@ -15,6 +15,7 @@ import pytest
 from hitchrail.claude_ipc import exit_menu as ipc_exit_menu
 from hitchrail.claude_ipc import request_stop
 from hitchrail.claude_ipc.exit_menu import exit_menu_appeared, offers_exit
+from hitchrail.tmux import TmuxUnavailable
 from test_claude_ipc import CLEAR_BOX, EXIT_MODAL_SCREEN, MODAL_BOX, FakePane, pane_text
 
 _ROW = "\x1b[39m \x1b[38;5;153m\u276f\x1b[39m \x1b[38;5;153m{}"
@@ -195,3 +196,88 @@ def test_the_answer_is_logged_without_the_screen(caplog: pytest.LogCaptureFixtur
         request_stop(pane, "vessel", settle=lambda _s: None)
     assert "the exit asked about background work, sent Enter" in caplog.text
     assert "monitor" not in caplog.text
+
+
+class _TmuxDown(FakePane):
+    """A pane whose tmux fails from the Nth capture on."""
+
+    def capture_pane(self, project: str, lines: int = 40, escapes: bool = False) -> str:
+        if len(self.captured) >= 2:
+            raise TmuxUnavailable("tmux went away")
+        return super().capture_pane(project, lines, escapes)
+
+
+def test_a_tmux_failure_while_waiting_for_the_menu_is_a_miss(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#454: the exit already went out, so this is not an "exit refused"."""
+    pane = _TmuxDown([pane_text(CLEAR_BOX)] * 2)
+    with caplog.at_level(logging.WARNING, logger="hitchrail.claude_ipc"):
+        request_stop(pane, "vessel", settle=lambda _s: None)
+    assert [s[1:] for s in pane.sent] == [("C-u",), ("Escape",), ("/exit", "Enter")]
+    assert "pressed nothing" in caplog.text
+
+
+def test_a_tmux_failure_before_the_exit_still_refuses() -> None:
+    """The miss is only for the wait after the exit: a failure while the box is
+    being checked must still stop the sequence."""
+
+    class Down(FakePane):
+        def capture_pane(self, project: str, lines: int = 40, escapes: bool = False) -> str:
+            raise TmuxUnavailable("tmux went away")
+
+    pane = Down()
+    with pytest.raises(OSError):
+        request_stop(pane, "vessel", settle=lambda _s: None)
+    assert ("vessel", "/exit", "Enter") not in pane.sent
+
+
+@pytest.mark.parametrize(
+    "frame",
+    [
+        " Background work is running\n The following will stop when you exit:\n",
+        " The following will stop when you exit:\n"
+        + _ROW.format("1. Exit and stop tasks")
+        + "\n",
+        " Background work is running\n" + _ROW.format("1. Exit and stop") + "\n",
+        " Background work is running\n" + _ROW.format("1. Exit and stop ta") + "\n",
+    ],
+    ids=["heading only", "row without heading", "row cut mid text", "row cut at the end"],
+)
+def test_a_frame_caught_mid_draw_is_not_the_menu(frame: str) -> None:
+    """Why one look is enough (#454): a partial frame lacks the heading or the
+    whole text of the selected row, and either reads as not the menu."""
+    assert offers_exit(frame) is False
+
+
+_P = chr(0x276F)
+
+# -- survivors of the #454 mutation run, read and judged real ----------------
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        _ROW.format(f"1. Exit and stop tasks {_P} trailing"),
+        _ROW.format(f"{_P} 1. Exit and stop tasks"),
+    ],
+    ids=["second prompt after", "second prompt before"],
+)
+def test_a_second_prompt_char_in_the_row_is_not_the_menu(row: str) -> None:
+    """The text after the FIRST prompt is the whole option, so a row carrying
+    another one is not exactly "Exit and stop tasks"."""
+    frame = " Background work is running\n x\n" + row + "\n"
+    assert offers_exit(frame) is False
+
+
+def test_the_heading_may_sit_directly_above_the_selected_row() -> None:
+    frame = " Background work is running\n" + _ROW.format("1. Exit and stop tasks") + "\n"
+    assert offers_exit(frame) is True
+
+
+def test_the_heading_is_looked_for_above_the_last_copy_of_the_row() -> None:
+    """An identical row earlier on screen must not move the search up past the
+    heading that belongs to the live one."""
+    row = _ROW.format("1. Exit and stop tasks")
+    frame = row + "\n x\n Background work is running\n" + row + "\n"
+    assert offers_exit(frame) is True

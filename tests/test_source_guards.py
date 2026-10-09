@@ -44,7 +44,20 @@ def test_the_import_contract_covers_every_engine_layer_module() -> None:
     The web layer is the exception list below, and it is spelled out rather
     than inferred, so adding a module to it is a deliberate act.
     """
-    web = {"server.py", "pages.py", "cli.py", "security.py", "headers.py", "__init__.py"}
+    web = {
+        "server.py",
+        "lifespan.py",
+        "routes_common.py",
+        "routes_live.py",
+        "routes_projects.py",
+        "routes_sessions.py",
+        "routes_settings.py",
+        "pages.py",
+        "cli.py",
+        "security.py",
+        "headers.py",
+        "__init__.py",
+    }
     modules = source_modules()
     assert any(in_claude_ipc(rel) for rel in modules), "the walk saw no claude_ipc module"
     engine_layer = {module_name(rel) for rel in modules if rel not in web}
@@ -254,7 +267,7 @@ def test_every_read_of_agent_binary_is_the_resolved_property_or_allowlisted() ->
         # The settings page shows the operator's raw setting, with `source`
         # saying where it came from; showing the resolved absolute path here
         # while `source` still said "default" would misrepresent provenance.
-        ("server.py", "_config_view", "config.agent_binary"): 1,
+        ("routes_settings.py", "_config_view", "config.agent_binary"): 1,
     }
 
     offenders: dict[str, str] = {}

@@ -104,7 +104,7 @@ export function buildActions(project, actions) {
    `foreign_session` null means no owner was SEEN, from one `list-panes -a`
    against our own tmux server, and a terminal, screen or another socket
    would all arrive here looking the same. */
-function confirmSignal(project, escalate) {
+export function confirmSignal(project, escalate) {
   showDialog({
     title: escalate ? `Kill ${project.name}?` : `End ${project.name}?`,
     body:

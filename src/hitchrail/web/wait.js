@@ -1,3 +1,4 @@
+import { confirmSignal } from "/actions.js";
 import { api } from "/api.js";
 import { closeDialog, showDialog } from "/dialogs.js";
 import { $ } from "/dom.js";
@@ -82,10 +83,14 @@ export function showWaiting(project, wait, phase) {
   if (dialog) dialog.dataset.waiting = phase;
 }
 
-function repaintWaiting(project, wait, current) {
+export function repaintWaiting(project, wait, current) {
   const dialog = $("[data-dialog]");
   if (!dialog?.open || dialog.dataset.for !== project.name) return;
   if (!("waiting" in dialog.dataset)) return;
+  // #433. The policy the server recorded for THIS stop, which a second
+  // browser's Stop can replace with the live one while this wait is open: the
+  // note must match the marker the expiry acts on, not the one first shown.
+  if (current?.stop_policy) wait.policy = current.stop_policy;
   const phase = waitingPhase(wait, current);
   if (dialog.dataset.waiting !== phase) {
     showWaiting(project, wait, phase);
@@ -212,11 +217,38 @@ async function showTimedOut(project) {
   // arrives on the stream after the expiry, so the object this was called with
   // predates it.
   const current = state.projects.find((p) => p.name === project.name) ?? project;
-  // #457. The page's deadline and the server's expiry are independent timers,
-  // and under `end_anyway` the server kills on its own: a row that already
-  // left `running` has nothing to answer and nothing to kill, and the stream's
-  // close for it may have run before this. Captured as "No answer" offering
-  // Kill over a row the list already showed stopped.
+  // #457, decided on #463. The page's deadline and the server's expiry are
+  // independent timers, and under `end_anyway` the server kills on its own:
+  // a row that already left `running` has nothing to answer, and "No answer"
+  // offering Kill over a row the list shows stopped was the defect.
+  //
+  // Not every other state is the same. `stopped` and `stale` have no agent to
+  // ask or to kill (Clear is on the stale row), so the dialog closes.
+  // `detached` is an agent ALIVE with no session to type into: see below.
+  if (current.state === "detached") {
+    // #463. The engine refuses /kill for every detached row (NoAgent, 409), so
+    // the Kill this dialog used to offer could only ever be answered with a
+    // refusal. The route that can end a detached agent is /signal, the same
+    // End then Kill escalation the row carries, through the same
+    // confirmation, and only where the row's own rule offers it: no visible
+    // owner session and no foreign tmux server. Otherwise the person is told
+    // and given Close, because ending a process another terminal owns is not
+    // this dialog's call. No `forProject`: the listing closes a `for` dialog
+    // on any event for a row that is not running, and this row never is.
+    const ours = !current.foreign_session && !current.foreign_server_pid;
+    showDialog({
+      title: `${project.name} is still running`,
+      body:
+        "Its terminal is gone, so there is nothing to ask. The agent is still "
+        + "alive and Hitchrail has stopped waiting."
+        + (ours ? "" : " A terminal Hitchrail cannot control owns it."),
+      actions: [
+        [ours ? "Leave it" : "Close", "ghost", () => closeDialog()],
+        ...(ours ? [["End it", "danger", () => confirmSignal(current, false)]] : []),
+      ],
+    });
+    return;
+  }
   if (current.state !== "running") {
     closeDialog(project.name);
     return;

@@ -565,3 +565,15 @@ def test_a_process_that_left_after_the_handle_is_gone_not_reused(root: Path) -> 
         engine.signal_detached(proj("vessel"))
     assert fake.signals == []
     assert not fake.leaked
+
+
+def test_a_failing_pidfd_close_after_the_signal_is_swallowed(root: Path) -> None:
+    """#426. The signal went; a close that raises must not turn it into an
+    error the person reads as "nothing happened"."""
+    fake = FakePidfd()
+    fake.fail_close = OSError(errno.EBADF, "bad fd")
+    engine = _engine(root, Watched(fake, DETACHED), fake)
+    session = engine.signal_detached(proj("vessel"))
+    assert session.pid == ORPHAN
+    assert fake.signals == [signal.SIGTERM]
+    assert ("close", 101) in fake.events

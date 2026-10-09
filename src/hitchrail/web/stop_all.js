@@ -82,7 +82,15 @@ export function confirmStopAll() {
         ? ""
         : `${again.map((p) => displayProject(p.name)).join(", ")} `
           + `${again.length === 1 ? "is" : "are"} already asked to exit, `
-          + "and will only be asked again.",
+          + "and will only be asked again."
+          // The exit is resent whatever `stop_prompt` says (#416), so this
+          // clause owes the warning the single row confirm gives an exiting
+          // row (#433). Not twice: the fresh clause above already says it
+          // when no wrap up prompt is set and there is a fresh row.
+          + (fresh > 0 && !state.server.stop_prompt_set
+            ? ""
+            : ` Anything ${again.length === 1 ? "it is" : "they are"} part way through `
+              + "may be lost."),
       endAnywayNote(),
     ].filter(Boolean).join(" "),
     actions: [
@@ -227,7 +235,11 @@ function showBulkWait() {
     extra: list,
     actions: [
       ["Hide, keep stopping", "ghost", () => closeDialog()],
-      ["Do not wait, kill them all", "danger", () => killRemaining()],
+      [
+        bulk.rows.length === 1 ? "Do not wait, kill it now" : "Do not wait, kill them all",
+        "danger",
+        () => killRemaining(),
+      ],
     ],
   });
   $("[data-dialog]").dataset.bulk = "";
@@ -269,7 +281,9 @@ export function renderBulk() {
     if (body) {
       body.textContent =
         "The stops were requested. This browser cannot read the machine, so "
-        + "it cannot say which sessions finished.";
+        + (bulk.rows.length === 1
+          ? "it cannot say whether the session finished."
+          : "it cannot say which sessions finished.");
     }
     // NO kill, for the reason `showLostTrack` gives.
     const actions = dialog.querySelector(".dialog-actions");

@@ -434,10 +434,10 @@ def test_the_kill_is_journalled_before_a_read_that_fails(
     with caplog.at_level(logging.INFO, logger="hitchrail"):
         assert expire_on(engine, tmux, clock, MODAL_PANE) == [VESSEL]
     assert agents.ended == [VESSEL]
-    kill_lines = [r.getMessage() for r in caplog.records if "killed pid" in r.getMessage()]
+    kill_lines = [r.getMessage() for r in caplog.records if "sent SIGHUP" in r.getMessage()]
     assert kill_lines == [
         f"stop {VESSEL}: ended on a prompt after {engine.prefs.stop_timeout():g}s; "
-        f"killed pid {PANE + 1}, as stop_policy end_anyway says"
+        f"sent SIGHUP to pid {PANE + 1}, as stop_policy end_anyway says"
     ]
     assert "expired but the machine could not be read" not in caplog.text
 
@@ -478,8 +478,12 @@ def test_a_redraw_that_reads_as_a_modal_once_is_not_ended(
     assert killed(engine, tmux) == []
     assert ender(engine).signals == []
     assert engine.get(VESSEL).state is State.RUNNING
-    assert "killed pid" not in caplog.text
+    assert "sent SIGHUP" not in caplog.text
     assert "did not hold" in caplog.text
+    # #444: the second look is the one that is believed, in the flag and in
+    # the wording, so the report does not contradict the line before it.
+    assert engine.get(VESSEL).awaiting_input is False
+    assert "its screen is waiting on a person" not in caplog.text
 
 
 def test_a_prompt_on_both_looks_is_ended(root: Path) -> None:
@@ -574,6 +578,26 @@ def test_a_row_restarted_between_the_looks_is_not_ended(root: Path) -> None:
     engine.expire_stops()
     assert killed(engine, tmux) == []
     assert engine.get(VESSEL).pid == RESTARTED_PANE + 1
+
+
+def test_the_pid_recheck_alone_stops_a_row_restarted_between_the_looks(root: Path) -> None:
+    """#444. The pane still shows a modal on the second look, so the screen
+    cannot refuse, and the handle in `signals.end_anyway` would refuse a
+    stale pid anyway. Only the comparison after the settle keeps a handle
+    from being opened on the old agent at all: no event reaches the seam."""
+    engine, tmux, clock = policy_engine(root, stop_policy="end_anyway")
+    engine.stop(VESSEL)
+    tmux.pane_text[VESSEL] = MODAL_PANE
+    clock.advance(engine.prefs.stop_timeout() + 1)
+    sleep = engine._sleep
+
+    def restart_in_the_settle(seconds: float) -> None:
+        sleep(seconds)
+        restart(tmux)
+
+    engine._sleep = restart_in_the_settle
+    engine.expire_stops()
+    assert ender(engine).events == []
 
 
 # -- #409: chosen on the settings page, kept in the state file ------------
@@ -816,3 +840,62 @@ def test_a_refused_exit_whose_look_predates_a_restart_flags_nothing(root: Path) 
     assert restarted.state is State.RUNNING
     assert restarted.pid != PANE + 1, "the restart happened"
     assert restarted.awaiting_input is False, "the old agent's question"
+
+
+def test_a_start_of_another_project_during_the_look_leaves_this_row_flagged(
+    root: Path,
+) -> None:
+    """#430. The epoch was one counter for every project, so a start or stop
+    of ANY other row during the expiry's capture discarded this row's true
+    "waiting on a person". Nothing adds it back: the stuck sweep skips a row
+    that has a session link. Only a clear of THIS row may discard its look."""
+    (root / "other").mkdir()
+    engine, tmux, clock = policy_engine(root)
+    engine.stop(VESSEL)
+    tmux.pane_text[VESSEL] = MODAL_PANE
+    clock.advance(engine.prefs.stop_timeout() + 1)
+    real = tmux.capture_pane
+
+    def capture(project: str, lines: int = 40, escapes: bool = False) -> str:
+        pane = real(project, lines, escapes)
+        if project == VESSEL:
+            tmux.capture_pane = real  # type: ignore[method-assign]
+            tmux.pane_text[f"{DEFAULT_LABEL}~other"] = CLEAR_INPUT_BOX
+            engine.start(f"{DEFAULT_LABEL}~other")
+        return pane
+
+    tmux.capture_pane = capture  # type: ignore[method-assign]
+    assert engine.expire_stops() == [VESSEL]
+    assert engine.get(f"{DEFAULT_LABEL}~other").state is State.RUNNING, "the start happened"
+    assert engine.get(VESSEL).awaiting_input is True
+
+
+def test_a_failing_pidfd_close_after_the_signal_does_not_lose_the_pass(root: Path) -> None:
+    """#426. The agent was signalled; a close that raises must neither escape
+    `expire_stops` (losing the rest of the pass) nor turn a kill that
+    happened into a refusal."""
+    engine, tmux, clock = policy_engine(root, stop_policy="end_anyway")
+    ender(engine).fail_close = OSError(errno.EBADF, "bad fd")
+    expired = expire_on(engine, tmux, clock, MODAL_PANE)
+    assert ender(engine).signals == [signal.SIGHUP]
+    assert ender(engine).ended == [VESSEL]
+    assert expired == [VESSEL]
+
+
+def test_an_agent_that_outlives_the_sighup_is_journalled_and_reported_as_ask(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#425. The journal said "killed" for an agent that handled the signal.
+    Now it says what was done, then that the agent survived, and the expiry
+    falls through to the report `ask` gives."""
+    engine, tmux, clock = policy_engine(root, stop_policy="end_anyway")
+    agents = ender(engine)
+    agents.send = lambda pidfd, sig: FakePidfd.send(agents, pidfd, sig)  # type: ignore[method-assign]
+    engine._pidfd = replace(engine._pidfd, send_signal=agents.send)
+    with caplog.at_level(logging.INFO, logger="hitchrail"):
+        expired = expire_on(engine, tmux, clock, MODAL_PANE)
+    assert agents.signals == [signal.SIGHUP] and agents.ended == []
+    assert expired == [VESSEL]
+    assert f"pid {PANE + 1} outlived the SIGHUP" in caplog.text
+    assert "gave up waiting" in caplog.text
+    assert "killed pid" not in caplog.text
