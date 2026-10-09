@@ -180,7 +180,10 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # `expire_stops` and what they call) moved to `sweep.py`, with the notes
     # above that argue its races; they stay where they were written, as the
     # history of this cap, and their text now lives in that file.
-    "engine.py": 1300,
+    # 1300 to 1255 for Phase 26: `StopMarker` and its note moved to
+    # `stopmarker.py` unchanged, because #427 and #432 add to the rules for
+    # who holds a marker and the file was at its cap.
+    "engine.py": 1256,
     # #473. The sweep, moved whole from `engine.py`. 465 is the move: most of
     # it is the notes on the races between a scan, a stop and a start, which
     # are the reason the code is shaped as it is. It does not want splitting

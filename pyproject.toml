@@ -177,6 +177,7 @@ source_modules = [
   "hitchrail.signals",
   "hitchrail.sweep",
   "hitchrail.engine_seam",
+  "hitchrail.stopmarker",
   "hitchrail.plugin_runs",
   "hitchrail.logs",
 ]
@@ -332,6 +333,8 @@ also_copy = [
   "src/hitchrail/sweep.py",
   # #424. Copied, not mutated: `engine.py` inherits from it.
   "src/hitchrail/engine_seam.py",
+  # Phase 26. Copied, not mutated: `engine.py` imports it.
+  "src/hitchrail/stopmarker.py",
   "src/hitchrail/events.py",
   "src/hitchrail/headers.py",
   # #167. Copied, not mutated: `security.py` escapes request values through

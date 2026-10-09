@@ -25,12 +25,12 @@ from typing import TYPE_CHECKING, Protocol
 if TYPE_CHECKING:
     from hitchrail.config import Config
     from hitchrail.derive import Machine
-    from hitchrail.engine import StopMarker
     from hitchrail.events import EventBus
     from hitchrail.procs import ProcTable
     from hitchrail.sessions import Session
     from hitchrail.settings import Preferences
     from hitchrail.signals import Seam
+    from hitchrail.stopmarker import StopMarker
     from hitchrail.tmux import Tmux
 
 

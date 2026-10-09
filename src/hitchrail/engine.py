@@ -35,9 +35,8 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from pathlib import Path
-from typing import Literal
 
 from hitchrail import attention, claude_ipc, derive, discovery, ram, settings, signals, sweep
 from hitchrail.config import TOKEN_ENV, Config
@@ -73,6 +72,7 @@ from hitchrail.sessions import (
     UnknownProject,
     UnknownRoot,
 )
+from hitchrail.stopmarker import StopMarker
 from hitchrail.tmux import Tmux, TmuxUnavailable
 
 logger = logging.getLogger(__name__)
@@ -112,59 +112,6 @@ def _no_session_here(session: Session, consequence: str) -> str:
 # nothing outside `claude_ipc` ITERATES a key constant, because iterating is
 # what encodes a sequence; asking whether one key is allowed encodes nothing.
 ANSWER_KEYS = claude_ipc.ANSWER_KEYS
-
-
-@dataclass(eq=False)
-class StopMarker:
-    """One graceful stop in flight (#242). Compared by identity, never value.
-
-    `closing` is the wrap up: the prompt is queued behind the task and the
-    sweep watches for the agent to finish both. `exiting` is the exit
-    sequence sent, which is all a stop was before #242 and still is with no
-    prompt configured.
-
-    **No path claims a marker while something types into its pane.** `watch`
-    is None while the prompt is being typed, and `typing` is True while the
-    exit sequence is, whether the sweep or `stop()` types it (#406). A Stop
-    on either is the no-op 202: a second sequence would interleave its keys
-    with the first.
-
-    **A caller that holds a marker removes it by identity**, through
-    `Engine._drop`: a pop by name removes whatever marker is there now, which
-    after a repeated Stop is a newer one than the caller holds. Three removals
-    are by name on purpose (#407), because each ends every stop on the row,
-    not one: `_derive` on a row it read `stopped`, `kill` before its
-    `kill-session` and again after it, and `expire_stops`, whose snapshot and
-    removal share one critical section.
-
-    A claim that fails gives the marker back rather than replacing it: Exit
-    now mutates the `closing` marker in place, and a refused exit restores
-    `closing` and its watch on the same object (`Engine._give_back`).
-
-    **The owner writes the OBJECT, not the table** (#387): the watch, the
-    give back and `withdrawn`. Kill takes the marker out before its
-    `kill-session` and hands it back if that fails, so a check that the
-    marker is still in the table read false in that window, the outcome was
-    lost, and Kill restored `closing` with no watch: stranded, as #407 was.
-    Writing a marker no table holds costs nothing, since nothing reads one.
-
-    A claim writes `exit_at`, `ceiling` and `typing` BEFORE `phase`, and
-    `_derive` reads `phase` first without the lock, so a reader that sees
-    `exiting` sees the flags that came with it.
-
-    `policy` is the stop policy when Stop was confirmed, and the one its
-    expiry acts on (#419): the dialog promised it, and the page can change
-    the live setting during the wait. Required, so no path forgets it.
-    """
-
-    began: float
-    phase: Literal["closing", "exiting"]
-    policy: str
-    watch: claude_ipc.WrapUpWatch | None = None
-    exit_at: float | None = None
-    ceiling: bool = False
-    typing: bool = False
-    withdrawn: bool = False
 
 
 class Engine(SeamMembers):
@@ -1302,6 +1249,7 @@ __all__ = [
     "StartFailed",
     "State",
     "StateUnwritable",
+    "StopMarker",
     "StopRefused",
     "UnknownProject",
     "UnknownRoot",

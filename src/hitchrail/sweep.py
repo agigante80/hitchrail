@@ -25,8 +25,8 @@ from hitchrail.sessions import MachineUnreadable, State
 from hitchrail.tmux import TmuxUnavailable
 
 if TYPE_CHECKING:
-    from hitchrail.engine import StopMarker
     from hitchrail.engine_seam import EngineSeam
+    from hitchrail.stopmarker import StopMarker
 
 # Named, not `__name__`: these lines were `hitchrail.engine`'s before the move,
 # and the journal and the tests know them by that name.
