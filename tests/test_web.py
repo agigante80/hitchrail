@@ -78,6 +78,7 @@ DIALOGS: dict[str, str] = {
     ),
     "`${project.name} is waiting for you`,": _MUST_ACT,
     "`No answer from ${project.name}`,": _MUST_ACT,
+    "`${project.name} is still running`,": _MUST_ACT,
     '"Not signed in any more",': _MUST_ACT,
     '"Hitchrail cannot reach it",': (
         "`no_agent`. Either there is no agent, or the row is detached and has "
@@ -419,12 +420,19 @@ def test_a_wait_follows_the_policy_of_the_row_and_of_the_answer() -> None:
     )
 
 
-def test_the_timed_out_dialog_closes_for_neither_a_live_nor_a_detached_agent() -> None:
-    """#463. A `detached` agent is alive, so only the states with nothing to
-    ask or kill dismiss the dialog. Read from the lines that are not comments,
-    since the comment above the guard names the same words."""
+def test_the_timed_out_dialog_gives_a_detached_agent_the_signal_route_and_never_kill() -> None:
+    """#463. A `detached` agent is alive, so the dialog stays, but the engine
+    refuses /kill for every detached row. The branch must precede the guard
+    that closes for a row that is not running, and must reach /signal through
+    `confirmSignal` and not `killNow`. Read from the lines that are not
+    comments, since the comments name the same words."""
     source = (WEB / "wait.js").read_text(encoding="utf-8")
     code = " ".join(
         line.strip() for line in source.splitlines() if not line.strip().startswith("//")
     )
-    assert 'current.state !== "running" && current.state !== "detached"' in code
+    detached = code.index('current.state === "detached"')
+    guard = code.index('current.state !== "running"')
+    assert detached < guard
+    branch = code[detached:guard]
+    assert "confirmSignal(" in branch
+    assert "killNow" not in branch

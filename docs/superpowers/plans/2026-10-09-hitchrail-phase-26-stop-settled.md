@@ -46,8 +46,9 @@ error.
   The moved code reaches the engine through a named interface, the one #424
   gives `signals.py`, so both share one structural test.
 - **#463: the guard stays,** with a comment naming the stale and detached
-  case. A detached row whose stop ran out is shown "No answer" with Kill,
-  since its agent is alive.
+  case. A detached row whose stop ran out says the terminal went and the
+  agent is alive, and offers End through `/signal`, since `/kill` refuses
+  every detached row (corrected in review).
 
 **Backlog's first rule, applied.** Among the open `from-review` tickets in
 Backlog, none is about a file this phase changes. #442 touches the plugin
@@ -155,8 +156,9 @@ Serial, in this order, one implementer.
       already carried `stop_policy`, so `docs/api.md` needed no change.
 - [x] **Task 237, #463.** The guard kept and named; a detached row offered
       Kill; the stale `log_drawer.js` comment gone.
-      Kill on a detached row is answered by the server's refusal (#83), which
-      the e2e test pins; no new route.
+      A stop that ran out on a detached row says the terminal went and the
+      agent is alive, and offers End through `/signal` (never `/kill`, which
+      the engine refuses for every detached row); no new route.
 - [x] **Task 238, #454.** A `TmuxUnavailable` during the menu wait is a miss;
       two looks or the reason one is enough, written; the menu mutated and its
       survivors read; the two doc lines; `MENU_TRIES` sampled once under load.

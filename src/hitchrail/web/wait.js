@@ -1,3 +1,4 @@
+import { confirmSignal } from "/actions.js";
 import { api } from "/api.js";
 import { closeDialog, showDialog } from "/dialogs.js";
 import { $ } from "/dom.js";
@@ -221,13 +222,34 @@ async function showTimedOut(project) {
   // a row that already left `running` has nothing to answer, and "No answer"
   // offering Kill over a row the list shows stopped was the defect.
   //
-  // Not every other state is the same, which is the case the first wording
-  // hid. `stopped` and `stale` have no agent to ask or to kill (Clear is on
-  // the stale row), so the dialog closes. `detached` is an agent ALIVE with no
-  // session to type into, so a stop that ran out on it is still "no answer":
-  // the dialog stays, and its Kill is answered by the server's own refusal
-  // saying why a kill cannot reach it, rather than by a dialog that vanishes.
-  if (current.state !== "running" && current.state !== "detached") {
+  // Not every other state is the same. `stopped` and `stale` have no agent to
+  // ask or to kill (Clear is on the stale row), so the dialog closes.
+  // `detached` is an agent ALIVE with no session to type into: see below.
+  if (current.state === "detached") {
+    // #463. The engine refuses /kill for every detached row (NoAgent, 409), so
+    // the Kill this dialog used to offer could only ever be answered with a
+    // refusal. The route that can end a detached agent is /signal, the same
+    // End then Kill escalation the row carries, through the same
+    // confirmation, and only where the row's own rule offers it: no visible
+    // owner session and no foreign tmux server. Otherwise the person is told
+    // and given Close, because ending a process another terminal owns is not
+    // this dialog's call. No `forProject`: the listing closes a `for` dialog
+    // on any event for a row that is not running, and this row never is.
+    const ours = !current.foreign_session && !current.foreign_server_pid;
+    showDialog({
+      title: `${project.name} is still running`,
+      body:
+        "Its terminal is gone, so there is nothing to ask. The agent is still "
+        + "alive and Hitchrail has stopped waiting."
+        + (ours ? "" : " A terminal Hitchrail cannot control owns it."),
+      actions: [
+        [ours ? "Leave it" : "Close", "ghost", () => closeDialog()],
+        ...(ours ? [["End it", "danger", () => confirmSignal(current, false)]] : []),
+      ],
+    });
+    return;
+  }
+  if (current.state !== "running") {
     closeDialog(project.name);
     return;
   }

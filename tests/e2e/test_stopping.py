@@ -7,6 +7,7 @@ it is a sequence over time, not a status code.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import itertools
 import logging
 import time
@@ -1260,18 +1261,22 @@ async def test_stop_all_over_only_exiting_rows_keeps_the_lost_work_warning(
     await expect(dialog).to_contain_text("Anything it is part way through may be lost.")
 
 
-async def test_a_stop_that_ran_out_on_a_detached_agent_says_no_answer_and_offers_kill(
+async def test_a_stop_that_ran_out_on_a_detached_agent_offers_the_signal_route_never_kill(
     page: Page, server: Harness
 ) -> None:
-    """#463. The wait's guard closes the dialog for a row that is `stopped` or
-    `stale` and nothing else: a `detached` agent is alive, so a stop that ran
-    out on it is "No answer", not a dialog dismissed in silence."""
+    """#463. A `detached` agent is alive with no session to type into, so a
+    stop that ran out on it is not dismissed in silence. The engine refuses
+    /kill for every detached row (NoAgent, 409), so the dialog says the
+    terminal went and offers the route that can end it, /signal, through the
+    same confirmation as the row's End button. It never sends /kill."""
     server.seed(
         running=["vessel"],
         ignores_graceful_stop=True,
         survives_its_terminal=True,
         stop_timeout=2.0,
     )
+    posts: list[str] = []
+    page.on("request", lambda r: posts.append(r.url) if r.method == "POST" else None)
     await page.goto(server.base)
     row = page.locator(f'[data-project="{server.project("vessel")}"]')
     await row.get_by_role("button", name="Stop").click()
@@ -1286,10 +1291,21 @@ async def test_a_stop_that_ran_out_on_a_detached_agent_says_no_answer_and_offers
     server.lose_the_terminal()
     await expect(row).to_have_attribute("data-state", "detached", timeout=15_000)
     try:
-        await expect(dialog).to_contain_text("No answer from", timeout=15_000)
-        await expect(dialog.get_by_role("button", name="Kill it")).to_be_visible()
-        # And Kill says why it cannot reach it, rather than doing nothing.
-        await dialog.get_by_role("button", name="Kill it").click()
-        await expect(dialog).to_contain_text("Hitchrail cannot reach it")
+        await expect(dialog).to_contain_text("terminal is gone", timeout=15_000)
+        await expect(dialog).to_contain_text("still running")
+        await expect(dialog.get_by_role("button", name="Kill it")).to_have_count(0)
+        # The dialog must survive the next event for a row that is not running.
+        await page.wait_for_timeout(1500)
+        await expect(dialog).to_contain_text("terminal is gone")
+
+        await dialog.get_by_role("button", name="End it").click()
+        await expect(dialog).to_contain_text(f"End {server.project('vessel')}?")
+        async with page.expect_response("**/api/sessions/*/signal") as signalled:
+            await dialog.get_by_role("button", name="End it").click()
+        assert (await signalled.value).status != 404
+        assert not [u for u in posts if u.endswith("/kill")], posts
     finally:
-        server.kill_the_agent_quietly("vessel")
+        # The signal normally ended it already; this is for a failed run, and
+        # the helper asserts there is a process to find.
+        with contextlib.suppress(AssertionError):
+            server.kill_the_agent_quietly("vessel")
