@@ -260,7 +260,7 @@ PIDFD_MODULE = "signals.py"
 # keyed as `source_modules` keys it. The operator's config file is the other
 # half of what `settings.py` held, read once and never written. Named once
 # so that the move is a one line edit the guards follow.
-STATE_MODULE = "settings.py"
+STATE_MODULE = "statefile.py"
 
 
 def keyed_modules(paths: Any, src: Path = SRC) -> dict[str, Path]:

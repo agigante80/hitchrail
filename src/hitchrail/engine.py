@@ -38,7 +38,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from hitchrail import attention, claude_ipc, derive, discovery, ram, settings, signals, sweep
+from hitchrail import attention, claude_ipc, derive, discovery, ram, signals, statefile, sweep
 from hitchrail.config import TOKEN_ENV, Config
 from hitchrail.derive import Machine
 from hitchrail.engine_seam import SeamMembers
@@ -222,7 +222,7 @@ class Engine(SeamMembers, RestartMembers):
         # hidden root is still a session, and refusing it by name would be a
         # lie. `prefs.active_roots()` is what the listing shows, the sheet
         # creates in and the sweep reads.
-        self.prefs = settings.Preferences(config)
+        self.prefs = statefile.Preferences(config)
         # Generous on purpose. Being too eager reports a working start as a
         # failure; being too patient is only a slow error message.
         self.start_grace = 8.0

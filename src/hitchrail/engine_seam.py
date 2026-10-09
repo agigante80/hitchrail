@@ -29,8 +29,8 @@ if TYPE_CHECKING:
     from hitchrail.procs import ProcTable
     from hitchrail.restart import RestartOverlay
     from hitchrail.sessions import Session
-    from hitchrail.settings import Preferences
     from hitchrail.signals import Seam
+    from hitchrail.statefile import Preferences
     from hitchrail.stopmarker import StopMarker
     from hitchrail.tmux import Tmux
 

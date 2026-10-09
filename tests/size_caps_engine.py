@@ -399,30 +399,4 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # two layers deep rather than two jobs wide, so it is tracked here
     # instead of split mid migration. #127 carries the split.
     "discovery.py": 440,
-    # #154, #238: the operator's file and Hitchrail's state file, one
-    # module because the split between them IS the security argument in
-    # its docstring; over by the ceiling's four lines (#265).
-    # 448 for #270: the directory checked by the file's rule, the
-    # decode refusal in words, the label asked of the allowlist before
-    # it is composed into `label=path`, and the state file written
-    # through a fresh `O_EXCL` name. Every line is a refusal or its
-    # reason, and the seam that would split this module is the one its
-    # docstring says must not be split.
-    # 460 for #256: `hidden_roots_a_request_can_show`, the operator's
-    # `enabled` asked where the listing needs it rather than only where
-    # the settings page does.
-    # 472 for #281: the resolved directory checked beside the lexical
-    # one, and the state file read by the operator file's rule, each
-    # with the decision written where a reader would undo it.
-    # 488 for #242: the two file keys, read by the same rule as the rest.
-    # 495 for #239: the `stop_policy` file key, typed here as the rest.
-    # 551 for #409: the policy kept in the state file, pinned by the file
-    # as well as the flag, with the reason where a reader would undo it.
-    # 570 for #421: a saved policy a pin overrides is reported at startup,
-    # with why it is reported rather than cleared. Past 550: the seam is the
-    # one the module docstring draws, the operator's file against the state
-    # file and `Preferences`.
-    # 592 for #397: the state read returns why it refused, and the write
-    # meets the read's directory rule.
-    "settings.py": 592,
 }

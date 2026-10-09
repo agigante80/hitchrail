@@ -106,7 +106,7 @@ under the bounded loop; lows go to Backlog.
 
 ### Batch 0: room for the state file, task 242
 
-- [ ] **Task 242, #443.** `settings.py` split into the operator's config file
+- [x] **Task 242, #443.** `settings.py` split into the operator's config file
       and Hitchrail's state file plus `Preferences`. A guards first commit,
       then a pure move; the caps, the security rules' paths and the
       architecture list updated.
