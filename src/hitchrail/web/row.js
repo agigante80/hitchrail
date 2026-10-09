@@ -66,9 +66,15 @@ function metaFor(project) {
   // to carry it too: the dialog can be dismissed, and the session is still
   // sitting there waiting for somebody.
   if (project.awaiting_input) return "waiting for an answer  ·  open the pane to answer";
-  if (project.pid === null) return "";
-  return `${formatMemory(project)}  ·  up ${formatUptime(project.uptime_s)}`;
+  // #472. A start that followed a restart was refused: the row stays stopped,
+  // and this is the only place the reason is, so it is not dismissible.
+  if (project.restart_refused) return `restart not started  ·  ${project.restart_refused}`;
+  if (project.pid === null) return project.restarting ? RESTARTING : "";
+  const usual = `${formatMemory(project)}  ·  up ${formatUptime(project.uptime_s)}`;
+  return project.restarting ? `${RESTARTING}  ·  ${usual}` : usual;
 }
+
+const RESTARTING = "restarting  ·  a new session starts once it exits";
 
 export function renderRow(project) {
   const row = document.createElement("article");
@@ -77,6 +83,7 @@ export function renderRow(project) {
   row.dataset.state = project.state;
   if (project.protected) row.dataset.protected = "true";
   if (project.stopping) row.dataset.stopping = "true";
+  if (project.restarting) row.dataset.restarting = "true";
 
   const head = document.createElement("div");
   head.className = "row-head";
