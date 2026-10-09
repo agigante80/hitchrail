@@ -155,8 +155,10 @@ Serial, in this order, one implementer.
       without faking the screen reader; said in the test and the ticket.
 - [ ] **Task 233, #459.** The lost status line: cause named from a
       reproduction or tmux's source, never retried into green.
-- [ ] **Task 234, #277.** The `Orphan` docstring names the subreaper; the
+- [x] **Task 234, #277.** The `Orphan` docstring names the subreaper; the
       launcher's exec error reaches its caller.
+      Built as a close-on-exec pipe the launcher reads until the exec; item 3
+      declined in a ticket comment.
 - [ ] **Task 235, #445.** The kill watch catches `visibility`, `opacity` and
       `inert`; one frame loop; an exact phase marker if the page has one.
 
