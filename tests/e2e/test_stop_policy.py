@@ -7,8 +7,10 @@ a sleep (#70).
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
-from playwright.async_api import Page, expect
+from playwright.async_api import Page, Route, expect
 
 from .conftest import Harness
 
@@ -153,3 +155,51 @@ async def test_a_wait_reopened_after_leaving_the_page_keeps_its_stops_policy(
     await row.get_by_role("button", name="Stop").click()
     await expect(dialog).to_contain_text("Asking it to wrap up")
     await expect(dialog).to_contain_text(NOTE)
+
+
+async def test_a_wait_rereads_the_policy_its_row_now_carries(
+    page: Page, server: Harness
+) -> None:
+    """#433 item 1, the #428 family. A second browser's Stop on an `exiting`
+    row builds a new marker under the policy then in force, and the server
+    acts on that one at the expiry. The first browser's open wait must follow
+    the row, or it shows no warning for a kill that is coming."""
+    server.seed(running=["vessel"], stop_prompt="/wrapup", wrap_up_takes=120)
+    await _confirm(page, server)
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop", exact=True).click()
+    await expect(dialog.get_by_role("button", name="Exit now")).to_be_visible()
+    assert NOTE not in await dialog.inner_text()
+    assert server.engine is not None
+    marker = server.engine._stopping[server.project("vessel")]
+    marker.policy = "end_anyway"
+    await expect(dialog).to_contain_text(NOTE, timeout=10_000)
+
+
+async def test_a_stop_takes_the_policy_the_server_recorded_for_it(
+    page: Page, server: Harness
+) -> None:
+    """#433 item 1, the tapping browser. `state.server.stop_policy` can be older
+    than the policy the server records on the marker, and the answer to the
+    DELETE is the row that carries the recorded one. The listing is held back
+    so only the answer can have painted the note: the ticker reads the row
+    too, and would otherwise do it a moment later."""
+    server.seed(running=["vessel"], stop_timeout=30.0, ignores_graceful_stop=True)
+    await _confirm(page, server)
+    assert await page.evaluate("() => window.__hitchrail.state.server.stop_policy") == "ask"
+    assert server.engine is not None
+    server.engine.prefs.apply(stop_policy="end_anyway")
+    release = asyncio.Event()
+
+    async def hold(route: Route) -> None:
+        await release.wait()
+        await route.continue_()
+
+    await page.route("**/api/projects", hold)
+    dialog = page.locator("[data-dialog]")
+    assert NOTE not in await dialog.inner_text()
+    try:
+        await dialog.get_by_role("button", name="Stop", exact=True).click()
+        await expect(dialog).to_contain_text(NOTE, timeout=5_000)
+    finally:
+        release.set()

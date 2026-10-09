@@ -171,6 +171,17 @@ while True:
     time.sleep(0.2)
 """
 
+# #463. An agent that outlives its terminal: it ignores SIGHUP, which is what
+# tmux sends when its session goes, so `Harness.lose_the_terminal` leaves it
+# alive with no session Hitchrail can address, which is `detached`.
+HUP_DEAF_BODY = """
+import signal
+signal.signal(signal.SIGINT, signal.SIG_IGN)
+signal.signal(signal.SIGHUP, signal.SIG_IGN)
+while True:
+    time.sleep(0.2)
+"""
+
 # Paints a bright Claude Code input row and leaves it there.
 #
 # #89: the graceful stop reads the box before it asks the agent to exit, and
@@ -633,6 +644,7 @@ class Harness:
         stop_timeout: float = 30.0,
         ignores_graceful_stop: bool = False,
         ignores_sigterm: bool = False,
+        survives_its_terminal: bool = False,
         box_will_not_clear: bool = False,
         prompts_after_stop: bool = False,
         exit_menu_after_stop: bool = False,
@@ -694,6 +706,8 @@ class Harness:
             body = STUBBORN_BODY
         if ignores_sigterm:
             body = DEAF_BODY
+        if survives_its_terminal:
+            body = HUP_DEAF_BODY
         if box_will_not_clear:
             body = UNCLEARABLE_BOX_BODY
         if prompts_after_stop:
@@ -1083,6 +1097,18 @@ class Harness:
                 cwd=self.root / e2e_name(name),
             )
         )
+
+    def lose_the_terminal(self) -> None:
+        """End every tmux session on the private socket and leave the agents
+        running (#463): the row derives `detached`. Needs `survives_its_terminal`
+        or the agent goes with its pane. By session, never `kill-server`."""
+        for session in self.sessions_on_the_socket(self._sock):
+            subprocess.run(
+                ["tmux", "-S", self._sock, "kill-session", "-t", f"={session}"],
+                capture_output=True,
+                env={k: v for k, v in os.environ.items() if k != "TMUX"},
+                check=True,
+            )
 
     def orphans_exited(self, timeout: float = 5.0) -> bool:
         """Whether every process seeded as `detached` has left (#107): the
