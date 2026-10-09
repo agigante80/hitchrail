@@ -571,15 +571,31 @@ def test_the_sweep_reports_only_the_exits_it_sent(root: Path) -> None:
 
 
 def _kill_fails_while_the_stop_types(
-    engine: Engine, tmux: FakeTmux, prompt_raises: bool
+    engine: Engine, tmux: FakeTmux, prompt_raises: bool, exit_refused: bool = False
 ) -> None:
     """The exact interleaving: Stop claims `closing` and types; Kill takes the
     marker out; the Stop finishes (or fails) while it is out; then Kill's
     `kill-session` raises and it hands the marker back. Two threads, but one
-    schedule: the kill releases the typing and joins it before raising."""
+    schedule: the kill releases the typing and joins it before raising.
+
+    `exit_refused` is the third variant (#431): the marker is already a wrap
+    up that is waiting (the caller stopped it), and the Stop is an Exit now
+    whose keys block, then find a draft in the box and are refused while Kill
+    holds the marker."""
     in_prompt = threading.Event()
     release = threading.Event()
     real_send_text = tmux.send_text
+    real_send_keys = tmux.send_keys
+
+    def send_keys(project: str, *keys: str) -> None:
+        in_prompt.set()
+        assert release.wait(timeout=5)
+        real_send_keys(project, *keys)
+
+    if exit_refused:
+        # The caller has already stopped it, so the marker is a waiting wrap up.
+        tmux.pane_text[VESSEL] = DIRTY_INPUT_BOX
+        tmux.send_keys = send_keys  # type: ignore[method-assign]
 
     def send_text(project: str, text: str) -> None:
         in_prompt.set()
@@ -611,7 +627,11 @@ def _kill_fails_while_the_stop_types(
     with pytest.raises(MachineUnreadable):
         engine.kill(VESSEL)
     del tmux.send_text, tmux.kill_session
-    assert len(errors) == int(prompt_raises)
+    if exit_refused:
+        del tmux.send_keys
+        assert [type(e) for e in errors] == [StopRefused]
+    else:
+        assert len(errors) == int(prompt_raises)
 
 
 def test_a_failed_kill_while_the_prompt_is_typed_leaves_a_wrap_up_the_sweep_ends(
@@ -694,6 +714,30 @@ def test_a_refused_exit_now_does_not_clear_the_flag_the_sweep_set_after_it(root:
     assert not sweep.is_alive()
     assert exits_sent(tmux) == 1
     assert marker.typing is False
+
+
+def test_a_failed_kill_hands_back_a_wrap_up_whose_exit_now_was_refused_meanwhile(
+    root: Path,
+) -> None:
+    """#431. A second Stop turned `closing` into `exiting`; Kill took the
+    marker out; the exit was refused and gave `closing` and the watch back to
+    an object no table holds; then Kill's `kill-session` failed and restored
+    it. Were the give back guarded by "is it still in the table", the marker
+    would come back `exiting` with `exit_at` set: expiry would treat an exit
+    never sent as sent and, under `end_anyway`, kill."""
+    engine, tmux, clock = wrap_engine(root)
+    engine.stop(VESSEL)
+    watch = engine._stopping[VESSEL].watch
+    assert watch is not None
+    _kill_fails_while_the_stop_types(engine, tmux, prompt_raises=False, exit_refused=True)
+    marker = engine._stopping[VESSEL]
+    assert marker.phase == "closing"
+    assert marker.exit_at is None
+    assert marker.typing is False
+    assert marker.watch is watch
+    del tmux.pane_text[VESSEL]
+    assert finish(engine, clock) == [VESSEL]
+    assert exits_sent(tmux) == 1
 
 
 # -- #408, #411, #428: what another browser needs to reopen a wait ----------
