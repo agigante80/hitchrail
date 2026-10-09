@@ -193,6 +193,9 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # 468 after #424: the signatures take EngineSeam, which wrapped three lines.
     # 479 for #430: why `_flag_waiting` compares a name's clear, not the counter.
     "sweep.py": 479,
+    # signals.py: 397 when #274 moved the pidfd path here. 414 for #426: `_close`,
+    # and the note on why a close that fails must not replace the outcome.
+    "signals.py": 414,
     # tmux.py is the module that encodes what tmux actually does
     # rather than what its manual implies, and every entry is a footgun
     # that cost real debugging: prefix matching targets, the colon

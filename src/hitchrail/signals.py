@@ -283,7 +283,7 @@ def signal_detached(
         # #387: the kill a person asked for, in the journal, once it happened.
         logger.info("signal %s: sent %s to pid %d through a handle", name, sig.name, pid)
     finally:
-        engine.pidfd.close_pidfd(pidfd)
+        _close(engine, pidfd)
     engine.announce(verified)
     return verified
 
@@ -364,7 +364,24 @@ def _end_session_agent(engine: EngineSeam, name: str, pid: int) -> None:
             )
         _send(engine, pidfd, pid, signal.SIGHUP)
     finally:
+        _close(engine, pidfd)
+
+
+def _close(engine: EngineSeam, pidfd: int) -> None:
+    """Close a handle, and never raise from a `finally` (#426).
+
+    By here the signal has gone or been refused, and an `OSError` from the
+    close would replace that outcome: a kill that happened reported as a
+    failure, or a refusal replaced by a bare errno. A leaked descriptor is
+    the lesser harm, so it is logged and the caller's result stands.
+    """
+    try:
         engine.pidfd.close_pidfd(pidfd)
+    except OSError as exc:
+        logger.warning(
+            "could not close a process handle: %s",
+            errno.errorcode.get(exc.errno or 0, "OSError"),
+        )
 
 
 def _send(engine: EngineSeam, pidfd: int, pid: int, sig: int) -> None:

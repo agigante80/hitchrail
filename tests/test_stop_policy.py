@@ -844,3 +844,15 @@ def test_a_start_of_another_project_during_the_look_leaves_this_row_flagged(
     assert engine.expire_stops() == [VESSEL]
     assert engine.get(f"{DEFAULT_LABEL}~other").state is State.RUNNING, "the start happened"
     assert engine.get(VESSEL).awaiting_input is True
+
+
+def test_a_failing_pidfd_close_after_the_signal_does_not_lose_the_pass(root: Path) -> None:
+    """#426. The agent was signalled; a close that raises must neither escape
+    `expire_stops` (losing the rest of the pass) nor turn a kill that
+    happened into a refusal."""
+    engine, tmux, clock = policy_engine(root, stop_policy="end_anyway")
+    ender(engine).fail_close = OSError(errno.EBADF, "bad fd")
+    expired = expire_on(engine, tmux, clock, MODAL_PANE)
+    assert ender(engine).signals == [signal.SIGHUP]
+    assert ender(engine).ended == [VESSEL]
+    assert expired == [VESSEL]
