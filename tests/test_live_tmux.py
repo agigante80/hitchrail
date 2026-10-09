@@ -27,22 +27,27 @@ import shutil
 import subprocess
 import tempfile
 import time
+import urllib.parse
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
+import httpx
 import pytest
 
 from conftest import REAL_CWD_OF, REAL_PIDFD
-from hitchrail import claude_ipc, derive
+from hitchrail import claude_ipc, derive, logs
 from hitchrail.claude_ipc import launch_argv
 from hitchrail.config import Config
 from hitchrail.engine import Engine
+from hitchrail.events import EventBus
 from hitchrail.procs import snapshot
+from hitchrail.server import create_app
 from hitchrail.sessions import Gone, NoAgent, NotDetached, OwnedElsewhere, State
 from hitchrail.tmux import Tmux
 from hitchrail.tmuxnames import UNNAMED_SESSION, sanitize
 from support import DEFAULT_LABEL, Orphan, make_config
+from test_live_socket import LiveServer, free_port
 
 pytestmark = pytest.mark.live_tmux
 
@@ -1337,3 +1342,83 @@ def test_an_agent_under_a_tmux_on_another_socket_is_named_by_its_server(
         assert alive.returncode == 0, "the refusal touched the other server's session"
     finally:
         assert other.close() == [], "a session outlived the test on the second socket"
+
+
+# -- #458: a kill's journal line, read from the server's stderr -------------
+
+
+def test_a_kill_route_ends_a_real_session_and_writes_one_journal_line(
+    server: PrivateTmux, machine: Machine, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#387's defect was a silent journal on a kill. The unit tests read the
+    record through `caplog` with a faked tmux, which cannot see a logging
+    configuration that drops `hitchrail.engine` or a handler uvicorn swapped
+    at startup. This starts a real session, presses the real Kill route on a
+    real uvicorn configured the way `cli._serve` configures it, and reads the
+    line from captured stderr.
+
+    **Not covered here: the kill `end_anyway` performs at expiry.** It is
+    `signals.end_anyway`, reached from the sweep only when a stop has timed
+    out AND the pane shows a prompt `claude_ipc` reads as waiting on a person
+    (twice, a settle apart). Without a real agent that screen is a shell
+    script printing a captured fixture, which is a fake of the very reader the
+    path depends on, and shortening the stop timeout to reach it would test
+    the shortened clock. Its line ("sent SIGHUP to pid") stays proved at the
+    unit tier (#458).
+    """
+    engine = Engine(
+        config=machine.config,
+        tmux=machine.adapter,
+        meminfo_fn=lambda: PLENTY,
+        cwd_of=REAL_CWD_OF,
+        **REAL_PIDFD,
+    )
+    name = f"{DEFAULT_LABEL}~{machine.project}"
+    port = free_port()
+    config = make_config(
+        machine.config.roots[0].path,
+        host="127.0.0.1",
+        port=port,
+        token="kill-journal-token",
+        agent_binary=str(machine.agent),
+        session_prefix=PREFIX,
+        sessions_dir=machine.config.sessions_dir,
+    )
+    started = engine.start(name)
+    session = f"{PREFIX}{sanitize(name)}"
+    server.created.append(session)
+    assert started.state is State.RUNNING
+
+    logs.configure("info")
+    live = LiveServer(
+        create_app(engine=engine, config=config, bus=EventBus()),
+        port,
+        log_level=logs.uvicorn_level(),
+        log_config=None,
+    )
+    live.start()
+    try:
+        response = httpx.post(
+            f"{live.base}/api/sessions/{urllib.parse.quote(name)}/kill",
+            headers={
+                "Host": f"127.0.0.1:{port}",
+                "Authorization": "Bearer kill-journal-token",
+                "Origin": f"http://127.0.0.1:{port}",
+            },
+            timeout=10,
+        )
+        assert response.status_code == 200, response.text
+        err = ""
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and "session killed" not in err:
+            err += capsys.readouterr().err
+            time.sleep(0.05)
+    finally:
+        live.stop()
+    err += capsys.readouterr().err
+    assert server.sessions() == [], "the route answered and the session is still there"
+    server.created.remove(session)
+    lines = [line for line in err.splitlines() if "session killed" in line]
+    assert len(lines) == 1, f"expected one kill line on stderr, got {lines}: {err}"
+    assert lines[0].endswith(f"INFO hitchrail.engine: kill {name}: session killed"), lines[0]
+    assert "kill-journal-token" not in err

@@ -147,8 +147,12 @@ Serial, in this order, one implementer.
 
 - [x] **Task 231, #423.** The pidfd guard sees `os.kill`, `os.killpg`,
       `pidfd_open`, `pidfd_send_signal` and a dotted `hitchrail.procs`.
-- [ ] **Task 232, #458.** A kill's journal line read from the real server's
+- [x] **Task 232, #458.** A kill's journal line read from the real server's
       stderr; removing the log call turns it red.
+      Built as `test_a_kill_route_ends_a_real_session_and_writes_one_journal_line`
+      in `test_live_tmux.py`. Differs: the server is in process uvicorn read
+      through capsys, like #388's test. `end_anyway`'s kill is not reachable
+      without faking the screen reader; said in the test and the ticket.
 - [ ] **Task 233, #459.** The lost status line: cause named from a
       reproduction or tmux's source, never retried into green.
 - [ ] **Task 234, #277.** The `Orphan` docstring names the subreaper; the
