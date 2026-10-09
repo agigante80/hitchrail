@@ -156,12 +156,13 @@ Serial, in this order, one implementer.
       without faking the screen reader; said in the test and the ticket.
 - [x] **Task 233, #459.** The lost status line: cause named from a
       reproduction or tmux's source, never retried into green.
-      Cause named, NOT BUILT as a fix: the capture order is not it. On a
-      private tmux 3.4 server under load the pane reports `pane_dead=1` while
-      its child is an unreaped zombie and the "Pane is dead" line is never
-      drawn, because tmux draws it only once SIGCHLD handling has marked the
-      pane status ready. Capturing after `pane_is_dead` cannot help, so
-      `_dead_start_output` is unchanged. #459 stays open for the tmux side.
+      Cause narrowed, no fix in code: the capture order is not it. On a
+      private tmux 3.4 server under load the pane reports `pane_dead=1` with an
+      empty status while its child is a zombie tmux has not reaped, and the
+      "Pane is dead" line is never drawn. Capturing after `pane_is_dead`
+      cannot help, so `_dead_start_output` is unchanged. Why tmux does not
+      reap is open, with the flaking tests and the lost exit code: MOVED OUT
+      to #480.
 - [x] **Task 234, #277.** The `Orphan` docstring names the subreaper; the
       launcher's exec error reaches its caller.
       Built as a close-on-exec pipe the launcher reads until the exec; item 3
