@@ -124,7 +124,7 @@ Serial, in this order, one implementer. Security auditor review at the end.
 - [x] **Task 245, #436.** The secure context question, withholding
       `localhost.localdomain`'s plain origin under a Secure cookie; the token
       rule for it pinned unchanged.
-- [ ] **Task 246, #438.** The restore advice says the token then crosses
+- [x] **Task 246, #438.** The restore advice says the token then crosses
       plain http; `phone-access.md` explains the startup line. Item 3 dropped
       with its reason on the ticket.
 

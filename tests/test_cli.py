@@ -1647,6 +1647,7 @@ def test_the_startup_block_says_which_plain_origins_are_not_derived(
         assert "http://box.lan:8787" in found[0]
         assert "Secure" in found[0]
         assert "--allow-origin http://box.lan:8787" in found[0]
+        assert "so the token then crosses plain http to that host" in found[0]
         assert "every non loopback --allow-origin is https" in found[0]
 
 

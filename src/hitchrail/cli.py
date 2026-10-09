@@ -615,12 +615,12 @@ def startup_block(config: Config, found: Preflight, level: str) -> list[str]:
         if host in https_hosts:
             continue
         plain = min(origin_forms("http", host, config.port), key=len)
-        # A loopback name here is `localhost.localdomain` (#436): the cookie
-        # rule ignores loopback origins, so giving it would not turn Secure off.
+        # Loopback here is `localhost.localdomain` (#436); giving it keeps Secure on.
         fix = (
             f"Browse http://localhost:{config.port} instead"
             if is_loopback_host(host)
-            else f"Give --allow-origin {plain} to serve it, which turns Secure off"
+            else f"Give --allow-origin {plain} to serve it, which turns Secure off, "
+            "so the token then crosses plain http to that host"
         )
         lines.append(
             f"plain http origin not derived for {plain}: every non loopback "
