@@ -984,13 +984,15 @@ def update_plugins_command(argv: list[str]) -> int:
             resolved, run=claude_ipc.plugin_runner(withhold=(TOKEN_ENV,)), report=progress
         )
     except claude_ipc.PluginsFailed as exc:
-        # Provisional rows, with no second listing behind them (#464).
         for outcome, times in _grouped(heard):
             print(_outcome_line(outcome, times))
         # The code first: it is the same word the route's record carries, so
         # a script or a person can match on it rather than on the prose.
         print(f"hitchrail: {exc.code}: {exc}", file=sys.stderr)
-        print(f"hitchrail: {_PROVISIONAL}", file=sys.stderr)
+        # Only with rows to qualify: a refresh or a first listing that fails
+        # leaves none. `note:` keeps a second line from reading as a code.
+        if heard:
+            print(f"hitchrail: note: {_PROVISIONAL}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         # The other run with no final account, and the likelier one: a plugin
@@ -1000,12 +1002,13 @@ def update_plugins_command(argv: list[str]) -> int:
         for outcome, times in _grouped(heard):
             print(_outcome_line(outcome, times))
         # The progress line arrives when an update FINISHES, so the one in
-        # flight is on neither stream: it is the one after the last `...`.
-        print(
-            f"hitchrail: interrupted: {_PROVISIONAL} The plugin after the last "
-            "`...` line was in flight.",
-            file=sys.stderr,
-        )
+        # flight is on neither stream. "If": a Ctrl-C during the refresh, a
+        # listing, or after the last update had none in flight, and from
+        # here those cannot be told apart.
+        said = "no plugin update had finished."
+        if heard:
+            said = f"{_PROVISIONAL} If one was running, it is the plugin after the last `...`."
+        print(f"hitchrail: interrupted: {said}", file=sys.stderr)
         return 130
     for outcome, times in _grouped(outcomes):
         print(_outcome_line(outcome, times))

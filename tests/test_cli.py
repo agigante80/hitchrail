@@ -1271,8 +1271,9 @@ def test_update_plugins_prints_the_rows_done_before_a_mid_run_failure(
         "skipped  adapt@kit (local scope is not updated)",
     ]
     assert "agent_missing:" in captured.err
-    # #464. Said on stderr, where the code word is, not left to the changelog.
-    assert "provisional" in captured.err
+    # #464. Said on stderr, where the code word is, not left to the changelog,
+    # and on a `note:` line so a parser splitting on `:` reads no second code.
+    assert "hitchrail: note: The rows above are provisional" in captured.err
 
 
 def test_update_plugins_prints_the_rows_done_before_a_ctrl_c(
@@ -1298,7 +1299,20 @@ def test_update_plugins_prints_the_rows_done_before_a_ctrl_c(
     # `...` line is the one in flight: the progress line arrives when an
     # update FINISHES, so no stream names the one that was running.
     assert "provisional" in captured.err
-    assert "in flight" in captured.err
+    assert "after the last `...`" in captured.err
+
+
+def test_a_ctrl_c_before_any_update_finished_claims_no_rows(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#464 round 1 review: during the refresh there are no rows and no `...`
+    line, so neither "provisional" nor "after the last" may be said."""
+    code, _ = _update(monkeypatch, FakeAgent([row("a@m")], refresh=KeyboardInterrupt()))
+    captured = capsys.readouterr()
+    assert code == 130
+    assert captured.out == ""
+    assert "no plugin update had finished" in captured.err
+    assert "provisional" not in captured.err
 
 
 @pytest.mark.parametrize(
@@ -1321,6 +1335,8 @@ def test_update_plugins_exits_two_when_the_operation_failed(
     assert code == 2
     assert code_word in captured.err
     assert "updated" not in captured.out, "a failed operation printed a count"
+    # #464 round 1 review: a failure before any row has none to qualify.
+    assert "provisional" not in captured.err
 
 
 def test_update_plugins_reports_plugins_unreadable_not_a_traceback_on_invalid_utf8(

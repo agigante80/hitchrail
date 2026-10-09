@@ -37,8 +37,9 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 - `hitchrail update-plugins` now says on stderr, after a Ctrl-C or a failure
   partway, that the rows it printed are provisional: `updated` means only that
   the update ran cleanly, not that the version moved. An interrupt also
-  says the plugin after the last `...` line was in flight, since that line
-  appears when an update finishes (#464).
+  says that any update still running is the plugin after the last `...`
+  line, since that line appears when an update finishes. Neither is said
+  when no update had finished yet (#464).
 - The journal's redaction of a request's query string now covers a traceback
   as well as the access line. An error logged with an exception whose message
   held the request target used to print a `?token=` query. Each traceback line
