@@ -18,6 +18,7 @@ import ipaddress
 import re
 import socket
 from collections.abc import Callable
+from urllib.parse import SplitResult, urlsplit
 
 LOOPBACK_NAMES = frozenset({"localhost", "localhost.localdomain"})
 
@@ -80,6 +81,41 @@ def normalise_host(raw: str) -> str:
     # Unconditional: see the docstring. A `len(value) > 1` guard looked like
     # safety and was the bug.
     return value.rstrip(".")
+
+
+def split_origin(entry: str) -> SplitResult:
+    """The one place an operator's origin string is taken apart (#439).
+
+    Trimmed, a trailing slash dropped, lowercased, then `urlsplit`. Five call
+    sites once each restated that recipe, and one of them skipped
+    `normalise_host`, so the CLI's https host match could disagree with the
+    allowlist about a root dot spelling. A guard in `test_config_origins.py`
+    fails when `urlsplit` is called anywhere else in `src/`.
+
+    Raises `ValueError` as `urlsplit` does (an unbalanced bracket); the
+    callers decide whether that is a refusal or something to skip. The host
+    comes back as `parts.hostname`, lowercased but with any root dot, so
+    callers pass it through `normalise_host`.
+    """
+    return urlsplit(entry.strip().rstrip("/").lower())
+
+
+def origin_parts(entry: str, *, loopback: bool = False) -> tuple[str, str] | None:
+    """An allowed origin as `(scheme, host)`, or None when it is unparseable or
+    loopback (unless `loopback` asks to keep it).
+
+    One reader for the cookie rule, the TLS refusal and the CLI's https hosts,
+    so they agree about what counts as somebody else's browser (#269). The host
+    goes through `normalise_host`, as `_allowed_hosts` does (#439).
+    """
+    try:
+        parts = split_origin(entry)
+    except ValueError:
+        return None
+    host = normalise_host(parts.hostname) if parts.hostname else ""
+    if not host or (is_loopback_host(host) and not loopback):
+        return None
+    return parts.scheme, host
 
 
 def normalise_origin(raw: str) -> str:
@@ -193,6 +229,35 @@ def is_loopback_host(host: str) -> bool:
             return False
     if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
         return address.ipv4_mapped.is_loopback
+    return address.is_loopback
+
+
+def is_secure_context_host(host: str) -> bool:
+    """Whether a browser treats a plain http origin on this host as a secure
+    context, which is what lets it send a `Secure` cookie there (#436).
+
+    The W3C Secure Contexts spec's "potentially trustworthy origin" rule, read
+    2026-10-09 (algorithm 3.1): an IP address in 127.0.0.0/8 or `::1`, the
+    host `localhost`, or a name ending in `.localhost`, a trailing root dot
+    allowed. Deliberately NOT `is_loopback_host`, and not by changing
+    `LOOPBACK_NAMES`: that set decides who must present a token, and
+    `localhost.localdomain` belongs in it for that, since this machine's
+    resolver sends it to loopback. The spec does not list it, so a browser
+    drops a `Secure` cookie on it. Only `Config.plain_origins_withheld` asks.
+    """
+    bare = normalise_host(host)
+    if bare == "localhost" or bare.endswith(".localhost"):
+        return True
+    if bare in LOOPBACK_NAMES:
+        return False
+    try:
+        address = ipaddress.ip_address(bare)
+    except ValueError:
+        # The dotted decimal spellings `is_loopback_host` also reads; a
+        # browser's URL parser canonicalises `127.1` to 127.0.0.1.
+        return is_loopback_host(bare)
+    if isinstance(address, ipaddress.IPv6Address):
+        return address == ipaddress.IPv6Address("::1")
     return address.is_loopback
 
 

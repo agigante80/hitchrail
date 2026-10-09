@@ -637,7 +637,8 @@ server is started and no root is needed. Exit 0 when nothing failed, 1 when
 a plugin failed, 2 when the update could not run at all: the agent is missing, the marketplaces did
 not refresh, or the list of installed plugins could not be understood, in
 which case nothing is updated rather than the part that could be read. Ctrl-C
-exits 130, after printing the rows it got to.
+exits 130, after printing the rows it got to; there, as after a failure
+partway, `updated` means only that the update exited cleanly.
 
 - **Only `user` scope is updated.** A plugin installed for one project belongs
   to that project's folder, which the agent's list does not name, so it is

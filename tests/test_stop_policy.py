@@ -27,7 +27,7 @@ from conftest import (
     procs_from,
     ps_row,
 )
-from hitchrail import settings
+from hitchrail import statefile
 from hitchrail.config import Config, ConfigError
 from hitchrail.engine import Engine, StopMarker
 from hitchrail.sessions import InvalidValue, OperatorPinned, State
@@ -665,11 +665,11 @@ def test_a_wrap_up_carries_the_policy_it_was_confirmed_under_to_its_exit(
 
 def test_the_policy_persists_and_a_new_process_reads_it(root: Path) -> None:
     state = root / "state" / "state.toml"
-    prefs = settings.Preferences(make_config(root, state_path=state))
+    prefs = statefile.Preferences(make_config(root, state_path=state))
     assert (prefs.stop_policy(), prefs.stop_policy_source()) == ("ask", "default")
     prefs.apply(stop_policy="end_anyway")
     assert 'stop_policy = "end_anyway"' in state.read_text()
-    fresh = settings.Preferences(make_config(root, state_path=state))
+    fresh = statefile.Preferences(make_config(root, state_path=state))
     assert (fresh.stop_policy(), fresh.stop_policy_source()) == ("end_anyway", "state")
     assert fresh.stop_policy_editable()
 
@@ -677,7 +677,7 @@ def test_the_policy_persists_and_a_new_process_reads_it(root: Path) -> None:
 @pytest.mark.parametrize("bad", ["kill", "", "END_ANYWAY", 1, True, ["end_anyway"]])
 def test_a_request_for_an_unknown_policy_writes_nothing(root: Path, bad: object) -> None:
     state = root / "state.toml"
-    prefs = settings.Preferences(make_config(root, state_path=state))
+    prefs = statefile.Preferences(make_config(root, state_path=state))
     with pytest.raises(InvalidValue, match="ask, end_anyway"):
         prefs.apply(stop_policy=bad)
     assert not state.exists()
@@ -694,7 +694,7 @@ def test_the_flag_and_the_file_both_pin_the_policy(root: Path, source: str, wher
     state = root / "state.toml"
     state.write_text('stop_policy = "end_anyway"\n')
     state.chmod(0o600)
-    prefs = settings.Preferences(
+    prefs = statefile.Preferences(
         make_config(root, state_path=state, stop_policy="ask", sources={"stop_policy": source})
     )
     assert (prefs.stop_policy(), prefs.stop_policy_source()) == ("ask", source)
@@ -717,7 +717,7 @@ def test_a_saved_policy_a_pin_overrides_is_said_at_startup(
     state = root / "state.toml"
     state.write_text('stop_policy = "end_anyway"\n')
     state.chmod(0o600)
-    prefs = settings.Preferences(
+    prefs = statefile.Preferences(
         make_config(root, state_path=state, stop_policy="ask", sources={"stop_policy": source})
     )
     (warning,) = prefs.startup_warnings()
@@ -742,7 +742,7 @@ def test_nothing_is_said_when_removing_the_pin_would_change_nothing(
     state = root / "state.toml"
     state.write_text(f'stop_policy = "{saved}"\n' if saved else "disabled = []\n")
     state.chmod(0o600)
-    prefs = settings.Preferences(
+    prefs = statefile.Preferences(
         make_config(root, state_path=state, stop_policy=pinned, sources={"stop_policy": source})
     )
     assert prefs.startup_warnings() == ()
@@ -759,10 +759,10 @@ def test_an_unknown_policy_in_the_state_file_is_ask_and_loses_nothing_beside_it(
     state = root / "state.toml"
     state.write_text(f'disabled = ["home"]\n{line}\n')
     state.chmod(0o600)
-    read = settings.read_state(state)
+    read = statefile.read_state(state)
     assert read.stop_policy is None
     assert read.hidden == {"home"}
-    assert settings.Preferences(make_config(root, state_path=state)).stop_policy() == "ask"
+    assert statefile.Preferences(make_config(root, state_path=state)).stop_policy() == "ask"
 
 
 def test_a_state_file_others_can_write_ends_nothing(root: Path) -> None:
@@ -771,16 +771,16 @@ def test_a_state_file_others_can_write_ends_nothing(root: Path) -> None:
     state = root / "state.toml"
     state.write_text('stop_policy = "end_anyway"\n')
     state.chmod(0o666)
-    assert settings.Preferences(make_config(root, state_path=state)).stop_policy() == "ask"
+    assert statefile.Preferences(make_config(root, state_path=state)).stop_policy() == "ask"
 
 
 def test_every_field_survives_a_round_trip(root: Path) -> None:
     state = root / "state.toml"
-    written = settings.State(
+    written = statefile.State(
         hidden=frozenset({"home"}), stop_timeout=45, stop_policy="end_anyway"
     )
-    settings.write_state(state, written, configured={"home"})
-    assert settings.read_state(state) == written
+    statefile.write_state(state, written, configured={"home"})
+    assert statefile.read_state(state) == written
 
 
 # -- #410: an overlay added from a look a restart has since overtaken ------
@@ -899,3 +899,39 @@ def test_an_agent_that_outlives_the_sighup_is_journalled_and_reported_as_ask(
     assert f"pid {PANE + 1} outlived the SIGHUP" in caplog.text
     assert "gave up waiting" in caplog.text
     assert "killed pid" not in caplog.text
+
+
+def test_a_saved_timeout_the_flag_overrides_is_said_at_startup(root: Path) -> None:
+    """#434 item 3, checked against the code first: `--stop-timeout` pins the
+    wait, `stop_timeout()` ignores the saved value, and dropping the flag
+    brings it back unannounced, the hazard #421 reported for the policy."""
+    state = root / "state.toml"
+    state.write_text("stop_timeout = 120\n")
+    state.chmod(0o600)
+    prefs = statefile.Preferences(
+        make_config(root, state_path=state, stop_timeout=60, sources={"stop_timeout": "flag"})
+    )
+    assert prefs.stop_timeout() == 60
+    (warning,) = prefs.startup_warnings()
+    assert "120" in warning
+    assert "60" in warning
+    assert "command line" in warning
+    assert "stop_timeout = 120" in state.read_text(), "the saved choice was cleared"
+
+
+@pytest.mark.parametrize(
+    ("saved", "pinned", "source"),
+    [(60, 60, "flag"), (None, 60, "flag"), (120, 30, "default")],
+    ids=["pin-agrees", "nothing-saved", "not-pinned"],
+)
+def test_no_timeout_is_said_when_removing_the_flag_would_change_nothing(
+    root: Path, saved: int | None, pinned: int, source: str
+) -> None:
+    state = root / "state.toml"
+    state.write_text(f"stop_timeout = {saved}\n" if saved else "disabled = []\n")
+    state.chmod(0o600)
+    config = make_config(
+        root, state_path=state, stop_timeout=pinned, sources={"stop_timeout": source}
+    )
+    prefs = statefile.Preferences(config)
+    assert prefs.startup_warnings() == ()

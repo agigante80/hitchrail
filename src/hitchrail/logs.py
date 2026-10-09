@@ -87,8 +87,11 @@ class QueryFilter(logging.Filter):
     uvicorn's h11 protocol splits the raw target at the first `?` and writes
     the rest back, so an absolute form target (through a forwarding proxy),
     a bare `?x` and `x?y` all reach the line with no leading slash. A client
-    address, a method and an http version never contain `?`, so nothing else
-    is touched.
+    address, a method and an http version are cut by the same rule, so a
+    client address that does contain one loses everything after it. Under
+    uvicorn's `proxy_headers` (on by default, trusting 127.0.0.1) a local
+    proxy's `X-Forwarded-For` sets that address, so it can. The effect is a
+    truncated address, which is harmless (#440).
 
     For `uvicorn.access` it FAILS CLOSED. That line is the one place a
     changed upstream shape would leak a secret silently, so a record whose
@@ -105,7 +108,36 @@ class QueryFilter(logging.Filter):
             record.args = ()
         elif isinstance(record.args, tuple):
             record.args = tuple(_without_query(arg) for arg in record.args)
+        _redact_traceback(record)
         return True
+
+
+def _redact_traceback(record: logging.LogRecord) -> None:
+    """The query is cut from the formatted exception text too (#440), and the
+    frames stay: `exc_info` is NOT cleared and the traceback NOT dropped,
+    since a traceback is what an operator reads an error line for.
+
+    uvicorn logs an application error with `exc_info`, and an exception whose
+    message holds the request target (a framework's "no route for /x?token=")
+    would print the token. Reachable: every HTTP protocol class in uvicorn 0.54
+    (h11, httptools) logs "Exception in ASGI application" with `exc_info`
+    from `run_asgi`, as does the lifespan runner.
+
+    The cut is the access line's, applied to each LINE of the text: from the
+    first `?` to the end of that line. **A `?` in unrelated exception text is
+    redacted too**, a ternary in a quoted source line or a message ending in a
+    question, and that cost is accepted: telling a query from any other `?`
+    inside free text is a denylist of shapes, and the line loses only its
+    tail while its frame, file and line number remain. Whole query or nothing,
+    as in #388.
+
+    Sets `exc_text`, which `Formatter.format` prints in place of formatting
+    `exc_info` again, and which is also redacted when something cached it.
+    """
+    if record.exc_info and record.exc_info[0] is not None and not record.exc_text:
+        record.exc_text = logging.Formatter().formatException(record.exc_info)
+    if record.exc_text:
+        record.exc_text = "\n".join(_cut_query(line) for line in record.exc_text.split("\n"))
 
 
 def _is_access_shape(args: object) -> bool:
@@ -117,10 +149,12 @@ def _is_access_shape(args: object) -> bool:
     )
 
 
+def _cut_query(text: str) -> str:
+    return text.partition("?")[0] + QUERY_OMITTED if "?" in text else text
+
+
 def _without_query(arg: object) -> object:
-    if isinstance(arg, str) and "?" in arg:
-        return arg.partition("?")[0] + QUERY_OMITTED
-    return arg
+    return _cut_query(arg) if isinstance(arg, str) else arg
 
 
 def configure(level: str = DEFAULT_LEVEL) -> None:

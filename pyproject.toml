@@ -1,6 +1,6 @@
 [project]
 name = "hitchrail"
-version = "0.16.0"
+version = "0.17.0"
 description = "Start and stop headless Claude Code sessions across a folder of projects, from a phone-first web UI."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -165,6 +165,7 @@ source_modules = [
   "hitchrail.projectnames",
   "hitchrail.roots",
   "hitchrail.settings",
+  "hitchrail.statefile",
   "hitchrail.tmux",
   "hitchrail.tmuxnames",
   "hitchrail.procs",
@@ -251,8 +252,10 @@ source_paths = [
   # its mode check is three clauses a mutant can flip one at a time;
   # `gateway.py` decides whether the unit starts at all from two `/proc`
   # tables, byte order and a flag test included. Between a web page and a
-  # shell in the sense that matters: what runs, and where.
+  # shell in the sense that matters: what runs, and where. #443 moved the state
+  # file and `Preferences` to `statefile.py`, which the sweep scores beside it.
   "src/hitchrail/settings.py",
+  "src/hitchrail/statefile.py",
   "src/hitchrail/gateway.py",
   # #130 asked whether this belongs here and required the answer with a
   # number. **Measured on 2026-09-05: adding it takes the sweep from 829

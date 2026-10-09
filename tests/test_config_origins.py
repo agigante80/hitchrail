@@ -8,6 +8,7 @@ socket.
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,7 @@ from hitchrail.config import (
     normalise_origin,
     origin_forms,
 )
+from hitchrail.hostnames import origin_parts
 from support import make_certificate
 
 
@@ -463,3 +465,87 @@ def test_our_own_tls_still_derives_its_https_origin_for_a_declared_host(
     cfg = _proxied(tmp_path, ("https://box.lan",), tls_cert=cert, tls_key=key)
     assert "https://box.lan:8787" in cfg.allowed_origins
     assert cfg.plain_origins_withheld == ()
+
+
+def test_the_https_hosts_are_normalised_as_the_allowlist_is(tmp_path: Path) -> None:
+    """#439: the CLI used to parse the origins itself, and `_origin_parts`
+    returned the host raw, so a root dot spelling could be an https host in
+    one reader and a different host in the other."""
+    cfg = _proxied(tmp_path, ("https://BOX.lan.", "http://plain.lan", "https://localhost:8443"))
+    assert cfg.https_origin_hosts == {"box.lan", "localhost"}
+    assert origin_parts("https://BOX.lan.") == ("https", "box.lan")
+
+
+@pytest.mark.parametrize(
+    "entry", ["https://localhost", "https://[::1]", "https://[::1", "box.lan"]
+)
+def test_origin_parts_leaves_out_loopback_and_junk_unless_asked(entry: str) -> None:
+    assert origin_parts(entry) is None
+
+
+def test_no_module_but_hostnames_takes_an_origin_apart() -> None:
+    """#439: five copies of `urlsplit(entry.strip().rstrip("/").lower())`
+    drifted once, so the recipe has one home. Structural, not a grep: a call
+    in a comment or a docstring is not a copy."""
+    src = Path(__file__).resolve().parent.parent / "src" / "hitchrail"
+    found = set()
+    for path in sorted(src.rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Call):
+                fn = node.func
+                name = fn.id if isinstance(fn, ast.Name) else getattr(fn, "attr", "")
+                if name == "urlsplit":
+                    found.add(path.name)
+            # An alias would hide the call from the check above.
+            if isinstance(node, ast.ImportFrom) and any(
+                a.name == "urlsplit" for a in node.names
+            ):
+                found.add(path.name)
+    assert found == {"hostnames.py"}
+
+
+def test_the_origins_are_derived_from_the_hosts_they_are_given_not_from_assignment_order(
+    tmp_path: Path,
+) -> None:
+    """#437. `__post_init__` assigned `_allowed_hosts` and only then derived
+    the origins, and the derivation read the field. Derive first and the field
+    is still `()`, nothing is withheld, and #391's refusal disappears with
+    every other test green. Reproduced here as that swapped order: the field
+    is empty when the derivation runs, and the hosts arrive as an argument."""
+    cfg = _proxied(tmp_path, ("https://box.lan",))
+    hosts = cfg._resolve_allowed_hosts()
+    object.__setattr__(cfg, "_allowed_hosts", ())
+    object.__setattr__(cfg, "_allowed_origins", frozenset())
+    derived = cfg._derive_allowed_origins(hosts)
+    assert "http://box.lan:8787" not in derived
+    assert "https://box.lan" in derived
+    assert cfg._withheld_among(hosts) == ("box.lan",)
+    assert cfg._withheld_among(()) == ()
+
+
+@pytest.mark.parametrize(
+    ("host", "withheld"),
+    [
+        ("localhost.localdomain", True),
+        ("localhost", False),
+        ("app.localhost", False),
+        ("box.lan", True),
+    ],
+)
+def test_a_secure_cookie_withholds_a_plain_origin_a_browser_will_not_return_it_on(
+    tmp_path: Path, host: str, withheld: bool
+) -> None:
+    """#436. `localhost.localdomain` is loopback here but not a secure context
+    to a browser, so under a `Secure` cookie its plain origin is refused with
+    the named 403 rather than granted and then 401 on every call. `localhost`
+    and `*.localhost` are secure contexts and stay."""
+    cfg = Config(
+        roots=_r(tmp_path),
+        host="127.0.0.1",
+        token="t",
+        extra_hosts=(host,),
+        extra_origins=("https://box.lan",),
+    )
+    assert cfg.cookie_is_secure
+    assert (host in cfg.plain_origins_withheld) is withheld
+    assert (f"http://{host}:8787" in cfg.allowed_origins) is not withheld

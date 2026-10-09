@@ -32,6 +32,40 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+## 0.17.0 - 2026-10-10
+
+### Changed
+
+- `hitchrail update-plugins` now says on stderr, after a Ctrl-C or a failure
+  partway, that the rows it printed are provisional: `updated` means only that
+  the update ran cleanly, not that the version moved. An interrupt also
+  says that any update still running is the plugin after the last `...`
+  line, since that line appears when an update finishes. A Ctrl-C or a
+  failure before any row was printed says neither (#464).
+- The journal's redaction of a request's query string now covers a traceback
+  as well as the access line. An error logged with an exception whose message
+  held the request target used to print a `?token=` query. Each traceback line
+  is cut at its first `?`, so a `?` in unrelated exception text loses the rest
+  of that line too; the frames stay (#440).
+- The startup lines about the saved settings say more. A refused `state.toml`
+  now says the next save from the settings page replaces it (or that saving
+  is refused too, when the directory is the problem). A `state.toml` that is a
+  symlink to nothing is reported instead of read as a first start. A saved
+  stop timeout that `--stop-timeout` overrides is reported, as a saved stop
+  policy already was, because removing the flag brings the saved value back
+  (#434).
+- With a `Secure` cookie (a loopback bind and every non loopback
+  `--allow-origin` https), a browser on `http://localhost.localdomain:8787` is
+  now refused at the grant with the origin check's 403, naming the origin. It
+  used to be granted a cookie the browser then dropped, so every call after it
+  was a 401. Browsers treat `localhost` and `*.localhost` as secure contexts
+  and not `localhost.localdomain`. If you reach Hitchrail that way, browse
+  `http://localhost:8787` instead; the startup block says so. The same rule
+  now keeps the plain origin of an `--allow-host` ending in `.localhost`,
+  which used to be withheld, and withholds `::ffff:127.0.0.1`'s, which a
+  browser does not treat as secure either. Who must present a token is
+  unchanged (#436).
+
 ## 0.16.0 - 2026-10-09
 
 Nothing to do on upgrade, unless something reads the journal for an ended

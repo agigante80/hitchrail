@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from hitchrail import settings
+from hitchrail import settings, statefile
 from hitchrail.cli import build_config, main, parse_args
 from hitchrail.config import Config, ConfigError
 from hitchrail.roots import Root
@@ -162,7 +162,7 @@ def test_enabled_false_in_the_file_configures_the_root_and_hides_it(tmp_path: Pa
     )
     config = build_config(parse_args(["--config", str(path)]))
     assert [(r.label, r.enabled) for r in config.roots] == [("work", True), ("home", False)]
-    assert [r.label for r in settings.Preferences(config).active_roots()] == ["work"]
+    assert [r.label for r in statefile.Preferences(config).active_roots()] == ["work"]
 
 
 def test_a_file_others_can_write_is_refused_and_says_why(tmp_path: Path) -> None:
@@ -303,7 +303,7 @@ def test_the_private_group_convention_is_read_from_the_passwd_database(
 # -- the state file: Hitchrail's own, and it can only disable ---------------
 
 
-def _two_roots(tmp_path: Path, state: Path | None) -> settings.Preferences:
+def _two_roots(tmp_path: Path, state: Path | None) -> statefile.Preferences:
     (tmp_path / "w").mkdir(exist_ok=True)
     (tmp_path / "h").mkdir(exist_ok=True)
     config = Config(
@@ -313,7 +313,7 @@ def _two_roots(tmp_path: Path, state: Path | None) -> settings.Preferences:
         ),
         state_path=state,
     )
-    return settings.Preferences(config)
+    return statefile.Preferences(config)
 
 
 def test_the_state_file_can_disable_a_root_and_never_enable_one(tmp_path: Path) -> None:
@@ -335,12 +335,12 @@ def test_a_toggle_persists_first_and_only_then_applies(tmp_path: Path) -> None:
     state = tmp_path / "state.toml"
     prefs = _two_roots(tmp_path, state)
     prefs.set_roots_enabled({"work": False})
-    assert settings.read_state(state).hidden == {"work"}
+    assert statefile.read_state(state).hidden == {"work"}
     assert prefs.active_roots() == ()
     # A fresh process reads the choice back: that is what "persists" means.
     assert _two_roots(tmp_path, state).active_roots() == ()
     prefs.set_roots_enabled({"work": True})
-    assert settings.read_state(state).hidden == frozenset()
+    assert statefile.read_state(state).hidden == frozenset()
     assert [r.label for r in prefs.active_roots()] == ["work"]
 
 
@@ -393,10 +393,10 @@ def test_an_unknown_label_is_refused_before_anything_is_written(tmp_path: Path) 
 
 def test_writing_the_state_file_records_only_labels_that_are_configured(tmp_path: Path) -> None:
     state = tmp_path / "state.toml"
-    settings.write_state(
-        state, settings.State(hidden=frozenset({"home", "gone"})), configured={"work", "home"}
+    statefile.write_state(
+        state, statefile.State(hidden=frozenset({"home", "gone"})), configured={"work", "home"}
     )
-    assert settings.read_state(state).hidden == {"home"}
+    assert statefile.read_state(state).hidden == {"home"}
 
 
 def test_an_unreadable_state_file_disables_nothing(tmp_path: Path) -> None:
@@ -405,9 +405,9 @@ def test_an_unreadable_state_file_disables_nothing(tmp_path: Path) -> None:
     operator's file is the perimeter either way."""
     state = tmp_path / "state.toml"
     state.write_text("disabled = [1, 2\n")
-    assert settings.read_state(state) == settings.State()
+    assert statefile.read_state(state) == statefile.State()
     state.write_text('disabled = "work"\n')
-    assert settings.read_state(state) == settings.State()
+    assert statefile.read_state(state) == statefile.State()
 
 
 # -- #238: the stop timeout, a policy the interface may set -----------------
@@ -439,7 +439,7 @@ def test_a_stop_timeout_persists_and_a_flag_pins_it(tmp_path: Path) -> None:
     assert _two_roots(tmp_path, state).stop_timeout() == 45
     # The flag wins outright, as it does over the config file: the value in
     # the state file is neither read nor writable while the flag is given.
-    pinned = settings.Preferences(
+    pinned = statefile.Preferences(
         Config(
             roots=(Root(label="work", path=tmp_path / "w"),),
             state_path=state,
@@ -463,7 +463,7 @@ def test_a_bad_timeout_in_the_state_file_loses_nothing_beside_it(
     hand, is not a way past the one validator."""
     state = tmp_path / "state.toml"
     state.write_text(f'disabled = ["home"]\nstop_timeout = {bad}\n')
-    read = settings.read_state(state)
+    read = statefile.read_state(state)
     assert read.hidden == {"home"}
     assert read.stop_timeout is None
 
@@ -585,19 +585,19 @@ def test_the_state_files_boundaries_are_honoured(tmp_path: Path) -> None:
     state = tmp_path / "state.toml"
     for value in (1, 3600):
         state.write_text(f"stop_timeout = {value}\n")
-        assert settings.read_state(state).stop_timeout == value
+        assert statefile.read_state(state).stop_timeout == value
 
 
 def test_two_hidden_labels_and_a_timeout_survive_a_round_trip(tmp_path: Path) -> None:
     """Two labels, so the separator is real TOML; both fields, so writing
     the second does not lose the first."""
     state = tmp_path / "state.toml"
-    settings.write_state(
+    statefile.write_state(
         state,
-        settings.State(hidden=frozenset({"home", "work"}), stop_timeout=45),
+        statefile.State(hidden=frozenset({"home", "work"}), stop_timeout=45),
         configured={"work", "home"},
     )
-    read = settings.read_state(state)
+    read = statefile.read_state(state)
     assert read.hidden == {"home", "work"}
     assert read.stop_timeout == 45
 
@@ -626,8 +626,10 @@ def test_the_state_file_is_written_two_levels_deep(tmp_path: Path) -> None:
     """`--config` can name a file in a directory that does not exist yet,
     and the state file sits beside it."""
     state = tmp_path / "a" / "b" / "state.toml"
-    settings.write_state(state, settings.State(hidden=frozenset({"work"})), configured={"work"})
-    assert settings.read_state(state).hidden == {"work"}
+    statefile.write_state(
+        state, statefile.State(hidden=frozenset({"work"})), configured={"work"}
+    )
+    assert statefile.read_state(state).hidden == {"work"}
 
 
 # -- #270: the file's remaining refusals, in words ----------------------------
@@ -723,9 +725,11 @@ def test_a_symlink_left_at_the_state_files_tmp_name_is_not_written_through(
     victim.write_text("ssh-ed25519 AAAA somebody\n")
     state = tmp_path / "state.toml"
     (tmp_path / "state.tmp").symlink_to(victim)
-    settings.write_state(state, settings.State(hidden=frozenset({"work"})), configured={"work"})
+    statefile.write_state(
+        state, statefile.State(hidden=frozenset({"work"})), configured={"work"}
+    )
     assert victim.read_text() == "ssh-ed25519 AAAA somebody\n"
-    assert settings.read_state(state).hidden == frozenset({"work"})
+    assert statefile.read_state(state).hidden == frozenset({"work"})
     assert (tmp_path / "state.tmp").is_symlink(), "the leftover was touched"
     assert sorted(p.name for p in tmp_path.iterdir() if p.name.startswith("state.")) == [
         "state.tmp",
@@ -738,7 +742,7 @@ def test_a_state_file_that_is_not_utf8_disables_nothing(tmp_path: Path) -> None:
     arm caught, out of `Preferences` and so out of `Engine.__init__`."""
     state = tmp_path / "state.toml"
     state.write_bytes(b'disabled = ["w\xff"]\n')
-    assert settings.read_state(state) == settings.State()
+    assert statefile.read_state(state) == statefile.State()
 
 
 def test_a_state_file_others_can_write_disables_nothing(tmp_path: Path) -> None:
@@ -748,9 +752,9 @@ def test_a_state_file_others_can_write_disables_nothing(tmp_path: Path) -> None:
     state = tmp_path / "state.toml"
     state.write_text('disabled = ["work"]\n')
     state.chmod(0o666)
-    assert settings.read_state(state) == settings.State()
+    assert statefile.read_state(state) == statefile.State()
     state.chmod(0o600)
-    assert settings.read_state(state).hidden == {"work"}
+    assert statefile.read_state(state).hidden == {"work"}
 
 
 def _shared_state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -776,7 +780,7 @@ def test_a_choice_is_not_saved_where_the_next_start_would_not_read_it(
     assert [r.label for r in prefs.active_roots()] == ["work"]
     assert list(state.parent.iterdir()) == [], "a file was left in the shared directory"
     with pytest.raises(settings.SettingsError, match="writable by group or others"):
-        settings.write_state(state, settings.State(hidden=frozenset({"work"})), {"work"})
+        statefile.write_state(state, statefile.State(hidden=frozenset({"work"})), {"work"})
 
 
 def test_a_state_file_the_read_refuses_is_said_once_at_startup(
@@ -799,6 +803,50 @@ def test_a_state_file_that_does_not_parse_is_said_at_startup(tmp_path: Path) -> 
     state.write_text("disabled = [1, 2\n")
     (warning,) = _two_roots(tmp_path, state).startup_warnings()
     assert str(state) in warning
+
+
+def test_the_refusal_warning_says_the_next_save_replaces_the_file(
+    tmp_path: Path,
+) -> None:
+    """#434: a refused file holding `disabled = ["work"]` was overwritten by
+    the first toggle, and the warning said only that nothing applied."""
+    state = tmp_path / "state.toml"
+    state.write_text('disabled = ["work"]\n')
+    state.chmod(0o666)
+    prefs = _two_roots(tmp_path, state)
+    (warning,) = prefs.startup_warnings()
+    assert "next save from the settings page replaces it" in warning
+    prefs.set_roots_enabled({"home": False})
+    assert "work" not in state.read_text(), "the claim is what the save really does"
+
+
+def test_the_refusal_warning_does_not_promise_a_replacement_a_shared_directory_forbids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the DIRECTORY is the refusal the save is refused too (#397), so
+    saying it replaces the file would be false."""
+    state = _shared_state_dir(tmp_path, monkeypatch)
+    state.write_text('disabled = ["work"]\n')
+    state.chmod(0o600)
+    (warning,) = _two_roots(tmp_path, state).startup_warnings()
+    assert "replaces" not in warning
+    assert "also refused" in warning
+
+
+def test_a_dangling_symlink_state_file_is_a_reason_and_is_said_at_startup(
+    tmp_path: Path,
+) -> None:
+    """#434: `os.open` raised FileNotFoundError on the link's missing target,
+    which was read as a first start, so every saved choice vanished silently."""
+    state = tmp_path / "state.toml"
+    state.symlink_to(tmp_path / "gone.toml")
+    loaded, reason = statefile.load_state(state)
+    assert loaded == statefile.State()
+    assert reason is not None
+    assert "gone.toml" in reason
+    (warning,) = _two_roots(tmp_path, state).startup_warnings()
+    assert str(state) in warning
+    assert "gone.toml" in warning
 
 
 @pytest.mark.parametrize("where", ["state.toml", "missing/state.toml"])

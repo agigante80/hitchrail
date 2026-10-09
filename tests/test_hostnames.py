@@ -15,7 +15,10 @@ from hitchrail.config import (
     is_valid_host,
     is_wildcard_host,
     normalise_host,
+    remote_reach,
 )
+from hitchrail.hostnames import is_secure_context_host
+from support import make_certificate
 
 
 @pytest.mark.parametrize(
@@ -110,3 +113,49 @@ def test_is_valid_host_defers_to_ipaddress_for_literals(value: str, valid: bool)
     # A character class does not know what an IPv6 literal is: `[...]` and
     # `[::1:::2]` both satisfied the pattern this replaces.
     assert is_valid_host(value) is valid
+
+
+@pytest.mark.parametrize(
+    ("host", "secure"),
+    [
+        ("localhost", True),
+        ("localhost.", True),
+        ("LOCALHOST", True),
+        ("app.localhost", True),
+        ("app.localhost.", True),
+        ("127.0.0.1", True),
+        ("127.5.5.5", True),
+        ("::1", True),
+        ("[::1]", True),
+        # Not on the Secure Contexts spec's list (algorithm 3.1, read
+        # 2026-10-09): a browser does not treat it as a potentially
+        # trustworthy origin, though it is loopback to this program.
+        ("localhost.localdomain", False),
+        ("localhost.localdomain.", False),
+        ("notlocalhost", False),
+        ("localhost.example.com", False),
+        ("box.lan", False),
+        ("192.168.1.5", False),
+        ("::ffff:127.0.0.1", False),
+    ],
+)
+def test_which_hosts_a_browser_treats_as_a_secure_context(host: str, secure: bool) -> None:
+    """#436, from the W3C Secure Contexts spec's potentially trustworthy
+    origin rule. A `Secure` cookie is only returned on such an origin."""
+    assert is_secure_context_host(host) is secure
+
+
+def test_localhost_localdomain_stays_loopback_for_every_other_rule(tmp_path: Path) -> None:
+    """#436 narrowed one question and left `LOOPBACK_NAMES` alone: that set
+    also decides who must present a token and which plain origins TLS
+    refuses, and neither answer changes for this name."""
+    assert is_loopback_host("localhost.localdomain")
+    assert remote_reach("127.0.0.1", ("localhost.localdomain",), ()) is None
+    assert Config(roots=_r(tmp_path), extra_hosts=("localhost.localdomain",)).token is None
+    cert, key = make_certificate(tmp_path)
+    Config(  # the TLS refusal of a plain off loopback origin does not apply
+        roots=_r(tmp_path),
+        tls_cert=cert,
+        tls_key=key,
+        extra_origins=("http://localhost.localdomain:8787",),
+    )

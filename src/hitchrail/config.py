@@ -12,7 +12,6 @@ import ipaddress
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from hitchrail.gateway import normalise_mac
 from hitchrail.hostnames import (
@@ -22,12 +21,15 @@ from hitchrail.hostnames import (
     MAX_HOSTNAME_LENGTH,
     Resolver,
     is_loopback_host,
+    is_secure_context_host,
     is_valid_host,
     is_wildcard_host,
     local_addresses,
     normalise_host,
     normalise_origin,
     origin_forms,
+    origin_parts,
+    split_origin,
 )
 from hitchrail.projectnames import explain_name
 from hitchrail.roots import Root, RootError, check_roots, split_identifier
@@ -118,25 +120,12 @@ def remote_reach(
         # constructing a Config, though, so a bad entry must not crash here on
         # its way to that refusal.
         try:
-            hostname = urlsplit(entry.strip().rstrip("/")).hostname
+            hostname = split_origin(entry).hostname
         except ValueError:
             continue
         if hostname and not is_loopback_host(hostname):
             return f"--allow-origin {entry} says something outside this machine can reach it"
     return None
-
-
-def _origin_parts(entry: str) -> tuple[str, str] | None:
-    """An allowed origin as `(scheme, host)`, or None when it is loopback or
-    unparseable. One reader for both, so the cookie rule and the TLS refusal
-    agree about what counts as somebody else's browser (#269)."""
-    try:
-        parts = urlsplit(entry.strip().rstrip("/").lower())
-    except ValueError:
-        return None
-    if not parts.hostname or is_loopback_host(parts.hostname):
-        return None
-    return parts.scheme, parts.hostname
 
 
 # The one setting that may arrive in the environment, and the only one that
@@ -312,8 +301,9 @@ class Config:
                 "API can run code as you"
             )
 
-        object.__setattr__(self, "_allowed_hosts", self._resolve_allowed_hosts())
-        object.__setattr__(self, "_allowed_origins", self._derive_allowed_origins())
+        hosts = self._resolve_allowed_hosts()
+        object.__setattr__(self, "_allowed_hosts", hosts)
+        object.__setattr__(self, "_allowed_origins", self._derive_allowed_origins(hosts))
 
     def _check_token(self) -> None:
         """`None` means no token. `""` is a token that matches nothing safely.
@@ -425,19 +415,34 @@ class Config:
     def proxied_origins_are_https(self) -> bool:
         """The origins' half of `cookie_is_secure`, apart from the bind, so
         the CLI's advice to bind loopback asks the rule it describes (#394)."""
-        proxied = [parts for entry in self.extra_origins if (parts := _origin_parts(entry))]
+        proxied = [parts for entry in self.extra_origins if (parts := origin_parts(entry))]
         return bool(proxied) and all(scheme == "https" for scheme, _ in proxied)
+
+    @property
+    def https_origin_hosts(self) -> frozenset[str]:
+        """Every host an `--allow-origin https://` entry names, normalised as
+        `_allowed_hosts` is, loopback included. The CLI asks this rather than
+        parsing the entries again (#439)."""
+        parts = (origin_parts(entry, loopback=True) for entry in self.extra_origins)
+        return frozenset(host for p in parts if p and p[0] == "https" for host in p[1:])
 
     @property
     def plain_origins_withheld(self) -> tuple[str, ...]:
         """The allowed hosts whose plain http origin is NOT derived (#391);
         `_derive_allowed_origins` says why. Asked of the cookie rule rather
-        than restating it, since two readers of one rule drift (#269). A
-        loopback host is kept: Chrome and Firefox send a `Secure` cookie to
-        `http://localhost`."""
+        than restating it, since two readers of one rule drift (#269). A host
+        a browser treats as a secure context is kept, `http://localhost`
+        among them; `localhost.localdomain` is not one (#436), so its plain
+        origin is withheld although `is_loopback_host` is true of it."""
+        return self._withheld_among(self._allowed_hosts)
+
+    def _withheld_among(self, hosts: tuple[str, ...]) -> tuple[str, ...]:
+        """The rule, over the hosts it is handed. The derivation passes its
+        own rather than reading the field, so no order of assignments in
+        `__post_init__` can leave it reading `()` and withhold nothing (#437)."""
         if self.tls or not self.cookie_is_secure:
             return ()
-        return tuple(h for h in self._allowed_hosts if not is_loopback_host(h))
+        return tuple(h for h in hosts if not is_secure_context_host(h))
 
     def _check_tls(self) -> None:
         """One flag without the other is a configuration error, not half a
@@ -469,12 +474,7 @@ class Config:
         # which treat `http://localhost` as a secure context for cookies,
         # and not for Safari, which drops a Secure cookie there.
         for entry in self.extra_origins:
-            parts = urlsplit(entry.strip().rstrip("/").lower())
-            if (
-                parts.scheme == "http"
-                and parts.hostname
-                and not is_loopback_host(parts.hostname)
-            ):
+            if (parts := origin_parts(entry)) and parts[0] == "http":
                 raise ConfigError(
                     f"--allow-origin {entry!r} is plain http and --tls-cert is set: the "
                     f"session cookie is Secure with TLS on and would never be sent back "
@@ -698,13 +698,12 @@ class Config:
         the port is the proxy's, and only the operator knows either.
         """
         for entry in self.extra_origins:
-            candidate = entry.strip().rstrip("/")
-            if "*" in candidate:
+            if "*" in entry:
                 raise ConfigError(
                     f"a wildcard origin defeats the point of the check: {entry!r}"
                 )
             try:
-                parts = urlsplit(candidate)
+                parts = split_origin(entry)
             except ValueError as exc:
                 # urlsplit validates bracketed netlocs itself and raises before
                 # any refusal in this function runs, so `http://[::1].` came
@@ -795,7 +794,7 @@ class Config:
             )
         )
 
-    def _derive_allowed_origins(self) -> frozenset[str]:
+    def _derive_allowed_origins(self, hosts: tuple[str, ...]) -> frozenset[str]:
         """Exactly the origins we can know, plus exactly the ones configured.
 
         We know our own bind: our scheme, the hosts we answer to, our port.
@@ -826,9 +825,9 @@ class Config:
         them back: `--allow-origin http://box.lan:8787` given explicitly,
         which also turns `Secure` off, because the cookie rule reads it.
         """
-        withheld = set(self.plain_origins_withheld)
+        withheld = set(self._withheld_among(hosts))
         origins: set[str] = set()
-        for host in self._allowed_hosts:
+        for host in hosts:
             if host in withheld:
                 continue
             # `self.scheme`, not "http": with TLS on, a browser sends
@@ -838,7 +837,7 @@ class Config:
             # is parametrised over both schemes.
             origins.update(origin_forms(self.scheme, host, self.port))
         for entry in self.extra_origins:
-            parts = urlsplit(entry.strip().rstrip("/").lower())
+            parts = split_origin(entry)
             assert parts.hostname is not None  # validated in _check_extra_origins
             # normalise_host, not parts.hostname raw: urlsplit lowercases but
             # keeps a trailing root dot, so `--allow-origin https://box.lan.`

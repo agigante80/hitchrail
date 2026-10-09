@@ -100,6 +100,48 @@ def test_a_query_string_never_reaches_the_access_line(
     assert f'"GET /api/projects{logs.QUERY_OMITTED} HTTP/1.1" 401' in err
 
 
+def _refuse_target(target: str) -> None:
+    raise ValueError(target)
+
+
+def test_a_traceback_loses_the_query_and_keeps_its_frames(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """#440. uvicorn logs an application error with `exc_info`, and an
+    exception whose message carries the request target printed the token in
+    the journal. The query goes; the frames, which are what the line is for,
+    stay, so `exc_info` is neither cleared nor dropped."""
+    logs.configure("info")
+    try:
+        _refuse_target(f"/api/projects?token={TOKEN}")
+    except ValueError:
+        logging.getLogger("uvicorn.error").exception("Exception in ASGI application")
+    err = capsys.readouterr().err
+    assert TOKEN not in err
+    assert "Traceback (most recent call last):" in err
+    assert "in _refuse_target" in err
+    assert "raise ValueError(target)" in err
+    assert f"ValueError: /api/projects{logs.QUERY_OMITTED}" in err
+
+
+def test_a_chained_cause_in_a_traceback_is_redacted_too(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The chained cause is in the same formatted text, so one pass covers it."""
+    logs.configure("info")
+    try:
+        try:
+            _refuse_target(f"/a?token={TOKEN}")
+        except ValueError as exc:
+            raise RuntimeError("wrapped") from exc
+    except RuntimeError:
+        logging.getLogger("uvicorn.error").exception("boom")
+    err = capsys.readouterr().err
+    assert TOKEN not in err
+    assert "RuntimeError: wrapped" in err
+    assert "direct cause" in err
+
+
 @pytest.mark.parametrize(
     "target",
     [

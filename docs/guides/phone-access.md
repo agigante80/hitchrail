@@ -47,6 +47,12 @@ and Hitchrail refuses on each separately:
   443, and they cannot be derived from our own loopback bind. This is what its
   own help text means by "needed behind a TLS terminating proxy".
 
+The startup block may print `plain http origin not derived for
+http://host:8787`: a browser on that plain address would be handed a `Secure`
+cookie it drops, so Hitchrail refuses its grant, and it stays quiet for a host
+that has an `--allow-origin https://` entry as above. Following the line's
+advice turns `Secure` off and sends the token over plain http to that host.
+
 What this buys, and it is worth being precise because it is the reason for the
 ordering. No inbound port is open, so there is nothing to find by scanning. The
 link is encrypted end to end, so the cookie does not cross anything in clear.

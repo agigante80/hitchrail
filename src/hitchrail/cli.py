@@ -15,7 +15,7 @@ from dataclasses import replace
 from importlib.metadata import PackageNotFoundError, metadata
 from pathlib import Path
 from typing import NamedTuple
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote
 
 import uvicorn
 from starlette.applications import Starlette
@@ -30,7 +30,7 @@ from hitchrail.config import (
 )
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
-from hitchrail.hostnames import normalise_host, origin_forms, reachable_hosts
+from hitchrail.hostnames import is_loopback_host, origin_forms, reachable_hosts
 from hitchrail.roots import Root, RootError, parse_root_argument
 from hitchrail.server import create_app
 
@@ -604,26 +604,28 @@ def startup_block(config: Config, found: Preflight, level: str) -> list[str]:
     # forwarder needs to learn that before the phone does. Not for a host
     # that is also the host of an https origin: that is phone-access.md's
     # own deployment (loopback bind, `--allow-host` and `--allow-origin
-    # https://` for one name), nobody uses the plain origin there, and the
-    # advice to give it would invite the one change that drops Secure from a
-    # working setup. The filter is here and not in `plain_origins_withheld`,
-    # which `_derive_allowed_origins` reads: the 403 must still name a
-    # withheld origin whenever a plain one is refused.
-    https_hosts = {
-        normalise_host(parts.hostname)
-        for entry in config.extra_origins
-        if (parts := urlsplit(entry.strip().rstrip("/").lower())).scheme == "https"
-        and parts.hostname
-    }
+    # https://` for one name), and the advice to give the plain origin would
+    # drop Secure from a working setup. The mixed case (an https proxy for
+    # `box.lan` AND a plain forwarder on `box.lan:8787`) is quiet too, kept
+    # deliberately (#439): the allowlist records no port to tell them apart,
+    # and the forwarder's grant meets the named 403. The filter is here, not
+    # in `plain_origins_withheld`, which the 403 reads.
+    https_hosts = config.https_origin_hosts
     for host in config.plain_origins_withheld:
         if host in https_hosts:
             continue
         plain = min(origin_forms("http", host, config.port), key=len)
+        # Loopback here is `localhost.localdomain` (#436); giving it keeps Secure on.
+        fix = (
+            f"Browse http://localhost:{config.port} instead"
+            if is_loopback_host(host)
+            else f"Give --allow-origin {plain} to serve it, which turns Secure off, "
+            "so the token then crosses plain http to that host"
+        )
         lines.append(
             f"plain http origin not derived for {plain}: every non loopback "
             f"--allow-origin is https, so the token cookie is Secure and a browser "
-            f"on plain http would drop it. "
-            f"Give --allow-origin {plain} to serve it, which turns Secure off"
+            f"on plain http would drop it. {fix}"
         )
     return lines
 
@@ -905,6 +907,10 @@ def _outcome_line(outcome: claude_ipc.PluginOutcome, times: int = 1) -> str:
     return f"{line} ({'; '.join(notes)})" if notes else line
 
 
+# No second listing ran behind the rows of an interrupt or a failure (#464).
+_PROVISIONAL = "The rows above are provisional: `updated` only means the update ran cleanly."
+
+
 def update_plugins_command(argv: list[str]) -> int:
     """`hitchrail update-plugins`: 0 when nothing failed, 1 when a plugin
     failed, 2 when the operation could not run (#124).
@@ -978,14 +984,15 @@ def update_plugins_command(argv: list[str]) -> int:
             resolved, run=claude_ipc.plugin_runner(withhold=(TOKEN_ENV,)), report=progress
         )
     except claude_ipc.PluginsFailed as exc:
-        # Provisional rows, with no second listing behind them: `updated`
-        # here may be a plugin that did not move, and says only that the
-        # update exited cleanly.
         for outcome, times in _grouped(heard):
             print(_outcome_line(outcome, times))
         # The code first: it is the same word the route's record carries, so
         # a script or a person can match on it rather than on the prose.
         print(f"hitchrail: {exc.code}: {exc}", file=sys.stderr)
+        # Only with rows to qualify: a refresh or a first listing that fails
+        # leaves none. `note:` keeps a second line from reading as a code.
+        if heard:
+            print(f"hitchrail: note: {_PROVISIONAL}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         # The other run with no final account, and the likelier one: a plugin
@@ -994,9 +1001,14 @@ def update_plugins_command(argv: list[str]) -> int:
         # and which plugins already failed is what they stopped it to learn.
         for outcome, times in _grouped(heard):
             print(_outcome_line(outcome, times))
-        print(
-            "hitchrail: interrupted: the rows above are every plugin it got to", file=sys.stderr
-        )
+        # The progress line arrives when an update FINISHES, so the one in
+        # flight is on neither stream. "If": a Ctrl-C during the refresh, a
+        # listing, or after the last update had none in flight, and from
+        # here those cannot be told apart.
+        said = "no plugin update had finished."
+        if heard:
+            said = f"{_PROVISIONAL} If one was running, it is the plugin after the last `...`."
+        print(f"hitchrail: interrupted: {said}", file=sys.stderr)
         return 130
     for outcome, times in _grouped(outcomes):
         print(_outcome_line(outcome, times))

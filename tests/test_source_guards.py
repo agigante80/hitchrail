@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from support import PIDFD_MODULE, in_claude_ipc, module_name, source_modules
+from support import PIDFD_MODULE, STATE_MODULE, in_claude_ipc, module_name, source_modules
 
 # -- #18: the seam holds ---------------------------------------------------
 
@@ -525,3 +525,31 @@ def test_the_direct_signal_guard_tells_a_send_from_a_constant() -> None:
         "x = other.killpg",
     ):
         assert not _signals_a_pid_directly(ast.parse(source)), source
+
+
+# -- #443: what writes Hitchrail's state file is one file --------------------
+
+
+def _defined_names(tree: ast.AST) -> set[str]:
+    return {
+        node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef | ast.ClassDef)
+    }
+
+
+def test_exactly_one_module_holds_the_state_file_and_the_contract_names_it() -> None:
+    """The operator's file is read once and never written; the state file is
+    written by a request. A reader auditing what can write to disk should find
+    that in one file (#443), engine layer, and named in the import contract."""
+    holding = {
+        rel
+        for rel, path in source_modules().items()
+        if {"write_state", "Preferences"} & _defined_names(ast.parse(path.read_text()))
+    }
+    assert holding == {STATE_MODULE}, (
+        f"the state file is written from {sorted(holding)}, and `support.STATE_MODULE` "
+        f"says {STATE_MODULE!r}. One module holds it; move the constant with it."
+    )
+    contract = tomllib.loads(
+        (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text()
+    )["tool"]["importlinter"]["contracts"][0]
+    assert module_name(STATE_MODULE) in contract["source_modules"]

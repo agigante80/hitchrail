@@ -1271,6 +1271,9 @@ def test_update_plugins_prints_the_rows_done_before_a_mid_run_failure(
         "skipped  adapt@kit (local scope is not updated)",
     ]
     assert "agent_missing:" in captured.err
+    # #464. Said on stderr, where the code word is, not left to the changelog,
+    # and on a `note:` line so a parser splitting on `:` reads no second code.
+    assert "hitchrail: note: The rows above are provisional" in captured.err
 
 
 def test_update_plugins_prints_the_rows_done_before_a_ctrl_c(
@@ -1292,6 +1295,24 @@ def test_update_plugins_prints_the_rows_done_before_a_ctrl_c(
         "updated  b@m",
     ]
     assert "interrupted:" in captured.err
+    # #464. The rows are the pre #311 kind, and the update after the last
+    # `...` line is the one in flight: the progress line arrives when an
+    # update FINISHES, so no stream names the one that was running.
+    assert "provisional" in captured.err
+    assert "after the last `...`" in captured.err
+
+
+def test_a_ctrl_c_before_any_update_finished_claims_no_rows(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#464 round 1 review: during the refresh there are no rows and no `...`
+    line, so neither "provisional" nor "after the last" may be said."""
+    code, _ = _update(monkeypatch, FakeAgent([row("a@m")], refresh=KeyboardInterrupt()))
+    captured = capsys.readouterr()
+    assert code == 130
+    assert captured.out == ""
+    assert "no plugin update had finished" in captured.err
+    assert "provisional" not in captured.err
 
 
 @pytest.mark.parametrize(
@@ -1314,6 +1335,8 @@ def test_update_plugins_exits_two_when_the_operation_failed(
     assert code == 2
     assert code_word in captured.err
     assert "updated" not in captured.out, "a failed operation printed a count"
+    # #464 round 1 review: a failure before any row has none to qualify.
+    assert "provisional" not in captured.err
 
 
 def test_update_plugins_reports_plugins_unreadable_not_a_traceback_on_invalid_utf8(
@@ -1647,6 +1670,7 @@ def test_the_startup_block_says_which_plain_origins_are_not_derived(
         assert "http://box.lan:8787" in found[0]
         assert "Secure" in found[0]
         assert "--allow-origin http://box.lan:8787" in found[0]
+        assert "so the token then crosses plain http to that host" in found[0]
         assert "every non loopback --allow-origin is https" in found[0]
 
 
@@ -1800,3 +1824,26 @@ def test_the_stop_policy_flag_refuses_anything_but_the_two(tmp_path: Path) -> No
     args = ["--root", f"main={tmp_path}", "--stop-policy", "end_anyway"]
     cfg = build_config(parse_args(args))
     assert (cfg.stop_policy, cfg.sources["stop_policy"]) == ("end_anyway", "flag")
+
+
+def test_the_startup_block_does_not_advise_a_flag_that_cannot_help_a_loopback_name(
+    tmp_path: Path,
+) -> None:
+    """#436. `--allow-origin http://localhost.localdomain:8787` is ignored by
+    the cookie rule (loopback origins are), so Secure stays on and the browser
+    still drops the cookie. The line points at `localhost` instead."""
+    config = make_config(
+        tmp_path,
+        host="127.0.0.1",
+        token="t" * 24,
+        extra_hosts=("localhost.localdomain",),
+        extra_origins=("https://box.lan",),
+    )
+    lines = cli.startup_block(
+        config, cli.Preflight([], "/usr/bin/claude", "/usr/bin/tmux"), "info"
+    )
+    found = [line for line in lines if line.startswith("plain http origin not derived")]
+    assert len(found) == 1, lines
+    assert "http://localhost.localdomain:8787" in found[0]
+    assert "Browse http://localhost:8787 instead" in found[0]
+    assert "--allow-origin http://localhost.localdomain" not in found[0]

@@ -77,7 +77,18 @@ OUTER_LAYER_CAPS: dict[str, int] = {
     # 1107 for #311: a failed run still prints the rows it heard.
     # 1118 for Phase 24's review: so does a Ctrl-C, the likelier way a run
     # ends without its account.
-    "cli.py": 1118,
+    # 1114 for #439: the CLI asks `Config.https_origin_hosts` instead of
+    # parsing the origins a second time.
+    # 1120 for #436: the withheld line gives a loopback name different advice,
+    # since the flag it used to give cannot turn Secure off for it. Two over the
+    # 1118 the phase began at, since #439's saving was spent first.
+    # 1127 for #464: the interrupt and failure output of update-plugins says its
+    # rows are provisional and that the plugin after the last `...` was in
+    # flight, which costs a constant and a longer print.
+    # 1130 for #464's round 1 review: neither line is said when no row was
+    # heard, and the comment saying why a refresh and the last listing cannot
+    # be told apart from here.
+    "cli.py": 1130,
     # 409 to 418 for #78: two entries in the exemption and the argument
     # beside them, which the set's own rule requires of every entry.
     # 418 to 436 for #160: the unauthenticated asset set and the argument
