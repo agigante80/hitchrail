@@ -337,6 +337,15 @@ also_copy = [
   "src/hitchrail/plugin_runs.py",
   "src/hitchrail/procs.py",
   "src/hitchrail/ram.py",
+  "src/hitchrail/lifespan.py",
+  "src/hitchrail/routes_common.py",
+  "src/hitchrail/routes_live.py",
+  "src/hitchrail/routes_projects.py",
+  "src/hitchrail/routes_sessions.py",
+  "src/hitchrail/routes_settings.py",
+  # #205. Copied for the reason `attention.py` is: `server.py` imports every
+  # route module it was split into, so a tree with the importer and not them
+  # cannot start.
   "src/hitchrail/server.py",
   "src/hitchrail/sessions.py",
   "src/hitchrail/web",

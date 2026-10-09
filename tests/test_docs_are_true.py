@@ -328,7 +328,9 @@ def test_the_roadmap_marks_a_phase_done_only_when_its_plan_is_finished() -> None
 # -- #63: the design's error table against the server -----------------------
 
 SPEC = ROOT / "docs" / "superpowers" / "specs" / "2026-08-25-hitchrail-design.md"
-SERVER = SRC / "server.py"
+# The app and every module its handlers were split into (#205). A glob, so a
+# route module added later is read without anybody remembering to list it.
+SERVER_MODULES = [SRC / "server.py", *sorted(SRC.glob("routes_*.py"))]
 
 
 def _codes_the_server_returns() -> set[str]:
@@ -339,7 +341,7 @@ def _codes_the_server_returns() -> set[str]:
     of the gap #63 is about. Reading the calls catches a code added inline the
     same as one added to the constant.
     """
-    src = SERVER.read_text()
+    src = "\n".join(path.read_text() for path in SERVER_MODULES)
     codes = set(re.findall(r'_error\(\s*\d+,\s*"([a-z_]+)"', src))
     for block in re.findall(r"_ROUTING_CODES\s*=\s*\{(.*?)\}", src, re.S):
         codes |= set(re.findall(r'"([a-z_]+)"', block))
