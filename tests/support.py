@@ -130,18 +130,37 @@ def make_certificate(directory: Path) -> tuple[Path, Path]:
 
 # -- a real orphan, for the tiers that spawn a detached agent -----------------
 #
-# Forks twice and exits, so the agent is reparented to init the way a real
-# detached agent is when its tmux session dies. A plain `Popen` child stays
+# Forks twice and exits, so the agent is reparented to init, or to the nearest
+# child subreaper above it (#277: a subreaper that sits inside a tmux would put
+# that server back above the orphan, and #189's walk would name it), the way a
+# real detached agent is when its tmux session dies. A plain `Popen` child stays
 # the SUITE's child, and the suite is often run from inside a tmux (the
 # CLAUDE.md warning about `$TMUX` exists because it is), so the developer's
 # own tmux server sat above every seeded "orphan" and #189's ancestry walk,
 # correctly, named it: the row said "in a tmux server Hitchrail is not
 # configured for" and the End control was gone. The grandchild's pid is
 # printed for the caller; nothing else is.
+#
+# **The launcher stays until the exec has happened or failed (#277).** Fds 0 to
+# 2 go to /dev/null before the exec, so an exec error (a non executable agent
+# path, a `noexec` tmpfs) used to be invisible: the launcher exited 0 and the
+# caller got a bare `ProcessLookupError` from `pidfd_open`. The grandchild now
+# holds the write end of a close-on-exec pipe: a successful exec closes it and
+# the launcher reads end of file, a failed one writes the error first, and the
+# launcher passes it to its own stderr and exits 127.
 _DETACH = """
 import os, sys
+r, w = os.pipe()
 if os.fork():
+    os.close(w)
+    with os.fdopen(r, "rb") as pipe:
+        failure = pipe.read()
+    if failure:
+        sys.stderr.write(failure.decode(errors="replace"))
+        sys.stderr.flush()
+        os._exit(127)
     os._exit(0)
+os.close(r)
 os.setsid()
 if (pid := os.fork()):
     print(pid, flush=True)
@@ -149,12 +168,17 @@ if (pid := os.fork()):
 null = os.open(os.devnull, os.O_RDWR)
 for fd in (0, 1, 2):
     os.dup2(null, fd)
-os.execv(sys.argv[1], sys.argv[1:])
+try:
+    os.execv(sys.argv[1], sys.argv[1:])
+except OSError as exc:
+    os.write(w, f"cannot exec {sys.argv[1]}: {exc}".encode())
+    os._exit(127)
 """
 
 
 class Orphan:
-    """A process reparented to init, watched through a pidfd.
+    """A process reparented to init (or the nearest subreaper), watched
+    through a pidfd.
 
     The `Popen` surface the harnesses already used (`pid`, `poll`, `wait`,
     `terminate`, `kill`), minus the exit status: nobody can `wait(2)` on a
@@ -169,9 +193,13 @@ class Orphan:
             env=env,
             capture_output=True,
             text=True,
-            check=True,
+            check=False,
             timeout=10,
         )
+        if launched.returncode != 0:
+            # The launcher's stderr holds the exec error; `check=True` would
+            # raise a CalledProcessError whose message leaves it out.
+            raise OSError(launched.stderr.strip() or f"launcher exited {launched.returncode}")
         self.pid = int(launched.stdout)
         self._fd = os.pidfd_open(self.pid)
 

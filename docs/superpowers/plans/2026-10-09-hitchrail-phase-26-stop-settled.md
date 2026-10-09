@@ -146,16 +146,30 @@ Serial, in this order, one implementer.
 
 ### Batch 2: the guards and the tiers that prove it, tasks 231 to 235
 
-- [ ] **Task 231, #423.** The pidfd guard sees `os.kill`, `os.killpg`,
+- [x] **Task 231, #423.** The pidfd guard sees `os.kill`, `os.killpg`,
       `pidfd_open`, `pidfd_send_signal` and a dotted `hitchrail.procs`.
-- [ ] **Task 232, #458.** A kill's journal line read from the real server's
+- [x] **Task 232, #458.** A kill's journal line read from the real server's
       stderr; removing the log call turns it red.
-- [ ] **Task 233, #459.** The lost status line: cause named from a
+      Built as `test_a_kill_route_ends_a_real_session_and_writes_one_journal_line`
+      in `test_live_tmux.py`. Differs: the server is in process uvicorn read
+      through capsys, like #388's test. `end_anyway`'s kill is not reachable
+      without faking the screen reader; said in the test and the ticket.
+- [x] **Task 233, #459.** The lost status line: cause named from a
       reproduction or tmux's source, never retried into green.
-- [ ] **Task 234, #277.** The `Orphan` docstring names the subreaper; the
+      Cause named, NOT BUILT as a fix: the capture order is not it. On a
+      private tmux 3.4 server under load the pane reports `pane_dead=1` while
+      its child is an unreaped zombie and the "Pane is dead" line is never
+      drawn, because tmux draws it only once SIGCHLD handling has marked the
+      pane status ready. Capturing after `pane_is_dead` cannot help, so
+      `_dead_start_output` is unchanged. #459 stays open for the tmux side.
+- [x] **Task 234, #277.** The `Orphan` docstring names the subreaper; the
       launcher's exec error reaches its caller.
-- [ ] **Task 235, #445.** The kill watch catches `visibility`, `opacity` and
+      Built as a close-on-exec pipe the launcher reads until the exec; item 3
+      declined in a ticket comment.
+- [x] **Task 235, #445.** The kill watch catches `visibility`, `opacity` and
       `inert`; one frame loop; an exact phase marker if the page has one.
+      Built with the page's own marker, `dialog.dataset.waiting === "waiting"`
+      (`wait.js` sets it), so the text match is gone.
 
 ### Batch 3: the dialog, the exit menu and the wrap up's watch, tasks 236 to 239
 

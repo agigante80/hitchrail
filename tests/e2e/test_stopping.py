@@ -221,19 +221,25 @@ async def test_kill_appears_once_the_wait_is_under_way_and_stays(
     # thing #81 forbids. "is waiting for you" is #101's, unreachable for this
     # shim, named for completeness.
     # **"Usable" is what a thumb needs, not "in the DOM".** The control counts
-    # only while the dialog is open and the button is connected, visible by
-    # checkVisibility() (which sees an ancestor's style, `hidden`, a class) and
-    # not disabled. Each look runs on every mutation, attribute change and
-    # animation frame, all inside the page, so none of it is a retry. A page
-    # setTimeout guard resolves well past the 3000ms patience so a missing
-    # ending fails with a message rather than hanging.
+    # only while the dialog is open and the button is connected, not disabled,
+    # not under an `inert` ancestor, and visible by `checkVisibility` with
+    # `visibilityProperty` and `opacityProperty` on, so `display:none`,
+    # `visibility:hidden` and `opacity:0` on the button or any ancestor all
+    # make it unusable (#445). It does NOT see `pointer-events:none` or a
+    # control covered by another element; nothing here claims it does.
+    # Each look runs on every mutation and attribute change, and on ONE
+    # animation frame loop started once (#445: a loop per mutation piled up
+    # and made `looks` meaningless), all inside the page, so none of it is a
+    # retry. A page setTimeout guard resolves well past the 3000ms patience so
+    # a missing ending fails with a message rather than hanging.
     outcome = await page.evaluate(
         """() => new Promise((resolve) => {
             const dialog = document.querySelector("[data-dialog]");
             const ending = /No answer from|Lost track of|is waiting for you/;
             const usable = () => dialog.open && [...dialog.querySelectorAll("button")].some(
                 (b) => b.textContent.trim() === "Do not wait, kill it now"
-                    && b.isConnected && b.checkVisibility() && !b.disabled);
+                    && b.isConnected && !b.disabled && !b.closest("[inert]")
+                    && b.checkVisibility({ visibilityProperty: true, opacityProperty: true }));
             const began = performance.now();
             let looks = 0;
             let phase = null;
@@ -252,17 +258,23 @@ async def test_kill_appears_once_the_wait_is_under_way_and_stays(
                 looks += 1;
                 const over = ending.test(dialog.textContent);
                 if (startedWaiting === null) {
-                    phase = dialog.textContent;
-                    startedWaiting = !over && usable();
+                    // The page's own marker for the phase (`showWaiting` sets
+                    // it), exact, where the text also matches the bulk dialog.
+                    phase = dialog.dataset.waiting ?? null;
+                    startedWaiting = phase === "waiting" && !over && usable();
                 }
-                if (over || !usable()) return finish(over, false);
-                requestAnimationFrame(look);
+                if (over || !usable()) finish(over, false);
+            };
+            const frame = () => {
+                if (done) return;
+                look();
+                if (!done) requestAnimationFrame(frame);
             };
             const observer = new MutationObserver(look);
             observer.observe(dialog, { childList: true, subtree: true,
                 characterData: true, attributes: true });
             const guard = setTimeout(() => finish(false, true), 15000);
-            look();
+            frame();
         })"""
     )
 
@@ -272,8 +284,8 @@ async def test_kill_appears_once_the_wait_is_under_way_and_stays(
     # **The watch must have started inside the wait.** If the ending were
     # already up on the first look this would pass having observed nothing,
     # which is the vacuous-guard shape this phase exists to remove. The first
-    # look's text must be the waiting phase itself, so a 1ms watch cannot pass.
-    assert outcome["startedWaiting"] and "Waiting for it to exit." in outcome["phase"], (
+    # look's phase marker must be `waiting` itself, so a 1ms watch cannot pass.
+    assert outcome["startedWaiting"], (
         f"the watch began outside the waiting phase, so it proved nothing "
         f"({outcome['looks']} looks): {outcome}"
     )
