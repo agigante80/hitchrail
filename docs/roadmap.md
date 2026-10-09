@@ -47,8 +47,8 @@ the running application, on the phone it is for. See
 [`tech-guidelines.md`](tech-guidelines.md) section 7.
 
 ## Phase: Phase 27: The perimeter's loose ends
-state: planned
-plan:
+state: open
+plan: docs/superpowers/plans/2026-10-09-hitchrail-phase-27-perimeter.md
 
 Close what Phase 25's batches 4 to 6 found in the perimeter: the config and
 its origin parsing, the state file, the log filter and the server's shutdown.
