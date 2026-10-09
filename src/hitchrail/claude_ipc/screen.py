@@ -315,8 +315,13 @@ _SETTLE_DONE_S = 2.0
 
 
 def queued_message(pane: str) -> bool:
-    """Whether the live input row shows a message waiting to be sent (#242)."""
-    row = _live_ornament_row(pane)
+    """Whether the live input row shows a message waiting to be sent (#242).
+
+    Reads the row `wrap_up_reading` reads (#475). Under a background agent
+    panel only the boxed form finds it; reading the plain form alone answered
+    False there, and the wrap up prompt was typed behind a queued message.
+    """
+    row = _input_row(pane)
     return row is not None and _QUEUED in row
 
 
@@ -345,6 +350,16 @@ def _boxed_ornament_row(pane: str) -> str | None:
     if _is_rule(rows[index - 1]) and _is_rule(rows[index + 1]):
         return rows[index]
     return None
+
+
+def _input_row(pane: str) -> str | None:
+    """The live input row, in either layout: plain, or boxed under a panel.
+
+    Deliberately NOT used by `shows_input_box` or `awaits_answer`: widening
+    those would change what the answer keys and the attention overlay act on
+    for a panel screen, which nobody has captured a modal under. Ticketed.
+    """
+    return _live_ornament_row(pane) or _boxed_ornament_row(pane)
 
 
 def _foreground_before(text: str) -> str | None:
@@ -382,7 +397,7 @@ def wrap_up_reading(pane: str) -> bool | None:
     a message is queued. None: no live input row, a modal, or an ornament in a
     colour nobody has captured, which is not evidence either way.
     """
-    row = _live_ornament_row(pane) or _boxed_ornament_row(pane)
+    row = _input_row(pane)
     if row is None:
         return None
     before, after = row.split(_PROMPT, 1)

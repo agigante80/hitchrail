@@ -52,6 +52,17 @@ def test_a_busy_box_over_a_background_agent_panel_reads_busy() -> None:
     assert ipc_screen.wrap_up_reading(fixture("busy_background_agent")) is False
 
 
+def test_a_queued_message_under_a_background_agent_panel_is_seen() -> None:
+    """#475. `queued_message` read only the plain row and answered False here,
+    so the wrap up prompt would be typed behind a person's queued message."""
+    pane = fixture("idle_background_agent")
+    assert ipc_screen.queued_message(pane) is False
+    queued = pane.replace("\u276f\xa0 ", "\u276f\xa0Press up to edit queued messages ", 1)
+    assert queued != pane
+    assert ipc_screen.queued_message(queued) is True
+    assert ipc_screen.wrap_up_reading(queued) is False
+
+
 def test_the_exit_menu_is_not_a_box_and_stays_unknown() -> None:
     """The menu's ornament has no rule under it, which is what the boxed rule
     keys on, so widening the tail did not widen what reads as the box."""

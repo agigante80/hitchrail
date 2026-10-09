@@ -30,7 +30,9 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # the live input box between its two rules, the captured reason the row
     # count alone could not be it, and the watch's counts of what it read. The
     # file is one subject, the vendor's screen, and its length is those captures.
-    "claude_ipc/screen.py": 441,
+    # 456 for the review of that change: `_input_row`, the one place that says
+    # which row is the live input, shared by `queued_message` and the watch.
+    "claude_ipc/screen.py": 456,
     # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
     # `except` arm: the adapter can now decline to type, and the marker has
     # to come back the same way a vanished tmux takes it back.
