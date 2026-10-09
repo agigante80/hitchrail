@@ -366,6 +366,10 @@ def expire_stops(engine: EngineSeam) -> list[str]:
         expired = [name for name, _marker in candidates]
         for name in expired:
             del engine.stopping[name]
+            # #472. A stop that ran out of time, or is about to be ended by
+            # `end_anyway`, starts nothing: the same critical section as the
+            # removal, so the sweep cannot read the row `stopped` in between.
+            engine.restarts.cancel(name)
     # Announced outside the lock: `get` does two subprocess calls, and
     # holding a lock across those would serialise every stop behind them.
     #

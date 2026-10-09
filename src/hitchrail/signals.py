@@ -279,6 +279,7 @@ def signal_detached(
                 "moved since it started. Nothing was signalled"
             )
         sig = signal.SIGKILL if force else signal.SIGTERM
+        _ends_a_restart(engine, name)
         _send(engine, pidfd, pid, sig)
         # #387: the kill a person asked for, in the journal, once it happened.
         logger.info("signal %s: sent %s to pid %d through a handle", name, sig.name, pid)
@@ -374,6 +375,7 @@ def _end_session_agent(engine: EngineSeam, name: str, pid: int) -> None:
                 f"{verified.state.value}, pid {verified.pid}): the row moved after "
                 "the look, so nothing was signalled"
             )
+        _ends_a_restart(engine, name)
         _send(engine, pidfd, pid, signal.SIGHUP)
     finally:
         _close(engine, pidfd)
@@ -394,6 +396,15 @@ def _close(engine: EngineSeam, pidfd: int) -> None:
             "could not close a process handle: %s",
             errno.errorcode.get(exc.errno or 0, "OSError"),
         )
+
+
+def _ends_a_restart(engine: EngineSeam, name: str) -> None:
+    """A signal that ends the agent is a Kill for a pending Restart (#472):
+    before the signal, so the sweep cannot read the dying row `stopped` first,
+    and counted, so a Restart still typing its stop does not mark afterwards
+    (`restart.request` says why the count and not the row)."""
+    with engine.stopping_guard:
+        engine.restarts.cancel(name)
 
 
 def _send(engine: EngineSeam, pidfd: int, pid: int, sig: int) -> None:

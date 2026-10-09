@@ -324,6 +324,14 @@ class Session:
     # `foreign_session` still means no owner was SEEN, not that there is
     # none: screen and a plain terminal leave no tmux above the agent.
     foreign_server_pid: int | None = None
+    # #472. Overlays from `restart.py`, like `stopping`, and for the same
+    # reason not states: `restarting` says a start will follow the stop in
+    # flight (or the exit just seen), and `restart_refused` carries the reason
+    # a start that DID follow was refused, on a row that therefore reads
+    # `stopped`. A refusal that was only logged would leave a person watching
+    # a row that stopped and never came back.
+    restarting: bool = False
+    restart_refused: str | None = None
 
     @property
     def held_elsewhere(self) -> str | None:
@@ -363,4 +371,6 @@ class Session:
             "awaiting_input": self.awaiting_input,
             "foreign_session": self.foreign_session,
             "foreign_server_pid": self.foreign_server_pid,
+            "restarting": self.restarting,
+            "restart_refused": self.restart_refused,
         }

@@ -363,6 +363,26 @@ fate of work the operator did not ask to end. The one exception is #453's, above
 with "Exit and stop tasks" selected, which is the work the operator did ask to
 end.
 
+### 4.3.1 Restart is a stop that starts (#472)
+
+Restart is the stop above with a start after it, and it adds no third
+mechanism: `POST /api/sessions/{name}/restart` calls the graceful stop, then
+marks that a start follows. It is its own route for the reason Stop and Kill are
+two (a duration is a parameter; an action is a route). The mark is the second
+overlay that is not derived, in engine memory and never persisted, beside the
+stop marker, and for the same reason: a mark that outlived the process would
+claim a stop nobody is waiting on.
+
+The sweep starts the agent exactly once, and only from a `stopped` it derived
+with the stop marker gone. Reading that verdict and taking the mark are one
+critical section under the lock the stop marker is written under, so two ticks
+or two presses hold and consume one mark. Every other end of the stop clears the
+mark and starts nothing: the timeout, a Kill, `end_anyway`. Kill means end this,
+not end this faster, so nothing here escalates in order to restart. A start the
+engine refuses (the memory guard, say) is recorded on the row with its reason
+and is not retried. The new run is a fresh conversation, as Start's is;
+resuming one is a decision for `claude_ipc` and is not made here.
+
 ### 4.4 Claude Code internals are quarantined
 
 The session link comes from `~/.claude/sessions/<pid>.json`, key

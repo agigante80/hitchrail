@@ -66,11 +66,11 @@ DIALOGS: dict[str, str] = {
         "replaces: a second Stop or a Kill for a session that is already "
         "stopping. The list catches up on its own."
     ),
-    "`Stop ${displayProject(project.name)}?`,": _MUST_ACT,
+    '`${restart ? "Restart" : "Stop"} ${displayProject(project.name)}?`,': _MUST_ACT,
     "`Stop ${sessionCount(rows.length)}?`,": _MUST_ACT,
     "`Stopping ${sessionCount(bulk.rows.length)}`,": _MUST_ACT,
     "`Clear ${project.name}?`,": _MUST_ACT,
-    "`Stopping ${project.name}`,": _MUST_ACT,
+    '`${wait.restart ? "Restarting" : "Stopping"} ${project.name}`,': _MUST_ACT,
     "`Lost track of ${project.name}`,": (
         "Argued in place, and the argument is the opposite of #169's: the page "
         "cannot read the machine, so offering to end a process it cannot "

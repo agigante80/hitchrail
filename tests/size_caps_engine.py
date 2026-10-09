@@ -192,7 +192,10 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # who holds a marker and the file was at its cap. Up to 1275 for #432:
     # the table of markers a Kill holds out, and why a Stop must see them;
     # 1279 for #430, the per name clear epoch.
-    "engine.py": 1279,
+    # 1283 for #472: the overlay's slot and its two `cancel`s in Kill, and the
+    # import. Restart's logic, its two entry points and its argument are in
+    # `restart.py`, which is a mixin precisely so this file gained no methods.
+    "engine.py": 1283,
     # #473. The sweep, moved whole from `engine.py`. 465 is the move: most of
     # it is the notes on the races between a scan, a stop and a start, which
     # are the reason the code is shaped as it is. It does not want splitting
@@ -201,11 +204,15 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # 479 for #430: why `_flag_waiting` compares a name's clear, not the counter.
     # 488 for #444: why the settle is per candidate, and the second look believed.
     # 489 for #475: the ceiling line carries what the watch read.
-    "sweep.py": 489,
+    # 493 for #472: an expired stop cancels a pending restart in the same
+    # critical section as the removal, and the comment says why it must.
+    "sweep.py": 493,
     # signals.py: 397 when #274 moved the pidfd path here. 414 for #426: `_close`,
     # and the note on why a close that fails must not replace the outcome.
     # 426 for #425: the survivor after the wait, journalled and reported as ask.
-    "signals.py": 426,
+    # 438 for the restart kill epoch: `_ends_a_restart`, called before each of the two
+    # signals, and the note on why the count is what a Restart still typing reads.
+    "signals.py": 438,
     # tmux.py is the module that encodes what tmux actually does
     # rather than what its manual implies, and every entry is a footgun
     # that cost real debugging: prefix matching targets, the colon
