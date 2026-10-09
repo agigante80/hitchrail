@@ -944,13 +944,21 @@ class Engine(SeamMembers):
             # in the HTTP layer, which is the whole point of the quarantine.
             self._give_back(name, typing, resume)
             raise StopRefused(str(exc)) from exc
-        except Exception:
+        except BaseException:
             # Anything else, too (#407): a marker left `closing` with no watch
             # made every later Stop a no-op and was invisible to the sweep and
             # to expiry, so only a Kill could clear it.
             self._give_back(name, typing, resume)
             raise
-        finally:
+        else:
+            # On success only (#427), and this was a `finally`. Every failure
+            # above ends in `_give_back`, which clears `typing` itself or
+            # drops the marker, and it releases the lock. A `finally` then
+            # cleared the flag again AFTER that: in the gap the sweep could
+            # claim the same restored `closing` marker and start typing its
+            # exit, and this cleared the sweep's flag, so a third Stop typed
+            # a second sequence over it. `BaseException` above keeps the
+            # `finally`'s old reach: nothing leaves with the flag set.
             self._done_typing(typing)
         if wrapping_up:
             # On the object whatever the table holds (#387): see StopMarker.

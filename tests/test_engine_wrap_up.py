@@ -639,6 +639,63 @@ def test_a_failed_kill_does_not_restore_a_stop_whose_prompt_failed(root: Path) -
     assert typed(tmux) == [PROMPT], "a later Stop is a real one again"
 
 
+# -- #427: Stop clears only the typing flag it still owns --------------------
+
+
+def test_a_refused_exit_now_does_not_clear_the_flag_the_sweep_set_after_it(root: Path) -> None:
+    """The window is between Stop's give back and its `finally`: the refused
+    Exit now has restored `closing` and released the lock, the sweep claims
+    the SAME marker object and starts typing the exit, and Stop then clears
+    the flag the sweep set. A third Stop reads `exiting` with nothing
+    typing and types a second sequence over the sweep's (#406 again).
+
+    Two threads, one schedule: the give back is wrapped so the sweep claims
+    and blocks in its first key before Stop's frame moves on."""
+    engine, tmux, clock = wrap_engine(root, stop_prompt_timeout=60.0)
+    engine.stop(VESSEL)
+    clock.advance(60)
+    tmux.pane_text[VESSEL] = DIRTY_INPUT_BOX
+    real_send_keys = tmux.send_keys
+    sweep_typing = threading.Event()
+    release = threading.Event()
+    callers: list[str] = []
+
+    def send_keys(project: str, *keys: str) -> None:
+        callers.append(threading.current_thread().name)
+        if len(callers) == 1:
+            sweep_typing.set()
+            assert release.wait(timeout=5)
+        real_send_keys(project, *keys)
+
+    sweep = threading.Thread(target=engine.advance_wrap_ups, name="sweep")
+    real_give_back = engine._give_back
+
+    def give_back(name: str, marker: StopMarker, resume: Any) -> None:
+        real_give_back(name, marker, resume)
+        # Stop has handed the marker back and holds no lock. The pane is
+        # idle now, so the sweep may type, and it claims the same object.
+        del tmux.pane_text[VESSEL]
+        tmux.send_keys = send_keys  # type: ignore[method-assign]
+        sweep.start()
+        assert sweep_typing.wait(timeout=5)
+
+    engine._give_back = give_back  # type: ignore[method-assign]
+    marker = engine._stopping[VESSEL]
+    with pytest.raises(StopRefused):
+        engine.stop(VESSEL)
+    assert engine._stopping[VESSEL] is marker
+    assert marker.typing is True, "the sweep's flag, which Stop does not own"
+    callers.clear()
+    third = engine.stop(VESSEL)
+    assert third.stopping is True, "the no-op 202"
+    assert callers == [], "a third Stop typed nothing while the sweep types"
+    release.set()
+    sweep.join(timeout=5)
+    assert not sweep.is_alive()
+    assert exits_sent(tmux) == 1
+    assert marker.typing is False
+
+
 # -- #408, #411, #428: what another browser needs to reopen a wait ----------
 
 
