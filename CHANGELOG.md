@@ -32,6 +32,8 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+## 0.15.1 - 2026-10-09
+
 Nothing to do on upgrade.
 
 ### Fixed
