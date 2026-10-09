@@ -175,6 +175,7 @@ WEB_CAPS: dict[str, int] = {
     # the row, the dialogs, the settings page) already read as files; split
     # it along them if it passes roughly 800, or when a build step exists.
     # 760 for Phase 24's bar: the gear, the mark, the search clear control
-    # and the appearance radiogroup (#320, #324, #451, #323).
-    "app.css": 760,
+    # and the appearance radiogroup (#320, #324, #451, #323). 770 for the
+    # color-scheme each explicit theme sets (#470).
+    "app.css": 770,
 }

@@ -67,6 +67,10 @@
 }
 
 :root[data-theme="dark"] {
+  /* #470. The meta's `light dark` draws native controls in the SYSTEM scheme,
+     so Light on a dark phone left each unselected radio a dark disc that read
+     as selected. System keeps the meta. */
+  color-scheme: dark;
   --ground: #362D24;
   --surface: #4A3E31;
   --surface-alt: #2E251C;
@@ -83,6 +87,7 @@
   --warn-tint: #4A3E31;
   --warn-on-tint: #D6A555;
 }
+:root[data-theme="light"] { color-scheme: light; }
 
 * { box-sizing: border-box; }
 

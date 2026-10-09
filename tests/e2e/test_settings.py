@@ -302,3 +302,25 @@ async def test_appearance_still_applies_when_the_browser_will_not_store(
     assert await page.evaluate(_BODY) == _DARK
     await group.get_by_role("radio", name="System").check()
     assert await page.evaluate(_BODY) == _LIGHT
+
+
+_SCHEME = "getComputedStyle(document.documentElement).colorScheme"
+
+
+@pytest.mark.parametrize(("system", "chosen"), [("dark", "Light"), ("light", "Dark")])
+async def test_native_controls_follow_a_choice_opposite_to_the_system(
+    page: Page, server: Harness, system: str, chosen: str
+) -> None:
+    """#470. The meta's `light dark` drew native controls in the system scheme,
+    so Light on a dark phone left every unselected radio a dark filled disc
+    that read as selected. System must keep following the device: the meta never
+    shows in the computed style, so `normal` is the rule leaving it in charge."""
+    server.seed(stopped=["vessel"])
+    await page.emulate_media(color_scheme=system)  # type: ignore[arg-type]
+    await page.goto(f"{server.base}/settings")
+    assert await page.evaluate(_SCHEME) == "normal"
+    group = page.get_by_role("radiogroup", name="Appearance")
+    await group.get_by_role("radio", name=chosen).check()
+    assert await page.evaluate(_SCHEME) == chosen.lower()
+    await group.get_by_role("radio", name="System").check()
+    assert await page.evaluate(_SCHEME) == "normal"
