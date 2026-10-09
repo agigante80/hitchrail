@@ -46,6 +46,76 @@ suite is green. It is finished when the behaviour has been watched working in
 the running application, on the phone it is for. See
 [`tech-guidelines.md`](tech-guidelines.md) section 7.
 
+## Phase: Phase 26: Stop, settled, and Restart on it
+state: open
+plan: docs/superpowers/plans/2026-10-09-hitchrail-phase-26-stop-settled.md
+
+Close the stop path's open findings, then build Restart on it.
+
+Phase 25 hardened the stop and filed what its review loops found but did not
+fix: races between Stop, Kill and the sweep, an `end_anyway` that journals a
+kill that did not happen, a pidfd close that can stop the ticker, an attention
+epoch shared by every project, and guards that cannot see what they guard.
+They sat in Backlog, which is the second Backlog rule's failure: a phase that
+hardens new surface was never opened for them. These are bugs in the one path
+that ends processes, so risk puts them first.
+
+Restart (#472) was "deliberately later" until Andrea asked for it on
+2026-10-09. It is a stop that starts once the old agent is gone, so it lands
+last, on the settled path, and its tests exercise the same races. `server.py`'s
+split (#205) moves here from Phase 16, first, because the restart route is the
+next thing added to a file already past the guideline.
+
+Done when no open ticket describes a defect in stop, kill, `end_anyway` or the
+sweep; Restart is watched on a real session on the phone, a clean one and one
+whose stop times out; and the timed out case started nothing.
+
+Placed first: Phase 23 plugs a second agent into this path, and a reboot
+restore (Phase 16) starts what this path stopped.
+
+## Phase: Phase 27: The perimeter's loose ends
+state: planned
+plan:
+
+Close what Phase 25's batches 4 to 6 found in the perimeter: the config and
+its origin parsing, the state file, the log filter and the server's shutdown.
+
+Two of them are security findings: a `localhost.localdomain` origin kept on
+plain http under a Secure cookie (#436), and a log filter that never reads an
+exception's text (#440). The origin parsing exists three times and the copies
+can disagree (#439); `settings.py` is past the guideline along a seam that is
+already there (#443). Each was filed low or medium and none is urgent alone,
+which is why they collected.
+
+Done when the origin is parsed in one place that every caller uses, each
+security finding has a test that fails if the fix is reverted, and
+`settings.py` is split along config versus state.
+
+Placed before Phase 23, which adds the operator's agent choice to the config
+this phase untangles.
+
+## Phase: Phase 28: The page's loose ends
+state: planned
+plan:
+
+Close what Phase 24's reviews and its phone watch found on the page, and do
+the S25 watch that phase could not.
+
+Phase 24 shipped the bar, the settings gear, the themes and a busy list fit
+for a phone, and closed as re-shaped because neither phone was reachable.
+Its lows are a comment that promises a long press Android lacks, a theme toggle
+stale under System, a layout untested above 360 px, five bar behaviours no
+test would miss, and the per root create offer, which is Andrea's decision
+(#467). The watch on the S25 at 360 CSS px (#468) is this phase's own close
+watch, so it is done once, here.
+
+Done when each bar behaviour has a test that fails when it is reverted, the
+layout is tested at a desktop width too, #467 is decided and written beside
+`canCreate`, and the page has been watched on the S25 at 360 px.
+
+Placed before Phase 23, whose agent choice at start (#292) is the next
+addition to this page.
+
 ## Phase: Phase 23: More than one agent, one package each
 state: planned
 
@@ -77,8 +147,10 @@ is, through its own package, the stop sequence included, with no vendor name
 outside that package and nothing an agent runs coming from a page.
 
 Placed before Phase 16 because a reboot restore has to record which agent a
-session was, and designing it for one is rework. After Phase 25 because the
-stop path the second agent plugs into should be hardened first.
+session was, and designing it for one is rework. After Phases 26 to 28,
+because the stop path, the config and the page the second agent plugs into
+should be settled first. It also holds the open `claude_ipc` findings (#456,
+#460) by the first Backlog rule, since this phase re-cuts that package.
 
 ## Phase: Phase 16: What survives a reboot
 state: planned
@@ -103,8 +175,8 @@ boot, so no retry budget reaches it; #201 has since decided the fix is a
 recovery timer that starts the unit once the address appears, not a longer
 budget. Socket activation (#220) sits here as its alternative, P3, and
 helps nobody while the unit binds loopback, so it is the first ticket to move
-out if the phase runs long. `server.py`'s split (#205) lands here, first,
-because the restore adds to the file that is already past the guideline.
+out if the phase runs long. `server.py`'s split (#205) moved to Phase 26 on
+2026-10-09, because the restart route reaches that file first.
 
 Done when a reboot brings back what was running, exactly once each, without a
 person tapping anything, and the security argument has been rewritten rather
@@ -167,8 +239,6 @@ before all three are built is a promise about an interface still moving.
 
 Not scheduled, and not to be smuggled into an earlier phase:
 
-- **Restart as its own operation.** It is stop then start, and the interface
-  can compose it.
 - **Authentication beyond a single shared token.** Phase 14 added ways to
   present the existing credential and says why a second kind of credential is
   a downgrade rather than a feature.
@@ -220,4 +290,13 @@ Not scheduled, and not to be smuggled into an earlier phase:
   as a premise that did not hold (`procs.py` runs only `ps`, which does not
   fork), and #291 closed with #334's decision. Phase 17 and 24 each lost a
   ticket that was not about what the phase is for (#10, #143, #339 to Backlog).
+- **Reviewed 2026-10-09: the Backlog had become a phase nobody opened.** It
+  held 46 tickets, about thirty of them review findings from Phases 24 and 25,
+  the case the second Backlog rule exists for. Phases 26 to 28 were inserted
+  ahead of 23 to hold them, split by the code they touch: the stop path, the
+  perimeter, the page. Restart left "Deliberately later" because Andrea asked
+  for it (#472): it is still a stop then a start, and lands in Phase 26 on the
+  settled stop path. What stays in Backlog is the governance and test
+  machinery, the TLS passphrase (#280), the sponsors link (#17), and the text
+  size work that waits on Chrome (#452).
 

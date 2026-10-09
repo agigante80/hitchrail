@@ -5,7 +5,14 @@ import { wrapUpSeconds } from "/patience.js";
 import { showRefusal } from "/refusal.js";
 import { displayProject } from "/roots.js";
 import { state } from "/state.js";
-import { awaitStopped, endAnywayNote, killNow, showWaiting, waitingPhase } from "/wait.js";
+import {
+  awaitStopped,
+  endAnywayNote,
+  killNow,
+  repaintWaiting,
+  showWaiting,
+  waitingPhase,
+} from "/wait.js";
 
 /* -- stopping ----------------------------------------------------------
    Confirm, then a wait during which the kill is reachable, then a timeout
@@ -134,6 +141,12 @@ async function beginStop(project) {
   // expiry most times, and say "no answer" before the server's one look at
   // the pane could say the agent is waiting on a question (#242 review).
   if (!state.server.stop_prompt_set || resend) wait.armed = true;
+  // #433. The answer is the row with the marker this stop wrote, so its policy
+  // is the one the server will act on, where `state.server` can be older than
+  // `prefs.stop_policy()` (#428). Repainted at once rather than left to the
+  // ticker, which starts only after the listing. A no-op 202 carries the
+  // marker already in flight, which is the right one to follow.
+  repaintWaiting(project, wait, result.body);
   await refresh();
   awaitStopped(project, wait);
 }

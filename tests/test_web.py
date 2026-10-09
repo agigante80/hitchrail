@@ -388,3 +388,43 @@ def test_the_key_field_hints_a_password_manager_and_has_no_name() -> None:
     assert 'autocomplete="current-password"' in field, field
     assert 'type="password"' in field, field
     assert " name=" not in field and "data-key" in field, field
+
+
+# -- #433, #463: the stop dialogs agree with their count and their row --------
+
+
+def _code(name: str) -> str:
+    return stripped((WEB / name).read_text(encoding="utf-8"))
+
+
+def test_stop_alls_plural_strings_branch_on_the_size_of_the_set() -> None:
+    """#433 item 2. Each string has a conditional on `bulk.rows.length` just
+    before it, so a set of one reads in the singular."""
+    source = (WEB / "stop_all.js").read_text(encoding="utf-8")
+    for plural, singular in (
+        ("Do not wait, kill them all", "Do not wait, kill it now"),
+        ("which sessions finished", "whether the session finished"),
+    ):
+        assert plural in source and singular in source, (plural, singular)
+        for text in (plural, singular):
+            before = source[: source.index(text)]
+            assert "bulk.rows.length === 1" in before[-220:], text
+
+
+def test_a_wait_follows_the_policy_of_the_row_and_of_the_answer() -> None:
+    """#433 item 1, as structure: the e2e tests are what prove the words."""
+    assert re.search(r"wait\.policy\s*=\s*current\.stop_policy", _code("wait.js"))
+    assert re.search(
+        r"repaintWaiting\(\s*project\s*,\s*wait\s*,\s*result\.body\s*\)", _code("stop.js")
+    )
+
+
+def test_the_timed_out_dialog_closes_for_neither_a_live_nor_a_detached_agent() -> None:
+    """#463. A `detached` agent is alive, so only the states with nothing to
+    ask or kill dismiss the dialog. Read from the lines that are not comments,
+    since the comment above the guard names the same words."""
+    source = (WEB / "wait.js").read_text(encoding="utf-8")
+    code = " ".join(
+        line.strip() for line in source.splitlines() if not line.strip().startswith("//")
+    )
+    assert 'current.state !== "running" && current.state !== "detached"' in code

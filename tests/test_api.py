@@ -30,8 +30,8 @@ from conftest import (
     failing_procs,
     procs_from,
 )
-from hitchrail import claude_ipc, pages, server
-from hitchrail import server as srv
+from hitchrail import claude_ipc, pages
+from hitchrail import lifespan as lifespan_mod
 from hitchrail.config import Config
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
@@ -965,7 +965,7 @@ async def test_the_stop_sweep_outlives_a_failing_tick(
                 raise RuntimeError("one bad tick")
             return []
 
-    monkeypatch.setattr(server, "SWEEP_INTERVAL_S", 0.01)
+    monkeypatch.setattr(lifespan_mod, "SWEEP_INTERVAL_S", 0.01)
     engine = Boom(
         config=config,
         tmux=FakeTmux(),
@@ -998,7 +998,7 @@ async def test_a_failing_attention_scan_is_logged_and_the_next_tick_scans_again(
                 raise RuntimeError("one bad scan")
             return []
 
-    monkeypatch.setattr(server, "SWEEP_INTERVAL_S", 0.01)
+    monkeypatch.setattr(lifespan_mod, "SWEEP_INTERVAL_S", 0.01)
     engine = Boom(
         config=config,
         tmux=FakeTmux(),
@@ -2062,7 +2062,7 @@ async def test_a_slow_attention_scan_does_not_delay_a_stop_expiry(
     second rather than the tens of seconds a real overrun takes; what is being
     asserted is the ordering, and that does not depend on the durations.
     """
-    monkeypatch.setattr(srv, "SWEEP_INTERVAL_S", 0.02)
+    monkeypatch.setattr(lifespan_mod, "SWEEP_INTERVAL_S", 0.02)
 
     expiries = 0
     scanning = threading.Event()
@@ -2119,7 +2119,7 @@ async def test_only_one_attention_scan_runs_at_a_time(
     `in_thread(engine.stop, ...)` then queues behind those captures, which is
     exactly the cost `scan_for_stuck` moved off the request path to avoid.
     """
-    monkeypatch.setattr(srv, "SWEEP_INTERVAL_S", 0.02)
+    monkeypatch.setattr(lifespan_mod, "SWEEP_INTERVAL_S", 0.02)
 
     started = 0
     release = threading.Event()
@@ -2198,7 +2198,7 @@ async def test_a_scan_still_running_at_shutdown_does_not_hang_the_lifespan(
     process waits for it at executor shutdown. Bounded, and not something this
     cancel can fix.
     """
-    monkeypatch.setattr(srv, "SWEEP_INTERVAL_S", 0.02)
+    monkeypatch.setattr(lifespan_mod, "SWEEP_INTERVAL_S", 0.02)
 
     scanning = threading.Event()
     release = threading.Event()
@@ -2258,7 +2258,7 @@ async def test_a_wedged_wrap_up_holds_back_neither_expiry_nor_itself(
     capture would stop every other row's expiry; unguarded, a wedged tmux
     fills the executor that serves the operator's stop. And it must start
     again once the first finishes, or a wrap up never moves on."""
-    monkeypatch.setattr(srv, "SWEEP_INTERVAL_S", 0.02)
+    monkeypatch.setattr(lifespan_mod, "SWEEP_INTERVAL_S", 0.02)
 
     started = 0
     expiries = 0
@@ -2317,7 +2317,7 @@ async def test_a_wrap_up_still_running_at_shutdown_is_cancelled(
     """The teardown half, which the test above cannot reach because it
     releases inside the lifespan. Same assertion as the scan's: nothing left
     pending against an engine the lifespan has finished with."""
-    monkeypatch.setattr(srv, "SWEEP_INTERVAL_S", 0.02)
+    monkeypatch.setattr(lifespan_mod, "SWEEP_INTERVAL_S", 0.02)
 
     wrapping = threading.Event()
     release = threading.Event()
@@ -2366,7 +2366,7 @@ async def test_a_wrap_up_moves_on_with_no_browser_connected(
     `scan_for_stuck`, which does nothing while nobody is watching: a wrap up
     has to finish with the phone in a pocket. A second DELETE during the wait
     is Exit now, and answers 202 as a stop always has."""
-    monkeypatch.setattr(srv, "SWEEP_INTERVAL_S", 0.02)
+    monkeypatch.setattr(lifespan_mod, "SWEEP_INTERVAL_S", 0.02)
     wrapped = replace(config, stop_prompt="/wrapup")
     tmux = FakeTmux(sessions={proj("vessel"): 500})
     engine = make_engine(wrapped, tmux, procs_from(RUNNING_PS))

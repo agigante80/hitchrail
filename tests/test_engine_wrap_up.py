@@ -156,6 +156,28 @@ def test_the_ceiling_moves_on_and_says_so(root: Path) -> None:
     assert session.stop_ceiling is True
 
 
+def test_the_ceiling_line_counts_what_the_watch_saw_and_quotes_no_pane(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#475: a 300s wait that could not tell its cause. The counts do, and the
+    pane text, which can hold anything, stays out of the journal."""
+    engine, tmux, clock = wrap_engine(root, stop_prompt_timeout=60.0)
+    engine.stop(VESSEL)
+    tmux.pane_text[VESSEL] = BUSY + "\nsecretish pane words"
+    with caplog.at_level(logging.INFO, logger="hitchrail"):
+        for _ in range(4):
+            clock.advance(SETTLE)
+            engine.advance_wrap_ups()
+        tmux.pane_text[VESSEL] = "nothing like a box"
+        clock.advance(SETTLE)
+        engine.advance_wrap_ups()
+        clock.advance(60)
+        engine.advance_wrap_ups()
+    assert "wrap up hit the ceiling after" in caplog.text
+    assert "(readings: 0 idle, 4 busy, 2 unreadable)" in caplog.text
+    assert "secretish" not in caplog.text
+
+
 def test_an_unreadable_pane_waits_to_the_ceiling_rather_than_reading_done(root: Path) -> None:
     engine, tmux, clock = wrap_engine(root, stop_prompt_timeout=60.0)
     engine.stop(VESSEL)
@@ -571,15 +593,31 @@ def test_the_sweep_reports_only_the_exits_it_sent(root: Path) -> None:
 
 
 def _kill_fails_while_the_stop_types(
-    engine: Engine, tmux: FakeTmux, prompt_raises: bool
+    engine: Engine, tmux: FakeTmux, prompt_raises: bool, exit_refused: bool = False
 ) -> None:
     """The exact interleaving: Stop claims `closing` and types; Kill takes the
     marker out; the Stop finishes (or fails) while it is out; then Kill's
     `kill-session` raises and it hands the marker back. Two threads, but one
-    schedule: the kill releases the typing and joins it before raising."""
+    schedule: the kill releases the typing and joins it before raising.
+
+    `exit_refused` is the third variant (#431): the marker is already a wrap
+    up that is waiting (the caller stopped it), and the Stop is an Exit now
+    whose keys block, then find a draft in the box and are refused while Kill
+    holds the marker."""
     in_prompt = threading.Event()
     release = threading.Event()
     real_send_text = tmux.send_text
+    real_send_keys = tmux.send_keys
+
+    def send_keys(project: str, *keys: str) -> None:
+        in_prompt.set()
+        assert release.wait(timeout=5)
+        real_send_keys(project, *keys)
+
+    if exit_refused:
+        # The caller has already stopped it, so the marker is a waiting wrap up.
+        tmux.pane_text[VESSEL] = DIRTY_INPUT_BOX
+        tmux.send_keys = send_keys  # type: ignore[method-assign]
 
     def send_text(project: str, text: str) -> None:
         in_prompt.set()
@@ -611,7 +649,11 @@ def _kill_fails_while_the_stop_types(
     with pytest.raises(MachineUnreadable):
         engine.kill(VESSEL)
     del tmux.send_text, tmux.kill_session
-    assert len(errors) == int(prompt_raises)
+    if exit_refused:
+        del tmux.send_keys
+        assert [type(e) for e in errors] == [StopRefused]
+    else:
+        assert len(errors) == int(prompt_raises)
 
 
 def test_a_failed_kill_while_the_prompt_is_typed_leaves_a_wrap_up_the_sweep_ends(
@@ -637,6 +679,138 @@ def test_a_failed_kill_does_not_restore_a_stop_whose_prompt_failed(root: Path) -
     assert VESSEL not in engine._stopping
     engine.stop(VESSEL)
     assert typed(tmux) == [PROMPT], "a later Stop is a real one again"
+
+
+# -- #427: Stop clears only the typing flag it still owns --------------------
+
+
+def test_a_refused_exit_now_does_not_clear_the_flag_the_sweep_set_after_it(root: Path) -> None:
+    """The window is between Stop's give back and its `finally`: the refused
+    Exit now has restored `closing` and released the lock, the sweep claims
+    the SAME marker object and starts typing the exit, and Stop then clears
+    the flag the sweep set. A third Stop reads `exiting` with nothing
+    typing and types a second sequence over the sweep's (#406 again).
+
+    Two threads, one schedule: the give back is wrapped so the sweep claims
+    and blocks in its first key before Stop's frame moves on."""
+    engine, tmux, clock = wrap_engine(root, stop_prompt_timeout=60.0)
+    engine.stop(VESSEL)
+    clock.advance(60)
+    tmux.pane_text[VESSEL] = DIRTY_INPUT_BOX
+    real_send_keys = tmux.send_keys
+    sweep_typing = threading.Event()
+    release = threading.Event()
+    callers: list[str] = []
+
+    def send_keys(project: str, *keys: str) -> None:
+        callers.append(threading.current_thread().name)
+        if len(callers) == 1:
+            sweep_typing.set()
+            assert release.wait(timeout=5)
+        real_send_keys(project, *keys)
+
+    sweep = threading.Thread(target=engine.advance_wrap_ups, name="sweep")
+    real_give_back = engine._give_back
+
+    def give_back(name: str, marker: StopMarker, resume: Any) -> None:
+        real_give_back(name, marker, resume)
+        # Stop has handed the marker back and holds no lock. The pane is
+        # idle now, so the sweep may type, and it claims the same object.
+        del tmux.pane_text[VESSEL]
+        tmux.send_keys = send_keys  # type: ignore[method-assign]
+        sweep.start()
+        assert sweep_typing.wait(timeout=5)
+
+    engine._give_back = give_back  # type: ignore[method-assign]
+    marker = engine._stopping[VESSEL]
+    with pytest.raises(StopRefused):
+        engine.stop(VESSEL)
+    assert engine._stopping[VESSEL] is marker
+    assert marker.typing is True, "the sweep's flag, which Stop does not own"
+    callers.clear()
+    third = engine.stop(VESSEL)
+    assert third.stopping is True, "the no-op 202"
+    assert callers == [], "a third Stop typed nothing while the sweep types"
+    release.set()
+    sweep.join(timeout=5)
+    assert not sweep.is_alive()
+    assert exits_sent(tmux) == 1
+    assert marker.typing is False
+
+
+def test_a_failed_kill_hands_back_a_wrap_up_whose_exit_now_was_refused_meanwhile(
+    root: Path,
+) -> None:
+    """#431. A second Stop turned `closing` into `exiting`; Kill took the
+    marker out; the exit was refused and gave `closing` and the watch back to
+    an object no table holds; then Kill's `kill-session` failed and restored
+    it. Were the give back guarded by "is it still in the table", the marker
+    would come back `exiting` with `exit_at` set: expiry would treat an exit
+    never sent as sent and, under `end_anyway`, kill."""
+    engine, tmux, clock = wrap_engine(root)
+    engine.stop(VESSEL)
+    watch = engine._stopping[VESSEL].watch
+    assert watch is not None
+    _kill_fails_while_the_stop_types(engine, tmux, prompt_raises=False, exit_refused=True)
+    marker = engine._stopping[VESSEL]
+    assert marker.phase == "closing"
+    assert marker.exit_at is None
+    assert marker.typing is False
+    assert marker.watch is watch
+    del tmux.pane_text[VESSEL]
+    assert finish(engine, clock) == [VESSEL]
+    assert exits_sent(tmux) == 1
+
+
+def test_a_stop_during_a_failing_kill_does_not_type_over_the_first_stop(root: Path) -> None:
+    """#432. Kill takes the marker out of the table before `kill-session`, so
+    a second Stop in that window found no marker, claimed a fresh one and
+    typed a second prompt into a pane where the first Stop is still typing
+    (#406's rule, broken by #387's order). It must see a stop in flight,
+    while Kill still restores the first marker when `kill-session` fails.
+
+    One schedule: inside `kill-session` the second Stop runs on Kill's own
+    thread while the first is parked in its prompt, then the first is
+    released and joined, and the kill fails."""
+    engine, tmux, clock = wrap_engine(root)
+    in_prompt = threading.Event()
+    release = threading.Event()
+    real_send_text = tmux.send_text
+    prompts: list[str] = []
+
+    def send_text(project: str, text: str) -> None:
+        prompts.append(text)
+        if len(prompts) == 1:
+            in_prompt.set()
+            assert release.wait(timeout=5)
+        real_send_text(project, text)
+
+    first = threading.Thread(target=lambda: engine.stop(VESSEL))
+    second: list[Any] = []
+
+    def kill_session(project: str) -> None:
+        sent_before = len(tmux.sent)
+        second.append(engine.stop(VESSEL))
+        assert len(tmux.sent) == sent_before, "the second Stop typed nothing"
+        release.set()
+        first.join(timeout=5)
+        assert not first.is_alive()
+        raise TmuxUnavailable("kill-session failed")
+
+    tmux.send_text = send_text  # type: ignore[method-assign]
+    tmux.kill_session = kill_session  # type: ignore[method-assign]
+    first.start()
+    assert in_prompt.wait(timeout=5)
+    held = engine._stopping[VESSEL]
+    with pytest.raises(MachineUnreadable):
+        engine.kill(VESSEL)
+    del tmux.send_text, tmux.kill_session
+    assert len(second) == 1
+    assert prompts == [PROMPT], "one prompt, typed once"
+    assert exits_sent(tmux) == 0
+    assert engine._stopping[VESSEL] is held, "Kill's restore still happens (#387)"
+    assert held.phase == "closing" and held.watch is not None
+    assert finish(engine, clock) == [VESSEL]
 
 
 # -- #408, #411, #428: what another browser needs to reopen a wait ----------
