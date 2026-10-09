@@ -26,6 +26,11 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # #311: the second listing that splits `updated` from `current`, and why
     # every way it can fail leaves `updated` as it was.
     "claude_ipc/plugins.py": 639,
+    # screen.py crossed the guideline for #475 (394 to 441): the rule that finds
+    # the live input box between its two rules, the captured reason the row
+    # count alone could not be it, and the watch's counts of what it read. The
+    # file is one subject, the vendor's screen, and its length is those captures.
+    "claude_ipc/screen.py": 441,
     # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
     # `except` arm: the adapter can now decline to type, and the marker has
     # to come back the same way a vanished tmux takes it back.
@@ -193,7 +198,8 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # 468 after #424: the signatures take EngineSeam, which wrapped three lines.
     # 479 for #430: why `_flag_waiting` compares a name's clear, not the counter.
     # 488 for #444: why the settle is per candidate, and the second look believed.
-    "sweep.py": 488,
+    # 489 for #475: the ceiling line carries what the watch read.
+    "sweep.py": 489,
     # signals.py: 397 when #274 moved the pidfd path here. 414 for #426: `_close`,
     # and the note on why a close that fails must not replace the outcome.
     # 426 for #425: the survivor after the wait, journalled and reported as ask.

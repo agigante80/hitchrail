@@ -120,6 +120,11 @@ and never retypes the prompt; one that arrives while the prompt is still being
 typed answers 202 and types nothing. If a message is already queued in the
 box, the call is 409 `stop_unsafe` and nothing is typed after the clear.
 
+If the agent answers the graceful request with its one menu about background
+work (#453), the stop presses `Enter` on "Exit and stop tasks" and on nothing
+else: any other dialog, or that menu with a different option selected, is left
+for a person and the row reports it as waiting on one.
+
 With `stop_policy = "end_anyway"` (#239, off by default), a stop whose
 `stop_timeout` runs out while the agent's screen shows a prompt on two looks
 a second apart (#429, so a redraw is not taken for one) is sent a hangup

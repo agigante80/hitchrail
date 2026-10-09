@@ -226,7 +226,16 @@ def request_stop(pane: Pane, project: str, settle: Callable[[float], None]) -> N
     logger.info("stop %s: box still clear, sent %s", project, " ".join(quit_keys))
     # #453, reversing #88's line for this one menu; `exit_menu` says why. A
     # miss presses nothing, which is the behaviour before it.
-    if exit_menu_appeared(lambda: pane.capture_pane(project, escapes=True), wait):
+    #
+    # A tmux that fails during this wait is a miss, not a refusal (#454): the
+    # exit already went out, so raising would report "exit refused" for an
+    # exit that was sent. Nothing is pressed, as for any other screen.
+    try:
+        answer = exit_menu_appeared(lambda: pane.capture_pane(project, escapes=True), wait)
+    except OSError:
+        logger.warning("stop %s: could not look for the exit menu, pressed nothing", project)
+        return
+    if answer:
         pane.send_keys(project, "Enter")
         logger.info("stop %s: the exit asked about background work, sent Enter", project)
 

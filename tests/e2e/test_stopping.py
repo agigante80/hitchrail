@@ -1009,14 +1009,14 @@ async def test_the_bulk_dialog_holds_fifty_rows_inside_the_viewport(
     """Fifty rows in the dialog at a phone width: the list scrolls inside it
     and Kill stays on screen. Fifty running shims is the load rather than
     the size, so the rows are added to the rendered list by hand."""
-    server.seed_fifty(running=["p00"])
+    server.seed_fifty(running=["p00", "p01"])
     await page.set_viewport_size({"width": 400, "height": 700})
-    await _open_stop_all(page, server, expected=1)
+    await _open_stop_all(page, server, expected=2)
     dialog = page.locator("[data-dialog]")
     await dialog.get_by_role("button", name="Stop all", exact=True).click()
-    await expect(_bulk(page).locator("li")).to_have_count(1)
+    await expect(_bulk(page).locator("li")).to_have_count(2)
     await _bulk(page).evaluate(
-        """(ul) => { for (let i = 0; i < 49; i++) {
+        """(ul) => { for (let i = 0; i < 48; i++) {
              const li = ul.firstElementChild.cloneNode(true);
              li.querySelector('[data-bulk-name]').textContent = 'main~padding-' + i;
              ul.append(li); } }"""
@@ -1212,3 +1212,84 @@ async def test_stop_all_names_the_rows_it_only_asks_to_exit_again(
     await expect(dialog).to_contain_text(
         f"{e2e_name('vessel')} is already asked to exit, and will only be asked again."
     )
+
+
+async def test_stop_all_over_one_row_agrees_with_a_set_of_one(
+    page: Page, server: Harness
+) -> None:
+    """#433 item 2, the plural twins of #414: the kill button and the lost
+    track text counted "them" and "sessions" over a set of one."""
+    server.seed_fifty(running=["p00"], ignores_graceful_stop=True)
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(50, timeout=15_000)
+    await page.evaluate("() => window.__hitchrail.setStopPatience(2000)")
+    await page.get_by_role("button", name="Stop all").click()
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop all", exact=True).click()
+    await expect(dialog.get_by_role("button", name="Do not wait, kill it now")).to_be_visible()
+    assert await dialog.get_by_role("button", name="Do not wait, kill them all").count() == 0
+    await expect(_bulk(page).locator("li").first).to_contain_text("requested", timeout=15_000)
+    server.break_machine()
+    try:
+        await expect(dialog).to_contain_text("cannot read the machine", timeout=15_000)
+        text = await dialog.inner_text()
+        assert "which sessions" not in text, text
+        assert "whether the session finished" in text, text
+    finally:
+        server.heal_machine()
+
+
+async def test_stop_all_over_only_exiting_rows_keeps_the_lost_work_warning(
+    page: Page, server: Harness
+) -> None:
+    """#433 item 3. The single row confirm for an exiting row says that what
+    the agent is part way through may be lost; the same row reached through
+    Stop all lost the sentence."""
+    server.seed(running=["vessel"], stop_prompt="/wrapup", wrap_up_takes=120)
+    engine = server.engine
+    assert engine is not None
+    now = engine._clock()
+    engine._stopping[server.project("vessel")] = StopMarker(now, "exiting", "ask", exit_at=now)
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row).to_have_attribute("data-stopping", "true")
+    await page.get_by_role("button", name="Stop all").click()
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text("Stop 1 session?")
+    await expect(dialog).to_contain_text("will only be asked again.")
+    await expect(dialog).to_contain_text("Anything it is part way through may be lost.")
+
+
+async def test_a_stop_that_ran_out_on_a_detached_agent_says_no_answer_and_offers_kill(
+    page: Page, server: Harness
+) -> None:
+    """#463. The wait's guard closes the dialog for a row that is `stopped` or
+    `stale` and nothing else: a `detached` agent is alive, so a stop that ran
+    out on it is "No answer", not a dialog dismissed in silence."""
+    server.seed(
+        running=["vessel"],
+        ignores_graceful_stop=True,
+        survives_its_terminal=True,
+        stop_timeout=2.0,
+    )
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await row.get_by_role("button", name="Stop").click()
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop", exact=True).click()
+    await expect(dialog).to_contain_text("Waiting for it to exit.")
+
+    # The words are painted BEFORE the DELETE is sent, so the marker on the
+    # row is what says the request landed; losing the terminal earlier is a
+    # refused stop, a different test.
+    await expect(row).to_have_attribute("data-stopping", "true")
+    server.lose_the_terminal()
+    await expect(row).to_have_attribute("data-state", "detached", timeout=15_000)
+    try:
+        await expect(dialog).to_contain_text("No answer from", timeout=15_000)
+        await expect(dialog.get_by_role("button", name="Kill it")).to_be_visible()
+        # And Kill says why it cannot reach it, rather than doing nothing.
+        await dialog.get_by_role("button", name="Kill it").click()
+        await expect(dialog).to_contain_text("Hitchrail cannot reach it")
+    finally:
+        server.kill_the_agent_quietly("vessel")
