@@ -4,7 +4,7 @@
 processes, and Restart is built on that path once it is settled.**
 
 **Written 2026-10-09,** from the roadmap block and the nineteen tickets in
-the milestone, each read against the tree at `55c19e5`. Andrea took the
+the milestone (#475 joined the same day, from a real Stop), each read against the tree at `55c19e5`. Andrea took the
 decisions the plan needed the same day, recorded below.
 
 ## Goal
@@ -142,7 +142,7 @@ Serial, in this order, one implementer.
 - [ ] **Task 235, #445.** The kill watch catches `visibility`, `opacity` and
       `inert`; one frame loop; an exact phase marker if the page has one.
 
-### Batch 3: the dialog and the exit menu, tasks 236 to 238
+### Batch 3: the dialog, the exit menu and the wrap up's watch, tasks 236 to 239
 
 - [ ] **Task 236, #433.** A wait re-reads its policy; the plural strings;
       the lost work sentence in Stop all.
@@ -151,14 +151,18 @@ Serial, in this order, one implementer.
 - [ ] **Task 238, #454.** A `TmuxUnavailable` during the menu wait is a miss;
       two looks or the reason one is enough, written; the menu mutated and its
       survivors read; the two doc lines; `MENU_TRIES` sampled once under load.
+- [ ] **Task 239, #475.** Filed after the plan, from a real Stop that waited
+      its full 300s with background work running: capture an idle box with a
+      background task on a private socket; if `wrap_up_reading` misses it, add
+      the shape from the fixture. The ceiling line counts what the watch saw.
 
-### Batch 4: Restart, tasks 239 and 240
+### Batch 4: Restart, tasks 240 and 241
 
-- [ ] **Task 239, #472.** The route, the overlay, the sweep's one start, and
+- [ ] **Task 240, #472.** The route, the overlay, the sweep's one start, and
       the button beside Stop at 360 px, with every scenario in the ticket at
       its tier. `docs/api.md`, the README's row actions and the spec's stop
       section are updated. Security auditor review, since the route mutates.
-- [ ] **Task 240.** Watched on the S25 on a throwaway root: one clean restart
+- [ ] **Task 241.** Watched on the S25 on a throwaway root: one clean restart
       gets a new session link, and one restart whose stop times out starts
       nothing and says why. A Kill pressed mid restart is watched too.
 
