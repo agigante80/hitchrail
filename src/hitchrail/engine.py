@@ -42,6 +42,7 @@ from typing import Literal
 from hitchrail import attention, claude_ipc, derive, discovery, ram, settings, signals, sweep
 from hitchrail.config import TOKEN_ENV, Config
 from hitchrail.derive import Machine
+from hitchrail.engine_seam import SeamMembers
 from hitchrail.events import EventBus
 from hitchrail.procs import ProcTable, snapshot
 from hitchrail.roots import RootError, split_identifier
@@ -166,7 +167,7 @@ class StopMarker:
     withdrawn: bool = False
 
 
-class Engine:
+class Engine(SeamMembers):
     """Derivation, and in later tickets the session lifecycle."""
 
     def __init__(
@@ -1197,8 +1198,7 @@ class Engine:
         return sweep.scan_for_stuck(self)
 
     def advance_wrap_ups(self) -> builtins.list[str]:
-        """Move each finished or overdue wrap up on to the exit (#242). The
-        sweep's (`sweep.py`, #473)."""
+        """Move wrap ups on to the exit (#242). The sweep's (`sweep.py`, #473)."""
         return sweep.advance_wrap_ups(self)
 
     def expire_stops(self) -> builtins.list[str]:

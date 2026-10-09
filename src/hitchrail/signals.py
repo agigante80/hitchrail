@@ -13,7 +13,7 @@ file, and `tests/test_source_guards.py` holds it to being this one.
 `Engine.signal_detached` is a one line delegate, so the route and the tests
 reach it where they always did. The function here takes the engine for its
 derivation, its refusals and its announcement. `engine` imports this module
-and this module names `Engine` for the type checker only, so the two do not
+and this module names `EngineSeam` (#424) for the type checker only, so the two do not
 form an import cycle at run time.
 
 This module is in the engine layer and imports nothing from the web layer;
@@ -50,7 +50,7 @@ from hitchrail.sessions import (
 from hitchrail.tmux import TmuxUnavailable
 
 if TYPE_CHECKING:
-    from hitchrail.engine import Engine
+    from hitchrail.engine_seam import EngineSeam
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +131,7 @@ class Seam:
 
 
 def signal_detached(
-    engine: Engine, name: str, force: bool = False, seen_pid: int | None = None
+    engine: EngineSeam, name: str, force: bool = False, seen_pid: int | None = None
 ) -> Session:
     """End an agent nothing addressable owns, through a handle (#107).
 
@@ -180,7 +180,7 @@ def signal_detached(
     holds the derived pid, so the binding lasts through to the send.
     Optional, so a client that sends no body keeps today's behaviour.
     """
-    engine._require_addressable(name)
+    engine.require_addressable(name)
     # The label names the root whose child the process must be running
     # in, checked after the handle below (#264). Not the listing: the
     # review's first version refused a folder the root no longer listed,
@@ -197,7 +197,7 @@ def signal_detached(
         raise Protected(name)
     if session.state is State.STOPPED:
         # Unknown and stopped are two answers, as on stop and kill.
-        engine._reject_if_not_a_project(name)
+        engine.reject_if_not_a_project(name)
     if session.state is not State.DETACHED or session.pid is None:
         raise NotDetached(
             f"{name} is {session.state.value}, and this route is for an agent "
@@ -211,15 +211,15 @@ def signal_detached(
             f"the row moved: pid {seen_pid} was shown for {name} and its agent is "
             f"now pid {pid}, so nothing was signalled. Look again before ending it"
         )
-    _refuse_our_own_tree(engine._procs_fn, pid)
+    _refuse_our_own_tree(engine.process_table, pid)
     try:
-        if engine._pidfd.owner_uid(pid) != os.getuid():
+        if engine.pidfd.owner_uid(pid) != os.getuid():
             raise NotOurs(f"pid {pid} belongs to another user on this machine")
     except OSError as exc:
         raise Gone(f"pid {pid} is gone: {exc}") from exc
 
     try:
-        pidfd = engine._pidfd.open_pidfd(pid)
+        pidfd = engine.pidfd.open_pidfd(pid)
     except AttributeError as exc:
         raise PidfdUnavailable(_NO_PIDFD) from exc
     except OSError as exc:
@@ -232,8 +232,8 @@ def signal_detached(
         # between the two reads was reported as `gone` when the row that
         # refused it had seen it alive under another identity: two
         # refusals for one instant, chosen by which read happened to win.
-        machine = engine._look()
-        verified = engine._derive(name, machine)
+        machine = engine.look()
+        verified = engine.derive(name, machine)
         if verified.state is not State.DETACHED or verified.pid != pid:
             # Two answers, told apart on the error path only: the pid is
             # gone from the table, or it is there under another identity.
@@ -259,7 +259,7 @@ def signal_detached(
         # reports a renamed folder by its new name, which is why such an
         # agent can still be ended here.
         try:
-            cwd = engine._pidfd.cwd_of(pid)
+            cwd = engine.pidfd.cwd_of(pid)
         except PermissionError as exc:
             # Readable for our own processes; another user's, reached
             # through a pid reused between the uid check and the handle,
@@ -283,12 +283,12 @@ def signal_detached(
         # #387: the kill a person asked for, in the journal, once it happened.
         logger.info("signal %s: sent %s to pid %d through a handle", name, sig.name, pid)
     finally:
-        engine._pidfd.close_pidfd(pidfd)
-    engine._announce(verified)
+        engine.pidfd.close_pidfd(pidfd)
+    engine.announce(verified)
     return verified
 
 
-def end_anyway(engine: Engine, name: str, pid: int) -> bool:
+def end_anyway(engine: EngineSeam, name: str, pid: int) -> bool:
     """End an expired stop's agent under `stop_policy = end_anyway` (#239).
 
     By the pid `expire_stops` read at the look, through a handle (#418).
@@ -317,20 +317,20 @@ def end_anyway(engine: Engine, name: str, pid: int) -> bool:
     )
     # The row reads `running` while the agent dies, so the wait is for the
     # pid to leave it, bounded like `Engine._await_gone`.
-    deadline = engine._clock() + engine.kill_grace
+    deadline = engine.now() + engine.kill_grace
     try:
         settled = engine.get(name)
-        while settled.pid == pid and engine._clock() < deadline:
-            engine._sleep(engine.poll_interval)
+        while settled.pid == pid and engine.now() < deadline:
+            engine.sleep(engine.poll_interval)
             settled = engine.get(name)
     except MachineUnreadable:
         logger.warning("stop %s: killed, but the machine could not be read after", name)
         return True
-    engine._announce(settled)
+    engine.announce(settled)
     return True
 
 
-def _end_session_agent(engine: Engine, name: str, pid: int) -> None:
+def _end_session_agent(engine: EngineSeam, name: str, pid: int) -> None:
     """End the agent `end_anyway` looked at, and no other (#418).
 
     `pid` was read before the screen, so the question seen is this agent's
@@ -345,15 +345,15 @@ def _end_session_agent(engine: Engine, name: str, pid: int) -> None:
     which a detached agent needs in place of that ownership; the kernel's
     EPERM is the backstop. Raises the engine's refusals, never `OSError`.
     """
-    _refuse_our_own_tree(engine._procs_fn, pid)
+    _refuse_our_own_tree(engine.process_table, pid)
     try:
-        pidfd = engine._pidfd.open_pidfd(pid)
+        pidfd = engine.pidfd.open_pidfd(pid)
     except AttributeError as exc:
         raise PidfdUnavailable(_NO_PIDFD) from exc
     except OSError as exc:
         raise _refusal_for(exc, pid, "open a handle to", opening=True) from exc
     try:
-        verified = engine._derive(name, engine._look())
+        verified = engine.derive(name, engine.look())
         if verified.protected:
             raise Protected(name)
         if verified.state is not State.RUNNING or verified.pid != pid:
@@ -364,12 +364,12 @@ def _end_session_agent(engine: Engine, name: str, pid: int) -> None:
             )
         _send(engine, pidfd, pid, signal.SIGHUP)
     finally:
-        engine._pidfd.close_pidfd(pidfd)
+        engine.pidfd.close_pidfd(pidfd)
 
 
-def _send(engine: Engine, pidfd: int, pid: int, sig: int) -> None:
+def _send(engine: EngineSeam, pidfd: int, pid: int, sig: int) -> None:
     try:
-        engine._pidfd.send_signal(pidfd, sig)
+        engine.pidfd.send_signal(pidfd, sig)
     except AttributeError as exc:
         raise PidfdUnavailable(_NO_PIDFD) from exc
     except OSError as exc:

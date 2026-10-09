@@ -25,14 +25,15 @@ from hitchrail.sessions import MachineUnreadable, State
 from hitchrail.tmux import TmuxUnavailable
 
 if TYPE_CHECKING:
-    from hitchrail.engine import Engine, StopMarker
+    from hitchrail.engine import StopMarker
+    from hitchrail.engine_seam import EngineSeam
 
 # Named, not `__name__`: these lines were `hitchrail.engine`'s before the move,
 # and the journal and the tests know them by that name.
 logger = logging.getLogger("hitchrail.engine")
 
 
-def scan_for_stuck(engine: Engine) -> list[str]:
+def scan_for_stuck(engine: EngineSeam) -> list[str]:
     """Record which running rows are waiting on a person (#100).
 
     Driven by the sweep that already expires stop markers, never by a
@@ -62,10 +63,10 @@ def scan_for_stuck(engine: Engine) -> list[str]:
     callback logs it and the next tick scans again; caught here, it would
     answer "nobody is waiting" on no evidence.
     """
-    if engine._bus is not None and engine._bus.subscriber_count == 0:
+    if engine.watchers() == 0:
         return []
     try:
-        machine = engine._look()
+        machine = engine.look()
         names = discovery.list_root_projects(engine.prefs.active_roots())
     except (MachineUnreadable, discovery.RootUnavailable):
         # We could not look. That is not evidence about anybody's screen,
@@ -73,18 +74,18 @@ def scan_for_stuck(engine: Engine) -> list[str]:
         return []
     # Sorted, so which rows a truncated budget reaches is deterministic
     # rather than a property of iteration order.
-    waiting = engine._needs_a_person()
-    rows = [engine._derive(name, machine, waiting) for name in sorted(names)]
+    waiting = engine.needs_a_person()
+    rows = [engine.derive(name, machine, waiting) for name in sorted(names)]
     # #182. Read BEFORE the capture, compared after it. Everything between
     # these two lines happens without the lock, which is the whole point:
     # `attention.scan` runs a subprocess per row.
-    epoch = engine._attention_epoch
+    epoch = engine.attention_epoch
     stuck, clear = attention.scan(
-        attention.candidates(rows), lambda n: _pane_needs_a_person(engine, n), engine._clock
+        attention.candidates(rows), lambda n: _pane_needs_a_person(engine, n), engine.now
     )
-    now = engine._clock()
-    with engine._stopping_guard:
-        discarded = engine._attention_epoch != epoch
+    now = engine.now()
+    with engine.stopping_guard:
+        discarded = engine.attention_epoch != epoch
         if discarded:
             # A stop or a start cleared this overlay while we were looking
             # at screens, so every `stuck` here is evidence from before an
@@ -111,7 +112,7 @@ def scan_for_stuck(engine: Engine) -> list[str]:
         # "nothing changed" and told nobody, while a page that reconnected
         # in the meantime had read `standing` and showed the row as not
         # waiting. Pruning first makes the store agree with the view, so
-        # `in engine._stuck` below is safe everywhere rather than only where
+        # `in engine.stuck` below is safe everywhere rather than only where
         # somebody remembered the TTL, and a re-confirmed name reads as
         # new, announces, and is renewed by the loop after.
         #
@@ -128,17 +129,17 @@ def scan_for_stuck(engine: Engine) -> list[str]:
         # this sweep did not re-confirm: `standing` already hid it from
         # every reader, so there is no change to report.
         if not discarded:
-            for name in attention.expired(engine._stuck, now):
-                engine._stuck.pop(name, None)
+            for name in attention.expired(engine.stuck, now):
+                engine.stuck.pop(name, None)
         # What CHANGED, computed under the lock beside the write, because
         # announcing what did not change is how a page that is already
         # right redraws itself once a second.
-        changed = [name for name in stuck if name not in engine._stuck]
-        changed += [name for name in clear if name in engine._stuck]
+        changed = [name for name in stuck if name not in engine.stuck]
+        changed += [name for name in clear if name in engine.stuck]
         for name in stuck:
-            engine._stuck[name] = now
+            engine.stuck[name] = now
         for name in clear:
-            engine._stuck.pop(name, None)
+            engine.stuck.pop(name, None)
     # Announced, OUTSIDE the lock, exactly as `expire_stops` does it and
     # for the reason its docstring gives: outside a stop wait the page does
     # not poll at all, so a change visible only on the next listing is one
@@ -162,11 +163,11 @@ def scan_for_stuck(engine: Engine) -> list[str]:
     for name in changed:
         row = by_name.get(name)
         if row is not None:
-            engine._announce(replace(row, awaiting_input=name in stuck))
+            engine.announce(replace(row, awaiting_input=name in stuck))
     return stuck
 
 
-def _pane_needs_a_person(engine: Engine, name: str) -> bool:
+def _pane_needs_a_person(engine: EngineSeam, name: str) -> bool:
     """Whether this agent's screen is showing something only a human can
     answer. False whenever that cannot be told.
 
@@ -200,7 +201,9 @@ def _pane_needs_a_person(engine: Engine, name: str) -> bool:
     return claude_ipc.awaits_answer(pane) is True
 
 
-def _held_by_a_second_look(engine: Engine, name: str, marker: StopMarker, seen: int) -> bool:
+def _held_by_a_second_look(
+    engine: EngineSeam, name: str, marker: StopMarker, seen: int
+) -> bool:
     """Whether `end_anyway` may still end this agent a settle after the
     first look found a prompt (#429).
 
@@ -216,23 +219,23 @@ def _held_by_a_second_look(engine: Engine, name: str, marker: StopMarker, seen: 
     acting), a newer Stop is in the table, the agent is not the one looked
     at, or the screen no longer shows a prompt.
     """
-    engine._sleep(engine.end_anyway_settle)
-    with engine._stopping_guard:
-        moved = marker.withdrawn or marker.typing or name in engine._stopping
+    engine.sleep(engine.end_anyway_settle)
+    with engine.stopping_guard:
+        moved = marker.withdrawn or marker.typing or name in engine.stopping
     if moved or _agent_pid(engine, name) != seen:
         return False
     return _pane_needs_a_person(engine, name)
 
 
-def _flag_waiting(engine: Engine, name: str, epoch: int) -> None:
+def _flag_waiting(engine: EngineSeam, name: str, epoch: int) -> None:
     """Add the overlay from a look taken at `epoch`, unless a start or a
     stop cleared it since (#410): that look was at the old agent's screen."""
-    with engine._stopping_guard:
-        if engine._attention_epoch == epoch:
-            engine._awaiting_input.add(name)
+    with engine.stopping_guard:
+        if engine.attention_epoch == epoch:
+            engine.awaiting_input.add(name)
 
 
-def advance_wrap_ups(engine: Engine) -> list[str]:
+def advance_wrap_ups(engine: EngineSeam) -> list[str]:
     """Move each finished or overdue wrap up on to the exit (#242).
 
     Driven by the server's sweep, started rather than awaited and at most
@@ -246,10 +249,10 @@ def advance_wrap_ups(engine: Engine) -> list[str]:
     this only asks. Returns the names sent to the exit. Never raises: a
     refused exit's marker is dropped first, so a raise loses its report.
     """
-    with engine._stopping_guard:
+    with engine.stopping_guard:
         closing = [
             (name, marker)
-            for name, marker in engine._stopping.items()
+            for name, marker in engine.stopping.items()
             if marker.phase == "closing" and marker.watch is not None
         ]
     moved: list[str] = []
@@ -260,13 +263,13 @@ def advance_wrap_ups(engine: Engine) -> list[str]:
             pane = engine.tmux.capture_pane(name, escapes=True)
         except TmuxUnavailable:
             pane = ""
-        now = engine._clock()
+        now = engine.now()
         finished = watch.observe(now, pane)
         ceiling = not finished and now - marker.began >= engine.config.stop_prompt_timeout
         if not (finished or ceiling):
             continue
-        with engine._stopping_guard:
-            if engine._stopping.get(name) is not marker or marker.phase != "closing":
+        with engine.stopping_guard:
+            if engine.stopping.get(name) is not marker or marker.phase != "closing":
                 # A second Stop claimed it, or a kill or a refusal took it,
                 # while this pane was being read.
                 continue
@@ -279,23 +282,23 @@ def advance_wrap_ups(engine: Engine) -> list[str]:
             now - marker.began,
         )
         try:
-            claude_ipc.request_stop(engine.tmux, name, settle=engine._sleep)
+            claude_ipc.request_stop(engine.tmux, name, settle=engine.sleep)
             moved.append(name)
         except (claude_ipc.StopNotSafe, TmuxUnavailable) as exc:
-            engine._drop(name, marker)
+            engine.drop(name, marker)
             logger.info("stop %s: exit refused after wrap up, %s", name, exc)
             # The stop ends here, so this is `expire_stops`' moment: one
             # look at the pane, or the page says "no answer" over a
             # question the person was never shown (#242 review). Only the
             # report; `end_anyway` kills a stop that expired after its exit
             # was SENT, and this one never was.
-            epoch = engine._attention_epoch
+            epoch = engine.attention_epoch
             if _pane_needs_a_person(engine, name):
                 _flag_waiting(engine, name, epoch)
         finally:
-            engine._done_typing(marker)
+            engine.done_typing(marker)
         try:
-            engine._announce(engine.get(name))
+            engine.announce(engine.get(name))
         except MachineUnreadable:
             logger.warning(
                 "stop %s: the wrap up moved on but the machine could not be "
@@ -305,7 +308,7 @@ def advance_wrap_ups(engine: Engine) -> list[str]:
     return moved
 
 
-def expire_stops(engine: Engine) -> list[str]:
+def expire_stops(engine: EngineSeam) -> list[str]:
     """Drop stop markers older than the timeout, and say so.
 
     Expiry means "we stopped waiting", never "escalate". The session is
@@ -323,8 +326,8 @@ def expire_stops(engine: Engine) -> list[str]:
     wait ended. An expiry visible only on the next poll is one the
     interface cannot report.
     """
-    now = engine._clock()
-    with engine._stopping_guard:
+    now = engine.now()
+    with engine.stopping_guard:
         # A snapshot, taken under the lock. Iterating the live dict while
         # `stop` adds on another thread raises, and the tick loses its
         # expiries to that raise.
@@ -333,7 +336,7 @@ def expire_stops(engine: Engine) -> list[str]:
         # before it is the rest of the agent's task.
         candidates = [
             (name, marker)
-            for name, marker in engine._stopping.items()
+            for name, marker in engine.stopping.items()
             if marker.exit_at is not None
             and marker.phase == "exiting"
             and now - marker.exit_at >= engine.prefs.stop_timeout()
@@ -350,7 +353,7 @@ def expire_stops(engine: Engine) -> list[str]:
         # snapshot taken outside it, that stops being true.
         expired = [name for name, _marker in candidates]
         for name in expired:
-            del engine._stopping[name]
+            del engine.stopping[name]
     # Announced outside the lock: `get` does two subprocess calls, and
     # holding a lock across those would serialise every stop behind them.
     #
@@ -391,7 +394,7 @@ def expire_stops(engine: Engine) -> list[str]:
         # policy could act on it. Read after, a Kill and Start between the
         # two would pair the fresh agent's pid with the old one's question.
         seen = _agent_pid(engine, name) if end_anyway else None
-        epoch = engine._attention_epoch
+        epoch = engine.attention_epoch
         waiting = _pane_needs_a_person(engine, name)
         if waiting:
             _flag_waiting(engine, name, epoch)
@@ -452,11 +455,11 @@ def expire_stops(engine: Engine) -> list[str]:
                 session.state.value,
                 person,
             )
-        engine._announce(session)
+        engine.announce(session)
     return expired
 
 
-def _agent_pid(engine: Engine, name: str) -> int | None:
+def _agent_pid(engine: EngineSeam, name: str) -> int | None:
     """The running agent's pid, or None when there is none or no look."""
     try:
         session = engine.get(name)

@@ -104,14 +104,19 @@ once, at its end, under the bounded loop. Its lows go to Backlog.
 
 ### Batch 0: room to build, tasks 221 to 223
 
-- [ ] **Task 221, #205.** `server.py` split along what its handlers touch, a
+- [x] **Task 221, #205.** `server.py` split along what its handlers touch, a
       pure move. Every route's refusal ladder stays readable at the route;
       `docs/api.md`'s two way check passes unchanged; the cap goes down.
-- [ ] **Task 222, #473.** The sweep out of `engine.py`, a pure move, the cap
+- [x] **Task 222, #473.** The sweep out of `engine.py`, a pure move, the cap
       lowered. Security auditor review, since `end_anyway` moves with it.
-- [ ] **Task 223, #424.** `signals.py` and the new sweep module reach no
+      Built as `sweep.py`. Differs from the text: `end_anyway`'s kill stayed in
+      `signals.py` (the one file that signals by pid), and the sweep's call to
+      it moved; the review is of that call site.
+- [x] **Task 223, #424.** `signals.py` and the new sweep module reach no
       underscore member of `Engine`, through a named interface; one structural
       test covers both, vacuity checked.
+      Built as a Protocol in `engine_seam.py` plus a mixin of public members
+      on `Engine`, so `engine.py` did not grow; `tests/test_engine_seam.py`.
 
 ### Batch 1: one owner for the marker, tasks 224 to 230
 

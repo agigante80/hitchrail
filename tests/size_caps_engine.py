@@ -185,7 +185,8 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # it is the notes on the races between a scan, a stop and a start, which
     # are the reason the code is shaped as it is. It does not want splitting
     # further, since the three entry points share the look at a pane.
-    "sweep.py": 465,
+    # 468 after #424: the signatures take EngineSeam, which wrapped three lines.
+    "sweep.py": 468,
     # tmux.py is the module that encodes what tmux actually does
     # rather than what its manual implies, and every entry is a footgun
     # that cost real debugging: prefix matching targets, the colon
