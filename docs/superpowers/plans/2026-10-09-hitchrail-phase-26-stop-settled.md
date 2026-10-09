@@ -205,19 +205,39 @@ Serial, in this order, one implementer.
       `engine.py` and `sweep.py` grew by four lines each), the route with
       Stop's ladder, and a Restart button hidden while a stop is in flight.
       The security auditor review was NOT done in the building session.
-- [ ] **Task 241.** Watched on the S25 on a throwaway root: one clean restart
+- [ ] **Task 241.** The S25 part MOVED OUT to #485, neither phone reachable.
+      Watched on the S25 on a throwaway root: one clean restart
       gets a new session link, and one restart whose stop times out starts
       nothing and says why. A Kill pressed mid restart is watched too.
+      Watched on
+      the laptop instead at 360 px on a private tmux server: a real agent's
+      restart got a new pid and link; a stand-in that ignores the exit timed
+      out and started nothing; a Kill mid restart started nothing. The dialog
+      does not say the restart is off (#482 item 14). The watch also found
+      #483 and #484.
 
 ## Done looks like
 
-- [ ] Every task ticked, or marked MOVED OUT or NOT BUILT with an issue number
-- [ ] No open ticket in any milestone describes a defect in stop, kill,
-      `end_anyway` or the sweep
-- [ ] `server.py` and `engine.py` both under caps that went down this phase
-- [ ] Every new test that guards a fix was seen failing with the fix reverted
-- [ ] Restart watched on the S25: clean, timed out (nothing started), killed
-- [ ] Roadmap says done, milestone closed, `check-phases.sh` passes
+- [x] Every task ticked, or marked MOVED OUT or NOT BUILT with an issue number
+- [ ] NOT MET, the stop path lows MOVED OUT to Backlog: #477 #478 #479 #480 #482.
+      The criterion: no open ticket in any milestone describes a defect in
+      stop, kill, `end_anyway` or the sweep. The review loops filed the lows
+      they did not fix, by the bounded loop's rule. None is high or medium.
+- [x] `server.py` and `engine.py` both under caps that went down this phase:
+      `engine.py` 1712 to 1283, `server.py` 1079 to 235, under the default
+- [x] Every new test that guards a fix was seen failing with the fix reverted,
+      as each batch's builder reported it. The reviews found lines no test
+      pins, filed on #478 and #482 item 5.
+- [ ] Restart watched on the S25, MOVED OUT to #485: clean, timed out
+      (nothing started), killed. Watched on the laptop instead, see task 241.
+- [x] Roadmap says done, milestone closed, `check-phases.sh` passes.
+      Closed 2026-10-09 as **re-shaped**: the stop path's findings and
+      Restart landed and shipped in 0.16.0, `server.py` split into route
+      modules and the sweep out of the engine. #459's cause (an unreaped
+      child) was fixed and the rest moved to #480. The S25 watch moved to
+      #485; the laptop watch at 360 px held. The reviews' lows went to
+      Backlog as #476 to #482. The block then left the roadmap under the
+      2026-09-26 rule.
 
 ## Out of scope
 

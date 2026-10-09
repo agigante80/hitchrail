@@ -46,33 +46,6 @@ suite is green. It is finished when the behaviour has been watched working in
 the running application, on the phone it is for. See
 [`tech-guidelines.md`](tech-guidelines.md) section 7.
 
-## Phase: Phase 26: Stop, settled, and Restart on it
-state: open
-plan: docs/superpowers/plans/2026-10-09-hitchrail-phase-26-stop-settled.md
-
-Close the stop path's open findings, then build Restart on it.
-
-Phase 25 hardened the stop and filed what its review loops found but did not
-fix: races between Stop, Kill and the sweep, an `end_anyway` that journals a
-kill that did not happen, a pidfd close that can stop the ticker, an attention
-epoch shared by every project, and guards that cannot see what they guard.
-They sat in Backlog, which is the second Backlog rule's failure: a phase that
-hardens new surface was never opened for them. These are bugs in the one path
-that ends processes, so risk puts them first.
-
-Restart (#472) was "deliberately later" until Andrea asked for it on
-2026-10-09. It is a stop that starts once the old agent is gone, so it lands
-last, on the settled path, and its tests exercise the same races. `server.py`'s
-split (#205) moves here from Phase 16, first, because the restart route is the
-next thing added to a file already past the guideline.
-
-Done when no open ticket describes a defect in stop, kill, `end_anyway` or the
-sweep; Restart is watched on a real session on the phone, a clean one and one
-whose stop times out; and the timed out case started nothing.
-
-Placed first: Phase 23 plugs a second agent into this path, and a reboot
-restore (Phase 16) starts what this path stopped.
-
 ## Phase: Phase 27: The perimeter's loose ends
 state: planned
 plan:
@@ -295,7 +268,7 @@ Not scheduled, and not to be smuggled into an earlier phase:
   the case the second Backlog rule exists for. Phases 26 to 28 were inserted
   ahead of 23 to hold them, split by the code they touch: the stop path, the
   perimeter, the page. Restart left "Deliberately later" because Andrea asked
-  for it (#472): it is still a stop then a start, and lands in Phase 26 on the
+  for it (#472): it is still a stop then a start, and landed in Phase 26 on the
   settled stop path. What stays in Backlog is the governance and test
   machinery, the TLS passphrase (#280), the sponsors link (#17), and the text
   size work that waits on Chrome (#452).
