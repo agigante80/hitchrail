@@ -32,6 +32,17 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+### Changed
+
+- With a `Secure` cookie (a loopback bind and every non loopback
+  `--allow-origin` https), a browser on `http://localhost.localdomain:8787` is
+  now refused at the grant with the origin check's 403, naming the origin. It
+  used to be granted a cookie the browser then dropped, so every call after it
+  was a 401. Browsers treat `localhost` and `*.localhost` as secure contexts
+  and not `localhost.localdomain`. If you reach Hitchrail that way, browse
+  `http://localhost:8787` instead; the startup block says so. Who must present
+  a token is unchanged (#436).
+
 ## 0.16.0 - 2026-10-09
 
 Nothing to do on upgrade, unless something reads the journal for an ended

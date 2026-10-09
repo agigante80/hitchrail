@@ -1800,3 +1800,26 @@ def test_the_stop_policy_flag_refuses_anything_but_the_two(tmp_path: Path) -> No
     args = ["--root", f"main={tmp_path}", "--stop-policy", "end_anyway"]
     cfg = build_config(parse_args(args))
     assert (cfg.stop_policy, cfg.sources["stop_policy"]) == ("end_anyway", "flag")
+
+
+def test_the_startup_block_does_not_advise_a_flag_that_cannot_help_a_loopback_name(
+    tmp_path: Path,
+) -> None:
+    """#436. `--allow-origin http://localhost.localdomain:8787` is ignored by
+    the cookie rule (loopback origins are), so Secure stays on and the browser
+    still drops the cookie. The line points at `localhost` instead."""
+    config = make_config(
+        tmp_path,
+        host="127.0.0.1",
+        token="t" * 24,
+        extra_hosts=("localhost.localdomain",),
+        extra_origins=("https://box.lan",),
+    )
+    lines = cli.startup_block(
+        config, cli.Preflight([], "/usr/bin/claude", "/usr/bin/tmux"), "info"
+    )
+    found = [line for line in lines if line.startswith("plain http origin not derived")]
+    assert len(found) == 1, lines
+    assert "http://localhost.localdomain:8787" in found[0]
+    assert "Browse http://localhost:8787 instead" in found[0]
+    assert "--allow-origin http://localhost.localdomain" not in found[0]

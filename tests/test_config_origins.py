@@ -521,3 +521,31 @@ def test_the_origins_are_derived_from_the_hosts_they_are_given_not_from_assignme
     assert "https://box.lan" in derived
     assert cfg._withheld_among(hosts) == ("box.lan",)
     assert cfg._withheld_among(()) == ()
+
+
+@pytest.mark.parametrize(
+    ("host", "withheld"),
+    [
+        ("localhost.localdomain", True),
+        ("localhost", False),
+        ("app.localhost", False),
+        ("box.lan", True),
+    ],
+)
+def test_a_secure_cookie_withholds_a_plain_origin_a_browser_will_not_return_it_on(
+    tmp_path: Path, host: str, withheld: bool
+) -> None:
+    """#436. `localhost.localdomain` is loopback here but not a secure context
+    to a browser, so under a `Secure` cookie its plain origin is refused with
+    the named 403 rather than granted and then 401 on every call. `localhost`
+    and `*.localhost` are secure contexts and stay."""
+    cfg = Config(
+        roots=_r(tmp_path),
+        host="127.0.0.1",
+        token="t",
+        extra_hosts=(host,),
+        extra_origins=("https://box.lan",),
+    )
+    assert cfg.cookie_is_secure
+    assert (host in cfg.plain_origins_withheld) is withheld
+    assert (f"http://{host}:8787" in cfg.allowed_origins) is not withheld

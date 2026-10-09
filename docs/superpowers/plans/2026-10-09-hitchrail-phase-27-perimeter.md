@@ -121,7 +121,7 @@ Serial, in this order, one implementer. Security auditor review at the end.
 - [x] **Task 244, #437.** `plain_origins_withheld` takes the hosts it reads,
       so no assignment order matters; a test that fails with the order swapped
       on the old code.
-- [ ] **Task 245, #436.** The secure context question, withholding
+- [x] **Task 245, #436.** The secure context question, withholding
       `localhost.localdomain`'s plain origin under a Secure cookie; the token
       rule for it pinned unchanged.
 - [ ] **Task 246, #438.** The restore advice says the token then crosses

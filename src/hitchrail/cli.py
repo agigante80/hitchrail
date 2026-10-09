@@ -30,7 +30,7 @@ from hitchrail.config import (
 )
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
-from hitchrail.hostnames import origin_forms, reachable_hosts
+from hitchrail.hostnames import is_loopback_host, origin_forms, reachable_hosts
 from hitchrail.roots import Root, RootError, parse_root_argument
 from hitchrail.server import create_app
 
@@ -615,11 +615,17 @@ def startup_block(config: Config, found: Preflight, level: str) -> list[str]:
         if host in https_hosts:
             continue
         plain = min(origin_forms("http", host, config.port), key=len)
+        # A loopback name here is `localhost.localdomain` (#436): the cookie
+        # rule ignores loopback origins, so giving it would not turn Secure off.
+        fix = (
+            f"Browse http://localhost:{config.port} instead"
+            if is_loopback_host(host)
+            else f"Give --allow-origin {plain} to serve it, which turns Secure off"
+        )
         lines.append(
             f"plain http origin not derived for {plain}: every non loopback "
             f"--allow-origin is https, so the token cookie is Secure and a browser "
-            f"on plain http would drop it. "
-            f"Give --allow-origin {plain} to serve it, which turns Secure off"
+            f"on plain http would drop it. {fix}"
         )
     return lines
 

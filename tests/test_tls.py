@@ -448,6 +448,44 @@ async def test_a_grant_on_a_plain_origin_a_secure_cookie_cannot_return_on_is_ref
     assert "set-cookie" not in r.headers
 
 
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("host", "allowed"),
+    [("localhost.localdomain", False), ("localhost", True), ("app.localhost", True)],
+)
+async def test_a_grant_from_localhost_localdomain_is_refused_under_a_secure_cookie(
+    tmp_path: pathlib.Path, host: str, allowed: bool
+) -> None:
+    """#436: loopback to this program, not a secure context to a browser, so
+    the cookie it was handed would be dropped. The refusal names the origin."""
+    (tmp_path / "root").mkdir(exist_ok=True)
+    config = make_config(
+        tmp_path / "root",
+        host="127.0.0.1",
+        token="s3cret",
+        extra_hosts=(host,),
+        extra_origins=("https://box.lan",),
+        sessions_dir=tmp_path / ".s",
+        agent_config_path=NO_AGENT_CONFIG,
+    )
+    engine = make_engine(config, FakeTmux(), procs_from(""), PLENTY)
+    app = create_app(engine=engine, config=config, bus=EventBus())
+    origin = f"http://{host}:8787"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url=f"http://{host}"
+    ) as c:
+        r = await c.post(
+            "/api/grant", json={"token": "s3cret"}, headers={"host": host, "origin": origin}
+        )
+    if allowed:
+        assert r.status_code == 200, r.text
+        return
+    assert r.status_code == 403, r.text
+    assert r.json()["code"] == "origin_rejected"
+    assert origin in r.json()["message"]
+    assert "set-cookie" not in r.headers
+
+
 def test_the_banner_prints_links_in_the_servers_scheme(
     tmp_path: pathlib.Path, certificate: tuple[pathlib.Path, pathlib.Path]
 ) -> None:

@@ -232,6 +232,35 @@ def is_loopback_host(host: str) -> bool:
     return address.is_loopback
 
 
+def is_secure_context_host(host: str) -> bool:
+    """Whether a browser treats a plain http origin on this host as a secure
+    context, which is what lets it send a `Secure` cookie there (#436).
+
+    The W3C Secure Contexts spec's "potentially trustworthy origin" rule, read
+    2026-10-09 (algorithm 3.1): an IP address in 127.0.0.0/8 or `::1`, the
+    host `localhost`, or a name ending in `.localhost`, a trailing root dot
+    allowed. Deliberately NOT `is_loopback_host`, and not by changing
+    `LOOPBACK_NAMES`: that set decides who must present a token, and
+    `localhost.localdomain` belongs in it for that, since this machine's
+    resolver sends it to loopback. The spec does not list it, so a browser
+    drops a `Secure` cookie on it. Only `Config.plain_origins_withheld` asks.
+    """
+    bare = normalise_host(host)
+    if bare == "localhost" or bare.endswith(".localhost"):
+        return True
+    if bare in LOOPBACK_NAMES:
+        return False
+    try:
+        address = ipaddress.ip_address(bare)
+    except ValueError:
+        # The dotted decimal spellings `is_loopback_host` also reads; a
+        # browser's URL parser canonicalises `127.1` to 127.0.0.1.
+        return is_loopback_host(bare)
+    if isinstance(address, ipaddress.IPv6Address):
+        return address == ipaddress.IPv6Address("::1")
+    return address.is_loopback
+
+
 def is_wildcard_host(host: str) -> bool:
     """Every spelling of "bind to everything", not a list of three.
 

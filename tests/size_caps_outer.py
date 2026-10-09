@@ -79,7 +79,10 @@ OUTER_LAYER_CAPS: dict[str, int] = {
     # ends without its account.
     # 1114 for #439: the CLI asks `Config.https_origin_hosts` instead of
     # parsing the origins a second time.
-    "cli.py": 1114,
+    # 1120 for #436: the withheld line gives a loopback name different advice,
+    # since the flag it used to give cannot turn Secure off for it. Two over the
+    # 1118 the phase began at; #438 is next in this file and must find room.
+    "cli.py": 1120,
     # 409 to 418 for #78: two entries in the exemption and the argument
     # beside them, which the set's own rule requires of every entry.
     # 418 to 436 for #160: the unauthenticated asset set and the argument

@@ -21,6 +21,7 @@ from hitchrail.hostnames import (
     MAX_HOSTNAME_LENGTH,
     Resolver,
     is_loopback_host,
+    is_secure_context_host,
     is_valid_host,
     is_wildcard_host,
     local_addresses,
@@ -429,9 +430,10 @@ class Config:
     def plain_origins_withheld(self) -> tuple[str, ...]:
         """The allowed hosts whose plain http origin is NOT derived (#391);
         `_derive_allowed_origins` says why. Asked of the cookie rule rather
-        than restating it, since two readers of one rule drift (#269). A
-        loopback host is kept: Chrome and Firefox send a `Secure` cookie to
-        `http://localhost`."""
+        than restating it, since two readers of one rule drift (#269). A host
+        a browser treats as a secure context is kept, `http://localhost`
+        among them; `localhost.localdomain` is not one (#436), so its plain
+        origin is withheld although `is_loopback_host` is true of it."""
         return self._withheld_among(self._allowed_hosts)
 
     def _withheld_among(self, hosts: tuple[str, ...]) -> tuple[str, ...]:
@@ -440,7 +442,7 @@ class Config:
         `__post_init__` can leave it reading `()` and withhold nothing (#437)."""
         if self.tls or not self.cookie_is_secure:
             return ()
-        return tuple(h for h in hosts if not is_loopback_host(h))
+        return tuple(h for h in hosts if not is_secure_context_host(h))
 
     def _check_tls(self) -> None:
         """One flag without the other is a configuration error, not half a

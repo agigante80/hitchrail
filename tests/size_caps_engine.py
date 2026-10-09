@@ -378,8 +378,8 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # and `origin_parts` in hostnames.py, which took the cookie rule's reader
     # with them.
     # 846 for #437: the rule over a hosts argument, so assignment order cannot
-    # matter.
-    "config.py": 846,
+    # matter. 848 for #436: the secure context question in the withheld rule.
+    "config.py": 848,
     # 409, nine lines over, down from 542. #115 deleted the `?token=`
     # carrier: 135 lines once the two blocks inside `TokenMiddleware`
     # that only served it are counted.
