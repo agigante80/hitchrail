@@ -54,6 +54,12 @@ Stopping is a sequence rather than a button: it asks the agent to wrap up, shows
 you the wait, and keeps a kill control within reach the whole time if you would
 rather not wait.
 
+**Restart is that same stop followed by a start.** On a running row it sits
+beside Stop, asks the same confirmation, and once the agent has exited starts a
+new one in the same folder as a fresh conversation. If the stop times out, or
+you Kill it, nothing is started; if the start is refused (not enough memory,
+say) the row stays stopped and says why.
+
 ## Why you'd use this
 
 **You started a session before leaving the desk, and now need to check on it,

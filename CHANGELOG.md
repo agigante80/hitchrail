@@ -32,6 +32,17 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+Nothing to do on upgrade.
+
+### Added
+
+- Restart. A running row has a Restart button beside Stop, and
+  `POST /api/sessions/{name}/restart`: the same graceful stop, confirmed the
+  same way, then a new agent in the same folder once the old one has exited, as
+  a fresh conversation. If the stop times out, or you Kill it, nothing is
+  started. If the start is refused, the row stays stopped and says why. The
+  session payload gains `restarting` and `restart_refused` (#472).
+
 ## 0.15.1 - 2026-10-09
 
 Nothing to do on upgrade.

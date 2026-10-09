@@ -182,10 +182,14 @@ Serial, in this order, one implementer.
 
 ### Batch 4: Restart, tasks 240 and 241
 
-- [ ] **Task 240, #472.** The route, the overlay, the sweep's one start, and
+- [x] **Task 240, #472.** The route, the overlay, the sweep's one start, and
       the button beside Stop at 360 px, with every scenario in the ticket at
       its tier. `docs/api.md`, the README's row actions and the spec's stop
       section are updated. Security auditor review, since the route mutates.
+      Built as `restart.py` (an overlay, `request`, `advance` and a mixin, so
+      `engine.py` and `sweep.py` grew by four lines each), the route with
+      Stop's ladder, and a Restart button hidden while a stop is in flight.
+      The security auditor review was NOT done in the building session.
 - [ ] **Task 241.** Watched on the S25 on a throwaway root: one clean restart
       gets a new session link, and one restart whose stop times out starts
       nothing and says why. A Kill pressed mid restart is watched too.
