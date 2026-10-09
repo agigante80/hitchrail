@@ -134,7 +134,7 @@ Serial, in this order, one implementer. Security auditor review at the end.
       the file; a dangling symlink is logged; a pinned `stop_timeout` with a
       different saved value is reported at startup, as #421 does for
       `stop_policy`.
-- [ ] **Task 248, #440.** The filter redacts a traceback's query and keeps
+- [x] **Task 248, #440.** The filter redacts a traceback's query and keeps
       its frames; the client address docstring sentence corrected.
 
 ### Batch 3: the CLI's words and a ticket that is not true, tasks 249 and 250

@@ -34,6 +34,11 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ### Changed
 
+- The journal's redaction of a request's query string now covers a traceback
+  as well as the access line. An error logged with an exception whose message
+  held the request target used to print a `?token=` query. Each traceback line
+  is cut at its first `?`, so a `?` in unrelated exception text loses the rest
+  of that line too; the frames stay (#440).
 - The startup lines about the saved settings say more. A refused `state.toml`
   now says the next save from the settings page replaces it (or that saving
   is refused too, when the directory is the problem). A `state.toml` that is a
