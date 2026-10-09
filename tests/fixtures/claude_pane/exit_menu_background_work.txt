@@ -1,0 +1,14 @@
+[38;5;153m▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+[39m   [1m[38;5;153mBackground work is running[0m                               
+   [38;5;246mThe following will stop when you exit:[39m                     
+
+   [1mshell[0m[38;5;246m · sleep 600[39m                                                                                                  
+   [1msubagent[0m[38;5;246m · Sleep 100s then report[39m                     
+   [1mmonitor[0m[38;5;246m · tick counter (20 ticks, 6s apart)[39m                                                                          
+   [1mshell[0m[38;5;246m · python3 -c "import time; time.sleep(100)"[39m                                                         
+
+   [38;5;153m❯[39m [38;5;246m1. [38;5;153mExit and stop tasks[39m                                                                                             
+     [38;5;246m2. [39mMove to background and exit                                                                           
+     [38;5;246m3. [39mStay
+
+   [3m[38;5;246mEnter to confirm · Esc to cancel[0m                                                                                   

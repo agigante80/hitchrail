@@ -7,6 +7,7 @@ it is a sequence over time, not a status code.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import itertools
 import logging
 import time
@@ -220,19 +221,25 @@ async def test_kill_appears_once_the_wait_is_under_way_and_stays(
     # thing #81 forbids. "is waiting for you" is #101's, unreachable for this
     # shim, named for completeness.
     # **"Usable" is what a thumb needs, not "in the DOM".** The control counts
-    # only while the dialog is open and the button is connected, visible by
-    # checkVisibility() (which sees an ancestor's style, `hidden`, a class) and
-    # not disabled. Each look runs on every mutation, attribute change and
-    # animation frame, all inside the page, so none of it is a retry. A page
-    # setTimeout guard resolves well past the 3000ms patience so a missing
-    # ending fails with a message rather than hanging.
+    # only while the dialog is open and the button is connected, not disabled,
+    # not under an `inert` ancestor, and visible by `checkVisibility` with
+    # `visibilityProperty` and `opacityProperty` on, so `display:none`,
+    # `visibility:hidden` and `opacity:0` on the button or any ancestor all
+    # make it unusable (#445). It does NOT see `pointer-events:none` or a
+    # control covered by another element; nothing here claims it does.
+    # Each look runs on every mutation and attribute change, and on ONE
+    # animation frame loop started once (#445: a loop per mutation piled up
+    # and made `looks` meaningless), all inside the page, so none of it is a
+    # retry. A page setTimeout guard resolves well past the 3000ms patience so
+    # a missing ending fails with a message rather than hanging.
     outcome = await page.evaluate(
         """() => new Promise((resolve) => {
             const dialog = document.querySelector("[data-dialog]");
             const ending = /No answer from|Lost track of|is waiting for you/;
             const usable = () => dialog.open && [...dialog.querySelectorAll("button")].some(
                 (b) => b.textContent.trim() === "Do not wait, kill it now"
-                    && b.isConnected && b.checkVisibility() && !b.disabled);
+                    && b.isConnected && !b.disabled && !b.closest("[inert]")
+                    && b.checkVisibility({ visibilityProperty: true, opacityProperty: true }));
             const began = performance.now();
             let looks = 0;
             let phase = null;
@@ -251,17 +258,23 @@ async def test_kill_appears_once_the_wait_is_under_way_and_stays(
                 looks += 1;
                 const over = ending.test(dialog.textContent);
                 if (startedWaiting === null) {
-                    phase = dialog.textContent;
-                    startedWaiting = !over && usable();
+                    // The page's own marker for the phase (`showWaiting` sets
+                    // it), exact, where the text also matches the bulk dialog.
+                    phase = dialog.dataset.waiting ?? null;
+                    startedWaiting = phase === "waiting" && !over && usable();
                 }
-                if (over || !usable()) return finish(over, false);
-                requestAnimationFrame(look);
+                if (over || !usable()) finish(over, false);
+            };
+            const frame = () => {
+                if (done) return;
+                look();
+                if (!done) requestAnimationFrame(frame);
             };
             const observer = new MutationObserver(look);
             observer.observe(dialog, { childList: true, subtree: true,
                 characterData: true, attributes: true });
             const guard = setTimeout(() => finish(false, true), 15000);
-            look();
+            frame();
         })"""
     )
 
@@ -271,8 +284,8 @@ async def test_kill_appears_once_the_wait_is_under_way_and_stays(
     # **The watch must have started inside the wait.** If the ending were
     # already up on the first look this would pass having observed nothing,
     # which is the vacuous-guard shape this phase exists to remove. The first
-    # look's text must be the waiting phase itself, so a 1ms watch cannot pass.
-    assert outcome["startedWaiting"] and "Waiting for it to exit." in outcome["phase"], (
+    # look's phase marker must be `waiting` itself, so a 1ms watch cannot pass.
+    assert outcome["startedWaiting"], (
         f"the watch began outside the waiting phase, so it proved nothing "
         f"({outcome['looks']} looks): {outcome}"
     )
@@ -1009,14 +1022,14 @@ async def test_the_bulk_dialog_holds_fifty_rows_inside_the_viewport(
     """Fifty rows in the dialog at a phone width: the list scrolls inside it
     and Kill stays on screen. Fifty running shims is the load rather than
     the size, so the rows are added to the rendered list by hand."""
-    server.seed_fifty(running=["p00"])
+    server.seed_fifty(running=["p00", "p01"])
     await page.set_viewport_size({"width": 400, "height": 700})
-    await _open_stop_all(page, server, expected=1)
+    await _open_stop_all(page, server, expected=2)
     dialog = page.locator("[data-dialog]")
     await dialog.get_by_role("button", name="Stop all", exact=True).click()
-    await expect(_bulk(page).locator("li")).to_have_count(1)
+    await expect(_bulk(page).locator("li")).to_have_count(2)
     await _bulk(page).evaluate(
-        """(ul) => { for (let i = 0; i < 49; i++) {
+        """(ul) => { for (let i = 0; i < 48; i++) {
              const li = ul.firstElementChild.cloneNode(true);
              li.querySelector('[data-bulk-name]').textContent = 'main~padding-' + i;
              ul.append(li); } }"""
@@ -1212,3 +1225,99 @@ async def test_stop_all_names_the_rows_it_only_asks_to_exit_again(
     await expect(dialog).to_contain_text(
         f"{e2e_name('vessel')} is already asked to exit, and will only be asked again."
     )
+
+
+async def test_stop_all_over_one_row_agrees_with_a_set_of_one(
+    page: Page, server: Harness
+) -> None:
+    """#433 item 2, the plural twins of #414: the kill button and the lost
+    track text counted "them" and "sessions" over a set of one."""
+    server.seed_fifty(running=["p00"], ignores_graceful_stop=True)
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(50, timeout=15_000)
+    await page.evaluate("() => window.__hitchrail.setStopPatience(2000)")
+    await page.get_by_role("button", name="Stop all").click()
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop all", exact=True).click()
+    await expect(dialog.get_by_role("button", name="Do not wait, kill it now")).to_be_visible()
+    assert await dialog.get_by_role("button", name="Do not wait, kill them all").count() == 0
+    await expect(_bulk(page).locator("li").first).to_contain_text("requested", timeout=15_000)
+    server.break_machine()
+    try:
+        await expect(dialog).to_contain_text("cannot read the machine", timeout=15_000)
+        text = await dialog.inner_text()
+        assert "which sessions" not in text, text
+        assert "whether the session finished" in text, text
+    finally:
+        server.heal_machine()
+
+
+async def test_stop_all_over_only_exiting_rows_keeps_the_lost_work_warning(
+    page: Page, server: Harness
+) -> None:
+    """#433 item 3. The single row confirm for an exiting row says that what
+    the agent is part way through may be lost; the same row reached through
+    Stop all lost the sentence."""
+    server.seed(running=["vessel"], stop_prompt="/wrapup", wrap_up_takes=120)
+    engine = server.engine
+    assert engine is not None
+    now = engine._clock()
+    engine._stopping[server.project("vessel")] = StopMarker(now, "exiting", "ask", exit_at=now)
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row).to_have_attribute("data-stopping", "true")
+    await page.get_by_role("button", name="Stop all").click()
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text("Stop 1 session?")
+    await expect(dialog).to_contain_text("will only be asked again.")
+    await expect(dialog).to_contain_text("Anything it is part way through may be lost.")
+
+
+async def test_a_stop_that_ran_out_on_a_detached_agent_offers_the_signal_route_never_kill(
+    page: Page, server: Harness
+) -> None:
+    """#463. A `detached` agent is alive with no session to type into, so a
+    stop that ran out on it is not dismissed in silence. The engine refuses
+    /kill for every detached row (NoAgent, 409), so the dialog says the
+    terminal went and offers the route that can end it, /signal, through the
+    same confirmation as the row's End button. It never sends /kill."""
+    server.seed(
+        running=["vessel"],
+        ignores_graceful_stop=True,
+        survives_its_terminal=True,
+        stop_timeout=2.0,
+    )
+    posts: list[str] = []
+    page.on("request", lambda r: posts.append(r.url) if r.method == "POST" else None)
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await row.get_by_role("button", name="Stop").click()
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop", exact=True).click()
+    await expect(dialog).to_contain_text("Waiting for it to exit.")
+
+    # The words are painted BEFORE the DELETE is sent, so the marker on the
+    # row is what says the request landed; losing the terminal earlier is a
+    # refused stop, a different test.
+    await expect(row).to_have_attribute("data-stopping", "true")
+    server.lose_the_terminal()
+    await expect(row).to_have_attribute("data-state", "detached", timeout=15_000)
+    try:
+        await expect(dialog).to_contain_text("terminal is gone", timeout=15_000)
+        await expect(dialog).to_contain_text("still running")
+        await expect(dialog.get_by_role("button", name="Kill it")).to_have_count(0)
+        # The dialog must survive the next event for a row that is not running.
+        await page.wait_for_timeout(1500)
+        await expect(dialog).to_contain_text("terminal is gone")
+
+        await dialog.get_by_role("button", name="End it").click()
+        await expect(dialog).to_contain_text(f"End {server.project('vessel')}?")
+        async with page.expect_response("**/api/sessions/*/signal") as signalled:
+            await dialog.get_by_role("button", name="End it").click()
+        assert (await signalled.value).status != 404
+        assert not [u for u in posts if u.endswith("/kill")], posts
+    finally:
+        # The signal normally ended it already; this is for a failed run, and
+        # the helper asserts there is a process to find.
+        with contextlib.suppress(AssertionError):
+            server.kill_the_agent_quietly("vessel")

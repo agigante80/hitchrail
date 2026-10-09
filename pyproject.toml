@@ -1,6 +1,6 @@
 [project]
 name = "hitchrail"
-version = "0.15.1"
+version = "0.16.0"
 description = "Start and stop headless Claude Code sessions across a folder of projects, from a phone-first web UI."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -175,6 +175,10 @@ source_modules = [
   "hitchrail.derive",
   "hitchrail.engine",
   "hitchrail.signals",
+  "hitchrail.sweep",
+  "hitchrail.engine_seam",
+  "hitchrail.stopmarker",
+  "hitchrail.restart",
   "hitchrail.plugin_runs",
   "hitchrail.logs",
 ]
@@ -326,6 +330,14 @@ also_copy = [
   "src/hitchrail/cli.py",
   "src/hitchrail/derive.py",
   "src/hitchrail/engine.py",
+  # #473. Copied, not mutated: `engine.py` imports it.
+  "src/hitchrail/sweep.py",
+  # #424. Copied, not mutated: `engine.py` inherits from it.
+  "src/hitchrail/engine_seam.py",
+  # Phase 26. Copied, not mutated: `engine.py` imports it.
+  "src/hitchrail/stopmarker.py",
+  # #472. Copied, not mutated: `engine.py` inherits from it.
+  "src/hitchrail/restart.py",
   "src/hitchrail/events.py",
   "src/hitchrail/headers.py",
   # #167. Copied, not mutated: `security.py` escapes request values through
@@ -337,6 +349,15 @@ also_copy = [
   "src/hitchrail/plugin_runs.py",
   "src/hitchrail/procs.py",
   "src/hitchrail/ram.py",
+  "src/hitchrail/lifespan.py",
+  "src/hitchrail/routes_common.py",
+  "src/hitchrail/routes_live.py",
+  "src/hitchrail/routes_projects.py",
+  "src/hitchrail/routes_sessions.py",
+  "src/hitchrail/routes_settings.py",
+  # #205. Copied for the reason `attention.py` is: `server.py` imports every
+  # route module it was split into, so a tree with the importer and not them
+  # cannot start.
   "src/hitchrail/server.py",
   "src/hitchrail/sessions.py",
   "src/hitchrail/web",

@@ -1,3 +1,4 @@
+import { confirmSignal } from "/actions.js";
 import { api } from "/api.js";
 import { closeDialog, showDialog } from "/dialogs.js";
 import { $ } from "/dom.js";
@@ -60,7 +61,7 @@ export function showWaiting(project, wait, phase) {
   const actions = [
     // "Hide, keep stopping" first: a modal that owns a phone screen for
     // thirty seconds is one people kill the app to escape.
-    ["Hide, keep stopping", "ghost", () => closeDialog()],
+    [wait.restart ? "Hide, keep restarting" : "Hide, keep stopping", "ghost", () => closeDialog()],
   ];
   // A graceful way out of a long wrap up short of the kill: a second DELETE
   // during `closing` sends the exit now and never retypes the prompt. Not
@@ -73,7 +74,7 @@ export function showWaiting(project, wait, phase) {
   // for the WHOLE wait rather than only at the end.
   actions.push(["Do not wait, kill it now", "danger", () => killNow(project)]);
   showDialog({
-    title: `Stopping ${project.name}`,
+    title: `${wait.restart ? "Restarting" : "Stopping"} ${project.name}`,
     body: waitingBody(wait, phase),
     forProject: project.name,
     actions,
@@ -82,10 +83,14 @@ export function showWaiting(project, wait, phase) {
   if (dialog) dialog.dataset.waiting = phase;
 }
 
-function repaintWaiting(project, wait, current) {
+export function repaintWaiting(project, wait, current) {
   const dialog = $("[data-dialog]");
   if (!dialog?.open || dialog.dataset.for !== project.name) return;
   if (!("waiting" in dialog.dataset)) return;
+  // #433. The policy the server recorded for THIS stop, which a second
+  // browser's Stop can replace with the live one while this wait is open: the
+  // note must match the marker the expiry acts on, not the one first shown.
+  if (current?.stop_policy) wait.policy = current.stop_policy;
   const phase = waitingPhase(wait, current);
   if (dialog.dataset.waiting !== phase) {
     showWaiting(project, wait, phase);
@@ -137,7 +142,13 @@ export function awaitStopped(project, wait) {
       closeDialog(project.name);
       return;
     }
-    if (!current.stopping) {
+    if (wait.restart && !current.stopping) {
+      // #472. The marker is gone. For a restart that is a success, a timeout
+      // or a refused start, or the agent has gone and its successor is not up
+      // yet, which is none of them: keep waiting, on the deadline below,
+      // which closes a row that is not running.
+      if (settledRestart(project, wait, current)) return;
+    } else if (!current.stopping) {
       // The marker cleared. That is EITHER the agent having gone, which is the
       // success this dialog is waiting for, OR the engine's own patience
       // running out first and dropping it.
@@ -153,13 +164,15 @@ export function awaitStopped(project, wait) {
       else showTimedOut(project);
       return;
     }
-    if (current.stopping_phase === "closing") {
+    if (!current.stopping) {
+      // Only a restart waiting for its successor reaches here.
+    } else if (current.stopping_phase === "closing") {
       wait.sawClosing = true;
     } else if (wait.sawClosing && !wait.exitSeen) {
       wait.exitSeen = true;
       deadline = Date.now() + stopTimeoutMs();
     }
-    repaintWaiting(project, wait, current);
+    if (current.stopping) repaintWaiting(project, wait, current);
     // The marker still being there at the deadline means the server's own
     // expiry, on a one second sweep, has not run yet, and that expiry is the
     // one look at the pane that can say the agent is asking a question. Two
@@ -182,6 +195,31 @@ export function awaitStopped(project, wait) {
     window.setTimeout(tick, 700);
   };
   window.setTimeout(tick, 700);
+}
+
+/* #472. The ways a restart's wait ends that a stop's does not. True when it
+   has ended (the caller returns); false to keep waiting. A pid that differs
+   from the one the wait began with, running, is the restart. The same pid
+   still running with the marker gone is the stop's own timeout, which is
+   reported as a stop's is and starts nothing. A refused start is on the row
+   and is left there: the dialog is already gone, since the listing closes a
+   wait for a row that left `running`. */
+function settledRestart(project, wait, current) {
+  if (current.state === "running" && current.pid !== wait.pid) {
+    wait.over = true;
+    closeDialog(project.name);
+    return true;
+  }
+  if (current.state === "stopped" && current.restart_refused) {
+    wait.over = true;
+    return true;
+  }
+  if (current.state === "running" && !current.restarting) {
+    wait.over = true;
+    showTimedOut(project);
+    return true;
+  }
+  return false;
 }
 
 function showLostTrack(project) {
@@ -212,11 +250,38 @@ async function showTimedOut(project) {
   // arrives on the stream after the expiry, so the object this was called with
   // predates it.
   const current = state.projects.find((p) => p.name === project.name) ?? project;
-  // #457. The page's deadline and the server's expiry are independent timers,
-  // and under `end_anyway` the server kills on its own: a row that already
-  // left `running` has nothing to answer and nothing to kill, and the stream's
-  // close for it may have run before this. Captured as "No answer" offering
-  // Kill over a row the list already showed stopped.
+  // #457, decided on #463. The page's deadline and the server's expiry are
+  // independent timers, and under `end_anyway` the server kills on its own:
+  // a row that already left `running` has nothing to answer, and "No answer"
+  // offering Kill over a row the list shows stopped was the defect.
+  //
+  // Not every other state is the same. `stopped` and `stale` have no agent to
+  // ask or to kill (Clear is on the stale row), so the dialog closes.
+  // `detached` is an agent ALIVE with no session to type into: see below.
+  if (current.state === "detached") {
+    // #463. The engine refuses /kill for every detached row (NoAgent, 409), so
+    // the Kill this dialog used to offer could only ever be answered with a
+    // refusal. The route that can end a detached agent is /signal, the same
+    // End then Kill escalation the row carries, through the same
+    // confirmation, and only where the row's own rule offers it: no visible
+    // owner session and no foreign tmux server. Otherwise the person is told
+    // and given Close, because ending a process another terminal owns is not
+    // this dialog's call. No `forProject`: the listing closes a `for` dialog
+    // on any event for a row that is not running, and this row never is.
+    const ours = !current.foreign_session && !current.foreign_server_pid;
+    showDialog({
+      title: `${project.name} is still running`,
+      body:
+        "Its terminal is gone, so there is nothing to ask. The agent is still "
+        + "alive and Hitchrail has stopped waiting."
+        + (ours ? "" : " A terminal Hitchrail cannot control owns it."),
+      actions: [
+        [ours ? "Leave it" : "Close", "ghost", () => closeDialog()],
+        ...(ours ? [["End it", "danger", () => confirmSignal(current, false)]] : []),
+      ],
+    });
+    return;
+  }
   if (current.state !== "running") {
     closeDialog(project.name);
     return;

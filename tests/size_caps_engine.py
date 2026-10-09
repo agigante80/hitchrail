@@ -26,6 +26,13 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # #311: the second listing that splits `updated` from `current`, and why
     # every way it can fail leaves `updated` as it was.
     "claude_ipc/plugins.py": 639,
+    # screen.py crossed the guideline for #475 (394 to 441): the rule that finds
+    # the live input box between its two rules, the captured reason the row
+    # count alone could not be it, and the watch's counts of what it read. The
+    # file is one subject, the vendor's screen, and its length is those captures.
+    # 456 for the review of that change: `_input_row`, the one place that says
+    # which row is the live input, shared by `queued_message` and the watch.
+    "claude_ipc/screen.py": 456,
     # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
     # `except` arm: the adapter can now decline to type, and the marker has
     # to come back the same way a vanished tmux takes it back.
@@ -176,7 +183,36 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # first, and the note on why one look is not evidence of a question.
     # 1712 for #453: the sweep leaves a marker whose exit is still being typed,
     # since the exit menu's look outlives the agent, and the note saying so.
-    "engine.py": 1712,
+    # 1712 to 1300 for #473: the sweep (`scan_for_stuck`, `advance_wrap_ups`,
+    # `expire_stops` and what they call) moved to `sweep.py`, with the notes
+    # above that argue its races; they stay where they were written, as the
+    # history of this cap, and their text now lives in that file.
+    # 1300 to 1255 for Phase 26: `StopMarker` and its note moved to
+    # `stopmarker.py` unchanged, because #427 and #432 add to the rules for
+    # who holds a marker and the file was at its cap. Up to 1275 for #432:
+    # the table of markers a Kill holds out, and why a Stop must see them;
+    # 1279 for #430, the per name clear epoch.
+    # 1283 for #472: the overlay's slot and its two `cancel`s in Kill, and the
+    # import. Restart's logic, its two entry points and its argument are in
+    # `restart.py`, which is a mixin precisely so this file gained no methods.
+    "engine.py": 1283,
+    # #473. The sweep, moved whole from `engine.py`. 465 is the move: most of
+    # it is the notes on the races between a scan, a stop and a start, which
+    # are the reason the code is shaped as it is. It does not want splitting
+    # further, since the three entry points share the look at a pane.
+    # 468 after #424: the signatures take EngineSeam, which wrapped three lines.
+    # 479 for #430: why `_flag_waiting` compares a name's clear, not the counter.
+    # 488 for #444: why the settle is per candidate, and the second look believed.
+    # 489 for #475: the ceiling line carries what the watch read.
+    # 493 for #472: an expired stop cancels a pending restart in the same
+    # critical section as the removal, and the comment says why it must.
+    "sweep.py": 493,
+    # signals.py: 397 when #274 moved the pidfd path here. 414 for #426: `_close`,
+    # and the note on why a close that fails must not replace the outcome.
+    # 426 for #425: the survivor after the wait, journalled and reported as ask.
+    # 438 for the restart kill epoch: `_ends_a_restart`, called before each of the two
+    # signals, and the note on why the count is what a Restart still typing reads.
+    "signals.py": 438,
     # tmux.py is the module that encodes what tmux actually does
     # rather than what its manual implies, and every entry is a footgun
     # that cost real debugging: prefix matching targets, the colon

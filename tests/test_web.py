@@ -66,11 +66,11 @@ DIALOGS: dict[str, str] = {
         "replaces: a second Stop or a Kill for a session that is already "
         "stopping. The list catches up on its own."
     ),
-    "`Stop ${displayProject(project.name)}?`,": _MUST_ACT,
+    '`${restart ? "Restart" : "Stop"} ${displayProject(project.name)}?`,': _MUST_ACT,
     "`Stop ${sessionCount(rows.length)}?`,": _MUST_ACT,
     "`Stopping ${sessionCount(bulk.rows.length)}`,": _MUST_ACT,
     "`Clear ${project.name}?`,": _MUST_ACT,
-    "`Stopping ${project.name}`,": _MUST_ACT,
+    '`${wait.restart ? "Restarting" : "Stopping"} ${project.name}`,': _MUST_ACT,
     "`Lost track of ${project.name}`,": (
         "Argued in place, and the argument is the opposite of #169's: the page "
         "cannot read the machine, so offering to end a process it cannot "
@@ -78,6 +78,7 @@ DIALOGS: dict[str, str] = {
     ),
     "`${project.name} is waiting for you`,": _MUST_ACT,
     "`No answer from ${project.name}`,": _MUST_ACT,
+    "`${project.name} is still running`,": _MUST_ACT,
     '"Not signed in any more",': _MUST_ACT,
     '"Hitchrail cannot reach it",': (
         "`no_agent`. Either there is no agent, or the row is detached and has "
@@ -388,3 +389,50 @@ def test_the_key_field_hints_a_password_manager_and_has_no_name() -> None:
     assert 'autocomplete="current-password"' in field, field
     assert 'type="password"' in field, field
     assert " name=" not in field and "data-key" in field, field
+
+
+# -- #433, #463: the stop dialogs agree with their count and their row --------
+
+
+def _code(name: str) -> str:
+    return stripped((WEB / name).read_text(encoding="utf-8"))
+
+
+def test_stop_alls_plural_strings_branch_on_the_size_of_the_set() -> None:
+    """#433 item 2. Each string has a conditional on `bulk.rows.length` just
+    before it, so a set of one reads in the singular."""
+    source = (WEB / "stop_all.js").read_text(encoding="utf-8")
+    for plural, singular in (
+        ("Do not wait, kill them all", "Do not wait, kill it now"),
+        ("which sessions finished", "whether the session finished"),
+    ):
+        assert plural in source and singular in source, (plural, singular)
+        for text in (plural, singular):
+            before = source[: source.index(text)]
+            assert "bulk.rows.length === 1" in before[-220:], text
+
+
+def test_a_wait_follows_the_policy_of_the_row_and_of_the_answer() -> None:
+    """#433 item 1, as structure: the e2e tests are what prove the words."""
+    assert re.search(r"wait\.policy\s*=\s*current\.stop_policy", _code("wait.js"))
+    assert re.search(
+        r"repaintWaiting\(\s*project\s*,\s*wait\s*,\s*result\.body\s*\)", _code("stop.js")
+    )
+
+
+def test_the_timed_out_dialog_gives_a_detached_agent_the_signal_route_and_never_kill() -> None:
+    """#463. A `detached` agent is alive, so the dialog stays, but the engine
+    refuses /kill for every detached row. The branch must precede the guard
+    that closes for a row that is not running, and must reach /signal through
+    `confirmSignal` and not `killNow`. Read from the lines that are not
+    comments, since the comments name the same words."""
+    source = (WEB / "wait.js").read_text(encoding="utf-8")
+    code = " ".join(
+        line.strip() for line in source.splitlines() if not line.strip().startswith("//")
+    )
+    detached = code.index('current.state === "detached"')
+    guard = code.index('current.state !== "running"')
+    assert detached < guard
+    branch = code[detached:guard]
+    assert "confirmSignal(" in branch
+    assert "killNow" not in branch

@@ -521,6 +521,8 @@ class FakePidfd:
         self.events: list[tuple[str, object]] = []
         self.fail_open = fail_open
         self.fail_send = fail_send
+        # Set by a test after construction: the close that fails (#426).
+        self.fail_close: BaseException | None = None
         self.uid = uid if uid is not None else os.getuid()
         # Where the process runs, or None for "the folder the test's root
         # holds under the project's own name", set by the test through
@@ -545,6 +547,8 @@ class FakePidfd:
 
     def close(self, pidfd: int) -> None:
         self.events.append(("close", pidfd))
+        if self.fail_close is not None:
+            raise self.fail_close
 
     def owner(self, pid: int) -> int:
         self.events.append(("owner", pid))

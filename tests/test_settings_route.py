@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 import pathlib
 import re
+import sys
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import replace
 from typing import Any
@@ -22,7 +23,7 @@ import pytest
 from starlette.routing import Route
 
 from conftest import FakeTmux, procs_from
-from hitchrail import server
+from hitchrail import routes_settings
 from hitchrail.config import Config
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
@@ -600,8 +601,8 @@ def test_the_editable_subset_is_exactly_the_literal() -> None:
     """Premortem 3. Member by member, so adding a key to either set fails
     here and is a decision, not a drift. The second half names every
     perimeter field #238 lists as read only and asserts none is editable."""
-    assert set(server.EDITABLE_TOP_LEVEL) == {"roots", "stop_timeout", "stop_policy"}
-    assert set(server.EDITABLE_ROOT_FIELDS) == {"enabled"}
+    assert set(routes_settings.EDITABLE_TOP_LEVEL) == {"roots", "stop_timeout", "stop_policy"}
+    assert set(routes_settings.EDITABLE_ROOT_FIELDS) == {"enabled"}
     perimeter = {
         "path",
         "label",
@@ -621,8 +622,8 @@ def test_the_editable_subset_is_exactly_the_literal() -> None:
         "agent_config_path",
         "state_path",
     }
-    assert not perimeter & server.EDITABLE_TOP_LEVEL
-    assert not perimeter & server.EDITABLE_ROOT_FIELDS
+    assert not perimeter & routes_settings.EDITABLE_TOP_LEVEL
+    assert not perimeter & routes_settings.EDITABLE_ROOT_FIELDS
 
 
 # Every name a route reads out of a request body, as a literal. `name` is a
@@ -637,8 +638,8 @@ BODY_KEYS = frozenset(
 
 
 class RouteSurfaces:
-    """Everything a request could carry into `server.py`, read from the route
-    table and the source (#154, sturdier since #266).
+    """Everything a request could carry into the route modules, read from the
+    route table and the source (#154, sturdier since #266).
 
     Three surfaces: template parameters (name and converter), keys read out
     of a parsed body, and keys read out of the query string. The body walk
@@ -648,7 +649,7 @@ class RouteSurfaces:
     `data = await request.json()` then `data["path"]` was invisible to it.
     """
 
-    def __init__(self, routes: Sequence[object], source: str) -> None:
+    def __init__(self, routes: Sequence[object], sources: Sequence[str]) -> None:
         self.params: set[str] = set()
         self.converters: set[str] = set()
         for route in routes:
@@ -657,7 +658,7 @@ class RouteSurfaces:
                 self.params.add(name)
                 if converter:
                     self.converters.add(f"{name}:{converter}")
-        tree = ast.parse(source)
+        trees = [ast.parse(source) for source in sources]
         # Every name bound to a parsed body, by any binding and any parser:
         # `body = await request.json()`, `data: dict = await request.json()`,
         # `(data := await request.json())`, `json.loads(await request.body())`,
@@ -665,7 +666,7 @@ class RouteSurfaces:
         # anywhere in the file resolves, and an inline `(await
         # request.json())["path"]` is a read whose owner IS the parse.
         bodies: set[str] = set()
-        for node in ast.walk(tree):
+        for node in (n for tree in trees for n in ast.walk(tree)):
             targets: list[ast.expr] = []
             value: ast.expr | None = None
             if isinstance(node, ast.Assign):
@@ -684,7 +685,7 @@ class RouteSurfaces:
 
         self.body_keys: set[str] = set()
         self.query_keys: set[str] = set()
-        for node in ast.walk(tree):
+        for node in (n for tree in trees for n in ast.walk(tree)):
             # x["key"], for x a body or the query string
             if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant):
                 if is_body(node.value):
@@ -715,9 +716,28 @@ def _parses_a_request(expr: ast.expr) -> bool:
     return any(parser in text for parser in _REQUEST_PARSERS)
 
 
-def _surfaces(engine: Engine, config: Config, source: str | None = None) -> RouteSurfaces:
+def _route_sources(routes: Sequence[object]) -> dict[str, str]:
+    """The source of every module a route's handler is defined in, found from
+    the route table itself (#205): a handler moved to a new module is read
+    without anybody remembering to list the module here."""
+    modules = {r.endpoint.__module__ for r in routes if isinstance(r, Route)}
+    assert len(modules) > 1, "the routes no longer come from several modules"
+    return {m: pathlib.Path(str(sys.modules[m].__file__)).read_text() for m in sorted(modules)}
+
+
+def _surfaces(
+    engine: Engine, config: Config, edit: tuple[str, str] | None = None
+) -> RouteSurfaces:
+    """`edit` is a (before, after) applied to the one module that holds
+    `before`, so a bypass is shown to a walk that reads every module."""
     app = create_app(engine=engine, config=config, bus=EventBus())
-    return RouteSurfaces(list(app.routes), source or pathlib.Path(server.__file__).read_text())
+    sources = _route_sources(app.routes)
+    if edit is not None:
+        before, after = edit
+        holders = [m for m, text in sources.items() if text.count(before) == 1]
+        assert len(holders) == 1, f"the anchor moved or repeats; re-aim it: {holders}"
+        sources[holders[0]] = sources[holders[0]].replace(before, after)
+    return RouteSurfaces(list(app.routes), list(sources.values()))
 
 
 def test_no_route_accepts_a_path(engine: Engine, config: Config) -> None:
@@ -735,7 +755,7 @@ def test_no_route_accepts_a_path(engine: Engine, config: Config) -> None:
     assert found.query_keys == {"acknowledged", "lines"}, found.query_keys
     # The one body whose keys are data rather than literals: the PATCH walks
     # `roots` by label and the fields under each label by the literal set.
-    assert "path" not in server.EDITABLE_ROOT_FIELDS
+    assert "path" not in routes_settings.EDITABLE_ROOT_FIELDS
     assert "path" not in BODY_KEYS
 
 
@@ -784,9 +804,7 @@ def test_the_guard_sees_each_bypass_in_the_source(
     engine: Engine, config: Config, bypass: str
 ) -> None:
     before, after = _BYPASSES[bypass]
-    source = pathlib.Path(server.__file__).read_text()
-    assert source.count(before) == 1, f"the anchor for {bypass} moved; re-aim it"
-    found = _surfaces(engine, config, source.replace(before, after))
+    found = _surfaces(engine, config, (before, after))
     if bypass == "query-by-subscript":
         assert "path" in found.query_keys
     else:
@@ -804,7 +822,7 @@ def test_the_guard_sees_a_path_converter(engine: Engine, config: Config) -> None
         else r
         for r in app.routes
     ]
-    found = RouteSurfaces(widened, pathlib.Path(server.__file__).read_text())
+    found = RouteSurfaces(widened, list(_route_sources(app.routes).values()))
     assert found.converters == {"name:path"}
 
 

@@ -55,6 +55,13 @@ export function buildActions(project, actions) {
         ? () => reopenStop(project)
         : () => confirmStop(project);
     add("Stop", "").addEventListener("click", onStop);
+    // #472. Not while a stop is in flight: a Restart then would be the
+    // route's second Stop, which on a `closing` row is Exit now, behind a
+    // confirmation that promised a wrap up (#242 review). The row's wait and
+    // its Stop are where a stop in flight is steered.
+    if (!project.stopping) {
+      add("Restart", "").addEventListener("click", () => confirmStop(project, true));
+    }
   }
   // A stale session gets Clear, not Stop (#98). Stop asks the agent to exit
   // and there is no agent here, so the API answers `no_agent` every time: the
@@ -104,7 +111,7 @@ export function buildActions(project, actions) {
    `foreign_session` null means no owner was SEEN, from one `list-panes -a`
    against our own tmux server, and a terminal, screen or another socket
    would all arrive here looking the same. */
-function confirmSignal(project, escalate) {
+export function confirmSignal(project, escalate) {
   showDialog({
     title: escalate ? `Kill ${project.name}?` : `End ${project.name}?`,
     body:

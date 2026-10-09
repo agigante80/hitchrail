@@ -32,6 +32,48 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+## 0.16.0 - 2026-10-09
+
+Nothing to do on upgrade, unless something reads the journal for an ended
+detached agent: see Changed.
+
+### Added
+
+- Restart. A running row has a Restart button beside Stop, and
+  `POST /api/sessions/{name}/restart`: the same graceful stop, confirmed the
+  same way, then a new agent in the same folder once the old one has exited, as
+  a fresh conversation. If the stop times out, or you Kill it, nothing is
+  started. If the start is refused, the row stays stopped and says why. The
+  session payload gains `restarting` and `restart_refused` (#472).
+
+### Changed
+
+- Ending a detached agent journals `sent SIGHUP to` where it said `killed`,
+  and an agent that survives the signal is reported as still asking rather
+  than as gone. The old line claimed a kill for an agent that handled the
+  signal and kept running (#425).
+
+### Fixed
+
+- A Stop with `stop_prompt` set waited its full wrap up ceiling, five minutes
+  by default, whenever a background subagent was running: its panel below the
+  input box hid the box from the screen reading, so the end of the turn was
+  never seen. The exit now goes out once the turn ends, and the wrap up prompt
+  is no longer typed behind a queued message on that screen (#475).
+- A detached agent whose stop timed out was offered Kill, which the server
+  could only refuse. It is offered End, the signal route, and the timeout
+  stays on screen (#463).
+- A failing close of a process handle while ending a detached agent replaced
+  the signal's result with an error and could stop the once a second sweep,
+  freezing every stop's timeout. It is logged and the sweep carries on (#426).
+- A second Stop pressed while a Kill was in flight could start typing the
+  exit over the one still being typed. It now sees the stop already under
+  way and does nothing (#432).
+- A start or stop in one project could throw away another project's "waiting
+  on you" flag, and for a row with a session link nothing set it again (#430).
+- A stop's words follow the row they are about and how many rows it covers,
+  and Stop all over rows that are already exiting keeps its warning (#433).
+
 ## 0.15.1 - 2026-10-09
 
 Nothing to do on upgrade.

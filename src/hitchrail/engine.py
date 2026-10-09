@@ -35,15 +35,16 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from pathlib import Path
-from typing import Literal
 
-from hitchrail import attention, claude_ipc, derive, discovery, ram, settings, signals
+from hitchrail import attention, claude_ipc, derive, discovery, ram, settings, signals, sweep
 from hitchrail.config import TOKEN_ENV, Config
 from hitchrail.derive import Machine
+from hitchrail.engine_seam import SeamMembers
 from hitchrail.events import EventBus
 from hitchrail.procs import ProcTable, snapshot
+from hitchrail.restart import RestartMembers, RestartOverlay
 from hitchrail.roots import RootError, split_identifier
 from hitchrail.sessions import (
     AlreadyRunning,
@@ -72,6 +73,7 @@ from hitchrail.sessions import (
     UnknownProject,
     UnknownRoot,
 )
+from hitchrail.stopmarker import StopMarker
 from hitchrail.tmux import Tmux, TmuxUnavailable
 
 logger = logging.getLogger(__name__)
@@ -113,60 +115,7 @@ def _no_session_here(session: Session, consequence: str) -> str:
 ANSWER_KEYS = claude_ipc.ANSWER_KEYS
 
 
-@dataclass(eq=False)
-class StopMarker:
-    """One graceful stop in flight (#242). Compared by identity, never value.
-
-    `closing` is the wrap up: the prompt is queued behind the task and the
-    sweep watches for the agent to finish both. `exiting` is the exit
-    sequence sent, which is all a stop was before #242 and still is with no
-    prompt configured.
-
-    **No path claims a marker while something types into its pane.** `watch`
-    is None while the prompt is being typed, and `typing` is True while the
-    exit sequence is, whether the sweep or `stop()` types it (#406). A Stop
-    on either is the no-op 202: a second sequence would interleave its keys
-    with the first.
-
-    **A caller that holds a marker removes it by identity**, through
-    `Engine._drop`: a pop by name removes whatever marker is there now, which
-    after a repeated Stop is a newer one than the caller holds. Three removals
-    are by name on purpose (#407), because each ends every stop on the row,
-    not one: `_derive` on a row it read `stopped`, `kill` before its
-    `kill-session` and again after it, and `expire_stops`, whose snapshot and
-    removal share one critical section.
-
-    A claim that fails gives the marker back rather than replacing it: Exit
-    now mutates the `closing` marker in place, and a refused exit restores
-    `closing` and its watch on the same object (`Engine._give_back`).
-
-    **The owner writes the OBJECT, not the table** (#387): the watch, the
-    give back and `withdrawn`. Kill takes the marker out before its
-    `kill-session` and hands it back if that fails, so a check that the
-    marker is still in the table read false in that window, the outcome was
-    lost, and Kill restored `closing` with no watch: stranded, as #407 was.
-    Writing a marker no table holds costs nothing, since nothing reads one.
-
-    A claim writes `exit_at`, `ceiling` and `typing` BEFORE `phase`, and
-    `_derive` reads `phase` first without the lock, so a reader that sees
-    `exiting` sees the flags that came with it.
-
-    `policy` is the stop policy when Stop was confirmed, and the one its
-    expiry acts on (#419): the dialog promised it, and the page can change
-    the live setting during the wait. Required, so no path forgets it.
-    """
-
-    began: float
-    phase: Literal["closing", "exiting"]
-    policy: str
-    watch: claude_ipc.WrapUpWatch | None = None
-    exit_at: float | None = None
-    ceiling: bool = False
-    typing: bool = False
-    withdrawn: bool = False
-
-
-class Engine:
+class Engine(SeamMembers, RestartMembers):
     """Derivation, and in later tickets the session lifecycle."""
 
     def __init__(
@@ -214,6 +163,13 @@ class Engine:
         # The one piece of state that is not derived. Memory only, and lost on
         # restart on purpose: see the module docstring.
         self._stopping: dict[str, StopMarker] = {}
+        # The marker a Kill took out of the table and holds until its
+        # `kill-session` answers (#432). `kill` removes it first (#387), so
+        # without this a Stop in that window found no marker and typed over a
+        # first Stop still typing. Under `_stopping_guard`; read only by
+        # `stop`'s claim, never by derivation, which must read `stopped`.
+        self._kill_held: dict[str, StopMarker] = {}
+        self._restarts = RestartOverlay()  # #472, under `_stopping_guard`; restart.py
         # Names whose LAST stop ran out of patience with the agent showing
         # something that needs a person (#101). In memory and not persisted,
         # for the same reason the stop marker is not: it describes one attempt,
@@ -241,6 +197,9 @@ class Engine:
         # subprocess. That leaves a window where a stop clears a project and
         # then an observation made BEFORE the clear puts it straight back.
         self._attention_epoch = 0
+        # #430. The epoch each name was last cleared at, so a look at ONE row
+        # is discarded only by a clear of that row. See `sweep._flag_waiting`.
+        self._attention_cleared: dict[str, int] = {}
         # Guarded for the same reason `_starting` is: stop, kill and the
         # expiry ticker all run on worker threads. Without it, iterating in
         # `expire_stops` while `stop` adds raises "dictionary changed size
@@ -331,8 +290,8 @@ class Engine:
             needs_a_person = self._needs_a_person()
         # `self._stopping` is passed unguarded on purpose: see the note on
         # `_stopping_guard`. `derive` only asks `name in stopping`.
-        session = derive.derive(
-            name, machine, self.config, self.tmux, self._stopping, needs_a_person
+        session = self._restarts.overlay(
+            derive.derive(name, machine, self.config, self.tmux, self._stopping, needs_a_person)
         )
         # **The membership test comes first, and it is not a micro optimisation
         # (#178).** The note on `_stopping_guard` says `_derive` reads
@@ -881,12 +840,15 @@ class Engine:
         resume: claude_ipc.WrapUpWatch | None = None
         with self._stopping_guard:
             current = self._stopping.get(name)
-            if current is not None and (
-                current.typing or (current.phase == "closing" and current.watch is None)
+            held = self._kill_held.get(name)
+            if (current is not None and current.is_typing) or (
+                held is not None and not held.withdrawn and held.is_typing
             ):
                 # Something is typing into this pane this moment, the prompt
                 # or an exit sequence (#406). Typing the exit sequence now
-                # would land in the middle of it.
+                # would land in the middle of it. A Kill's held marker counts
+                # (#432): it is out of the table, but its owner still types,
+                # and a failed Kill hands it back.
                 typing = None
             elif current is not None and current.phase == "closing":
                 # "Exit now": a second Stop during the wait skips to the exit,
@@ -943,13 +905,21 @@ class Engine:
             # in the HTTP layer, which is the whole point of the quarantine.
             self._give_back(name, typing, resume)
             raise StopRefused(str(exc)) from exc
-        except Exception:
+        except BaseException:
             # Anything else, too (#407): a marker left `closing` with no watch
             # made every later Stop a no-op and was invisible to the sweep and
             # to expiry, so only a Kill could clear it.
             self._give_back(name, typing, resume)
             raise
-        finally:
+        else:
+            # On success only (#427), and this was a `finally`. Every failure
+            # above ends in `_give_back`, which clears `typing` itself or
+            # drops the marker, and it releases the lock. A `finally` then
+            # cleared the flag again AFTER that: in the gap the sweep could
+            # claim the same restored `closing` marker and start typing its
+            # exit, and this cleared the sweep's flag, so a third Stop typed
+            # a second sequence over it. `BaseException` above keeps the
+            # `finally`'s old reach: nothing leaves with the flag set.
             self._done_typing(typing)
         if wrapping_up:
             # On the object whatever the table holds (#387): see StopMarker.
@@ -1072,20 +1042,32 @@ class Engine:
         # not take the indicator of a stop still in flight with it.
         with self._stopping_guard:
             marker = self._stopping.pop(name, None)
+            self._restarts.cancel(name)  # before the kill: restart.py says why
+            if marker is not None:
+                self._kill_held[name] = marker
+        failed = False
         try:
             self.tmux.kill_session(name)
         except TmuxUnavailable as exc:
+            failed = True
+            raise MachineUnreadable(str(exc)) from exc
+        finally:
+            # One critical section for the release and the restore, so a Stop
+            # never sees the marker in neither place (#432). Only the Kill
+            # that took the marker releases it.
             if marker is not None:
                 with self._stopping_guard:
-                    if not marker.withdrawn:
+                    if self._kill_held.get(name) is marker:
+                        del self._kill_held[name]
+                    if failed and not marker.withdrawn:
                         self._stopping.setdefault(name, marker)
-            raise MachineUnreadable(str(exc)) from exc
         # Before `_await_gone`, which reads the machine and can raise: the
         # kill happened whatever that read says.
         logger.info("kill %s: session killed", name)
         # A Stop that landed while the kill ran marked a row that is gone.
         with self._stopping_guard:
             self._stopping.pop(name, None)
+            self._restarts.cancel(name)
         updated = self._await_gone(name)
         self._announce(updated)
         return updated
@@ -1169,6 +1151,7 @@ class Engine:
             # clear. Under the same lock as the clear itself, so a sweep can
             # never read the counter and the map in disagreement.
             self._attention_epoch += 1
+            self._attention_cleared[name] = self._attention_epoch
 
     def _needs_a_person(self) -> frozenset[str]:
         """Every name the `awaiting_input` overlay is true for, from both sources.
@@ -1192,431 +1175,18 @@ class Engine:
             return frozenset(self._awaiting_input) | attention.standing(self._stuck, now)
 
     def scan_for_stuck(self) -> builtins.list[str]:
-        """Record which running rows are waiting on a person (#100).
-
-        Driven by the sweep that already expires stop markers, never by a
-        request. `attention` carries the argument for that and the bounds; this
-        is the part that touches the machine and holds the answer.
-
-        **It does nothing while nobody is watching**, and that is not an
-        optimisation. Before #100 an idle tick was free: `expire_stops` with no
-        markers runs no subprocess at all. A look is a `ps`, a
-        `tmux list-panes -a` and a file read, and doing that every second for
-        the life of a user unit, on a machine with no browser open and nothing
-        running, is a cost this feature has no claim on. It would also make the
-        sweep look more often than the polling browser whose cost was the
-        argument for moving off the request path in the first place.
-
-        The subscriber count is the honest test for "somebody is watching":
-        outside a stop wait the page only refreshes on an event, so with no
-        stream there is nobody this could tell anything to. The first sweep
-        after a client connects re establishes the flag within one interval,
-        which is the same freshness a client gets on any other row.
-
-        A bus is always attached in the running application, by `create_app`.
-        `None` means an engine built directly, which is a test asking for one
-        scan rather than a process idling, so it scans.
-
-        May raise past the look and the root scan (#181). The server's done
-        callback logs it and the next tick scans again; caught here, it would
-        answer "nobody is waiting" on no evidence.
-        """
-        if self._bus is not None and self._bus.subscriber_count == 0:
-            return []
-        try:
-            machine = self._look()
-            names = discovery.list_root_projects(self.prefs.active_roots())
-        except (MachineUnreadable, discovery.RootUnavailable):
-            # We could not look. That is not evidence about anybody's screen,
-            # so nothing is added and nothing already known is dropped.
-            return []
-        # Sorted, so which rows a truncated budget reaches is deterministic
-        # rather than a property of iteration order.
-        waiting = self._needs_a_person()
-        rows = [self._derive(name, machine, waiting) for name in sorted(names)]
-        # #182. Read BEFORE the capture, compared after it. Everything between
-        # these two lines happens without the lock, which is the whole point:
-        # `attention.scan` runs a subprocess per row.
-        epoch = self._attention_epoch
-        stuck, clear = attention.scan(
-            attention.candidates(rows), self._pane_needs_a_person, self._clock
-        )
-        now = self._clock()
-        with self._stopping_guard:
-            discarded = self._attention_epoch != epoch
-            if discarded:
-                # A stop or a start cleared this overlay while we were looking
-                # at screens, so every `stuck` here is evidence from before an
-                # action the person has already taken. #101's rule is that a
-                # fresh attempt starts from nothing, and writing these would
-                # undo that with an observation older than the clear.
-                #
-                # **The whole batch, not the cleared name.** Knowing WHICH
-                # project was cleared would need a per project record, and this
-                # is one integer. The cost of the coarse version is that an
-                # unrelated stop delays a true "waiting for an answer" by one
-                # sweep interval, which the next scan corrects because it reads
-                # the pane again.
-                #
-                # The `clear` half is still applied below: dropping a claim on
-                # stale evidence is the safe direction, and refusing to drop it
-                # would leave a person told they are needed when they are not.
-                stuck = []
-            # **The prune comes BEFORE `changed`, and before the renewal.** Two
-            # representations of one fact: `changed` asks the store, the
-            # interface asks `attention.standing`, which filters by the TTL,
-            # and inside the gap they disagreed (#218). A name past `TTL_S`
-            # was still in the dict, so a sweep re-confirming it computed
-            # "nothing changed" and told nobody, while a page that reconnected
-            # in the meantime had read `standing` and showed the row as not
-            # waiting. Pruning first makes the store agree with the view, so
-            # `in self._stuck` below is safe everywhere rather than only where
-            # somebody remembered the TTL, and a re-confirmed name reads as
-            # new, announces, and is renewed by the loop after.
-            #
-            # This is NOT round 1 of #182, which looks the same in a diff and
-            # is the opposite: that version popped AFTER the renewal, so a
-            # re-confirmed entry was written with `now` and then removed by the
-            # same block, silently. This pops before the renewal, and the
-            # renewal puts a re-confirmed name back.
-            #
-            # **Skipped on a discarded sweep**, which is round 1's own point: a
-            # standing observation stays alive by being rewritten, so aging an
-            # entry this scan declined to renew drops a row on evidence the
-            # sweep does not trust. Nothing is announced for an aged name that
-            # this sweep did not re-confirm: `standing` already hid it from
-            # every reader, so there is no change to report.
-            if not discarded:
-                for name in attention.expired(self._stuck, now):
-                    self._stuck.pop(name, None)
-            # What CHANGED, computed under the lock beside the write, because
-            # announcing what did not change is how a page that is already
-            # right redraws itself once a second.
-            changed = [name for name in stuck if name not in self._stuck]
-            changed += [name for name in clear if name in self._stuck]
-            for name in stuck:
-                self._stuck[name] = now
-            for name in clear:
-                self._stuck.pop(name, None)
-        # Announced, OUTSIDE the lock, exactly as `expire_stops` does it and
-        # for the reason its docstring gives: outside a stop wait the page does
-        # not poll at all, so a change visible only on the next listing is one
-        # the interface cannot report. The person this exists for is holding a
-        # phone, looking at a row that will not change on its own.
-        #
-        # **From the row already derived, not from `self.get(name)`.**
-        # `expire_stops` uses `get` because it holds no rows; this method
-        # derived every one of them a moment ago, and re deriving would spend a
-        # whole machine look per changed row: ten changes would be ten more
-        # `ps` and `tmux` pairs inside one tick, which is the cost this ticket
-        # moved off the request path in the first place. It is also more
-        # consistent, since the payload then comes from the same look the
-        # decision came from rather than from a newer one that may disagree.
-        by_name = {row.name: row for row in rows}
-        for name in changed:
-            if name in stuck:
-                logger.info("%s: its screen is waiting on a person", name)
-            else:
-                logger.debug("%s: no longer waiting on a person", name)
-        for name in changed:
-            row = by_name.get(name)
-            if row is not None:
-                self._announce(replace(row, awaiting_input=name in stuck))
-        return stuck
-
-    def _pane_needs_a_person(self, name: str) -> bool:
-        """Whether this agent's screen is showing something only a human can
-        answer. False whenever that cannot be told.
-
-        Never raises. `expire_stops` calls it per name after it has dropped
-        the markers, so a raise would lose every later name's report and
-        announcement, though the server's sweep survives it (#181).
-
-        What "clear" means is Claude Code knowledge and stays in `claude_ipc`;
-        this asks and does not interpret.
-        """
-        try:
-            pane = self.tmux.capture_pane(name, escapes=True)
-        except TmuxUnavailable:
-            return False
-        # `is False` and not `is not True`: `None` means the row could not be
-        # read at all, which is not evidence of a prompt. Only a screen we can
-        # see and that is not an ordinary input box counts.
-        #
-        # **`shows_input_box`, not `input_is_clear`, and #100 is why.** The two
-        # differ on exactly one case: an ordinary box with text in it. That is a
-        # person's draft, and a draft is not somebody being needed. The design's
-        # own words for this overlay are "showing something that had to be
-        # answered, not an ordinary input box", which is this predicate; the
-        # other one was an approximation that also fired on the draft, and it
-        # cannot be reused here because #89 shortened its anchor deliberately so
-        # that a modal and a box would both match.
-        #
-        # **`awaits_answer`, not `shows_input_box` directly (#429).** It is the
-        # same answer today, and it is the one the answer route tests with
-        # `is True`: this asks the vendor module the question it names.
-        return claude_ipc.awaits_answer(pane) is True
-
-    def _held_by_a_second_look(self, name: str, marker: StopMarker, seen: int) -> bool:
-        """Whether `end_anyway` may still end this agent a settle after the
-        first look found a prompt (#429).
-
-        One look is not enough: while the box is not drawn, an output line
-        carrying the ornament reads as a modal for the length of a redraw, and
-        the agent writes that line itself. Ending on it kills a working agent
-        for a question nobody asked. A modal is still there a settle later; a
-        redraw is not. No lock is held across the sleep or the capture, as the
-        sweep does not hold one across its reads.
-
-        False, and the expiry is then reported as `ask` reports it, when
-        anything moved: the stop was withdrawn or is typing (its owner is
-        acting), a newer Stop is in the table, the agent is not the one looked
-        at, or the screen no longer shows a prompt.
-        """
-        self._sleep(self.end_anyway_settle)
-        with self._stopping_guard:
-            moved = marker.withdrawn or marker.typing or name in self._stopping
-        if moved or self._agent_pid(name) != seen:
-            return False
-        return self._pane_needs_a_person(name)
-
-    def _flag_waiting(self, name: str, epoch: int) -> None:
-        """Add the overlay from a look taken at `epoch`, unless a start or a
-        stop cleared it since (#410): that look was at the old agent's screen."""
-        with self._stopping_guard:
-            if self._attention_epoch == epoch:
-                self._awaiting_input.add(name)
+        """Record which running rows are waiting on a person (#100). The sweep's
+        (`sweep.py`, #473); the argument for what it does and why is there."""
+        return sweep.scan_for_stuck(self)
 
     def advance_wrap_ups(self) -> builtins.list[str]:
-        """Move each finished or overdue wrap up on to the exit (#242).
-
-        Driven by the server's sweep, started rather than awaited and at most
-        one in flight, because it captures a pane per `closing` row and may
-        run the exit sequence with its settles: awaited beside `expire_stops`,
-        one hung capture would hold back every other row's expiry. And not
-        inside `scan_for_stuck`, which does nothing while no browser is
-        connected: a wrap up has to finish with the phone in a pocket.
-
-        Whether a screen reads finished is `claude_ipc`'s, through the watch;
-        this only asks. Returns the names sent to the exit. Never raises: a
-        refused exit's marker is dropped first, so a raise loses its report.
-        """
-        with self._stopping_guard:
-            closing = [
-                (name, marker)
-                for name, marker in self._stopping.items()
-                if marker.phase == "closing" and marker.watch is not None
-            ]
-        moved: builtins.list[str] = []
-        for name, marker in closing:
-            watch = marker.watch
-            assert watch is not None
-            try:
-                pane = self.tmux.capture_pane(name, escapes=True)
-            except TmuxUnavailable:
-                pane = ""
-            now = self._clock()
-            finished = watch.observe(now, pane)
-            ceiling = not finished and now - marker.began >= self.config.stop_prompt_timeout
-            if not (finished or ceiling):
-                continue
-            with self._stopping_guard:
-                if self._stopping.get(name) is not marker or marker.phase != "closing":
-                    # A second Stop claimed it, or a kill or a refusal took it,
-                    # while this pane was being read.
-                    continue
-                marker.exit_at, marker.ceiling, marker.typing = now, ceiling, True
-                marker.phase = "exiting"
-            logger.info(
-                "stop %s: wrap up %s after %.0fs",
-                name,
-                "hit the ceiling" if ceiling else "finished",
-                now - marker.began,
-            )
-            try:
-                claude_ipc.request_stop(self.tmux, name, settle=self._sleep)
-                moved.append(name)
-            except (claude_ipc.StopNotSafe, TmuxUnavailable) as exc:
-                self._drop(name, marker)
-                logger.info("stop %s: exit refused after wrap up, %s", name, exc)
-                # The stop ends here, so this is `expire_stops`' moment: one
-                # look at the pane, or the page says "no answer" over a
-                # question the person was never shown (#242 review). Only the
-                # report; `end_anyway` kills a stop that expired after its exit
-                # was SENT, and this one never was.
-                epoch = self._attention_epoch
-                if self._pane_needs_a_person(name):
-                    self._flag_waiting(name, epoch)
-            finally:
-                self._done_typing(marker)
-            try:
-                self._announce(self.get(name))
-            except MachineUnreadable:
-                logger.warning(
-                    "stop %s: the wrap up moved on but the machine could not be "
-                    "read, so no event was sent",
-                    name,
-                )
-        return moved
+        """Move wrap ups on to the exit (#242). The sweep's (`sweep.py`, #473)."""
+        return sweep.advance_wrap_ups(self)
 
     def expire_stops(self) -> builtins.list[str]:
-        """Drop stop markers older than the timeout, and say so.
-
-        Expiry means "we stopped waiting", never "escalate". The session is
-        still alive and the decision to kill it belongs to a person: an
-        automatic kill is a destructive action taken while they were not
-        looking.
-
-        **Unless the operator decided before they tapped** (#239):
-        `stop_policy = end_anyway`, off by default, kills a stop that ended on
-        a prompt. Escalation by choice made once in configuration, not by
-        default, which is what section 7 forbids; and a kill, not an answer.
-        The policy is the one recorded at that Stop, never the live one (#419).
-
-        It announces, because the person watching the timer has to learn the
-        wait ended. An expiry visible only on the next poll is one the
-        interface cannot report.
-        """
-        now = self._clock()
-        with self._stopping_guard:
-            # A snapshot, taken under the lock. Iterating the live dict while
-            # `stop` adds on another thread raises, and the tick loses its
-            # expiries to that raise.
-            # #242. A `closing` marker is the sweep's, not this method's, and
-            # the wait is measured from the exit: under a wrap up the time
-            # before it is the rest of the agent's task.
-            candidates = [
-                (name, marker)
-                for name, marker in self._stopping.items()
-                if marker.exit_at is not None
-                and marker.phase == "exiting"
-                and now - marker.exit_at >= self.prefs.stop_timeout()
-            ]
-            # No "is it still the same stop" check, deliberately. The
-            # snapshot and the removal are inside ONE lock, so nothing can
-            # install a fresh marker between them, and a guard against that
-            # would be a condition that cannot be false. This module removed
-            # one of those from `Tmux.kill_session` for the same reason: a
-            # guard that looks meaningful and cannot execute is worse than
-            # none, because a reader stops looking.
-            #
-            # If the announce loop below is ever moved inside the lock, or the
-            # snapshot taken outside it, that stops being true.
-            expired = [name for name, _marker in candidates]
-            for name in expired:
-                del self._stopping[name]
-        # Announced outside the lock: `get` does two subprocess calls, and
-        # holding a lock across those would serialise every stop behind them.
-        #
-        # Outside the lock also means `get` can fail out here, and the markers
-        # are already gone by then. `_announce` cannot raise, but `get` can:
-        # it reads the machine, and a tmux that has gone away is exactly the
-        # MachineUnreadable case. Uncaught, that raise ends this pass with its
-        # markers already gone, so every later name in it goes unreported and
-        # unannounced, and their timers sit on the page until the next listing.
-        # The sweep itself survives it, inside the server's loop (#181).
-        # ONE look at each expired pane, before announcing (#101).
-        #
-        # This is the only place the interface can learn that a stop ended
-        # because the agent is waiting on something a person has to answer.
-        # The sequence itself produces that state: asked to exit with
-        # background work running, Claude Code opens a confirmation and sits on
-        # it, and the row goes on saying `running` while the screen says
-        # "it has not finished" and offers a kill.
-        #
-        # Affordable HERE and nowhere else. A `capture-pane` per running row on
-        # every listing is the cost the design refused for the session link; a
-        # stop that runs out of patience is rare by construction, and this is
-        # the one moment where the answer is worth a subprocess.
-        #
-        # It only ever ADDS. Nothing here answers the prompt: the options in
-        # that dialog decide what happens to work the operator did not ask to
-        # end, and choosing for them is the power #88 declined to take.
-        #
-        # One name at a time, look then act, never every look first (#239
-        # review). Each end_anyway kill waits up to `kill_grace` for the
-        # session to go, so with the looks taken up front a later row's look
-        # could be seconds old by its kill, long enough for a person to Kill
-        # and Start it again, and the fresh agent, which never saw a prompt,
-        # would be killed for the old one's question.
-        for name, marker in candidates:
-            end_anyway = marker.policy == "end_anyway"
-            # The agent, read BEFORE its screen (#418), and only when the
-            # policy could act on it. Read after, a Kill and Start between the
-            # two would pair the fresh agent's pid with the old one's question.
-            seen = self._agent_pid(name) if end_anyway else None
-            epoch = self._attention_epoch
-            waiting = self._pane_needs_a_person(name)
-            if waiting:
-                self._flag_waiting(name, epoch)
-            # #239. The operator's answer, given in advance, to a stop that
-            # ran out of time on a question: the kill the dialog offers at
-            # this moment, taken without the tap. Only on THIS look at the
-            # pane, never the sweep's overlay, and never a key typed into the
-            # prompt. The protected project is refused after the handle.
-            if waiting and seen is not None:
-                if self._held_by_a_second_look(name, marker, seen):
-                    if signals.end_anyway(self, name, seen):
-                        continue
-                else:
-                    logger.info(
-                        "stop %s: end_anyway did not hold: a second look, %gs "
-                        "later, did not agree it was waiting on a person",
-                        name,
-                        self.end_anyway_settle,
-                    )
-            person = "; its screen is waiting on a person" if waiting else ""
-            try:
-                session = self.get(name)
-            except MachineUnreadable:
-                logger.warning(
-                    "stop timer for %s expired but the machine could not be "
-                    "read, so no event was sent; the marker is already dropped%s",
-                    name,
-                    person,
-                )
-                continue
-            # Worded from the state read AFTER the timer, never assumed (#167
-            # review). Only `get` clears the marker on a clean exit, and with
-            # no browser connected nothing calls it, so an agent that exited at
-            # 12s still reaches this line at 30s. Saying "still running" there
-            # is the journal calling a stop that worked a failure.
-            # `stale` too (#390): the agent went and only its session stayed,
-            # held by another window or a failed `remain-on-exit` clear. The
-            # time is from the Stop, an upper bound nothing watched shrink.
-            if session.state is State.STOPPED:
-                logger.info(
-                    "stop %s: the %gs wait ran out after the agent had already "
-                    "exited, within %.1fs of the stop",
-                    name,
-                    self.prefs.stop_timeout(),
-                    now - marker.began,
-                )
-            elif session.state is State.STALE:
-                logger.info(
-                    "stop %s: the %gs wait ran out; the agent exited and its "
-                    "tmux session remains",
-                    name,
-                    self.prefs.stop_timeout(),
-                )
-            else:
-                logger.info(
-                    "stop %s: gave up waiting after %gs, and the row is still %s%s",
-                    name,
-                    self.prefs.stop_timeout(),
-                    session.state.value,
-                    person,
-                )
-            self._announce(session)
-        return expired
-
-    def _agent_pid(self, name: str) -> int | None:
-        """The running agent's pid, or None when there is none or no look."""
-        try:
-            session = self.get(name)
-        except MachineUnreadable:
-            return None
-        return session.pid if session.state is State.RUNNING else None
+        """Drop stop markers older than the timeout, and say so. The sweep's
+        (`sweep.py`, #473), `end_anyway` included."""
+        return sweep.expire_stops(self)
 
     def locate(self, name: str) -> Session:
         """The row a client may address by name, or the refusal the API gives.
@@ -1706,6 +1276,7 @@ __all__ = [
     "StartFailed",
     "State",
     "StateUnwritable",
+    "StopMarker",
     "StopRefused",
     "UnknownProject",
     "UnknownRoot",

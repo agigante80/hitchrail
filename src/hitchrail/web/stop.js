@@ -5,18 +5,25 @@ import { wrapUpSeconds } from "/patience.js";
 import { showRefusal } from "/refusal.js";
 import { displayProject } from "/roots.js";
 import { state } from "/state.js";
-import { awaitStopped, endAnywayNote, killNow, showWaiting, waitingPhase } from "/wait.js";
+import {
+  awaitStopped,
+  endAnywayNote,
+  killNow,
+  repaintWaiting,
+  showWaiting,
+  waitingPhase,
+} from "/wait.js";
 
 /* -- stopping ----------------------------------------------------------
    Confirm, then a wait during which the kill is reachable, then a timeout
    that reports and does NOT escalate on its own. The engine refuses to
    escalate by itself; the interface must not do it on the engine's behalf. */
 
-export function confirmStop(project) {
+export function confirmStop(project, restart = false) {
   showDialog({
     // The name a PERSON reads, which with several roots says which one.
     // A confirmation naming the wrong project is worse than none.
-    title: `Stop ${displayProject(project.name)}?`,
+    title: `${restart ? "Restart" : "Stop"} ${displayProject(project.name)}?`,
     // #89: this used to say "It will be asked to finish what it is doing",
     // which no version of the sequence has ever done. The first thing sent is
     // an interrupt. Say that, and carry the warning about part done work here
@@ -40,12 +47,15 @@ export function confirmStop(project) {
           : "It will be interrupted, then asked to exit. "
             + "Anything it is part way through may be lost.",
       endAnywayNote(),
+      // #472. The same confirm as Stop, because the first half IS a stop and
+      // carries every one of its risks; the second half is the only addition.
+      restart ? "A new session starts once it has exited, as a fresh conversation." : "",
     ].filter(Boolean).join(" "),
     // Cancel and Stop, and nothing else. A kill control at this step puts the
     // destructive path under the thumb at the same weight as the safe one.
     actions: [
       ["Cancel", "ghost", () => closeDialog()],
-      ["Stop", "", () => beginStop(project)],
+      [restart ? "Restart" : "Stop", "", () => beginStop(project, restart)],
     ],
   });
 }
@@ -68,7 +78,7 @@ export function confirmClear(project) {
    repaint then rebuilds the dialog every tick, taking focus (#71). */
 const waits = new Map();
 
-function newWait(project, began = Date.now(), policy = state.server.stop_policy) {
+function newWait(project, began = Date.now(), policy = state.server.stop_policy, restart = false) {
   // `over` lets Exit now's refusal end the ticker, which would otherwise
   // paint "no answer" over the refusal it just showed.
   const previous = waits.get(project.name);
@@ -81,6 +91,11 @@ function newWait(project, began = Date.now(), policy = state.server.stop_policy)
     sawClosing: false,
     exitSeen: false,
     policy,
+    // #472. A restart's wait ends in a NEW agent, not an absent one, so it
+    // remembers the pid it began with: the same pid still running at the end
+    // is a stop that timed out, and a different one is the restart.
+    restart,
+    pid: project.pid,
   };
   waits.set(project.name, wait);
   return wait;
@@ -103,6 +118,7 @@ export function reopenStop(project) {
     project,
     current.stopBeganHere ?? Date.now(),
     current.stop_policy ?? state.server.stop_policy,
+    Boolean(current.restarting),
   );
   wait.sawClosing = current.stopping_phase === "closing";
   wait.armed = true;
@@ -110,17 +126,19 @@ export function reopenStop(project) {
   awaitStopped(project, wait);
 }
 
-async function beginStop(project) {
-  const wait = newWait(project);
+async function beginStop(project, restart = false) {
+  const wait = newWait(project, Date.now(), state.server.stop_policy, restart);
   // A resent exit (#416) is watched as the exit after a wrap up is: its
   // deadline starts from the first `exiting` reading, not a wrap up away.
   const resend = project.stopping_phase === "exiting";
   if (resend) wait.sawClosing = true;
   const first = resend ? "exiting" : state.server.stop_prompt_set ? "sending" : "waiting";
   showWaiting(project, wait, first);
-  const result = await api(`/api/sessions/${encodeURIComponent(project.name)}`, {
-    method: "DELETE",
-  });
+  // Its own route, never a flag on the DELETE (#52, #472).
+  const name = encodeURIComponent(project.name);
+  const result = await (restart
+    ? api(`/api/sessions/${name}/restart`, { method: "POST" })
+    : api(`/api/sessions/${name}`, { method: "DELETE" }));
   if (!result.ok) {
     // The row goes with it: `stop_unsafe` is refused here and nowhere else,
     // and the dialog that reports it offers a kill that has to name a session.
@@ -134,6 +152,12 @@ async function beginStop(project) {
   // expiry most times, and say "no answer" before the server's one look at
   // the pane could say the agent is waiting on a question (#242 review).
   if (!state.server.stop_prompt_set || resend) wait.armed = true;
+  // #433. The answer is the row with the marker this stop wrote, so its policy
+  // is the one the server will act on, where `state.server` can be older than
+  // `prefs.stop_policy()` (#428). Repainted at once rather than left to the
+  // ticker, which starts only after the listing. A no-op 202 carries the
+  // marker already in flight, which is the right one to follow.
+  repaintWaiting(project, wait, result.body);
   await refresh();
   awaitStopped(project, wait);
 }

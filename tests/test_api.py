@@ -30,8 +30,8 @@ from conftest import (
     failing_procs,
     procs_from,
 )
-from hitchrail import claude_ipc, pages, server
-from hitchrail import server as srv
+from hitchrail import claude_ipc, pages
+from hitchrail import lifespan as lifespan_mod
 from hitchrail.config import Config
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
@@ -965,7 +965,7 @@ async def test_the_stop_sweep_outlives_a_failing_tick(
                 raise RuntimeError("one bad tick")
             return []
 
-    monkeypatch.setattr(server, "SWEEP_INTERVAL_S", 0.01)
+    monkeypatch.setattr(lifespan_mod, "SWEEP_INTERVAL_S", 0.01)
     engine = Boom(
         config=config,
         tmux=FakeTmux(),
@@ -998,7 +998,7 @@ async def test_a_failing_attention_scan_is_logged_and_the_next_tick_scans_again(
                 raise RuntimeError("one bad scan")
             return []
 
-    monkeypatch.setattr(server, "SWEEP_INTERVAL_S", 0.01)
+    monkeypatch.setattr(lifespan_mod, "SWEEP_INTERVAL_S", 0.01)
     engine = Boom(
         config=config,
         tmux=FakeTmux(),
@@ -2062,7 +2062,7 @@ async def test_a_slow_attention_scan_does_not_delay_a_stop_expiry(
     second rather than the tens of seconds a real overrun takes; what is being
     asserted is the ordering, and that does not depend on the durations.
     """
-    monkeypatch.setattr(srv, "SWEEP_INTERVAL_S", 0.02)
+    monkeypatch.setattr(lifespan_mod, "SWEEP_INTERVAL_S", 0.02)
 
     expiries = 0
     scanning = threading.Event()
@@ -2119,7 +2119,7 @@ async def test_only_one_attention_scan_runs_at_a_time(
     `in_thread(engine.stop, ...)` then queues behind those captures, which is
     exactly the cost `scan_for_stuck` moved off the request path to avoid.
     """
-    monkeypatch.setattr(srv, "SWEEP_INTERVAL_S", 0.02)
+    monkeypatch.setattr(lifespan_mod, "SWEEP_INTERVAL_S", 0.02)
 
     started = 0
     release = threading.Event()
@@ -2198,7 +2198,7 @@ async def test_a_scan_still_running_at_shutdown_does_not_hang_the_lifespan(
     process waits for it at executor shutdown. Bounded, and not something this
     cancel can fix.
     """
-    monkeypatch.setattr(srv, "SWEEP_INTERVAL_S", 0.02)
+    monkeypatch.setattr(lifespan_mod, "SWEEP_INTERVAL_S", 0.02)
 
     scanning = threading.Event()
     release = threading.Event()
@@ -2258,7 +2258,7 @@ async def test_a_wedged_wrap_up_holds_back_neither_expiry_nor_itself(
     capture would stop every other row's expiry; unguarded, a wedged tmux
     fills the executor that serves the operator's stop. And it must start
     again once the first finishes, or a wrap up never moves on."""
-    monkeypatch.setattr(srv, "SWEEP_INTERVAL_S", 0.02)
+    monkeypatch.setattr(lifespan_mod, "SWEEP_INTERVAL_S", 0.02)
 
     started = 0
     expiries = 0
@@ -2317,7 +2317,7 @@ async def test_a_wrap_up_still_running_at_shutdown_is_cancelled(
     """The teardown half, which the test above cannot reach because it
     releases inside the lifespan. Same assertion as the scan's: nothing left
     pending against an engine the lifespan has finished with."""
-    monkeypatch.setattr(srv, "SWEEP_INTERVAL_S", 0.02)
+    monkeypatch.setattr(lifespan_mod, "SWEEP_INTERVAL_S", 0.02)
 
     wrapping = threading.Event()
     release = threading.Event()
@@ -2366,7 +2366,7 @@ async def test_a_wrap_up_moves_on_with_no_browser_connected(
     `scan_for_stuck`, which does nothing while nobody is watching: a wrap up
     has to finish with the phone in a pocket. A second DELETE during the wait
     is Exit now, and answers 202 as a stop always has."""
-    monkeypatch.setattr(srv, "SWEEP_INTERVAL_S", 0.02)
+    monkeypatch.setattr(lifespan_mod, "SWEEP_INTERVAL_S", 0.02)
     wrapped = replace(config, stop_prompt="/wrapup")
     tmux = FakeTmux(sessions={proj("vessel"): 500})
     engine = make_engine(wrapped, tmux, procs_from(RUNNING_PS))
@@ -2679,3 +2679,122 @@ async def test_a_body_nested_past_the_parser_is_a_400_at_the_grant_without_a_tok
         r = await c.post("/api/grant", headers=GRANT_HEADERS, content=_TOO_DEEP)
     assert r.status_code == 400, r.text
     assert r.json()["code"] == "invalid_body"
+
+
+# -- #472: Restart ------------------------------------------------------------
+
+
+async def test_restart_begins_a_graceful_stop_and_marks_the_row(
+    client: httpx.AsyncClient, engine: Engine, tmux: FakeTmux
+) -> None:
+    r = await client.post(f"/api/sessions/{proj('vessel')}/restart", headers=HEADERS)
+    assert r.status_code == 202
+    body = r.json()
+    assert body["stopping"] is True and body["restarting"] is True
+    assert body["restart_refused"] is None
+    assert tmux.killed == [] and tmux.started == [], (
+        "a restart kills nothing and starts nothing yet"
+    )
+    listed = (await client.get("/api/projects", headers=HEADERS)).json()["projects"]
+    row = next(p for p in listed if p["name"] == proj("vessel"))
+    assert row["restarting"] is True, "the listing is all another browser has"
+
+
+async def test_a_second_restart_answers_like_a_second_stop_and_holds_one_start(
+    client: httpx.AsyncClient, engine: Engine
+) -> None:
+    path = f"/api/sessions/{proj('vessel')}/restart"
+    first = await client.post(path, headers=HEADERS)
+    second = await client.post(path, headers=HEADERS)
+    assert first.status_code == second.status_code == 202
+    assert second.json()["restarting"] is True
+    assert list(engine.restarts.pending) == [proj("vessel")]
+
+
+async def test_restart_on_a_stopped_row_is_409_not_running(
+    client: httpx.AsyncClient, engine: Engine
+) -> None:
+    r = await client.post(f"/api/sessions/{proj('network')}/restart", headers=HEADERS)
+    assert r.status_code == 409
+    assert r.json()["code"] == "not_running"
+    assert engine.restarts.pending == {}
+
+
+async def test_restart_on_a_stale_row_is_409_no_agent(config: Config, tmux: FakeTmux) -> None:
+    tmux.pane_text[proj("vessel")] = "user@host:/tmp$ "
+    stale = make_engine(config, tmux, procs_from(STALE_PS))
+    async with client_for(stale, config) as c:
+        r = await c.post(f"/api/sessions/{proj('vessel')}/restart", headers=HEADERS)
+    assert r.status_code == 409
+    assert r.json()["code"] == "no_agent"
+    assert tmux.sent == [] and stale.restarts.pending == {}
+
+
+async def test_restart_the_adapter_declined_is_409_stop_unsafe_and_marks_nothing(
+    client: httpx.AsyncClient, engine: Engine, tmux: FakeTmux
+) -> None:
+    tmux.pane_text[proj("vessel")] = DIRTY_INPUT_BOX
+    r = await client.post(f"/api/sessions/{proj('vessel')}/restart", headers=HEADERS)
+    assert r.status_code == 409
+    assert r.json()["code"] == "stop_unsafe"
+    assert engine.restarts.pending == {}
+
+
+async def test_restart_on_the_self_project_is_423(root: pathlib.Path) -> None:
+    cfg = make_config(
+        root,
+        sessions_dir=root / ".s",
+        agent_config_path=NO_AGENT_CONFIG,
+        self_project=proj("vessel"),
+    )
+    engine = make_engine(cfg, FakeTmux(sessions={proj("vessel"): 500}), procs_from(RUNNING_PS))
+    async with client_for(engine, cfg) as c:
+        r = await c.post(f"/api/sessions/{proj('vessel')}/restart", headers=HEADERS)
+    assert r.status_code == 423
+    assert r.json()["code"] == "self_protected"
+    assert engine.restarts.pending == {}
+
+
+async def test_restart_404s_an_unknown_project(client: httpx.AsyncClient) -> None:
+    r = await client.post(f"/api/sessions/{proj('nope')}/restart", headers=HEADERS)
+    assert r.status_code == 404
+    assert r.json()["code"] == "unknown_project"
+
+
+async def test_restart_is_origin_checked_and_refuses_before_it_stops_anything(
+    client: httpx.AsyncClient, engine: Engine, tmux: FakeTmux
+) -> None:
+    path = f"/api/sessions/{proj('vessel')}/restart"
+    for origin in ("http://evil.example", None):
+        headers = {"host": "localhost"} if origin is None else {**HEADERS, "origin": origin}
+        r = await client.post(path, headers=headers)
+        assert r.status_code == 403, origin
+    assert tmux.sent == [] and engine.restarts.pending == {}
+
+
+async def test_restart_refuses_a_forged_host_and_a_missing_token(
+    tmp_path: pathlib.Path,
+) -> None:
+    engine, config = _token_app(tmp_path)
+    path = f"/api/sessions/{proj('vessel')}/restart"
+    async with client_for(engine, config) as c:
+        forged = await c.post(
+            path, headers={"host": "evil.example", "origin": "http://localhost"}
+        )
+        no_token = await c.post(
+            path, headers={"host": "localhost", "origin": "http://localhost"}
+        )
+    assert forged.status_code == 400 and forged.json()["code"] == "host_rejected"
+    assert no_token.status_code == 401
+    assert engine.restarts.pending == {}
+
+
+async def test_restart_is_not_a_flag_on_delete(
+    client: httpx.AsyncClient, engine: Engine
+) -> None:
+    """An action is a route (#52): nothing in the query string turns a stop
+    into a restart."""
+    r = await client.delete(f"/api/sessions/{proj('vessel')}?restart=1", headers=HEADERS)
+    assert r.status_code == 202
+    assert r.json()["restarting"] is False
+    assert engine.restarts.pending == {}

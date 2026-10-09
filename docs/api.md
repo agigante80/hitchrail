@@ -93,6 +93,7 @@ See `CHANGELOG.md`.
 | `POST` | `/api/projects` | create a folder |
 | `POST` | `/api/sessions/{name}` | start a session |
 | `DELETE` | `/api/sessions/{name}` | begin a graceful stop, returns immediately |
+| `POST` | `/api/sessions/{name}/restart` | begin a graceful stop and start a new agent once it has exited, returns immediately |
 | `POST` | `/api/sessions/{name}/kill` | kill now, valid at any point |
 | `POST` | `/api/sessions/{name}/signal` | SIGTERM to a detached agent nothing addressable owns, through a pidfd |
 | `POST` | `/api/sessions/{name}/signal/force` | SIGKILL to the same, a second explicit request |
@@ -111,6 +112,21 @@ client that meant to be gentle is never one query parameter away from a kill.
 The graceful call returns as soon as the request is sent and reports progress
 over the event stream like every other state change.
 
+**Restart is a stop that starts (#472).** `POST /api/sessions/{name}/restart`
+is the graceful stop above, unchanged, plus a mark that a new agent follows. It
+answers what `DELETE` answers for the same row, with the same codes: 404
+`unknown_project`, 423 `self_protected`, 409 `not_running` for a `stopped` row,
+409 `no_agent` for a `stale` or `detached` one, 409 `stop_unsafe`, 503
+`machine_unreadable` and 503 `root_unavailable`, and 202 with the row, which
+reads `stopping` and `restarting`. A refusal marks nothing. The mark is
+in the server's memory and never persisted. The server starts the agent
+exactly once, and only from a `stopped` it derived with the stop over; a second
+`restart` while one is pending answers as a second `DELETE` does and still holds
+one start. A timeout, a `kill`, or `end_anyway` ending the agent clears the mark
+and starts nothing. A start that is refused is reported in `restart_refused`
+and is not retried. The new run is a fresh conversation, as `POST
+/api/sessions/{name}` makes one.
+
 With `stop_prompt` set (#242), the graceful call first types that prompt into
 the agent's box WITHOUT interrupting it, so it runs after the task in flight;
 the row reads `stopping_phase: "closing"`. When the agent has finished both,
@@ -120,12 +136,25 @@ and never retypes the prompt; one that arrives while the prompt is still being
 typed answers 202 and types nothing. If a message is already queued in the
 box, the call is 409 `stop_unsafe` and nothing is typed after the clear.
 
+If the agent answers the graceful request with its one menu about background
+work (#453), the stop presses `Enter` on "Exit and stop tasks" and on nothing
+else: any other dialog, or that menu with a different option selected, is left
+for a person and the row reports it as waiting on one.
+
 With `stop_policy = "end_anyway"` (#239, off by default), a stop whose
 `stop_timeout` runs out while the agent's screen shows a prompt on two looks
-a second apart (#429, so a redraw is not taken for one) is killed by the server, exactly as `POST /api/sessions/{name}/kill` would, and the row is
-announced `stopped`. A screen showing anything else reports as it always has.
-Nothing is ever typed into the prompt. The policy is the one in force when the
-stop was requested (#419): a change during the wait applies to the next stop.
+a second apart (#429, so a redraw is not taken for one) is sent a hangup
+through a handle on that agent, which ends it as `POST
+/api/sessions/{name}/kill` would, and the row is announced `stopped`. An agent
+that handles the hangup and stays alive is reported as any other expired stop
+(#425). A screen showing anything else reports as it always has. Nothing is
+ever typed into the prompt. The policy is the one in force when the stop was
+requested (#419): a change during the wait applies to the next stop.
+
+The two looks are not a guarantee. A prompt shape that stays on the screen for
+both of them is ended, whatever put it there: nothing the server can read
+tells a question that is not an ordinary input box apart from output that
+looks like one and happens to stay. The settle only removes a redraw.
 
 ### The listing payload
 
@@ -170,6 +199,8 @@ One project, as `projects` lists it, as `POST` and `DELETE` on
 | `stop_typing` | while `stopping`: the wrap up prompt or the exit is being typed into the pane this moment, so a `DELETE` now answers 202 and does nothing; false otherwise |
 | `stop_age_s` | while `stopping`: seconds since the stop was requested, as an AGE measured on the server's monotonic clock, never an instant; a client adds it to its own clock at the moment it received the row. A repeated `DELETE` on an `exiting` row starts a new stop and resets it; Exit now does not. Null otherwise |
 | `stop_policy` | while `stopping`: the `stop_policy` the stop was requested under, which is the one its expiry acts on whatever `server.stop_policy` says now (#419); null otherwise |
+| `restarting` | a `restart` is pending: a new agent will be started once this stop ends with the agent gone (#472); false otherwise |
+| `restart_refused` | the reason the start that followed a restart was refused (the memory guard, say); the row is then `stopped`, and nothing is retried; null otherwise, and cleared when the row is anything but `stopped` |
 | `protected` | the self project; refuses every mutating route |
 | `awaiting_trust` | the agent is sitting on its trust prompt |
 | `awaiting_input` | the agent is sitting on a question only a person can answer |
