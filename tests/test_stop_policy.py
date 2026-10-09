@@ -434,10 +434,10 @@ def test_the_kill_is_journalled_before_a_read_that_fails(
     with caplog.at_level(logging.INFO, logger="hitchrail"):
         assert expire_on(engine, tmux, clock, MODAL_PANE) == [VESSEL]
     assert agents.ended == [VESSEL]
-    kill_lines = [r.getMessage() for r in caplog.records if "killed pid" in r.getMessage()]
+    kill_lines = [r.getMessage() for r in caplog.records if "sent SIGHUP" in r.getMessage()]
     assert kill_lines == [
         f"stop {VESSEL}: ended on a prompt after {engine.prefs.stop_timeout():g}s; "
-        f"killed pid {PANE + 1}, as stop_policy end_anyway says"
+        f"sent SIGHUP to pid {PANE + 1}, as stop_policy end_anyway says"
     ]
     assert "expired but the machine could not be read" not in caplog.text
 
@@ -478,7 +478,7 @@ def test_a_redraw_that_reads_as_a_modal_once_is_not_ended(
     assert killed(engine, tmux) == []
     assert ender(engine).signals == []
     assert engine.get(VESSEL).state is State.RUNNING
-    assert "killed pid" not in caplog.text
+    assert "sent SIGHUP" not in caplog.text
     assert "did not hold" in caplog.text
 
 
@@ -856,3 +856,22 @@ def test_a_failing_pidfd_close_after_the_signal_does_not_lose_the_pass(root: Pat
     assert ender(engine).signals == [signal.SIGHUP]
     assert ender(engine).ended == [VESSEL]
     assert expired == [VESSEL]
+
+
+def test_an_agent_that_outlives_the_sighup_is_journalled_and_reported_as_ask(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#425. The journal said "killed" for an agent that handled the signal.
+    Now it says what was done, then that the agent survived, and the expiry
+    falls through to the report `ask` gives."""
+    engine, tmux, clock = policy_engine(root, stop_policy="end_anyway")
+    agents = ender(engine)
+    agents.send = lambda pidfd, sig: FakePidfd.send(agents, pidfd, sig)  # type: ignore[method-assign]
+    engine._pidfd = replace(engine._pidfd, send_signal=agents.send)
+    with caplog.at_level(logging.INFO, logger="hitchrail"):
+        expired = expire_on(engine, tmux, clock, MODAL_PANE)
+    assert agents.signals == [signal.SIGHUP] and agents.ended == []
+    assert expired == [VESSEL]
+    assert f"pid {PANE + 1} outlived the SIGHUP" in caplog.text
+    assert "gave up waiting" in caplog.text
+    assert "killed pid" not in caplog.text

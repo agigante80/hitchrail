@@ -310,7 +310,8 @@ def end_anyway(engine: EngineSeam, name: str, pid: int) -> bool:
     # Before any read that can fail (#412): the kill happened whatever the
     # machine says next.
     logger.info(
-        "stop %s: ended on a prompt after %gs; killed pid %d, as stop_policy end_anyway says",
+        "stop %s: ended on a prompt after %gs; "
+        "sent SIGHUP to pid %d, as stop_policy end_anyway says",
         name,
         engine.prefs.stop_timeout(),
         pid,
@@ -327,6 +328,17 @@ def end_anyway(engine: EngineSeam, name: str, pid: int) -> bool:
         logger.warning("stop %s: killed, but the machine could not be read after", name)
         return True
     engine.announce(settled)
+    if settled.pid == pid:
+        # An agent can handle SIGHUP. Saying so, and returning False, lets
+        # `expire_stops` report the expiry as `ask` does: still waiting.
+        logger.warning(
+            "stop %s: pid %d outlived the SIGHUP for %gs; "
+            "reported as a stop waiting on a person",
+            name,
+            pid,
+            engine.kill_grace,
+        )
+        return False
     return True
 
 

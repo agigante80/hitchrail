@@ -195,7 +195,8 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     "sweep.py": 479,
     # signals.py: 397 when #274 moved the pidfd path here. 414 for #426: `_close`,
     # and the note on why a close that fails must not replace the outcome.
-    "signals.py": 414,
+    # 426 for #425: the survivor after the wait, journalled and reported as ask.
+    "signals.py": 426,
     # tmux.py is the module that encodes what tmux actually does
     # rather than what its manual implies, and every entry is a footgun
     # that cost real debugging: prefix matching targets, the colon
