@@ -122,17 +122,26 @@ once, at its end, under the bounded loop. Its lows go to Backlog.
 
 Serial, in this order, one implementer.
 
-- [ ] **Task 224, #427.** Stop clears only a typing flag it still owns.
-- [ ] **Task 225, #431.** The refused Exit now during a failing Kill, tested.
-- [ ] **Task 226, #432.** A Stop during a Kill in flight sees a stop in
-      flight; one sequence typed.
-- [ ] **Task 227, #430.** A per name attention epoch, or one counter kept by a
-      tested, written decision beside `_flag_waiting`.
-- [ ] **Task 228, #426.** A failing pidfd close is logged, and the ticker
+- [x] **Task 224, #427.** Stop clears only a typing flag it still owns.
+- [x] **Task 225, #431.** The refused Exit now during a failing Kill, tested.
+- [x] **Task 226, #432.** A Stop during a Kill in flight sees a stop in
+      flight; one sequence typed. Differs: a `_kill_held` table beside
+      `_stopping`, not a placeholder in it, since a placeholder would list
+      the row `stopped` with a marker present and break #387.
+- [x] **Task 227, #430.** A per name attention epoch, or one counter kept by a
+      tested, written decision beside `_flag_waiting`. Differs: a per name
+      epoch (`attention_cleared`) for `_flag_waiting`; `scan_for_stuck` keeps
+      its one counter, argued in `_flag_waiting`.
+- [x] **Task 228, #426.** A failing pidfd close is logged, and the ticker
       carries on; both callers.
-- [ ] **Task 229, #425.** "sent SIGHUP to", and a survivor journalled.
-- [ ] **Task 230, #444.** One settle per pass, the second look's wording, the
+- [x] **Task 229, #425.** "sent SIGHUP to", and a survivor journalled.
+      Differs: a survivor also makes `end_anyway` return False, so the `ask`
+      report runs.
+- [x] **Task 230, #444.** One settle per pass, the second look's wording, the
       pid recheck tested, the persistent ornament written into `docs/api.md`.
+      Differs: the shared settle is not built; the cost is written beside the
+      loop with the reason. Finding 5 (a non tmux capture error escaping
+      `_pane_needs_a_person`) is left for a ticket.
 
 ### Batch 2: the guards and the tiers that prove it, tasks 231 to 235
 

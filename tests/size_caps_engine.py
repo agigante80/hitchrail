@@ -192,7 +192,8 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # further, since the three entry points share the look at a pane.
     # 468 after #424: the signatures take EngineSeam, which wrapped three lines.
     # 479 for #430: why `_flag_waiting` compares a name's clear, not the counter.
-    "sweep.py": 479,
+    # 488 for #444: why the settle is per candidate, and the second look believed.
+    "sweep.py": 488,
     # signals.py: 397 when #274 moved the pidfd path here. 414 for #426: `_close`,
     # and the note on why a close that fails must not replace the outcome.
     # 426 for #425: the survivor after the wait, journalled and reported as ask.

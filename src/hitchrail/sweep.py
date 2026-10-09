@@ -208,8 +208,8 @@ def _held_by_a_second_look(
     first look found a prompt (#429).
 
     One look is not enough: while the box is not drawn, an output line
-    carrying the ornament reads as a modal for the length of a redraw, and
-    the agent writes that line itengine. Ending on it kills a working agent
+    that looks like a prompt reads as a modal for the length of a redraw, and
+    the agent writes that line itself. Ending on it kills a working agent
     for a question nobody asked. A modal is still there a settle later; a
     redraw is not. No lock is held across the sleep or the capture, as the
     sweep does not hold one across its reads.
@@ -407,24 +407,33 @@ def expire_stops(engine: EngineSeam) -> list[str]:
         seen = _agent_pid(engine, name) if end_anyway else None
         epoch = engine.attention_epoch
         waiting = _pane_needs_a_person(engine, name)
-        if waiting:
-            _flag_waiting(engine, name, epoch)
         # #239. The operator's answer, given in advance, to a stop that
         # ran out of time on a question: the kill the dialog offers at
         # this moment, taken without the tap. Only on THIS look at the
         # pane, never the sweep's overlay, and never a key typed into the
         # prompt. The protected project is refused after the handle.
+        #
+        # The settle sleeps once per candidate, so N prompts expiring in
+        # one pass hold the sweep about N seconds (#444). Accepted: a shared
+        # settle needs every first look taken up front, which the rule above
+        # refuses because a later row's look would be stale by its kill, and
+        # it takes several stops expiring together under end_anyway.
         if waiting and seen is not None:
             if _held_by_a_second_look(engine, name, marker, seen):
                 if signals.end_anyway(engine, name, seen):
                     continue
             else:
+                # The second look is the one believed (#444): neither the
+                # flag nor the report below says the screen was waiting.
+                waiting = False
                 logger.info(
                     "stop %s: end_anyway did not hold: a second look, %gs "
                     "later, did not agree it was waiting on a person",
                     name,
                     engine.end_anyway_settle,
                 )
+        if waiting:
+            _flag_waiting(engine, name, epoch)
         person = "; its screen is waiting on a person" if waiting else ""
         try:
             session = engine.get(name)

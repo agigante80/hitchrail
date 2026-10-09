@@ -480,6 +480,10 @@ def test_a_redraw_that_reads_as_a_modal_once_is_not_ended(
     assert engine.get(VESSEL).state is State.RUNNING
     assert "sent SIGHUP" not in caplog.text
     assert "did not hold" in caplog.text
+    # #444: the second look is the one that is believed, in the flag and in
+    # the wording, so the report does not contradict the line before it.
+    assert engine.get(VESSEL).awaiting_input is False
+    assert "its screen is waiting on a person" not in caplog.text
 
 
 def test_a_prompt_on_both_looks_is_ended(root: Path) -> None:
@@ -574,6 +578,26 @@ def test_a_row_restarted_between_the_looks_is_not_ended(root: Path) -> None:
     engine.expire_stops()
     assert killed(engine, tmux) == []
     assert engine.get(VESSEL).pid == RESTARTED_PANE + 1
+
+
+def test_the_pid_recheck_alone_stops_a_row_restarted_between_the_looks(root: Path) -> None:
+    """#444. The pane still shows a modal on the second look, so the screen
+    cannot refuse, and the handle in `signals.end_anyway` would refuse a
+    stale pid anyway. Only the comparison after the settle keeps a handle
+    from being opened on the old agent at all: no event reaches the seam."""
+    engine, tmux, clock = policy_engine(root, stop_policy="end_anyway")
+    engine.stop(VESSEL)
+    tmux.pane_text[VESSEL] = MODAL_PANE
+    clock.advance(engine.prefs.stop_timeout() + 1)
+    sleep = engine._sleep
+
+    def restart_in_the_settle(seconds: float) -> None:
+        sleep(seconds)
+        restart(tmux)
+
+    engine._sleep = restart_in_the_settle
+    engine.expire_stops()
+    assert ender(engine).events == []
 
 
 # -- #409: chosen on the settings page, kept in the state file ------------
