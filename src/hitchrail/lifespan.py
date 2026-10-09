@@ -78,6 +78,15 @@ def make_lifespan(
             while True:
                 await asyncio.sleep(SWEEP_INTERVAL_S)
                 try:
+                    # #472. BEFORE the expiry: an agent that exited a moment
+                    # before its stop's timeout is started from, where after it
+                    # the expiry would clear the restart that had worked.
+                    # Awaited, as the expiry is; with nothing pending it is one
+                    # dict read.
+                    await in_thread(engine.advance_restarts)
+                except Exception:
+                    logger.exception("restart sweep failed; the timer continues")
+                try:
                     await in_thread(engine.expire_stops)
                     # #100. Here rather than on the listing route, which is the
                     # decision `scan_for_stuck` documents: the cost then scales

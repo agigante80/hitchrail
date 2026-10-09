@@ -44,6 +44,7 @@ from hitchrail.derive import Machine
 from hitchrail.engine_seam import SeamMembers
 from hitchrail.events import EventBus
 from hitchrail.procs import ProcTable, snapshot
+from hitchrail.restart import RestartMembers, RestartOverlay
 from hitchrail.roots import RootError, split_identifier
 from hitchrail.sessions import (
     AlreadyRunning,
@@ -114,7 +115,7 @@ def _no_session_here(session: Session, consequence: str) -> str:
 ANSWER_KEYS = claude_ipc.ANSWER_KEYS
 
 
-class Engine(SeamMembers):
+class Engine(SeamMembers, RestartMembers):
     """Derivation, and in later tickets the session lifecycle."""
 
     def __init__(
@@ -168,6 +169,7 @@ class Engine(SeamMembers):
         # first Stop still typing. Under `_stopping_guard`; read only by
         # `stop`'s claim, never by derivation, which must read `stopped`.
         self._kill_held: dict[str, StopMarker] = {}
+        self._restarts = RestartOverlay()  # #472, under `_stopping_guard`; restart.py
         # Names whose LAST stop ran out of patience with the agent showing
         # something that needs a person (#101). In memory and not persisted,
         # for the same reason the stop marker is not: it describes one attempt,
@@ -288,8 +290,8 @@ class Engine(SeamMembers):
             needs_a_person = self._needs_a_person()
         # `self._stopping` is passed unguarded on purpose: see the note on
         # `_stopping_guard`. `derive` only asks `name in stopping`.
-        session = derive.derive(
-            name, machine, self.config, self.tmux, self._stopping, needs_a_person
+        session = self._restarts.overlay(
+            derive.derive(name, machine, self.config, self.tmux, self._stopping, needs_a_person)
         )
         # **The membership test comes first, and it is not a micro optimisation
         # (#178).** The note on `_stopping_guard` says `_derive` reads
@@ -1040,6 +1042,7 @@ class Engine(SeamMembers):
         # not take the indicator of a stop still in flight with it.
         with self._stopping_guard:
             marker = self._stopping.pop(name, None)
+            self._restarts.cancel(name)  # before the kill: restart.py says why
             if marker is not None:
                 self._kill_held[name] = marker
         failed = False
@@ -1064,6 +1067,7 @@ class Engine(SeamMembers):
         # A Stop that landed while the kill ran marked a row that is gone.
         with self._stopping_guard:
             self._stopping.pop(name, None)
+            self._restarts.cancel(name)
         updated = self._await_gone(name)
         self._announce(updated)
         return updated

@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from hitchrail.derive import Machine
     from hitchrail.events import EventBus
     from hitchrail.procs import ProcTable
+    from hitchrail.restart import RestartOverlay
     from hitchrail.sessions import Session
     from hitchrail.settings import Preferences
     from hitchrail.signals import Seam
@@ -122,6 +123,16 @@ class EngineSeam(Protocol):
         """Refuse a name the root has never heard of."""
         ...
 
+    # -- the two halves of a restart (#472) ---------------------------------
+
+    def stop(self, name: str) -> Session:
+        """Ask the agent to finish: the graceful stop, nothing killed."""
+        ...
+
+    def start(self, name: str, acknowledged: bool = False) -> Session:
+        """Start an agent in a folder, once, with the machine's consent."""
+        ...
+
     # -- the overlays the sweep reads and writes ------------------------------
 
     @property
@@ -152,6 +163,11 @@ class EngineSeam(Protocol):
     @property
     def attention_cleared(self) -> dict[str, int]:
         """The epoch of each name's last clear. Under `stopping_guard` (#430)."""
+        ...
+
+    @property
+    def restarts(self) -> RestartOverlay:
+        """Restarts pending and refused (#472). Written under `stopping_guard`."""
         ...
 
     def drop(self, name: str, marker: StopMarker) -> None:
@@ -185,6 +201,7 @@ class SeamMembers:
         _awaiting_input: set[str]
         _attention_epoch: int
         _attention_cleared: dict[str, int]
+        _restarts: RestartOverlay
         _bus: EventBus | None
         _clock: Callable[[], float]
         _sleep: Callable[[float], None]
@@ -228,6 +245,10 @@ class SeamMembers:
     @property
     def attention_cleared(self) -> dict[str, int]:
         return self._attention_cleared
+
+    @property
+    def restarts(self) -> RestartOverlay:
+        return self._restarts
 
     def now(self) -> float:
         return self._clock()
