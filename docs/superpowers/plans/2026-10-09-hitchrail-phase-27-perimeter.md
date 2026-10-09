@@ -147,23 +147,41 @@ Serial, in this order, one implementer. Security auditor review at the end.
 
 ### The close, task 251
 
-- [ ] **Task 251.** The perimeter watched on a real server, private root,
+- [x] **Task 251.** The perimeter watched on a real server, private root,
       loopback socket: `localhost.localdomain` refused with the named 403
       under a Secure cookie, `localhost` granted, a forced exception's
       journal line read with its query redacted and its frames intact.
+      Held 2026-10-10 on 127.0.0.1:8799 with `--allow-host
+      localhost.localdomain --allow-origin https://box.lan`: curl's grant
+      from `localhost.localdomain` got the 403 naming the origin, `localhost`
+      got a `Secure` cookie, and a real Chromium agreed (not a secure context,
+      no cookie; a secure context, a cookie and a 200 listing). A forced
+      exception carrying `?token=` logged `?(query omitted)` with its 22 frames
+      and no trace of the token. The watch also found that the banner still
+      offers the refused link and the grant page calls the 403 a wrong key,
+      both since #391; filed as #493 for Phase 28.
 
 ## Done looks like
 
-- [ ] Every task ticked, or marked MOVED OUT or NOT BUILT with an issue number
-- [ ] The origin is parsed by one function; a grep test finds no other
+- [x] Every task ticked, or marked MOVED OUT or NOT BUILT with an issue number
+- [x] The origin is parsed by one function; a grep test finds no other
       `urlsplit` of an origin in `src/`
-- [ ] #436 and #440 each have a test seen failing with the fix reverted
-- [ ] `settings.py` is under 400 lines or under a cap lower than 592, and the
+- [x] #436 and #440 each have a test seen failing with the fix reverted
+- [x] `settings.py` is under 400 lines or under a cap lower than 592, and the
       state half is its own module
-- [ ] No cap in `ENGINE_LAYER_CAPS` or `OUTER_LAYER_CAPS` went up this phase
-      without a reason in its commit
-- [ ] Task 251's watch held
-- [ ] Roadmap says done, milestone closed, `check-phases.sh` passes
+- [x] No cap in `ENGINE_LAYER_CAPS` or `OUTER_LAYER_CAPS` went up this phase
+      without a reason in its commit. `config.py` ended at 848 against 849;
+      `cli.py` rose from 1118 to 1130, each step reasoned in its cap comment
+      (#436's advice, #464's wording and its review fix)
+- [x] Task 251's watch held
+- [x] Roadmap says done, milestone closed, `check-phases.sh` passes
+
+Closed 2026-10-10 as **done**. Every planned task landed except #441, not
+built because its premise was false. #464's remainder, a failed second
+listing, left as the plan said and is #491 in Phase 23. Each batch was
+reviewed once, and only batch 3 needed round 2, whose finding in the round 1
+fix is #492. The lows are #487, #488 and #489; the log coverage gap found
+beside #440 is #490; the watch's finding is #493. Shipped in 0.17.0.
 
 ## Out of scope
 

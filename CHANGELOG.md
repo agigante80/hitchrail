@@ -32,14 +32,16 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+## 0.17.0 - 2026-10-10
+
 ### Changed
 
 - `hitchrail update-plugins` now says on stderr, after a Ctrl-C or a failure
   partway, that the rows it printed are provisional: `updated` means only that
   the update ran cleanly, not that the version moved. An interrupt also
   says that any update still running is the plugin after the last `...`
-  line, since that line appears when an update finishes. Neither is said
-  when no update had finished yet (#464).
+  line, since that line appears when an update finishes. A Ctrl-C or a
+  failure before any row was printed says neither (#464).
 - The journal's redaction of a request's query string now covers a traceback
   as well as the access line. An error logged with an exception whose message
   held the request target used to print a `?token=` query. Each traceback line
@@ -58,8 +60,11 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
   used to be granted a cookie the browser then dropped, so every call after it
   was a 401. Browsers treat `localhost` and `*.localhost` as secure contexts
   and not `localhost.localdomain`. If you reach Hitchrail that way, browse
-  `http://localhost:8787` instead; the startup block says so. Who must present
-  a token is unchanged (#436).
+  `http://localhost:8787` instead; the startup block says so. The same rule
+  now keeps the plain origin of an `--allow-host` ending in `.localhost`,
+  which used to be withheld, and withholds `::ffff:127.0.0.1`'s, which a
+  browser does not treat as secure either. Who must present a token is
+  unchanged (#436).
 
 ## 0.16.0 - 2026-10-09
 

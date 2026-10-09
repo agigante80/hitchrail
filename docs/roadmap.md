@@ -46,27 +46,6 @@ suite is green. It is finished when the behaviour has been watched working in
 the running application, on the phone it is for. See
 [`tech-guidelines.md`](tech-guidelines.md) section 7.
 
-## Phase: Phase 27: The perimeter's loose ends
-state: open
-plan: docs/superpowers/plans/2026-10-09-hitchrail-phase-27-perimeter.md
-
-Close what Phase 25's batches 4 to 6 found in the perimeter: the config and
-its origin parsing, the state file, the log filter and the server's shutdown.
-
-Two of them are security findings: a `localhost.localdomain` origin kept on
-plain http under a Secure cookie (#436), and a log filter that never reads an
-exception's text (#440). The origin parsing exists three times and the copies
-can disagree (#439); `settings.py` is past the guideline along a seam that is
-already there (#443). Each was filed low or medium and none is urgent alone,
-which is why they collected.
-
-Done when the origin is parsed in one place that every caller uses, each
-security finding has a test that fails if the fix is reverted, and
-`settings.py` is split along config versus state.
-
-Placed before Phase 23, which adds the operator's agent choice to the config
-this phase untangles.
-
 ## Phase: Phase 28: The page's loose ends
 state: planned
 plan:
