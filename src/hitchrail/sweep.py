@@ -276,10 +276,11 @@ def advance_wrap_ups(engine: EngineSeam) -> list[str]:
             marker.exit_at, marker.ceiling, marker.typing = now, ceiling, True
             marker.phase = "exiting"
         logger.info(
-            "stop %s: wrap up %s after %.0fs",
+            "stop %s: wrap up %s after %.0fs (%s)",
             name,
             "hit the ceiling" if ceiling else "finished",
             now - marker.began,
+            watch.readings(),
         )
         try:
             claude_ipc.request_stop(engine.tmux, name, settle=engine.sleep)

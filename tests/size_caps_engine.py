@@ -26,6 +26,11 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # #311: the second listing that splits `updated` from `current`, and why
     # every way it can fail leaves `updated` as it was.
     "claude_ipc/plugins.py": 639,
+    # screen.py crossed the guideline for #475 (394 to 441): the rule that finds
+    # the live input box between its two rules, the captured reason the row
+    # count alone could not be it, and the watch's counts of what it read. The
+    # file is one subject, the vendor's screen, and its length is those captures.
+    "claude_ipc/screen.py": 441,
     # +_await_gone, +list(...), +#47 split, +#64, +#66, and +#89's one
     # `except` arm: the adapter can now decline to type, and the marker has
     # to come back the same way a vanished tmux takes it back.
@@ -186,7 +191,8 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # are the reason the code is shaped as it is. It does not want splitting
     # further, since the three entry points share the look at a pane.
     # 468 after #424: the signatures take EngineSeam, which wrapped three lines.
-    "sweep.py": 468,
+    # 469 for #475: the ceiling line carries what the watch read.
+    "sweep.py": 469,
     # tmux.py is the module that encodes what tmux actually does
     # rather than what its manual implies, and every entry is a footgun
     # that cost real debugging: prefix matching targets, the colon
