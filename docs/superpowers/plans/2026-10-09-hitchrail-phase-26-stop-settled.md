@@ -159,8 +159,10 @@ Serial, in this order, one implementer.
       launcher's exec error reaches its caller.
       Built as a close-on-exec pipe the launcher reads until the exec; item 3
       declined in a ticket comment.
-- [ ] **Task 235, #445.** The kill watch catches `visibility`, `opacity` and
+- [x] **Task 235, #445.** The kill watch catches `visibility`, `opacity` and
       `inert`; one frame loop; an exact phase marker if the page has one.
+      Built with the page's own marker, `dialog.dataset.waiting === "waiting"`
+      (`wait.js` sets it), so the text match is gone.
 
 ### Batch 3: the dialog, the exit menu and the wrap up's watch, tasks 236 to 239
 
