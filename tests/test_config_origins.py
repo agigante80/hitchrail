@@ -502,3 +502,22 @@ def test_no_module_but_hostnames_takes_an_origin_apart() -> None:
             ):
                 found.add(path.name)
     assert found == {"hostnames.py"}
+
+
+def test_the_origins_are_derived_from_the_hosts_they_are_given_not_from_assignment_order(
+    tmp_path: Path,
+) -> None:
+    """#437. `__post_init__` assigned `_allowed_hosts` and only then derived
+    the origins, and the derivation read the field. Derive first and the field
+    is still `()`, nothing is withheld, and #391's refusal disappears with
+    every other test green. Reproduced here as that swapped order: the field
+    is empty when the derivation runs, and the hosts arrive as an argument."""
+    cfg = _proxied(tmp_path, ("https://box.lan",))
+    hosts = cfg._resolve_allowed_hosts()
+    object.__setattr__(cfg, "_allowed_hosts", ())
+    object.__setattr__(cfg, "_allowed_origins", frozenset())
+    derived = cfg._derive_allowed_origins(hosts)
+    assert "http://box.lan:8787" not in derived
+    assert "https://box.lan" in derived
+    assert cfg._withheld_among(hosts) == ("box.lan",)
+    assert cfg._withheld_among(()) == ()

@@ -300,8 +300,9 @@ class Config:
                 "API can run code as you"
             )
 
-        object.__setattr__(self, "_allowed_hosts", self._resolve_allowed_hosts())
-        object.__setattr__(self, "_allowed_origins", self._derive_allowed_origins())
+        hosts = self._resolve_allowed_hosts()
+        object.__setattr__(self, "_allowed_hosts", hosts)
+        object.__setattr__(self, "_allowed_origins", self._derive_allowed_origins(hosts))
 
     def _check_token(self) -> None:
         """`None` means no token. `""` is a token that matches nothing safely.
@@ -431,9 +432,15 @@ class Config:
         than restating it, since two readers of one rule drift (#269). A
         loopback host is kept: Chrome and Firefox send a `Secure` cookie to
         `http://localhost`."""
+        return self._withheld_among(self._allowed_hosts)
+
+    def _withheld_among(self, hosts: tuple[str, ...]) -> tuple[str, ...]:
+        """The rule, over the hosts it is handed. The derivation passes its
+        own rather than reading the field, so no order of assignments in
+        `__post_init__` can leave it reading `()` and withhold nothing (#437)."""
         if self.tls or not self.cookie_is_secure:
             return ()
-        return tuple(h for h in self._allowed_hosts if not is_loopback_host(h))
+        return tuple(h for h in hosts if not is_loopback_host(h))
 
     def _check_tls(self) -> None:
         """One flag without the other is a configuration error, not half a
@@ -785,7 +792,7 @@ class Config:
             )
         )
 
-    def _derive_allowed_origins(self) -> frozenset[str]:
+    def _derive_allowed_origins(self, hosts: tuple[str, ...]) -> frozenset[str]:
         """Exactly the origins we can know, plus exactly the ones configured.
 
         We know our own bind: our scheme, the hosts we answer to, our port.
@@ -816,9 +823,9 @@ class Config:
         them back: `--allow-origin http://box.lan:8787` given explicitly,
         which also turns `Secure` off, because the cookie rule reads it.
         """
-        withheld = set(self.plain_origins_withheld)
+        withheld = set(self._withheld_among(hosts))
         origins: set[str] = set()
-        for host in self._allowed_hosts:
+        for host in hosts:
             if host in withheld:
                 continue
             # `self.scheme`, not "http": with TLS on, a browser sends

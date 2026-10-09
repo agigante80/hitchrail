@@ -377,7 +377,9 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # 839 for #439: the five copies of the origin parse became `split_origin`
     # and `origin_parts` in hostnames.py, which took the cookie rule's reader
     # with them.
-    "config.py": 839,
+    # 846 for #437: the rule over a hosts argument, so assignment order cannot
+    # matter.
+    "config.py": 846,
     # 409, nine lines over, down from 542. #115 deleted the `?token=`
     # carrier: 135 lines once the two blocks inside `TokenMiddleware`
     # that only served it are counted.
