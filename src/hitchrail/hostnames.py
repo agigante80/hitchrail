@@ -18,6 +18,7 @@ import ipaddress
 import re
 import socket
 from collections.abc import Callable
+from urllib.parse import SplitResult, urlsplit
 
 LOOPBACK_NAMES = frozenset({"localhost", "localhost.localdomain"})
 
@@ -80,6 +81,41 @@ def normalise_host(raw: str) -> str:
     # Unconditional: see the docstring. A `len(value) > 1` guard looked like
     # safety and was the bug.
     return value.rstrip(".")
+
+
+def split_origin(entry: str) -> SplitResult:
+    """The one place an operator's origin string is taken apart (#439).
+
+    Trimmed, a trailing slash dropped, lowercased, then `urlsplit`. Five call
+    sites once each restated that recipe, and one of them skipped
+    `normalise_host`, so the CLI's https host match could disagree with the
+    allowlist about a root dot spelling. A guard in `test_config_origins.py`
+    fails when `urlsplit` is called anywhere else in `src/`.
+
+    Raises `ValueError` as `urlsplit` does (an unbalanced bracket); the
+    callers decide whether that is a refusal or something to skip. The host
+    comes back as `parts.hostname`, lowercased but with any root dot, so
+    callers pass it through `normalise_host`.
+    """
+    return urlsplit(entry.strip().rstrip("/").lower())
+
+
+def origin_parts(entry: str, *, loopback: bool = False) -> tuple[str, str] | None:
+    """An allowed origin as `(scheme, host)`, or None when it is unparseable or
+    loopback (unless `loopback` asks to keep it).
+
+    One reader for the cookie rule, the TLS refusal and the CLI's https hosts,
+    so they agree about what counts as somebody else's browser (#269). The host
+    goes through `normalise_host`, as `_allowed_hosts` does (#439).
+    """
+    try:
+        parts = split_origin(entry)
+    except ValueError:
+        return None
+    host = normalise_host(parts.hostname) if parts.hostname else ""
+    if not host or (is_loopback_host(host) and not loopback):
+        return None
+    return parts.scheme, host
 
 
 def normalise_origin(raw: str) -> str:

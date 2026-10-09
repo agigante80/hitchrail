@@ -15,7 +15,7 @@ from dataclasses import replace
 from importlib.metadata import PackageNotFoundError, metadata
 from pathlib import Path
 from typing import NamedTuple
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote
 
 import uvicorn
 from starlette.applications import Starlette
@@ -30,7 +30,7 @@ from hitchrail.config import (
 )
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
-from hitchrail.hostnames import normalise_host, origin_forms, reachable_hosts
+from hitchrail.hostnames import origin_forms, reachable_hosts
 from hitchrail.roots import Root, RootError, parse_root_argument
 from hitchrail.server import create_app
 
@@ -604,17 +604,13 @@ def startup_block(config: Config, found: Preflight, level: str) -> list[str]:
     # forwarder needs to learn that before the phone does. Not for a host
     # that is also the host of an https origin: that is phone-access.md's
     # own deployment (loopback bind, `--allow-host` and `--allow-origin
-    # https://` for one name), nobody uses the plain origin there, and the
-    # advice to give it would invite the one change that drops Secure from a
-    # working setup. The filter is here and not in `plain_origins_withheld`,
-    # which `_derive_allowed_origins` reads: the 403 must still name a
-    # withheld origin whenever a plain one is refused.
-    https_hosts = {
-        normalise_host(parts.hostname)
-        for entry in config.extra_origins
-        if (parts := urlsplit(entry.strip().rstrip("/").lower())).scheme == "https"
-        and parts.hostname
-    }
+    # https://` for one name), and the advice to give the plain origin would
+    # drop Secure from a working setup. The mixed case (an https proxy for
+    # `box.lan` AND a plain forwarder on `box.lan:8787`) is quiet too, kept
+    # deliberately (#439): the allowlist records no port to tell them apart,
+    # and the forwarder's grant meets the named 403. The filter is here, not
+    # in `plain_origins_withheld`, which the 403 reads.
+    https_hosts = config.https_origin_hosts
     for host in config.plain_origins_withheld:
         if host in https_hosts:
             continue

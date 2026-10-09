@@ -12,7 +12,6 @@ import ipaddress
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from hitchrail.gateway import normalise_mac
 from hitchrail.hostnames import (
@@ -28,6 +27,8 @@ from hitchrail.hostnames import (
     normalise_host,
     normalise_origin,
     origin_forms,
+    origin_parts,
+    split_origin,
 )
 from hitchrail.projectnames import explain_name
 from hitchrail.roots import Root, RootError, check_roots, split_identifier
@@ -118,25 +119,12 @@ def remote_reach(
         # constructing a Config, though, so a bad entry must not crash here on
         # its way to that refusal.
         try:
-            hostname = urlsplit(entry.strip().rstrip("/")).hostname
+            hostname = split_origin(entry).hostname
         except ValueError:
             continue
         if hostname and not is_loopback_host(hostname):
             return f"--allow-origin {entry} says something outside this machine can reach it"
     return None
-
-
-def _origin_parts(entry: str) -> tuple[str, str] | None:
-    """An allowed origin as `(scheme, host)`, or None when it is loopback or
-    unparseable. One reader for both, so the cookie rule and the TLS refusal
-    agree about what counts as somebody else's browser (#269)."""
-    try:
-        parts = urlsplit(entry.strip().rstrip("/").lower())
-    except ValueError:
-        return None
-    if not parts.hostname or is_loopback_host(parts.hostname):
-        return None
-    return parts.scheme, parts.hostname
 
 
 # The one setting that may arrive in the environment, and the only one that
@@ -425,8 +413,16 @@ class Config:
     def proxied_origins_are_https(self) -> bool:
         """The origins' half of `cookie_is_secure`, apart from the bind, so
         the CLI's advice to bind loopback asks the rule it describes (#394)."""
-        proxied = [parts for entry in self.extra_origins if (parts := _origin_parts(entry))]
+        proxied = [parts for entry in self.extra_origins if (parts := origin_parts(entry))]
         return bool(proxied) and all(scheme == "https" for scheme, _ in proxied)
+
+    @property
+    def https_origin_hosts(self) -> frozenset[str]:
+        """Every host an `--allow-origin https://` entry names, normalised as
+        `_allowed_hosts` is, loopback included. The CLI asks this rather than
+        parsing the entries again (#439)."""
+        parts = (origin_parts(entry, loopback=True) for entry in self.extra_origins)
+        return frozenset(host for p in parts if p and p[0] == "https" for host in p[1:])
 
     @property
     def plain_origins_withheld(self) -> tuple[str, ...]:
@@ -469,12 +465,7 @@ class Config:
         # which treat `http://localhost` as a secure context for cookies,
         # and not for Safari, which drops a Secure cookie there.
         for entry in self.extra_origins:
-            parts = urlsplit(entry.strip().rstrip("/").lower())
-            if (
-                parts.scheme == "http"
-                and parts.hostname
-                and not is_loopback_host(parts.hostname)
-            ):
+            if (parts := origin_parts(entry)) and parts[0] == "http":
                 raise ConfigError(
                     f"--allow-origin {entry!r} is plain http and --tls-cert is set: the "
                     f"session cookie is Secure with TLS on and would never be sent back "
@@ -698,13 +689,12 @@ class Config:
         the port is the proxy's, and only the operator knows either.
         """
         for entry in self.extra_origins:
-            candidate = entry.strip().rstrip("/")
-            if "*" in candidate:
+            if "*" in entry:
                 raise ConfigError(
                     f"a wildcard origin defeats the point of the check: {entry!r}"
                 )
             try:
-                parts = urlsplit(candidate)
+                parts = split_origin(entry)
             except ValueError as exc:
                 # urlsplit validates bracketed netlocs itself and raises before
                 # any refusal in this function runs, so `http://[::1].` came
@@ -838,7 +828,7 @@ class Config:
             # is parametrised over both schemes.
             origins.update(origin_forms(self.scheme, host, self.port))
         for entry in self.extra_origins:
-            parts = urlsplit(entry.strip().rstrip("/").lower())
+            parts = split_origin(entry)
             assert parts.hostname is not None  # validated in _check_extra_origins
             # normalise_host, not parts.hostname raw: urlsplit lowercases but
             # keeps a trailing root dot, so `--allow-origin https://box.lan.`

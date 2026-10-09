@@ -77,7 +77,9 @@ OUTER_LAYER_CAPS: dict[str, int] = {
     # 1107 for #311: a failed run still prints the rows it heard.
     # 1118 for Phase 24's review: so does a Ctrl-C, the likelier way a run
     # ends without its account.
-    "cli.py": 1118,
+    # 1114 for #439: the CLI asks `Config.https_origin_hosts` instead of
+    # parsing the origins a second time.
+    "cli.py": 1114,
     # 409 to 418 for #78: two entries in the exemption and the argument
     # beside them, which the set's own rule requires of every entry.
     # 418 to 436 for #160: the unauthenticated asset set and the argument

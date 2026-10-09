@@ -374,7 +374,10 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # `Secure` cookie cannot return on, and the decision's argument.
     # 845 for #395: the IPv4 mapped bind refused by name, not by uvicorn.
     # 849 for #394: the origins' half of the cookie rule, for the CLI's advice.
-    "config.py": 849,
+    # 839 for #439: the five copies of the origin parse became `split_origin`
+    # and `origin_parts` in hostnames.py, which took the cookie rule's reader
+    # with them.
+    "config.py": 839,
     # 409, nine lines over, down from 542. #115 deleted the `?token=`
     # carrier: 135 lines once the two blocks inside `TokenMiddleware`
     # that only served it are counted.

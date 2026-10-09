@@ -115,7 +115,7 @@ under the bounded loop; lows go to Backlog.
 
 Serial, in this order, one implementer. Security auditor review at the end.
 
-- [ ] **Task 243, #439.** One origin parser, used by all five call sites;
+- [x] **Task 243, #439.** One origin parser, used by all five call sites;
       `_origin_parts` normalises; the CLI asks `Config` for its https hosts;
       the mixed case named in the comment.
 - [ ] **Task 244, #437.** `plain_origins_withheld` takes the hosts it reads,
