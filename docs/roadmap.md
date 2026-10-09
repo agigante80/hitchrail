@@ -47,8 +47,8 @@ the running application, on the phone it is for. See
 [`tech-guidelines.md`](tech-guidelines.md) section 7.
 
 ## Phase: Phase 26: Stop, settled, and Restart on it
-state: planned
-plan:
+state: open
+plan: docs/superpowers/plans/2026-10-09-hitchrail-phase-26-stop-settled.md
 
 Close the stop path's open findings, then build Restart on it.
 
