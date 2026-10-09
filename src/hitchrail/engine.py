@@ -162,6 +162,12 @@ class Engine(SeamMembers):
         # The one piece of state that is not derived. Memory only, and lost on
         # restart on purpose: see the module docstring.
         self._stopping: dict[str, StopMarker] = {}
+        # The marker a Kill took out of the table and holds until its
+        # `kill-session` answers (#432). `kill` removes it first (#387), so
+        # without this a Stop in that window found no marker and typed over a
+        # first Stop still typing. Under `_stopping_guard`; read only by
+        # `stop`'s claim, never by derivation, which must read `stopped`.
+        self._kill_held: dict[str, StopMarker] = {}
         # Names whose LAST stop ran out of patience with the agent showing
         # something that needs a person (#101). In memory and not persisted,
         # for the same reason the stop marker is not: it describes one attempt,
@@ -829,12 +835,15 @@ class Engine(SeamMembers):
         resume: claude_ipc.WrapUpWatch | None = None
         with self._stopping_guard:
             current = self._stopping.get(name)
-            if current is not None and (
-                current.typing or (current.phase == "closing" and current.watch is None)
+            held = self._kill_held.get(name)
+            if (current is not None and current.is_typing) or (
+                held is not None and not held.withdrawn and held.is_typing
             ):
                 # Something is typing into this pane this moment, the prompt
                 # or an exit sequence (#406). Typing the exit sequence now
-                # would land in the middle of it.
+                # would land in the middle of it. A Kill's held marker counts
+                # (#432): it is out of the table, but its owner still types,
+                # and a failed Kill hands it back.
                 typing = None
             elif current is not None and current.phase == "closing":
                 # "Exit now": a second Stop during the wait skips to the exit,
@@ -1028,14 +1037,24 @@ class Engine(SeamMembers):
         # not take the indicator of a stop still in flight with it.
         with self._stopping_guard:
             marker = self._stopping.pop(name, None)
+            if marker is not None:
+                self._kill_held[name] = marker
+        failed = False
         try:
             self.tmux.kill_session(name)
         except TmuxUnavailable as exc:
+            failed = True
+            raise MachineUnreadable(str(exc)) from exc
+        finally:
+            # One critical section for the release and the restore, so a Stop
+            # never sees the marker in neither place (#432). Only the Kill
+            # that took the marker releases it.
             if marker is not None:
                 with self._stopping_guard:
-                    if not marker.withdrawn:
+                    if self._kill_held.get(name) is marker:
+                        del self._kill_held[name]
+                    if failed and not marker.withdrawn:
                         self._stopping.setdefault(name, marker)
-            raise MachineUnreadable(str(exc)) from exc
         # Before `_await_gone`, which reads the machine and can raise: the
         # kill happened whatever that read says.
         logger.info("kill %s: session killed", name)

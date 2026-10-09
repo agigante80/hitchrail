@@ -68,3 +68,11 @@ class StopMarker:
     ceiling: bool = False
     typing: bool = False
     withdrawn: bool = False
+
+    @property
+    def is_typing(self) -> bool:
+        """Something is typing into the pane for this stop this moment: the
+        exit sequence (`typing`), or the prompt (`closing` before its watch
+        exists). The condition `Engine.stop` answers with the no-op 202.
+        Read under the engine's lock."""
+        return self.typing or (self.phase == "closing" and self.watch is None)

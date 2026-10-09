@@ -740,6 +740,57 @@ def test_a_failed_kill_hands_back_a_wrap_up_whose_exit_now_was_refused_meanwhile
     assert exits_sent(tmux) == 1
 
 
+def test_a_stop_during_a_failing_kill_does_not_type_over_the_first_stop(root: Path) -> None:
+    """#432. Kill takes the marker out of the table before `kill-session`, so
+    a second Stop in that window found no marker, claimed a fresh one and
+    typed a second prompt into a pane where the first Stop is still typing
+    (#406's rule, broken by #387's order). It must see a stop in flight,
+    while Kill still restores the first marker when `kill-session` fails.
+
+    One schedule: inside `kill-session` the second Stop runs on Kill's own
+    thread while the first is parked in its prompt, then the first is
+    released and joined, and the kill fails."""
+    engine, tmux, clock = wrap_engine(root)
+    in_prompt = threading.Event()
+    release = threading.Event()
+    real_send_text = tmux.send_text
+    prompts: list[str] = []
+
+    def send_text(project: str, text: str) -> None:
+        prompts.append(text)
+        if len(prompts) == 1:
+            in_prompt.set()
+            assert release.wait(timeout=5)
+        real_send_text(project, text)
+
+    first = threading.Thread(target=lambda: engine.stop(VESSEL))
+    second: list[Any] = []
+
+    def kill_session(project: str) -> None:
+        sent_before = len(tmux.sent)
+        second.append(engine.stop(VESSEL))
+        assert len(tmux.sent) == sent_before, "the second Stop typed nothing"
+        release.set()
+        first.join(timeout=5)
+        assert not first.is_alive()
+        raise TmuxUnavailable("kill-session failed")
+
+    tmux.send_text = send_text  # type: ignore[method-assign]
+    tmux.kill_session = kill_session  # type: ignore[method-assign]
+    first.start()
+    assert in_prompt.wait(timeout=5)
+    held = engine._stopping[VESSEL]
+    with pytest.raises(MachineUnreadable):
+        engine.kill(VESSEL)
+    del tmux.send_text, tmux.kill_session
+    assert len(second) == 1
+    assert prompts == [PROMPT], "one prompt, typed once"
+    assert exits_sent(tmux) == 0
+    assert engine._stopping[VESSEL] is held, "Kill's restore still happens (#387)"
+    assert held.phase == "closing" and held.watch is not None
+    assert finish(engine, clock) == [VESSEL]
+
+
 # -- #408, #411, #428: what another browser needs to reopen a wait ----------
 
 
