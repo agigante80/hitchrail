@@ -210,7 +210,9 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # signals.py: 397 when #274 moved the pidfd path here. 414 for #426: `_close`,
     # and the note on why a close that fails must not replace the outcome.
     # 426 for #425: the survivor after the wait, journalled and reported as ask.
-    "signals.py": 426,
+    # 438 for the restart kill epoch: `_ends_a_restart`, called before each of the two
+    # signals, and the note on why the count is what a Restart still typing reads.
+    "signals.py": 438,
     # tmux.py is the module that encodes what tmux actually does
     # rather than what its manual implies, and every entry is a footgun
     # that cost real debugging: prefix matching targets, the colon

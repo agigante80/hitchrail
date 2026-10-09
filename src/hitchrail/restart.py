@@ -57,13 +57,24 @@ class RestartOverlay:
     pending: dict[str, float] = field(default_factory=dict)
     # Name to the reason a start that followed a stop was refused.
     refused: dict[str, str] = field(default_factory=dict)
+    # Name to how many times a Kill, a signal or an expiry has ended a restart
+    # for it. `request` reads it before `stop` and again before it marks.
+    ended: dict[str, int] = field(default_factory=dict)
 
     def __bool__(self) -> bool:
         return bool(self.pending or self.refused)
 
     def cancel(self, name: str) -> None:
-        """Forget a pending start. Under `stopping_guard`."""
+        """Forget a pending start, and count that it was ended. Under
+        `stopping_guard`. Counting is the point: a Restart whose `stop` is
+        still typing has no mark to forget yet, and the count is what tells
+        `request` that someone ended it meanwhile."""
+        self.ended[name] = self.ended.get(name, 0) + 1
         self.pending.pop(name, None)
+
+    def epoch(self, name: str) -> int:
+        """How many times `cancel` has run for `name`. Under `stopping_guard`."""
+        return self.ended.get(name, 0)
 
     def overlay(self, session: Session) -> Session:
         """The two fields on a derived row."""
@@ -96,10 +107,23 @@ def request(engine: EngineSeam, name: str) -> Session:
     row, and types nothing while a sequence is going out) and finds the mark
     already there: `setdefault` keeps one, with the first press's time.
     """
+    with engine.stopping_guard:
+        epoch = engine.restarts.epoch(name)
     session = engine.stop(name)
     if not (session.stopping or session.state is State.STOPPED):
         return session
     with engine.stopping_guard:
+        # Decided against the epoch, never from the row alone. `stop` types
+        # the exit over several seconds and the mark does not exist yet, so a
+        # Kill, a /signal or an end_anyway in that window has nothing to
+        # cancel, and the row it leaves reads STOPPED, indistinguishable from
+        # a clean exit: the check above passes and the sweep would start a
+        # new agent after the person said "end this". Anything that ended the
+        # agent bumped the epoch under this lock, so a changed epoch means no
+        # mark. Do not replace this with a look at the row.
+        if engine.restarts.epoch(name) != epoch:
+            logger.info("restart %s: ended while the stop was typing, so no start", name)
+            return session
         engine.restarts.refused.pop(name, None)
         engine.restarts.pending.setdefault(name, engine.now())
     logger.info("restart %s: a start will follow the stop", name)

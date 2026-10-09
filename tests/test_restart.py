@@ -414,3 +414,71 @@ def test_a_restart_pressed_while_a_kill_is_typing_marks_nothing(root: Path) -> N
     assert session.restarting is False
     assert engine.restarts.pending == {}
     assert starts.calls == []
+
+
+# -- an end that lands while the stop is still being typed (review finding) ---
+#
+# `request` marks only after `stop` returns, and `stop` types the exit over
+# several seconds. A Kill in that window finds no mark to cancel and leaves a
+# row that reads `stopped`, the same as a clean exit, so the row alone cannot
+# tell the sweep not to start. Each test asserts no start and no overlay.
+
+
+def _nothing_started(engine: Engine, starts: Starts) -> None:
+    assert engine.advance_restarts() == []
+    assert starts.calls == []
+    assert engine.restarts.pending == {}
+    assert engine.get(VESSEL).restarting is False
+
+
+def test_a_kill_while_the_exit_is_being_typed_starts_nothing(root: Path) -> None:
+    engine, tmux, _, starts = restartable(root)
+    real = tmux.send_keys
+    fired: list[bool] = []
+
+    def send(project: str, *keys: str) -> Any:
+        result = real(project, *keys)
+        if not fired and len(tmux.sent) >= 3:  # after the quit keys went out
+            fired.append(True)
+            engine.kill(VESSEL)
+        return result
+
+    tmux.send_keys = send  # type: ignore[method-assign]
+    engine.restart(VESSEL)
+    assert fired, "the Kill landed inside the stop"
+    _nothing_started(engine, starts)
+
+
+def test_a_kill_between_the_stop_returning_and_the_mark_starts_nothing(root: Path) -> None:
+    engine, tmux, _, starts = restartable(root)
+    real_stop = engine.stop
+
+    def stop_then_kill(name: str) -> Session:
+        session = real_stop(name)
+        engine.kill(name)
+        return session
+
+    engine.stop = stop_then_kill  # type: ignore[method-assign]
+    engine.restart(VESSEL)
+    assert VESSEL not in tmux.sessions
+    _nothing_started(engine, starts)
+
+
+def test_end_anyway_while_the_exit_is_being_typed_starts_nothing(root: Path) -> None:
+    from hitchrail import signals
+
+    engine, tmux, _, starts = restartable(root)
+    real = tmux.send_keys
+    fired: list[bool] = []
+
+    def send(project: str, *keys: str) -> Any:
+        result = real(project, *keys)
+        if not fired and len(tmux.sent) >= 3:
+            fired.append(True)
+            assert signals.end_anyway(engine, VESSEL, tmux.sessions[VESSEL] + 1)
+        return result
+
+    tmux.send_keys = send  # type: ignore[method-assign]
+    engine.restart(VESSEL)
+    assert fired
+    _nothing_started(engine, starts)
