@@ -27,6 +27,10 @@ export function storeTheme(theme) {
   }
 }
 
+/* The theme-color metas still follow the system, so Chrome's address bar keeps
+   the system colour under an explicit choice (#470). Accepted: rewriting the
+   metas from here would put a second copy of the palette in script, and the
+   bar is outside the page. */
 export function applyTheme(theme) {
   if (theme) {
     document.documentElement.setAttribute("data-theme", theme);

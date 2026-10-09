@@ -32,6 +32,17 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+## 0.15.1 - 2026-10-09
+
+Nothing to do on upgrade.
+
+### Fixed
+
+- Choosing Light on a phone set to dark, or Dark on one set to light, left the
+  settings page's unselected radios drawn in the phone's scheme: dark filled
+  discs that looked selected. Native controls now follow the choice. Chrome's
+  address bar still takes the phone's colour, by decision (#470).
+
 ## 0.15.0 - 2026-10-08
 
 Nothing to do on upgrade, unless a script reads the plugin update's record or
