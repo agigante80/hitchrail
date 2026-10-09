@@ -175,6 +175,7 @@ source_modules = [
   "hitchrail.derive",
   "hitchrail.engine",
   "hitchrail.signals",
+  "hitchrail.sweep",
   "hitchrail.plugin_runs",
   "hitchrail.logs",
 ]
@@ -326,6 +327,8 @@ also_copy = [
   "src/hitchrail/cli.py",
   "src/hitchrail/derive.py",
   "src/hitchrail/engine.py",
+  # #473. Copied, not mutated: `engine.py` imports it.
+  "src/hitchrail/sweep.py",
   "src/hitchrail/events.py",
   "src/hitchrail/headers.py",
   # #167. Copied, not mutated: `security.py` escapes request values through

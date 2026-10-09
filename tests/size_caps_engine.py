@@ -176,7 +176,16 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # first, and the note on why one look is not evidence of a question.
     # 1712 for #453: the sweep leaves a marker whose exit is still being typed,
     # since the exit menu's look outlives the agent, and the note saying so.
-    "engine.py": 1712,
+    # 1712 to 1300 for #473: the sweep (`scan_for_stuck`, `advance_wrap_ups`,
+    # `expire_stops` and what they call) moved to `sweep.py`, with the notes
+    # above that argue its races; they stay where they were written, as the
+    # history of this cap, and their text now lives in that file.
+    "engine.py": 1300,
+    # #473. The sweep, moved whole from `engine.py`. 465 is the move: most of
+    # it is the notes on the races between a scan, a stop and a start, which
+    # are the reason the code is shaped as it is. It does not want splitting
+    # further, since the three entry points share the look at a pane.
+    "sweep.py": 465,
     # tmux.py is the module that encodes what tmux actually does
     # rather than what its manual implies, and every entry is a footgun
     # that cost real debugging: prefix matching targets, the colon
