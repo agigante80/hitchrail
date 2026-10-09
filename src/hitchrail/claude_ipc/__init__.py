@@ -18,7 +18,8 @@ literal, so the quarantine has grep tests instead.
 This package is in the engine layer and imports nothing from the web layer.
 
 **A package since #368**, split along the seams the single file already had:
-`screen` reads a pane, `keys` types into one, `launch` builds the argv and finds
+`screen` reads a pane, `keys` types into one, `exit_menu` reads the one menu
+`/exit` raises over background work, `launch` builds the argv and finds
 the session link, `plugins` updates the plugins. The rest of Hitchrail imports
 THIS module and calls through its attributes, never a submodule, so that
 `monkeypatch.setattr(claude_ipc, "plugin_runner", ...)` still reaches the
