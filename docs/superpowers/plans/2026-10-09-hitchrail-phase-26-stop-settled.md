@@ -145,7 +145,7 @@ Serial, in this order, one implementer.
 
 ### Batch 2: the guards and the tiers that prove it, tasks 231 to 235
 
-- [ ] **Task 231, #423.** The pidfd guard sees `os.kill`, `os.killpg`,
+- [x] **Task 231, #423.** The pidfd guard sees `os.kill`, `os.killpg`,
       `pidfd_open`, `pidfd_send_signal` and a dotted `hitchrail.procs`.
 - [ ] **Task 232, #458.** A kill's journal line read from the real server's
       stderr; removing the log call turns it red.
