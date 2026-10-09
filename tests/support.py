@@ -256,6 +256,12 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "hitchrail"
 # taught about after it has already passed over the new file.
 PIDFD_MODULE = "signals.py"
 
+# The one module that holds Hitchrail's state file and `Preferences` (#443),
+# keyed as `source_modules` keys it. The operator's config file is the other
+# half of what `settings.py` held, read once and never written. Named once
+# so that the move is a one line edit the guards follow.
+STATE_MODULE = "settings.py"
+
 
 def keyed_modules(paths: Any, src: Path = SRC) -> dict[str, Path]:
     """`paths` keyed by their POSIX path relative to `src`, refusing a repeat.

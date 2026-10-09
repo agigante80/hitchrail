@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from mutation_support import _REPO, _mutmut_config
-from support import PIDFD_MODULE
+from support import PIDFD_MODULE, STATE_MODULE
 
 # -- #198: the rules that load for the modules on the spawn path --------------
 
@@ -228,6 +228,24 @@ def test_the_module_holding_the_pidfd_path_loads_the_security_rules() -> None:
     assert f"src/hitchrail/{PIDFD_MODULE}" in _security_rule_paths(), (
         f"{_SECURITY_RULE} does not load for {PIDFD_MODULE}, which holds the pidfd path"
     )
+
+
+def test_the_module_holding_the_state_file_loads_the_security_rules() -> None:
+    """#443. The state file hides roots and its directory check decides whether
+    a hide is trusted, so the rules load for whichever file writes it. Keyed on
+    `support.STATE_MODULE`, which the AST guard in `test_source_guards.py`
+    holds to the code."""
+    if not _SECURITY_RULE.parent.exists():
+        pytest.skip("`.claude/rules/` is not in this checkout (it is gitignored)")
+    assert f"src/hitchrail/{STATE_MODULE}" in _security_rule_paths(), (
+        f"{_SECURITY_RULE} does not load for {STATE_MODULE}, which holds the state file"
+    )
+
+
+def test_the_module_holding_the_state_file_is_mutated() -> None:
+    """#443. The same module, by the sweep's own list: a mutant of the
+    directory check must be scored wherever the check moves to."""
+    assert f"src/hitchrail/{STATE_MODULE}" in _mutmut_config()["source_paths"]
 
 
 # The refusals above, exercised. Round 1 of review found them written and
