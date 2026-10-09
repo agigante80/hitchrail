@@ -102,6 +102,30 @@ def session_routes(engine: eng.Engine) -> list[Route]:
             return _error(503, "root_unavailable", str(exc))
         return JSONResponse(session.as_dict(), status_code=202)
 
+    async def restart(request: Request) -> Response:
+        """A stop that starts (#472). The ladder is `stop`'s, line for line,
+        because the first half IS `stop`: a refusal here is a refusal there, with
+        nothing marked. Written out, never mapped from `stop`'s, as the module
+        says every ladder is."""
+        name = request.path_params["name"]
+        try:
+            session = await in_thread(engine.restart, name)
+        except eng.UnknownProject as exc:
+            return _error(404, "unknown_project", str(exc))
+        except eng.Protected as exc:
+            return _error(423, "self_protected", str(exc))
+        except eng.NotRunning as exc:
+            return _error(409, "not_running", str(exc))
+        except eng.NoAgent as exc:
+            return _error(409, "no_agent", str(exc))
+        except eng.StopRefused as exc:
+            return _error(409, "stop_unsafe", str(exc))
+        except eng.MachineUnreadable as exc:
+            return _error(503, "machine_unreadable", str(exc))
+        except discovery.RootUnavailable as exc:
+            return _error(503, "root_unavailable", str(exc))
+        return JSONResponse(session.as_dict(), status_code=202)
+
     async def answer(request: Request) -> Response:
         """Carry one keypress to a prompt the operator read (#204).
 
@@ -258,6 +282,8 @@ def session_routes(engine: eng.Engine) -> list[Route]:
         # Its own route, deliberately. #52 and the design's section 6.
         Route("/api/sessions/{name}/answer", answer, methods=["POST"]),
         Route("/api/sessions/{name}/kill", kill, methods=["POST"]),
+        # A stop that starts (#472): its own route, never a flag on DELETE.
+        Route("/api/sessions/{name}/restart", restart, methods=["POST"]),
         Route("/api/sessions/{name}/signal", signal_detached, methods=["POST"]),
         Route("/api/sessions/{name}/signal/force", signal_force, methods=["POST"]),
     ]
