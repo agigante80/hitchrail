@@ -195,6 +195,9 @@ class Engine(SeamMembers):
         # subprocess. That leaves a window where a stop clears a project and
         # then an observation made BEFORE the clear puts it straight back.
         self._attention_epoch = 0
+        # #430. The epoch each name was last cleared at, so a look at ONE row
+        # is discarded only by a clear of that row. See `sweep._flag_waiting`.
+        self._attention_cleared: dict[str, int] = {}
         # Guarded for the same reason `_starting` is: stop, kill and the
         # expiry ticker all run on worker threads. Without it, iterating in
         # `expire_stops` while `stop` adds raises "dictionary changed size
@@ -1144,6 +1147,7 @@ class Engine(SeamMembers):
             # clear. Under the same lock as the clear itself, so a sweep can
             # never read the counter and the map in disagreement.
             self._attention_epoch += 1
+            self._attention_cleared[name] = self._attention_epoch
 
     def _needs_a_person(self) -> frozenset[str]:
         """Every name the `awaiting_input` overlay is true for, from both sources.

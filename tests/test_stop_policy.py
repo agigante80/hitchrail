@@ -816,3 +816,31 @@ def test_a_refused_exit_whose_look_predates_a_restart_flags_nothing(root: Path) 
     assert restarted.state is State.RUNNING
     assert restarted.pid != PANE + 1, "the restart happened"
     assert restarted.awaiting_input is False, "the old agent's question"
+
+
+def test_a_start_of_another_project_during_the_look_leaves_this_row_flagged(
+    root: Path,
+) -> None:
+    """#430. The epoch was one counter for every project, so a start or stop
+    of ANY other row during the expiry's capture discarded this row's true
+    "waiting on a person". Nothing adds it back: the stuck sweep skips a row
+    that has a session link. Only a clear of THIS row may discard its look."""
+    (root / "other").mkdir()
+    engine, tmux, clock = policy_engine(root)
+    engine.stop(VESSEL)
+    tmux.pane_text[VESSEL] = MODAL_PANE
+    clock.advance(engine.prefs.stop_timeout() + 1)
+    real = tmux.capture_pane
+
+    def capture(project: str, lines: int = 40, escapes: bool = False) -> str:
+        pane = real(project, lines, escapes)
+        if project == VESSEL:
+            tmux.capture_pane = real  # type: ignore[method-assign]
+            tmux.pane_text[f"{DEFAULT_LABEL}~other"] = CLEAR_INPUT_BOX
+            engine.start(f"{DEFAULT_LABEL}~other")
+        return pane
+
+    tmux.capture_pane = capture  # type: ignore[method-assign]
+    assert engine.expire_stops() == [VESSEL]
+    assert engine.get(f"{DEFAULT_LABEL}~other").state is State.RUNNING, "the start happened"
+    assert engine.get(VESSEL).awaiting_input is True

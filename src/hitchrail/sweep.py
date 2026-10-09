@@ -229,9 +229,20 @@ def _held_by_a_second_look(
 
 def _flag_waiting(engine: EngineSeam, name: str, epoch: int) -> None:
     """Add the overlay from a look taken at `epoch`, unless a start or a
-    stop cleared it since (#410): that look was at the old agent's screen."""
+    stop cleared THIS name since (#410): that look was at the old agent's
+    screen.
+
+    **Per name, unlike `scan_for_stuck`'s whole batch (#430).** The epoch is
+    one counter, so comparing it here discarded a true flag whenever ANY
+    project started or stopped during the capture, and nothing adds it back:
+    the stuck sweep skips a row with a session link. The counter only grows,
+    so a look is stale for a name exactly when that name's last clear is
+    newer than the epoch read before the look. `scan_for_stuck` keeps the
+    single comparison on purpose: it reads every row again a second later,
+    which corrects what the coarse version costs, and this does not.
+    """
     with engine.stopping_guard:
-        if engine.attention_epoch == epoch:
+        if engine.attention_cleared.get(name, 0) <= epoch:
             engine.awaiting_input.add(name)
 
 

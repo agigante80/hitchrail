@@ -183,14 +183,16 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # 1300 to 1255 for Phase 26: `StopMarker` and its note moved to
     # `stopmarker.py` unchanged, because #427 and #432 add to the rules for
     # who holds a marker and the file was at its cap. Up to 1275 for #432:
-    # the table of markers a Kill holds out, and why a Stop must see them.
-    "engine.py": 1275,
+    # the table of markers a Kill holds out, and why a Stop must see them;
+    # 1279 for #430, the per name clear epoch.
+    "engine.py": 1279,
     # #473. The sweep, moved whole from `engine.py`. 465 is the move: most of
     # it is the notes on the races between a scan, a stop and a start, which
     # are the reason the code is shaped as it is. It does not want splitting
     # further, since the three entry points share the look at a pane.
     # 468 after #424: the signatures take EngineSeam, which wrapped three lines.
-    "sweep.py": 468,
+    # 479 for #430: why `_flag_waiting` compares a name's clear, not the counter.
+    "sweep.py": 479,
     # tmux.py is the module that encodes what tmux actually does
     # rather than what its manual implies, and every entry is a footgun
     # that cost real debugging: prefix matching targets, the colon

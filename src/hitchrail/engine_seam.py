@@ -149,6 +149,11 @@ class EngineSeam(Protocol):
         """Bumped by every clear; a sweep compares it before and after a look."""
         ...
 
+    @property
+    def attention_cleared(self) -> dict[str, int]:
+        """The epoch of each name's last clear. Under `stopping_guard` (#430)."""
+        ...
+
     def drop(self, name: str, marker: StopMarker) -> None:
         """Remove `marker`, and only it: a newer stop's stays."""
         ...
@@ -179,6 +184,7 @@ class SeamMembers:
         _stuck: dict[str, float]
         _awaiting_input: set[str]
         _attention_epoch: int
+        _attention_cleared: dict[str, int]
         _bus: EventBus | None
         _clock: Callable[[], float]
         _sleep: Callable[[float], None]
@@ -218,6 +224,10 @@ class SeamMembers:
     @property
     def attention_epoch(self) -> int:
         return self._attention_epoch
+
+    @property
+    def attention_cleared(self) -> dict[str, int]:
+        return self._attention_cleared
 
     def now(self) -> float:
         return self._clock()
