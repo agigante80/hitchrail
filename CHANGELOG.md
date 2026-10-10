@@ -32,6 +32,8 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+## 0.18.0 - 2026-10-10
+
 ### Fixed
 
 - The startup banner no longer offers a link on a host whose plain http origin
@@ -53,8 +55,8 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 - With `stop_prompt` set, a row wrapping up now reads "wrapping up" with the
   time left (for example "wrapping up 4:32"), counted down on the page from
   when the row arrived and resumed correctly after a reload, then "sending the
-  exit" at zero. Its Stop button reads "Exit now", since that is the wait that
-  skips the rest. Once the exit is sent the chip reads "stopping", as before.
+  exit" at zero. Its Stop button reads "Exit now" and opens the wait, where
+  Exit now skips the rest of it. Once the exit is sent the chip reads "stopping", as before.
   With no `stop_prompt` nothing changes. Nothing to change on your side.
 
 ## 0.17.0 - 2026-10-10
