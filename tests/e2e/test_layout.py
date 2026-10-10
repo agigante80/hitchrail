@@ -189,8 +189,8 @@ async def test_no_name_is_squeezed_at_a_desktop_width(page: Page, server: Harnes
     """#462. From 900px the name shares its line with the chips and the
     actions again, because there is room; it must not be the one that gives
     way. A name that wraps to a second line, or is narrower than the text it
-    holds, has been squeezed by what sits beside it (`flex: 0 1 auto` let the
-    chips take the squeeze), where at 360px `_NAME`'s test reads the same
+    holds, has been squeezed by what sits beside it (`flex: 0 1 auto` made the
+    name take the squeeze), where at 360px `_NAME`'s test reads the same
     thing against the phone's one line per name."""
     await _busy_list(page, server, WIDE)
     names = page.locator(".row-name")
@@ -393,9 +393,13 @@ async def test_every_page_with_a_bar_carries_the_mark_and_a_way_home(
     )
     assert ring == ["solid", "3px"], f"the way home has not the bar's own focus ring: {ring}"
 
-    # Following it, from every page including the one it names.
+    # Following it, from every page including the one it names. On `/` the
+    # URL already matches, so the marker is what proves a new document loaded:
+    # a click the page swallowed would leave it set (#333).
+    await page.evaluate("window.__beforeHome = 1")
     await link.click()
     await page.wait_for_url(server.base + "/")
+    await page.wait_for_function("window.__beforeHome === undefined")
     await expect(page.locator("[data-tabs]")).to_be_visible()
 
 
