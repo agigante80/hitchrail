@@ -47,8 +47,8 @@ the running application, on the phone it is for. See
 [`tech-guidelines.md`](tech-guidelines.md) section 7.
 
 ## Phase: Phase 28: The page's loose ends
-state: planned
-plan:
+state: open
+plan: docs/superpowers/plans/2026-10-10-hitchrail-phase-28-page-loose-ends.md
 
 Close what Phase 24's reviews and its phone watch found on the page, and do
 the S25 watch that phase could not.
