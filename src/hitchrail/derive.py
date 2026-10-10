@@ -153,8 +153,8 @@ def derive(
     # directions: the root's `agent` may have changed while one of the other
     # package's agents still ran, and asking only the new one reported that
     # agent `stopped` and offered a second in the same folder. A row found
-    # through another package carries that package, so its link is that
-    # agent's; what stopping it types is still the root's agent (#290).
+    # through another package carries that package, so its link, its screen
+    # reader and the keys a stop or answer types are its own (#290 review).
     asked = (configured, *(c for c in registry.all() if c is not configured))
     protected = config.self_project is not None and name == config.self_project
     # The SANITIZED name, because that is what tmux stored. Looking up the

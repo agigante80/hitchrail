@@ -8,14 +8,16 @@ package for the length of one test. Nothing else in the suite sees it.
 from __future__ import annotations
 
 import re
+import signal
 from collections.abc import Iterator
 from pathlib import Path
 
 import httpx
 import pytest
 
-from conftest import TRUST_MODAL, FakeClock, FakeTmux, procs_from, ps_row
+from conftest import TRUST_MODAL, FakeClock, FakePidfd, FakeTmux, procs_from, ps_row
 from hitchrail import agentconfig, agents, agy_ipc, claude_ipc
+from hitchrail.agent import SessionUrl
 from hitchrail.agentconfig import DEFAULT_AGENT, AgentSpec
 from hitchrail.cli import build_config, main, parse_args, preflight
 from hitchrail.config import Config, ConfigError
@@ -315,6 +317,8 @@ def _agy_root(
     root_agent: str = DEFAULT_AGENT,
     prompt: str | None = None,
     clock: FakeClock | None = None,
+    stop_policy: str = "ask",
+    pidfd: FakePidfd | None = None,
 ) -> Engine:
     """A root, an `agy` agent configured beside the default, and a pane
     holding `argv`. Claude Code's trust map is readable and trusts nothing,
@@ -329,7 +333,11 @@ def _agy_root(
         sessions_dir=tmp_path / ".sessions",
         agent_config_path=tmp_path / "claude.json",
         stop_prompt=prompt,
+        stop_policy=stop_policy,
     )
+    # Never the real pidfd calls: an end_anyway kill would signal pid 501 on
+    # the machine running the suite.
+    pidfd = pidfd or FakePidfd(fail_open=AssertionError("no test here kills"))
     return Engine(
         config,
         tmux=FakeTmux(sessions={"main~vessel": 500}),
@@ -338,6 +346,11 @@ def _agy_root(
         ceiling_fn=lambda pid: None,
         clock=clock,
         sleep=clock.sleep,
+        open_pidfd=pidfd.open,
+        send_signal=pidfd.send,
+        close_pidfd=pidfd.close,
+        owner_uid=pidfd.owner,
+        cwd_of=pidfd.cwd_of,
     )
 
 
@@ -379,11 +392,23 @@ async def test_the_listing_names_each_rows_agent_and_each_roots(tmp_path: Path) 
 
 
 def _claude_left_running(
-    tmp_path: Path, prompt: str | None = None, clock: FakeClock | None = None
+    tmp_path: Path,
+    prompt: str | None = None,
+    clock: FakeClock | None = None,
+    stop_policy: str = "ask",
+    pidfd: FakePidfd | None = None,
 ) -> tuple[Engine, FakeTmux]:
     """The root was switched to agy while Claude Code still ran in its pane."""
     argv = claude_ipc.launch_argv("claude", "main~vessel")
-    engine = _agy_root(tmp_path, argv, root_agent="agy", prompt=prompt, clock=clock)
+    engine = _agy_root(
+        tmp_path,
+        argv,
+        root_agent="agy",
+        prompt=prompt,
+        clock=clock,
+        stop_policy=stop_policy,
+        pidfd=pidfd,
+    )
     assert isinstance(engine.tmux, FakeTmux)
     engine.tmux.pane_text["main~vessel"] = "\x1b[39m\u276f\xa0                     \n"
     return engine, engine.tmux
@@ -424,6 +449,86 @@ def test_the_sweep_reads_a_screen_with_the_running_agents_reader(tmp_path: Path)
     engine, tmux = _claude_left_running(tmp_path)
     tmux.pane_text["main~vessel"] = TRUST_MODAL
     assert engine.scan_for_stuck() == ["main~vessel"]
+
+
+def test_a_repeated_stop_remembers_the_running_agent(tmp_path: Path) -> None:
+    """A second Stop on `exiting` writes a fresh marker, and the sweep reads
+    the agent off it: the root's would read Claude Code's screen with agy's
+    reader when the stop runs out."""
+    engine, _ = _claude_left_running(tmp_path)
+    engine.stop("main~vessel")
+    first = engine.stopping["main~vessel"]
+    engine.stop("main~vessel")
+    assert engine.stopping["main~vessel"] is not first
+    assert engine.stopping["main~vessel"].agent == DEFAULT_AGENT
+
+
+def test_an_answer_goes_through_the_running_agents_keys(tmp_path: Path) -> None:
+    """agy refuses every key, so answering through the root's agent refused
+    the key Claude Code's question was asking for."""
+    engine, tmux = _claude_left_running(tmp_path)
+    tmux.pane_text["main~vessel"] = TRUST_MODAL
+    engine.answer("main~vessel", "1")
+    assert tmux.sent == [("main~vessel", ("1",))]
+
+
+def test_the_link_is_read_by_the_running_agents_package(tmp_path: Path) -> None:
+    """agy under a Claude Code root. Claude Code's scrape finds no
+    claude.ai link in agy's pane, so asking the root's agent says `pending`
+    over a link on the screen."""
+    folder = tmp_path.resolve() / "vessel"
+    engine = _agy_root(tmp_path, agy_ipc.Antigravity().launch_argv("/opt/agy", "x", folder))
+    assert isinstance(engine.tmux, FakeTmux)
+    link = "https://antigravity.google.com/r/0123abcd-0123-4abc-8def-0123456789ab-v1"
+    engine.tmux.pane_text["main~vessel"] = f"Remote session: {link}\n"
+    assert engine.session_url("main~vessel") == SessionUrl(link, "scraped")
+
+
+def _expire(engine: Engine, tmux: FakeTmux, clock: FakeClock) -> list[str]:
+    """Stop, the pane showing a question, and the stop running out."""
+    engine.stop("main~vessel")
+    tmux.pane_text["main~vessel"] = TRUST_MODAL
+    clock.advance(engine.prefs.stop_timeout() + 1)
+    return engine.expire_stops()
+
+
+def test_an_expired_stop_reads_the_running_agents_screen(tmp_path: Path) -> None:
+    """agy claims no question on any screen, so the expiry read through the
+    root's agent reported "no answer" over Claude Code's question."""
+    clock = FakeClock()
+    engine, tmux = _claude_left_running(tmp_path, clock=clock)
+    assert _expire(engine, tmux, clock) == ["main~vessel"]
+    assert engine.get("main~vessel").awaiting_input is True
+
+
+def test_end_anyway_second_look_reads_the_running_agents_screen(tmp_path: Path) -> None:
+    """The second look decides the kill (#444). Read with agy's reader it
+    sees no question, and the stop the operator asked to end on one is left
+    running."""
+    clock = FakeClock()
+    pidfd = FakePidfd()
+    pidfd.runs_in(tmp_path.resolve() / "vessel")
+    engine, tmux = _claude_left_running(
+        tmp_path, clock=clock, stop_policy="end_anyway", pidfd=pidfd
+    )
+    _expire(engine, tmux, clock)
+    assert pidfd.signals == [signal.SIGHUP]
+
+
+def test_an_exit_refused_after_a_wrap_up_reads_the_running_agents_screen(
+    tmp_path: Path,
+) -> None:
+    """The wrap up hit its ceiling on a question, so the exit is refused and
+    the stop ends there. The one look it takes is the running agent's, or
+    the row says "no answer" over the question."""
+    clock = FakeClock()
+    engine, tmux = _claude_left_running(tmp_path, prompt="wrap up", clock=clock)
+    engine.stop("main~vessel")
+    tmux.pane_text["main~vessel"] = TRUST_MODAL
+    clock.advance(engine.config.stop_prompt_timeout + 1)
+    assert engine.advance_wrap_ups() == []
+    assert "main~vessel" not in engine.stopping
+    assert engine.get("main~vessel").awaiting_input is True
 
 
 # -- #295: the documents' config examples -----------------------------------
