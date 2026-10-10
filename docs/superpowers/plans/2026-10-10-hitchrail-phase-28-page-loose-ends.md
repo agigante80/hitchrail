@@ -103,10 +103,13 @@ three of them edit `app.css`. Each batch is reviewed once at its end.
       theme only through `theme.js`.
       Landed: the comment is true, `followSystemTheme` in `theme.js`, both
       pages apply the theme through it, e2e tests in `test_shell.py`.
-- [ ] **Task 255, #461 and #467.** The `stream.js` comment says why the
+- [x] **Task 255, #461 and #467.** The `stream.js` comment says why the
       accessor exists without the false claim about live bindings; the asset
       import check reads every import form; `publish.yml` asserts its glob
       found files. #467's decision written beside `canCreate`.
+      Landed: `_imported_urls` in `test_api.py` with its own test, the
+      `publish.yml` guard, the `stream.js` and `search.js` comments, the
+      `canCreate` decision.
 
 ### Batch 3: tests that fail when reverted, tasks 256 and 257
 
