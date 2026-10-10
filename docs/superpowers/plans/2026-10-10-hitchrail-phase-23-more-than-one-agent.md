@@ -179,9 +179,12 @@ at once; batches 3 onward run in order.
 
 ### Close, task 270
 
-- [ ] **270, #468 and #485.** The S25 watch, Chrome only, at 360 CSS px:
-  Phase 24's bar, Phase 26's Restart, Phase 28's countdown and this phase's
-  agent name, on a throwaway root. Not on a real projects root.
+- [ ] **270, MOVED OUT to Phase 16 as #468 and #485.** The S25 watch, Chrome
+  only, at 360 CSS px: Phase 24's bar, Phase 26's Restart, Phase 28's countdown
+  and this phase's agent name, on a throwaway root. Watched on the Pixel
+  instead on 2026-10-10 (#485): the bar on one line, the chips, Restart on
+  each agent sending the closing message, then the exit, then one start, and
+  the plugin scope. The S25 was not reachable, its fourth slip.
 
 ## Out of scope
 
@@ -193,11 +196,38 @@ at once; batches 3 onward run in order.
 
 ## Done looks like
 
-- [ ] An `agy` root and a Claude Code root on one Hitchrail: each starts,
+- [x] An `agy` root and a Claude Code root on one Hitchrail: each starts,
   stops politely, wraps up and is derived running, stale, detached and
-  stopped, on the live_tmux tier and by hand on a throwaway root.
-- [ ] No vendor name outside the agent packages, enforced by guards seen
+  stopped, on the live_tmux tier (`test_live_tmux_agents.py`) and by hand on
+  a throwaway root (the Pixel watch, #485).
+- [x] No vendor name outside the agent packages, enforced by guards seen
   failing.
-- [ ] Nothing an agent runs comes from a page: the start route unchanged.
-- [ ] #334's acceptance met.
-- [ ] The S25 watch held.
+- [x] Nothing an agent runs comes from a page: the start route unchanged.
+- [x] #334's acceptance met.
+- [ ] The S25 watch held: MOVED OUT to Phase 16, #468 and #485.
+- [x] Roadmap says done, milestone closed, `check-phases.sh` passes
+
+## Close, 2026-10-10: re-shaped
+
+Tasks 259 to 269 landed: the Agent protocol, the `[agents]` table and the
+per root `agent` key, the `agy_ipc` package, a root of each agent on one
+engine over a real tmux, the agent chip and the plugin scope on the page, and
+the docs. The S25 watch moved out a fourth time; the Pixel watch stands in
+for it and cannot see the S25's 360 px width or its font scale.
+
+What the plan did not expect: the security review of the agy package found
+that agy's `--add-dir=` answers agy's trust prompt for every folder (#504).
+It needs Andrea's choice among three options and, because agy is in
+`## Unreleased`, it holds the next release whichever phase that is. It goes
+to Phase 16, the next phase, rather than the Backlog for that reason, and the
+S25 tickets go with it. Filed for later: #505 (a second Claude Code agent's
+plugins), #506 (the wait dialog's title), #507 (the marker's agent required).
+
+Reviews: round 1 found the high this phase most needed caught: every action
+went through the ROOT's agent, so a root switched to agy while Claude Code
+ran typed agy's keys into Claude Code's pane; fixed in `f3fb188` and
+`cfc0025`. Round 2 reviewed only those fixes and found no defect in them,
+one medium (six of the sites they changed had no test that failed on a
+revert; pinned in `2228f9f`, each test seen failing on its own site) and two
+lows (#507, and a stale comment fixed in `2228f9f`). No high, so the loop
+stopped after round 2 by rule. Zero rounds found a defect in a prior fix.

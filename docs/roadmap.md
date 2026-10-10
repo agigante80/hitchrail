@@ -46,45 +46,6 @@ suite is green. It is finished when the behaviour has been watched working in
 the running application, on the phone it is for. See
 [`tech-guidelines.md`](tech-guidelines.md) section 7.
 
-## Phase: Phase 23: More than one agent, one package each
-state: open
-plan: docs/superpowers/plans/2026-10-10-hitchrail-phase-23-more-than-one-agent.md
-
-Build more than one agent through the seam `claude_ipc` already is: one
-quarantined package per agent, the agents chosen on the machine, and no
-command template anywhere.
-
-Decided by Andrea on 2026-10-07, on #334, between three answers to design
-section 3.1's "not built, not closed off": stay single agent; widen the vendor
-seam; or change the security argument so a page could edit a registry of
-command templates, as the epic filed on 2026-09-22 proposed. The seam won, so
-the three things the product rests on still hold: the settings file is read
-once and never written, no vendor name enters the operator or API contract,
-and no text from a page reaches a spawn. #291, the settings page that edited
-templates, closed with that reason.
-
-The phase's first task is #334 itself: the answer written into section 3.1 and
-into what `docs/versioning.md` means by 1.0. Then every epic ticket is
-rewritten against it when the phase opens, because each was written for the
-registry. Two questions are left for the plan rather than assumed here:
-whether the page may choose among the agents the operator configured when it
-starts a project (#292), which is a choice from an allowlist but changes the
-start route's contract; and whether a daemon one agent needs (#293) is a
-process Hitchrail should own at all, since it would be the first long lived
-child that is not a session.
-
-Done when a second agent starts, stops and is derived exactly as Claude Code
-is, through its own package, the stop sequence included, with no vendor name
-outside that package and nothing an agent runs coming from a page.
-
-Placed before Phase 16 because a reboot restore has to record which agent a
-session was, and designing it for one is rework. After Phases 26 to 28,
-because the stop path, the config and the page the second agent plugs into
-should be settled first. It also holds the open `claude_ipc` findings (#456,
-#460) by the first Backlog rule, since this phase re-cuts that package.
-And its close watch is on the S25: Phase 28 moved the page's phone watch
-here (#468, #485), because this phase changes the same page again.
-
 ## Phase: Phase 16: What survives a reboot
 state: planned
 
@@ -110,6 +71,12 @@ budget. Socket activation (#220) sits here as its alternative, P3, and
 helps nobody while the unit binds loopback, so it is the first ticket to move
 out if the phase runs long. `server.py`'s split (#205) moved to Phase 26 on
 2026-10-09, because the restart route reaches that file first.
+
+Phase 23 closed re-shaped on 2026-10-10 and left two things here. #504,
+agy's `--add-dir=` answering agy's trust prompt for every folder, is Andrea's
+decision and holds the next release, since agy is already in `## Unreleased`.
+And the S25 watch at 360 CSS px (#468, #485), which has slipped four phases
+running and covers the bar, Restart, the countdown and the agent chip.
 
 Done when a reboot brings back what was running, exactly once each, without a
 person tapping anything, and the security argument has been rewritten rather
