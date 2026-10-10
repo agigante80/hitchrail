@@ -65,6 +65,10 @@ class Agents:
         """Every configured agent, the default first."""
         return tuple(self._by_ident.values())
 
+    def by_ident(self, ident: str) -> Configured:
+        """A configured agent by its identifier, as a derived row names it."""
+        return self._by_ident[ident]
+
     def for_project(self, identifier: str) -> Configured:
         """The agent a project's root runs. The default for a name no root
         holds: derivation is asked about such names and must not raise, and

@@ -47,8 +47,10 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
   opens. Stop, Kill, Restart and the closing message take the same steps as
   for Claude Code. What Hitchrail has not seen on agy's screen it reports as
   unknown rather than guessing: no agy row says it is waiting on a question,
-  so none offers an answer. agy's own trust prompt never shows,
-  because Hitchrail starts it with the project folder added.
+  so none offers an answer. **agy's trust prompt never shows**: Hitchrail
+  starts agy with the project folder added, which agy takes as trusting
+  it, so every folder under a root that runs agy is trusted without being
+  asked. Claude Code still asks.
 
 ### Fixed
 

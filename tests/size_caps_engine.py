@@ -200,7 +200,9 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # 1291 for #290: the engine holds its `Agents` and asks the project's
     # agent to start, stop, answer and link, where it called `claude_ipc`;
     # the derive call wrapped once it passed them.
-    "engine.py": 1291,
+    # 1300 for #294: a stop acts through the agent the row was derived
+    # running and records it on the marker, not through the root's agent.
+    "engine.py": 1300,
     # #473. The sweep, moved whole from `engine.py`. 465 is the move: most of
     # it is the notes on the races between a scan, a stop and a start, which
     # are the reason the code is shaped as it is. It does not want splitting
@@ -212,7 +214,9 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # 493 for #472: an expired stop cancels a pending restart in the same
     # critical section as the removal, and the comment says why it must.
     # 494 for #290: the exception is the neutral module's, one import more.
-    "sweep.py": 494,
+    # 498 for #294: the sweep reads a screen and types an exit with the
+    # agent on the row or the marker.
+    "sweep.py": 498,
     # signals.py: 397 when #274 moved the pidfd path here. 414 for #426: `_close`,
     # and the note on why a close that fails must not replace the outcome.
     # 426 for #425: the survivor after the wait, journalled and reported as ask.
@@ -227,7 +231,8 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # root's, so a changed `agent` key cannot hide one still running.
     # 460 for #294: the pane direction prefers the agent whose whole argv tail
     # a process ends with, since agy's argv carries Claude Code's marker.
-    "derive.py": 460,
+    # 461 for #294: a row carries the identifier of the agent found.
+    "derive.py": 461,
     # tmux.py is the module that encodes what tmux actually does
     # rather than what its manual implies, and every entry is a footgun
     # that cost real debugging: prefix matching targets, the colon

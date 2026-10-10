@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import FakeTmux, procs_from, ps_row
+from conftest import TRUST_MODAL, FakeClock, FakeTmux, procs_from, ps_row
 from hitchrail import agentconfig, agents, agy_ipc, claude_ipc
 from hitchrail.agentconfig import DEFAULT_AGENT, AgentSpec
 from hitchrail.cli import build_config, parse_args, preflight
@@ -20,6 +20,7 @@ from hitchrail.config import Config, ConfigError
 from hitchrail.engine import Engine
 from hitchrail.roots import Root
 from hitchrail.sessions import State
+from test_wrap_up import SETTLE
 
 
 def _write(tmp_path: Path, text: str) -> Path:
@@ -233,25 +234,33 @@ def test_a_pane_holding_another_packages_agent_is_running(tmp_path: Path) -> Non
 @pytest.mark.usefixtures("other_package")
 def test_the_root_agent_is_the_one_the_engine_asks(tmp_path: Path) -> None:
     engine = _engine(tmp_path, "", root_agent="other")
-    assert engine.agent_for("main~vessel").package == "other"
-    assert _engine(tmp_path, "").agent_for("main~vessel").package == "claude-code"
+    assert engine.agent_for("main~vessel", None).package == "other"
+    assert _engine(tmp_path, "").agent_for("main~vessel", None).package == "claude-code"
 
 
 # -- markers overlap (#294) ------------------------------------------------
 
 
-def _agy_root(tmp_path: Path, argv: list[str]) -> Engine:
-    """A Claude Code root, an `agy` agent configured beside it, and a pane
+def _agy_root(
+    tmp_path: Path,
+    argv: list[str],
+    root_agent: str = DEFAULT_AGENT,
+    prompt: str | None = None,
+    clock: FakeClock | None = None,
+) -> Engine:
+    """A root, an `agy` agent configured beside the default, and a pane
     holding `argv`. Claude Code's trust map is readable and trusts nothing,
     so `awaiting_trust` says which package derivation named the owner."""
     (tmp_path / "vessel").mkdir(exist_ok=True)
     (tmp_path / ".sessions").mkdir(exist_ok=True)
     (tmp_path / "claude.json").write_text('{"projects": {}}')
+    clock = clock or FakeClock()
     config = Config(
-        roots=(Root("main", tmp_path.resolve()),),
+        roots=(Root("main", tmp_path.resolve(), agent=root_agent),),
         agents={"agy": AgentSpec("antigravity", "/opt/agy")},
         sessions_dir=tmp_path / ".sessions",
         agent_config_path=tmp_path / "claude.json",
+        stop_prompt=prompt,
     )
     return Engine(
         config,
@@ -259,6 +268,8 @@ def _agy_root(tmp_path: Path, argv: list[str]) -> Engine:
         procs_fn=procs_from(ps_row(500, 1) + ps_row(501, 500, args=" ".join(argv))),
         meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
         ceiling_fn=lambda pid: None,
+        clock=clock,
+        sleep=clock.sleep,
     )
 
 
@@ -273,7 +284,57 @@ def test_a_pane_holding_agy_under_a_claude_root_is_agys(tmp_path: Path) -> None:
     session = agy.get("main~vessel")
     assert session.state is State.RUNNING
     assert session.awaiting_trust is False, "read as Claude Code's, which trusts nothing here"
+    assert session.agent == "agy"
     # The positive control: the same pane holding Claude Code does warn, so
     # the False above is the owner and not a trust map nobody read.
     claude = _agy_root(tmp_path, claude_ipc.launch_argv("claude", "main~vessel"))
     assert claude.get("main~vessel").awaiting_trust is True
+    assert claude.get("main~vessel").agent == DEFAULT_AGENT
+
+
+def _claude_left_running(
+    tmp_path: Path, prompt: str | None = None, clock: FakeClock | None = None
+) -> tuple[Engine, FakeTmux]:
+    """The root was switched to agy while Claude Code still ran in its pane."""
+    argv = claude_ipc.launch_argv("claude", "main~vessel")
+    engine = _agy_root(tmp_path, argv, root_agent="agy", prompt=prompt, clock=clock)
+    assert isinstance(engine.tmux, FakeTmux)
+    engine.tmux.pane_text["main~vessel"] = "\x1b[39m\u276f\xa0                     \n"
+    return engine, engine.tmux
+
+
+def test_a_stop_types_the_running_agents_keys_not_the_roots(tmp_path: Path) -> None:
+    """Round 1 of the #290 review. The root's agent typed agy's sequence into
+    Claude Code's pane, after reading Claude Code's screen with agy's reader,
+    which finds no box there and refused a Stop that would have worked."""
+    engine, tmux = _claude_left_running(tmp_path)
+    assert engine.get("main~vessel").agent == DEFAULT_AGENT
+    engine.stop("main~vessel")
+    assert [keys for _, keys in tmux.sent] == list(claude_ipc.GRACEFUL_STOP_KEYS)
+
+
+def test_a_wrap_up_remembers_which_agent_it_was_sent_to(tmp_path: Path) -> None:
+    """The sweep, not the Stop, types the exit after a wrap up: it reads the
+    agent off the marker, since the row it would derive again is not to hand."""
+    clock = FakeClock()
+    engine, tmux = _claude_left_running(tmp_path, prompt="wrap up", clock=clock)
+    engine.stop("main~vessel")
+    marker = engine.stopping["main~vessel"]
+    assert marker.phase == "closing"
+    assert marker.agent == DEFAULT_AGENT
+    assert isinstance(marker.watch, claude_ipc.WrapUpWatch)
+    tmux.sent.clear()
+    # Two idle reads a settle apart, the first a settle after the prompt.
+    for _ in range(2):
+        clock.advance(SETTLE)
+        moved = engine.advance_wrap_ups()
+    assert moved == ["main~vessel"]
+    assert [keys for _, keys in tmux.sent] == list(claude_ipc.GRACEFUL_STOP_KEYS)
+
+
+def test_the_sweep_reads_a_screen_with_the_running_agents_reader(tmp_path: Path) -> None:
+    """agy claims no question on any screen, so reading Claude Code's modal
+    with the root's agent hid a person being needed."""
+    engine, tmux = _claude_left_running(tmp_path)
+    tmux.pane_text["main~vessel"] = TRUST_MODAL
+    assert engine.scan_for_stuck() == ["main~vessel"]

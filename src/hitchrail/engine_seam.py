@@ -77,9 +77,11 @@ class EngineSeam(Protocol):
         """The pidfd callables, `procs.py`'s unless a test injected its own."""
         ...
 
-    def agent_for(self, name: str) -> Agent:
-        """The agent a project's root runs (#290): what to type a stop or
-        read a screen with."""
+    def agent_for(self, name: str, ident: str | None) -> Agent:
+        """What to type a stop or read a screen with: the agent derivation
+        found running (`ident`, from a row or a stop marker), else the one
+        the project's root runs (#290, #294). Required, so no caller falls
+        back to the root's agent by forgetting the row's."""
         ...
 
     # -- time ---------------------------------------------------------------
@@ -258,7 +260,9 @@ class SeamMembers:
     def restarts(self) -> RestartOverlay:
         return self._restarts
 
-    def agent_for(self, name: str) -> Agent:
+    def agent_for(self, name: str, ident: str | None) -> Agent:
+        if ident is not None:
+            return self._agents.by_ident(ident).agent
         return self._agents.for_project(name).agent
 
     def now(self) -> float:

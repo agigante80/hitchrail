@@ -457,4 +457,5 @@ def live(
         awaiting_input=awaiting_input,
         foreign_session=foreign_session,
         foreign_server_pid=foreign_server_pid,
+        agent=configured.ident,
     )

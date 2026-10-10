@@ -324,6 +324,12 @@ class Session:
     # `foreign_session` still means no owner was SEEN, not that there is
     # none: screen and a plain terminal leave no tmux above the agent.
     foreign_server_pid: int | None = None
+    # #294. The configured agent derivation found running here, by its
+    # identifier: the root's own, or another package's still running after
+    # the root's `agent` changed. A stop types, and a screen is read, with
+    # THIS agent and never the root's, since agy and Claude Code read and
+    # stop differently. None while nothing runs.
+    agent: str | None = None
     # #472. Overlays from `restart.py`, like `stopping`, and for the same
     # reason not states: `restarting` says a start will follow the stop in
     # flight (or the exit just seen), and `restart_refused` carries the reason

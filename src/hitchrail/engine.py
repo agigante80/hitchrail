@@ -871,12 +871,20 @@ class Engine(SeamMembers, RestartMembers):
                 # A repeated Stop on `exiting`, as before #242, keeping the
                 # ceiling flag so the dialog still says why it is exiting.
                 typing = StopMarker(
-                    now, "exiting", policy, exit_at=now, ceiling=current.ceiling, typing=True
+                    now,
+                    "exiting",
+                    policy,
+                    exit_at=now,
+                    ceiling=current.ceiling,
+                    typing=True,
+                    agent=session.agent,
                 )
             elif prompt is not None:
-                typing = StopMarker(now, "closing", policy)
+                typing = StopMarker(now, "closing", policy, agent=session.agent)
             else:
-                typing = StopMarker(now, "exiting", policy, exit_at=now, typing=True)
+                typing = StopMarker(
+                    now, "exiting", policy, exit_at=now, typing=True, agent=session.agent
+                )
             if typing is not None:
                 self._stopping[name] = typing
         if typing is None:
@@ -889,7 +897,7 @@ class Engine(SeamMembers, RestartMembers):
         # and that they travel through a pane. The engine owns the policy, the
         # timeout, the marker and the refusal to escalate; the adapter owns the
         # mechanism.
-        agent = self.agent_for(name)
+        agent = self.agent_for(name, session.agent)
         try:
             if wrapping_up:
                 assert prompt is not None
@@ -1016,7 +1024,7 @@ class Engine(SeamMembers, RestartMembers):
         # One call, like the stop. The engine does not learn that answering is
         # a keystroke, nor that the check is a pane read.
         try:
-            self.agent_for(name).send_answer(self.tmux, name, key)
+            self.agent_for(name, session.agent).send_answer(self.tmux, name, key)
         except TmuxUnavailable as exc:
             raise MachineUnreadable(str(exc)) from exc
         except AnswerNotSafe as exc:
@@ -1256,7 +1264,8 @@ class Engine(SeamMembers, RestartMembers):
             if session.state is State.STOPPED:
                 raise NotRunning(name)
             return None
-        return self.agent_for(name).session_url(session.pid, self._safe_capture(name))
+        agent = self.agent_for(name, session.agent)
+        return agent.session_url(session.pid, self._safe_capture(name))
 
 
 __all__ = [

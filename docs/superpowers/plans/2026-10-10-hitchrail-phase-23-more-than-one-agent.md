@@ -153,9 +153,12 @@ at once; batches 3 onward run in order.
   throwaway root: process argv, the polite stop, the input box, a question,
   trust. The gate for the phase (Fails if 6). Recorded on #294, on 1.2.14
   and 1.3.3; no question could be raised, so that one is unknown.
-- [ ] **266, #294.** The `agy` package: start, derive, stop and wrap up
-  through the interface, plus whatever 265 shows it cannot do, reported as
-  unknown rather than guessed.
+- [x] **266, #294.** The `agy` package (`agy_ipc/`): start, derive, stop and
+  wrap up through the interface; its marker is `--add-dir=<folder>`, since
+  `--remote-control` is in both agents' argv. A question is unknown, so its
+  answer keys refuse. Every action follows the agent derivation found running,
+  not the root's (8ab756a and the owner fix after it). The flag skips agy's
+  trust prompt: #504.
 - [ ] **267.** A fake `agy` beside the fake Claude Code in the e2e and
   live_tmux tiers, so a root of each runs in one test.
 

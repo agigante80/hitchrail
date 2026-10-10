@@ -58,6 +58,11 @@ class StopMarker:
     `policy` is the stop policy when Stop was confirmed, and the one its
     expiry acts on (#419): the dialog promised it, and the page can change
     the live setting during the wait. Required, so no path forgets it.
+
+    `agent` is the identifier of the agent the row was derived running when
+    Stop was confirmed (#294): the sweep types the exit and reads the screen
+    with it. None reads as the root's agent, which is what every marker meant
+    before a second package existed.
     """
 
     began: float
@@ -68,6 +73,7 @@ class StopMarker:
     ceiling: bool = False
     typing: bool = False
     withdrawn: bool = False
+    agent: str | None = None
 
     @property
     def is_typing(self) -> bool:
