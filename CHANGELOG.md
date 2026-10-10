@@ -32,6 +32,12 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+### Documentation
+
+- The README suggests what a wrap up prompt can ask, and what to keep out of
+  it. The prompt stays settable only in the config file: a page that could
+  set what Stop types would be a route that types any text into an agent.
+
 ## 0.19.0 - 2026-10-10
 
 ### Added
