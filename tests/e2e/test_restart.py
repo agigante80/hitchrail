@@ -119,6 +119,11 @@ async def test_a_restart_whose_stop_times_out_starts_no_second_agent(
 
     dialog = page.locator("[data-dialog]")
     await expect(dialog).to_contain_text("No answer from", timeout=20_000)
+    # #482. The restart is off, and the dialog says so rather than leaving a
+    # person to wait for a successor that no Kill will bring.
+    await expect(dialog).to_contain_text(
+        "No new session will start, and Kill will not start one either."
+    )
     # Several sweeps after the timeout: a start that was merely late would be
     # here by now.
     await page.wait_for_timeout(3_000)

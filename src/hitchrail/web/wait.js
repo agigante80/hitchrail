@@ -161,7 +161,7 @@ export function awaitStopped(project, wait) {
       // first.
       wait.over = true;
       if (current.state === "stopped") closeDialog(project.name);
-      else showTimedOut(project);
+      else showTimedOut(project, wait.restart);
       return;
     }
     if (!current.stopping) {
@@ -187,7 +187,7 @@ export function awaitStopped(project, wait) {
       // If that one failed, the page cannot answer, and one blip costing an
       // honest screen instead of a claim is the right way round to be wrong.
       wait.over = true;
-      if (lastReadOk) showTimedOut(project);
+      if (lastReadOk) showTimedOut(project, wait.restart);
       else showLostTrack(project);
       return;
     }
@@ -216,7 +216,7 @@ function settledRestart(project, wait, current) {
   }
   if (current.state === "running" && !current.restarting) {
     wait.over = true;
-    showTimedOut(project);
+    showTimedOut(project, true);
     return true;
   }
   return false;
@@ -236,7 +236,13 @@ function showLostTrack(project) {
   });
 }
 
-async function showTimedOut(project) {
+/* #482. Said when the wait that ran out was a restart's: the expiry, a Kill
+   and an End each cancel the pending restart (`restarts.cancel`), so no
+   successor is coming and the person must not wait for one. */
+const NO_RESTART = " No new session will start, and Kill will not start one either.";
+
+async function showTimedOut(project, restart = false) {
+  const off = restart ? NO_RESTART : "";
   // #101. The wait can end two ways and they need different words.
   //
   // The engine looks at the pane ONCE when the wait expires, and says whether
@@ -280,7 +286,8 @@ async function showTimedOut(project) {
       body:
         "Its terminal is gone, so there is nothing to ask. The agent is still "
         + "alive and Hitchrail has stopped waiting."
-        + (ours ? "" : " A terminal Hitchrail cannot control owns it."),
+        + (ours ? "" : " A terminal Hitchrail cannot control owns it.")
+        + off,
       actions: [
         [ours ? "Leave it" : "Close", "ghost", () => closeDialog()],
         ...(ours
@@ -316,7 +323,8 @@ async function showTimedOut(project) {
       title: `${project.name} is waiting for you`,
       body:
         "It was asked to exit and answered with a prompt, shown below. Reply "
-        + "with a key here or at the pane; Hitchrail has stopped waiting.",
+        + "with a key here or at the pane; Hitchrail has stopped waiting."
+        + off,
       extra,
       wide: true,
       forProject: project.name,
@@ -337,7 +345,8 @@ async function showTimedOut(project) {
     // work that is not saved.
     body:
       "It has not finished. Killing it now ends the process immediately, "
-      + "and anything it has not written to disk is lost.",
+      + "and anything it has not written to disk is lost."
+      + off,
     // A `for` like the rest of the stop sequence, so a row leaving `running`
     // after this opened closes it rather than leaving a Kill for nothing.
     forProject: project.name,
