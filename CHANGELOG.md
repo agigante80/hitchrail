@@ -32,6 +32,16 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+### Fixed
+
+- The startup banner no longer offers a link on a host whose plain http origin
+  is withheld (for example `localhost.localdomain` beside an https
+  `--allow-origin`), since the grant from it is refused. The startup block
+  already says what to browse instead. And the grant page, opened on such an
+  address, now shows the server's message naming the origin rather than "That
+  key was not accepted", so a correct token is not retyped. A wrong or missing
+  key still gets the one sentence. Nothing to change.
+
 ## 0.17.0 - 2026-10-10
 
 ### Changed

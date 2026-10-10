@@ -79,11 +79,13 @@ three of them edit `app.css`. Each batch is reviewed once at its end.
 
 ### Batch 1: what the page tells the person, tasks 252 and 253
 
-- [ ] **Task 252, #493.** `banner` skips a host whose plain origin is
+- [x] **Task 252, #493.** `banner` skips a host whose plain origin is
       withheld; the grant page shows the server's message for
       `origin_rejected` and keeps the one sentence for a bad key. A banner
       test with `localhost.localdomain` withheld; an e2e test of the grant
       page on a withheld origin, and of a wrong key beside it.
+      Landed: banner filter in `cli.py` (under its cap), `grant()` returns the
+      sentence to show, tests in `test_cli.py` and `e2e/test_token.py`.
 - [ ] **Task 253, #474.** A `closing` row's chip reads "wrapping up" with the
       time left, "sending the exit" at zero, and its Stop says it skips the
       wait; `exiting` keeps `stopping`. A pure time left function with unit

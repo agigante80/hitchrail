@@ -136,6 +136,31 @@ def test_the_banner_never_offers_the_token_as_a_query_string(tmp_path: Path) -> 
     assert "?token=" not in banner(cfg)
 
 
+def test_the_banner_leaves_out_a_host_whose_plain_origin_is_withheld(tmp_path: Path) -> None:
+    """#493. `localhost.localdomain` is allowed and bound, and its plain origin is
+    withheld beside an https proxy origin (#436), so the grant from it is a 403.
+    The link must not be offered; the startup block says what to browse."""
+    cfg = build_config(
+        parse_args(
+            [
+                "--root",
+                f"main={tmp_path}",
+                "--token",
+                "abc123",
+                "--allow-host",
+                "localhost.localdomain",
+                "--allow-origin",
+                "https://box.lan",
+            ]
+        )
+    )
+    assert "localhost.localdomain" in cfg.plain_origins_withheld
+    text = banner(cfg)
+    assert "localhost.localdomain" not in text
+    # What is kept: the link that works, so the omission is not an empty list.
+    assert "http://localhost:8787/grant#token=abc123" in text
+
+
 def test_the_banner_is_silent_on_loopback(tmp_path: Path) -> None:
     cfg = build_config(parse_args(["--root", f"main={tmp_path}"]))
     assert banner(cfg) == ""

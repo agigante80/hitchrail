@@ -7,8 +7,10 @@ only a real browser decides what to send.
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
-from playwright.async_api import Page, expect
+from playwright.async_api import Page, async_playwright, expect
 
 from hitchrail import pages
 
@@ -199,3 +201,49 @@ async def test_the_page_asks_for_the_grant_next_to_itself(page: Page, server: Ha
     assert 'fetch("api/grant"' in source, "the grant is not a sibling of the page"
     assert 'window.location.replace("./")' in source, "the app root is not relative"
     assert '"/api/grant"' not in source and '"/grant"' not in source, source
+
+
+async def test_a_withheld_origin_is_named_and_a_wrong_key_beside_it_is_not(
+    server: Harness,
+) -> None:
+    """#493. The page read every 403 as a wrong key, so a person on a refused
+    ADDRESS retyped a correct token. `origin_rejected` shows the server's words
+    (they name the origin); a wrong key, on the same page and in the same
+    browser, keeps the one sentence, so the page is still no oracle.
+
+    `localhost.localdomain` beside an https proxy origin is withheld (#436).
+    Chromium is told where the name lives rather than trusting the resolver.
+    """
+    server.seed(stopped=["vessel"], token=TOKEN)
+    assert server._config is not None
+    server._config = dataclasses.replace(
+        server._config,
+        extra_hosts=("localhost.localdomain",),
+        extra_origins=("https://box.lan",),
+    )
+    server.restart()
+    name = f"http://localhost.localdomain:{server.port}"
+    async with async_playwright() as driver:
+        browser = await driver.chromium.launch(
+            args=["--host-resolver-rules=MAP localhost.localdomain 127.0.0.1"]
+        )
+        try:
+            page = await (await browser.new_context()).new_page()
+            await page.goto(f"{name}/grant#token={TOKEN}")
+            alert = page.get_by_role("alert")
+            await expect(alert).to_contain_text("origin not allowed", timeout=15_000)
+            await expect(alert).to_contain_text(name)
+            assert "not accepted" not in await alert.inner_text()
+
+            # A wrong key is asked on an ALLOWED address: on the refused one the
+            # origin is checked first and the key is never looked at.
+            fine = await (await browser.new_context()).new_page()
+            await fine.goto(f"{server.base}/grant")
+            await fine.get_by_label("Access key").fill("not-the-key")
+            await fine.get_by_role("button", name="Unlock").click()
+            wrong = fine.get_by_role("alert")
+            await expect(wrong).to_have_text(
+                "That key was not accepted. Check it and try again."
+            )
+        finally:
+            await browser.close()
