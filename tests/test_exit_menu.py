@@ -218,6 +218,27 @@ def test_a_tmux_failure_while_waiting_for_the_menu_is_a_miss(
     assert "pressed nothing" in caplog.text
 
 
+def test_a_tmux_failure_pressing_enter_on_the_menu_is_a_miss(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#479: the exit went out and the menu was read, so the press failing is
+    not an "exit refused" either. The stop returns, and says what was missed."""
+
+    class EnterFails(FakePane):
+        def send_keys(self, project: str, *keys: str) -> None:
+            if keys == ("Enter",):
+                raise TmuxUnavailable("tmux went away")
+            super().send_keys(project, *keys)
+
+    clear = pane_text(CLEAR_BOX)
+    pane = EnterFails([clear, clear, MENU])
+    with caplog.at_level(logging.WARNING, logger="hitchrail.claude_ipc"):
+        request_stop(pane, "vessel", settle=lambda _s: None)
+    assert [s[1:] for s in pane.sent] == [("C-u",), ("Escape",), ("/exit", "Enter")]
+    assert "exit menu seen, Enter not sent" in caplog.text
+    assert "sent Enter" not in caplog.text.replace("Enter not sent", "")
+
+
 def test_a_tmux_failure_before_the_exit_still_refuses() -> None:
     """The miss is only for the wait after the exit: a failure while the box is
     being checked must still stop the sequence."""
