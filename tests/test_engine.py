@@ -51,7 +51,7 @@ from hitchrail.engine import (
 from hitchrail.events import EventBus
 from hitchrail.procs import ProcTable, snapshot
 from hitchrail.tmux import Panes, Tmux, TmuxUnavailable
-from support import DEFAULT_LABEL, make_config
+from support import DEFAULT_LABEL, make_config, names_outside_the_quarantine
 
 
 def proj(folder: str) -> str:
@@ -1132,11 +1132,14 @@ def test_the_stop_sequence_comes_from_the_quarantine(root: Path) -> None:
     assert [keys for _project, keys in tmux.sent] == list(GRACEFUL_STOP_KEYS)
 
 
-def test_the_engine_source_never_names_the_stop_sequence() -> None:
-    """A grep, because no import contract sees a `for` loop over a constant."""
-    source = (Path(__file__).parent.parent / "src" / "hitchrail" / "engine.py").read_text()
-    assert "GRACEFUL_STOP_KEYS" not in source
-    assert "send_keys" not in source
+def test_no_module_outside_the_quarantine_names_the_stop_sequence() -> None:
+    """A syntax tree walk, because no import contract sees a `for` loop over a
+    constant. It read only engine.py until #476: `request_stop` is also called
+    from sweep.py and signals.py acts on agents, so every module is read."""
+    seen = names_outside_the_quarantine()
+    assert {"engine.py", "sweep.py", "signals.py"} <= set(seen)
+    forbidden = {"GRACEFUL_STOP_KEYS", "send_keys"}
+    assert {rel for rel, names in seen.items() if names & forbidden} == set()
 
 
 def test_kill_is_reachable_during_a_stop(root: Path) -> None:

@@ -12,6 +12,7 @@ constructor would hide the thing being asserted.
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import os
 import select
@@ -308,6 +309,31 @@ AGENT_PACKAGES = ("claude_ipc", "agy_ipc")
 def in_an_agent_package(rel: str) -> bool:
     """Whether a `source_modules` key is inside any agent's quarantine."""
     return rel.split("/", 1)[0].removesuffix(".py") in AGENT_PACKAGES
+
+
+def names_outside_the_quarantine(src: Path = SRC) -> dict[str, set[str]]:
+    """Every identifier each module outside every agent package REFERENCES (#476).
+
+    Read from the syntax tree, not the text: a guard that greps for a forbidden
+    name matches the comment or docstring that explains why it is forbidden,
+    and `tmux.py` documents `send_keys` in prose. A name, an attribute, an
+    import alias and a definition each count, so `from x import NAME as y`
+    and `obj.NAME` are seen, and a mention in a string or comment is not.
+    """
+    found: dict[str, set[str]] = {}
+    for rel, path in source_modules(src).items():
+        if in_an_agent_package(rel):
+            continue
+        names: set[str] = set()
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Name):
+                names.add(node.id)
+            elif isinstance(node, ast.Attribute):
+                names.add(node.attr)
+            elif isinstance(node, ast.alias):
+                names.add(node.name.rsplit(".", 1)[-1])
+        found[rel] = names
+    return found
 
 
 def module_name(rel: str) -> str:
