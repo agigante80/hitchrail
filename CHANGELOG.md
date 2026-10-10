@@ -32,6 +32,8 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+## 0.19.0 - 2026-10-10
+
 ### Added
 
 - The config file can name more than one agent: an `[agents.<id>]` table

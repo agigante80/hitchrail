@@ -1,6 +1,6 @@
 [project]
 name = "hitchrail"
-version = "0.18.0"
+version = "0.19.0"
 description = "Start and stop headless Claude Code sessions across a folder of projects, from a phone-first web UI."
 readme = "README.md"
 requires-python = ">=3.11"
