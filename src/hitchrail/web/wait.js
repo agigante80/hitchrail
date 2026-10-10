@@ -267,9 +267,15 @@ async function showTimedOut(project) {
     // owner session and no foreign tmux server. Otherwise the person is told
     // and given Close, because ending a process another terminal owns is not
     // this dialog's call. No `forProject`: the listing closes a `for` dialog
-    // on any event for a row that is not running, and this row never is.
+    // on any event for a row that is not running, and this row never is. It
+    // carries `detachedFor` instead (#479), closed when the row leaves
+    // `detached`, so a dead agent is not offered an End that answers 409.
     const ours = !current.foreign_session && !current.foreign_server_pid;
+    // #479. The row's own escalation (actions.js): once a SIGTERM went to
+    // this pid, the next control is Kill, so the dialog may not offer End.
+    const escalate = state.signalled.has(`${current.name}:${current.pid}`);
     showDialog({
+      detachedFor: project.name,
       title: `${project.name} is still running`,
       body:
         "Its terminal is gone, so there is nothing to ask. The agent is still "
@@ -277,7 +283,9 @@ async function showTimedOut(project) {
         + (ours ? "" : " A terminal Hitchrail cannot control owns it."),
       actions: [
         [ours ? "Leave it" : "Close", "ghost", () => closeDialog()],
-        ...(ours ? [["End it", "danger", () => confirmSignal(current, false)]] : []),
+        ...(ours
+          ? [[escalate ? "Kill it" : "End it", "danger", () => confirmSignal(current, escalate)]]
+          : []),
       ],
     });
     return;

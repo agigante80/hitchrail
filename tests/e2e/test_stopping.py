@@ -13,7 +13,7 @@ import logging
 import time
 
 import pytest
-from playwright.async_api import Page, Route, expect
+from playwright.async_api import Locator, Page, Route, expect
 
 from hitchrail.engine import StopMarker
 
@@ -1227,6 +1227,29 @@ async def test_stop_all_names_the_rows_it_only_asks_to_exit_again(
     )
 
 
+async def test_stop_all_warns_about_the_exiting_rows_too_when_no_wrap_up_is_set(
+    page: Page, server: Harness
+) -> None:
+    """#479. With no `stop_prompt` the warning rode on the fresh rows' clause
+    and said "it" for the one fresh row, so the exiting row, resent its exit
+    all the same, was passed over. The warning now covers the whole set."""
+    server.seed(running=["vessel", "wharf"])
+    engine = server.engine
+    assert engine is not None
+    now = engine._clock()
+    engine._stopping[server.project("vessel")] = StopMarker(now, "exiting", "ask", exit_at=now)
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await expect(row).to_have_attribute("data-stopping", "true")
+    await page.get_by_role("button", name="Stop all").click()
+    dialog = page.locator("[data-dialog]")
+    await expect(dialog).to_contain_text("Stop 2 sessions?")
+    await expect(dialog).to_contain_text("will only be asked again.")
+    text = await dialog.inner_text()
+    assert text.count("part way through may be lost") == 1, text
+    assert "Anything they are part way through may be lost." in text, text
+
+
 async def test_stop_all_over_one_row_agrees_with_a_set_of_one(
     page: Page, server: Harness
 ) -> None:
@@ -1314,10 +1337,75 @@ async def test_a_stop_that_ran_out_on_a_detached_agent_offers_the_signal_route_n
         await expect(dialog).to_contain_text(f"End {server.project('vessel')}?")
         async with page.expect_response("**/api/sessions/*/signal") as signalled:
             await dialog.get_by_role("button", name="End it").click()
-        assert (await signalled.value).status != 404
+        assert (await signalled.value).status == 202
+        await expect(row).not_to_have_attribute("data-state", "detached", timeout=15_000)
         assert not [u for u in posts if u.endswith("/kill")], posts
     finally:
         # The signal normally ended it already; this is for a failed run, and
         # the helper asserts there is a process to find.
+        with contextlib.suppress(AssertionError):
+            server.kill_the_agent_quietly("vessel")
+
+
+async def _timed_out_on_a_detached_agent(
+    page: Page, server: Harness, *, signalled: bool = False
+) -> tuple[Locator, Locator]:
+    """A stop that ran out on an agent whose terminal went: the dialog of #463.
+    `signalled` records a SIGTERM already sent to its pid, as the row does."""
+    server.seed(
+        running=["vessel"],
+        ignores_graceful_stop=True,
+        survives_its_terminal=True,
+        stop_timeout=6.0 if signalled else 2.0,
+    )
+    await page.goto(server.base)
+    row = page.locator(f'[data-project="{server.project("vessel")}"]')
+    await row.get_by_role("button", name="Stop").click()
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Stop", exact=True).click()
+    await expect(row).to_have_attribute("data-stopping", "true")
+    server.lose_the_terminal()
+    await expect(row).to_have_attribute("data-state", "detached", timeout=15_000)
+    if signalled:
+        # While the wait is still running: a render prunes a key whose row is
+        # not detached, so this can only be set once the row is.
+        await page.evaluate(
+            "n => { const s = window.__hitchrail.state;"
+            " s.signalled.add(n + ':' + s.projects.find(p => p.name === n).pid); }",
+            server.project("vessel"),
+        )
+    await expect(dialog).to_contain_text("terminal is gone", timeout=15_000)
+    return row, dialog
+
+
+async def test_the_detached_timeout_dialog_closes_when_the_agent_is_gone(
+    page: Page, server: Harness
+) -> None:
+    """#479. The dialog carries no `for`, so nothing closed it: after the agent
+    died, End was answered with a 409 `not_detached`."""
+    row, dialog = await _timed_out_on_a_detached_agent(page, server)
+    try:
+        server.kill_the_agent_quietly("vessel")
+        # Nothing announces a death the engine did not cause: a listing does.
+        await page.evaluate("() => window.__hitchrail.refresh()")
+        await expect(row).to_have_attribute("data-state", "stopped", timeout=15_000)
+        await expect(dialog).not_to_be_visible()
+    finally:
+        with contextlib.suppress(AssertionError):
+            server.kill_the_agent_quietly("vessel")
+
+
+async def test_the_detached_timeout_dialog_escalates_like_the_row_after_an_end(
+    page: Page, server: Harness
+) -> None:
+    """#479. Once a SIGTERM went to this pid the row offers Kill, and a dialog
+    offering End again would repeat the signal the agent already ignored."""
+    _row, dialog = await _timed_out_on_a_detached_agent(page, server, signalled=True)
+    try:
+        await expect(dialog.get_by_role("button", name="Kill it")).to_be_visible()
+        assert await dialog.get_by_role("button", name="End it").count() == 0
+        await dialog.get_by_role("button", name="Kill it").click()
+        await expect(dialog).to_contain_text(f"Kill {server.project('vessel')}?")
+    finally:
         with contextlib.suppress(AssertionError):
             server.kill_the_agent_quietly("vessel")
