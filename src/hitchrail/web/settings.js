@@ -22,9 +22,10 @@ import { applyTheme, storedTheme, storeTheme } from "/theme.js";
 
 const $ = (selector) => document.querySelector(selector);
 
-/* The stored theme, through the one module that owns it. Module scripts run
-   after the document is parsed and before its first paint, so this is as early
-   as a copy at the top of the file ever was (imports are hoisted above it). */
+/* The stored theme, through the one module that owns it. No earlier than the
+   copy at the top of this file was, since imports are hoisted above both; a
+   module is deferred, so a paint before it is possible either way, and only a
+   classic script in the head could prevent one. */
 applyTheme(storedTheme());
 
 /* #315. WHO wrote the text currently on the strip, "settings" or "plugins",

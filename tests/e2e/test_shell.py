@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import Literal
 
 import pytest
 from playwright.async_api import Page, ViewportSize, expect
@@ -144,9 +145,26 @@ async def test_the_toggle_follows_a_system_scheme_change_while_system_is_chosen(
 
     await toggle.click()
     await expect(toggle).to_have_text("Light")
-    await page.emulate_media(color_scheme="dark")
-    await page.emulate_media(color_scheme="light")
+    # Awaited, not polled: "Light" is already on the toggle, so an assertion
+    # that only waits for it passes before a wrongly followed change lands.
+    await _change_scheme(page, "dark")
+    await _change_scheme(page, "light")
     await expect(toggle).to_have_text("Light")
+    assert await page.evaluate("document.documentElement.dataset.theme") == "dark"
+
+
+async def _change_scheme(page: Page, scheme: Literal["light", "dark"]) -> None:
+    """Emulate a device scheme change and return once the page has handled it.
+    `emulate_media` returns before the `change` event is dispatched; this
+    listener is added after the app's, so it runs after it, and the frame
+    after that is when the repaint is visible."""
+    await page.evaluate(
+        """void (window.__schemeChanged = new Promise((done) =>
+             matchMedia("(prefers-color-scheme: dark)").addEventListener(
+               "change", () => requestAnimationFrame(() => done()), { once: true })))"""
+    )
+    await page.emulate_media(color_scheme=scheme)
+    await page.evaluate("window.__schemeChanged")
 
 
 async def test_a_theme_picked_in_settings_is_what_the_header_toggle_offers(
