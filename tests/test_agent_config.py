@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from conftest import FakeTmux, procs_from, ps_row
-from hitchrail import agentconfig, agents, claude_ipc
+from hitchrail import agentconfig, agents, agy_ipc, claude_ipc
 from hitchrail.agentconfig import DEFAULT_AGENT, AgentSpec
 from hitchrail.cli import build_config, parse_args, preflight
 from hitchrail.config import Config, ConfigError
@@ -235,3 +235,45 @@ def test_the_root_agent_is_the_one_the_engine_asks(tmp_path: Path) -> None:
     engine = _engine(tmp_path, "", root_agent="other")
     assert engine.agent_for("main~vessel").package == "other"
     assert _engine(tmp_path, "").agent_for("main~vessel").package == "claude-code"
+
+
+# -- markers overlap (#294) ------------------------------------------------
+
+
+def _agy_root(tmp_path: Path, argv: list[str]) -> Engine:
+    """A Claude Code root, an `agy` agent configured beside it, and a pane
+    holding `argv`. Claude Code's trust map is readable and trusts nothing,
+    so `awaiting_trust` says which package derivation named the owner."""
+    (tmp_path / "vessel").mkdir(exist_ok=True)
+    (tmp_path / ".sessions").mkdir(exist_ok=True)
+    (tmp_path / "claude.json").write_text('{"projects": {}}')
+    config = Config(
+        roots=(Root("main", tmp_path.resolve()),),
+        agents={"agy": AgentSpec("antigravity", "/opt/agy")},
+        sessions_dir=tmp_path / ".sessions",
+        agent_config_path=tmp_path / "claude.json",
+    )
+    return Engine(
+        config,
+        tmux=FakeTmux(sessions={"main~vessel": 500}),
+        procs_fn=procs_from(ps_row(500, 1) + ps_row(501, 500, args=" ".join(argv))),
+        meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
+        ceiling_fn=lambda pid: None,
+    )
+
+
+def test_a_pane_holding_agy_under_a_claude_root_is_agys(tmp_path: Path) -> None:
+    """agy's argv carries `--remote-control`, which is Claude Code's marker, and
+    the root's own agent is asked first. The first marker match named Claude
+    Code the owner, with Claude Code's trust warning, link and stop keys; the
+    whole launch tail is what tells the two apart."""
+    folder = tmp_path.resolve() / "vessel"
+    argv = agy_ipc.Antigravity().launch_argv("/opt/agy", "main~vessel", folder)
+    agy = _agy_root(tmp_path, argv)
+    session = agy.get("main~vessel")
+    assert session.state is State.RUNNING
+    assert session.awaiting_trust is False, "read as Claude Code's, which trusts nothing here"
+    # The positive control: the same pane holding Claude Code does warn, so
+    # the False above is the owner and not a trust map nobody read.
+    claude = _agy_root(tmp_path, claude_ipc.launch_argv("claude", "main~vessel"))
+    assert claude.get("main~vessel").awaiting_trust is True

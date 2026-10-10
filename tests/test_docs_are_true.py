@@ -140,7 +140,7 @@ def _named_in_claude_md() -> set[str]:
 # and listing it in the architecture block would be noise. Named here, and kept
 # short on purpose: a broad pattern in this exemption is how the NEXT module
 # goes missing, which is the whole failure below.
-_NOT_ON_THE_MAP = {"__init__.py", "claude_ipc/__init__.py"}
+_NOT_ON_THE_MAP = {"__init__.py", "claude_ipc/__init__.py", "agy_ipc/__init__.py"}
 
 
 def test_every_module_named_in_claude_md_exists() -> None:

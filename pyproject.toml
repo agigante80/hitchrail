@@ -170,6 +170,7 @@ source_modules = [
   "hitchrail.tmuxnames",
   "hitchrail.procs",
   "hitchrail.claude_ipc",
+  "hitchrail.agy_ipc",
   "hitchrail.agent",
   "hitchrail.agentconfig",
   "hitchrail.agents",
@@ -331,6 +332,12 @@ also_copy = [
   "src/hitchrail/claude_ipc/keys.py",
   "src/hitchrail/claude_ipc/launch.py",
   "src/hitchrail/claude_ipc/screen.py",
+  # #294. The second agent package, copied because `agents.py` imports it.
+  "src/hitchrail/agy_ipc/__init__.py",
+  "src/hitchrail/agy_ipc/adapter.py",
+  "src/hitchrail/agy_ipc/keys.py",
+  "src/hitchrail/agy_ipc/launch.py",
+  "src/hitchrail/agy_ipc/screen.py",
   # #221. Copied rather than mutated, and its ABSENCE was not a gap but a
   # break: `engine.py` imports it, so the assembled tree had the importer and
   # not the module, `tests/conftest.py` failed to import, and pytest exited 4.

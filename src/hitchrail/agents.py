@@ -17,7 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from hitchrail import claude_ipc, discovery
+from hitchrail import agy_ipc, claude_ipc, discovery
 from hitchrail.agent import Agent
 from hitchrail.agentconfig import DEFAULT_AGENT
 from hitchrail.config import Config
@@ -32,6 +32,7 @@ PACKAGES: dict[str, Callable[[Config], Agent]] = {
     "claude-code": lambda config: claude_ipc.ClaudeCode(
         config.agent_config_path, config.sessions_dir
     ),
+    "antigravity": lambda config: agy_ipc.Antigravity(),
 }
 
 

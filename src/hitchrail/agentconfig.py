@@ -24,7 +24,7 @@ DEFAULT_AGENT = "default"
 # The closed set. A config file selects one of these by string and nothing
 # else: never an import path, a module name or a template (Fails if 4 in
 # Phase 23's plan). Adding an agent is a code change and a release.
-PACKAGE_NAMES = frozenset({"claude-code"})
+PACKAGE_NAMES = frozenset({"claude-code", "antigravity"})
 
 # Lower case, short, no separator tmux or a URL would read: it is shown on a
 # phone and sent in JSON, never put in a path or an argv.

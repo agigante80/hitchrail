@@ -41,7 +41,14 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
   change. Every named binary is checked at startup, and an unknown package,
   a bad identifier or a root naming an agent that is not configured stops
   the start with the reason. `GET /api/config` shows each root's `agent`
-  and the `agents` table. Only the `claude-code` package exists so far.
+  and the `agents` table.
+- A second package, `antigravity`, starts Google's Antigravity CLI (`agy`,
+  read against 1.3.3) with its remote control link, which the row's link
+  opens. Stop, Kill, Restart and the closing message take the same steps as
+  for Claude Code. What Hitchrail has not seen on agy's screen it reports as
+  unknown rather than guessing: no agy row says it is waiting on a question,
+  so none offers an answer. agy's own trust prompt never shows,
+  because Hitchrail starts it with the project folder added.
 
 ### Fixed
 

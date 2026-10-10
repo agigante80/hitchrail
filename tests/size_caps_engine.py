@@ -225,7 +225,9 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # the questions asked of it; splitting there is #501.
     # 438 for #290: both directions ask every configured agent, not only the
     # root's, so a changed `agent` key cannot hide one still running.
-    "derive.py": 438,
+    # 460 for #294: the pane direction prefers the agent whose whole argv tail
+    # a process ends with, since agy's argv carries Claude Code's marker.
+    "derive.py": 460,
     # tmux.py is the module that encodes what tmux actually does
     # rather than what its manual implies, and every entry is a footgun
     # that cost real debugging: prefix matching targets, the colon

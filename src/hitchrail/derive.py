@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from hitchrail import discovery
 from hitchrail.agents import Agents, Configured, launch_folder
 from hitchrail.config import Config
-from hitchrail.procs import ProcTable
+from hitchrail.procs import Proc, ProcTable
 from hitchrail.sessions import MachineUnreadable, Session, State
 from hitchrail.tmux import Tmux, TmuxUnavailable
 from hitchrail.tmuxnames import is_tmux_argv
@@ -182,14 +182,7 @@ def derive(
         # these consistent" resolved in the wrong direction is the failure this
         # project has already hit twice with removed workarounds, and both
         # behaviours now have a test that fails if either is changed.
-        found = next(
-            (
-                (c, proc)
-                for c in asked
-                if (proc := machine.table.first_matching_in_tree(pane_pid, c.agent.marker))
-            ),
-            None,
-        )
+        found = _pane_agent(name, pane_pid, machine, config, asked)
         if found is not None:
             owner, agent = found
             return live(
@@ -272,6 +265,36 @@ def derive(
     )
 
 
+def _argv_tail(name: str, config: Config, configured: Configured) -> str:
+    """What `configured` would start `name` with, after the binary."""
+    argv = configured.agent.launch_argv(configured.binary, name, launch_folder(config, name))
+    return " ".join(argv[1:])
+
+
+def _pane_agent(
+    name: str, pane_pid: int, machine: Machine, config: Config, asked: tuple[Configured, ...]
+) -> tuple[Configured, Proc] | None:
+    """The agent in a pane's tree, and which configured agent it is.
+
+    #294. Markers overlap: agy's argv carries Claude Code's marker too, so
+    the first marker match can name the wrong package, and its link and its
+    stop with it. An agent whose whole launch tail the process ends with
+    wins. The first marker match is kept otherwise, because a pane may hold
+    an agent started by hand, which read `running` before #290 and must still.
+    """
+    found = [
+        (c, proc)
+        for c in asked
+        if (proc := machine.table.first_matching_in_tree(pane_pid, c.agent.marker))
+    ]
+    exact = (
+        (c, proc)
+        for c, proc in found
+        if proc.args.rstrip().endswith(_argv_tail(name, config, c))
+    )
+    return next(exact, found[0] if found else None)
+
+
 def find_detached(
     name: str, machine: Machine, config: Config, configured: Configured
 ) -> int | None:
@@ -305,8 +328,7 @@ def find_detached(
     # Built by calling `launch_argv`, so this cannot drift from what we
     # actually spawn, and the flags stay inside the quarantine.
     agent = configured.agent
-    argv = agent.launch_argv(configured.binary, name, launch_folder(config, name))
-    suffix = " ".join(argv[1:])
+    suffix = _argv_tail(name, config, configured)
     for proc in machine.table.matching(agent.marker):
         if proc.pid in machine.owned:
             continue
