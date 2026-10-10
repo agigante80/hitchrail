@@ -147,7 +147,15 @@ def derive(
 ) -> Session:
     # Built from the config when the caller has none: the mapping is a pure
     # function of it (#290), and the engine passes the one it holds.
-    configured = (agents or Agents(config)).for_project(name)
+    registry = agents or Agents(config)
+    configured = registry.for_project(name)
+    # #290. Every configured agent is asked, the root's own first, in BOTH
+    # directions: the root's `agent` may have changed while one of the other
+    # package's agents still ran, and asking only the new one reported that
+    # agent `stopped` and offered a second in the same folder. A row found
+    # through another package carries that package, so its link is that
+    # agent's; what stopping it types is still the root's agent (#290).
+    asked = (configured, *(c for c in registry.all() if c is not configured))
     protected = config.self_project is not None and name == config.self_project
     # The SANITIZED name, because that is what tmux stored. Looking up the
     # raw name finds nothing and reports stopped while the agent runs.
@@ -174,8 +182,16 @@ def derive(
         # these consistent" resolved in the wrong direction is the failure this
         # project has already hit twice with removed workarounds, and both
         # behaviours now have a test that fails if either is changed.
-        agent = machine.table.first_matching_in_tree(pane_pid, configured.agent.marker)
-        if agent is not None:
+        found = next(
+            (
+                (c, proc)
+                for c in asked
+                if (proc := machine.table.first_matching_in_tree(pane_pid, c.agent.marker))
+            ),
+            None,
+        )
+        if found is not None:
+            owner, agent = found
             return live(
                 name,
                 agent.pid,
@@ -189,11 +205,11 @@ def derive(
                 # project in an untrusted folder would hit it if somebody
                 # started it, and warning before the fact is a different
                 # feature from describing what is on screen now.
-                awaiting_trust=_awaiting_trust(name, machine, config, configured),
+                awaiting_trust=_awaiting_trust(name, machine, config, owner),
                 # Not derived here: the engine records it when a stop's wait
                 # ends, because that is the one moment worth a `capture-pane`.
                 awaiting_input=name in awaiting_input,
-                configured=configured,
+                configured=owner,
             )
         # A session with no agent in it. Not stopped: the shell is there.
         return Session(
@@ -203,7 +219,14 @@ def derive(
             protected=protected,
         )
 
-    orphan = find_detached(name, machine, config, configured)
+    orphan, owner = next(
+        (
+            (pid, c)
+            for c in asked
+            if (pid := find_detached(name, machine, config, c)) is not None
+        ),
+        (None, configured),
+    )
     if orphan is not None:
         return live(
             name,
@@ -231,7 +254,7 @@ def derive(
             # cannot name the session, only the server. Nothing here gates
             # an action; the engine reads it as "somebody holds this".
             foreign_server_pid=_held_by_another_server(orphan, machine),
-            configured=configured,
+            configured=owner,
         )
 
     # Never `stopping` here, whatever the marker says. The graceful stop is an

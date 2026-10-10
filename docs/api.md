@@ -294,7 +294,12 @@ instance pointed at" without SSH. Every value is `{value, source}` where
 `expect_gateway_mac` (the flag's value, normalised, or null), the three
 memory figures, `config_file` and `state_file`.
 `roots` is every configured root as `{label, path, enabled, editable,
-source}`, hidden ones included, with `hidden_roots` beside it; `stop_timeout`
+source, agent}`, hidden ones included, with `hidden_roots` beside it. `agent`
+is the identifier of the agent a project there starts (#290): `default` for
+the one `agent_binary` names, or a key of `agents`, whose value maps each
+identifier the config file configures to `{package, binary}`, empty when it
+configures none. An identifier is the operator's word; `package` names which
+agent it is. Both are read only. `stop_timeout`
 and `stop_policy` (#239, #409) are each `{value, source, editable}`, the
 source `state` when the interface set it.
 **`token` carries its source and never its value**, and `none` means the

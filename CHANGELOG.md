@@ -32,6 +32,17 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+### Added
+
+- The config file can name more than one agent: an `[agents.<id>]` table
+  gives a `package` and the `binary` to start, and a root's `agent = "<id>"`
+  picks which one its projects run. A root that names none runs the agent
+  `--agent-binary` points at, as before, so an existing config needs no
+  change. Every named binary is checked at startup, and an unknown package,
+  a bad identifier or a root naming an agent that is not configured stops
+  the start with the reason. `GET /api/config` shows each root's `agent`
+  and the `agents` table. Only the `claude-code` package exists so far.
+
 ### Fixed
 
 - A running project in a folder under one you trusted as a whole (say, a

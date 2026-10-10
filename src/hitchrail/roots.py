@@ -29,6 +29,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from hitchrail.agentconfig import DEFAULT_AGENT
 from hitchrail.projectnames import explain_name
 
 # The one character that may appear in an identifier and in neither half of it.
@@ -59,6 +60,11 @@ class Root:
     # still derives and can still be addressed by name; it is absent from the
     # listing and the sheet. Nothing about `enabled` changes what is reachable.
     enabled: bool = True
+    # #290. The identifier of the agent a project here starts, from the
+    # config file's `agent` key; `--root` has no way to say one, so a flag's
+    # root runs the default. Checked against the configured agents by
+    # `Config`, which holds both.
+    agent: str = DEFAULT_AGENT
 
 
 def parse_root_argument(raw: str) -> Root:

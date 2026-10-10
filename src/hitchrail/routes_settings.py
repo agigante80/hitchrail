@@ -128,6 +128,7 @@ def settings_routes(engine: eng.Engine, config: Config) -> list[Route]:
             return {"value": value, "source": src.get(name, "default")}
 
         prefs = engine.prefs
+        agent_of = {root.label: root.agent for root in config.roots}
         return {
             "roots": [
                 {
@@ -136,9 +137,20 @@ def settings_routes(engine: eng.Engine, config: Config) -> list[Route]:
                     "enabled": v.enabled,
                     "editable": v.editable,
                     "source": src.get("roots", "default"),
+                    # #290. The operator's identifier, never a vendor's.
+                    "agent": agent_of[v.label],
                 }
                 for v in prefs.root_views()
             ],
+            # #290. Read only, like the roots that name them: which agents
+            # exist is the operator's file, never a request's.
+            "agents": {
+                "value": {
+                    ident: {"package": spec.package, "binary": spec.agent_binary}
+                    for ident, spec in config.agents.items()
+                },
+                "source": src.get("agents", "default"),
+            },
             "hidden_roots": list(prefs.hidden_roots()),
             "stop_timeout": {
                 "value": prefs.stop_timeout(),

@@ -171,6 +171,7 @@ source_modules = [
   "hitchrail.procs",
   "hitchrail.claude_ipc",
   "hitchrail.agent",
+  "hitchrail.agentconfig",
   "hitchrail.agents",
   "hitchrail.ram",
   "hitchrail.events",
@@ -324,6 +325,7 @@ also_copy = [
   # mapping there is pinned by the config refusal tests directly.
   "src/hitchrail/claude_ipc/adapter.py",
   "src/hitchrail/agent.py",
+  "src/hitchrail/agentconfig.py",
   "src/hitchrail/agents.py",
   "src/hitchrail/claude_ipc/exit_menu.py",
   "src/hitchrail/claude_ipc/keys.py",

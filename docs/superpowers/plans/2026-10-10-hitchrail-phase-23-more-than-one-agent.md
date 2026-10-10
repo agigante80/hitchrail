@@ -140,16 +140,19 @@ at once; batches 3 onward run in order.
   calls the engine layer makes today, `claude_ipc` behind it unchanged, and
   the quarantine guards generalised to every agent package. No behaviour
   change; suites compared by count before and after (0dc5998).
-- [ ] **264, #290.** The `[agents]` table and the per root `agent` key,
+- [x] **264, #290.** The `[agents]` table and the per root `agent` key,
   refused at startup when unknown; derivation and the engine ask the root's
   agent; `find_detached` asks every configured agent. `docs/api.md` and the
-  config view name the agent identifier, never a vendor.
+  config view name the agent identifier, never a vendor. Derivation asks
+  every configured agent in BOTH directions, the root's first, so a changed
+  `agent` key cannot hide one still running.
 
 ### Batch 4: the second agent, tasks 265 to 267
 
-- [ ] **265.** `agy`'s real shapes recorded on a private tmux server in a
+- [x] **265.** `agy`'s real shapes recorded on a private tmux server in a
   throwaway root: process argv, the polite stop, the input box, a question,
-  trust. The gate for the phase (Fails if 6).
+  trust. The gate for the phase (Fails if 6). Recorded on #294, on 1.2.14
+  and 1.3.3; no question could be raised, so that one is unknown.
 - [ ] **266, #294.** The `agy` package: start, derive, stop and wrap up
   through the interface, plus whatever 265 shows it cannot do, reported as
   unknown rather than guessed.

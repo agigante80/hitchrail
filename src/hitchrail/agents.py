@@ -19,12 +19,14 @@ from pathlib import Path
 
 from hitchrail import claude_ipc, discovery
 from hitchrail.agent import Agent
+from hitchrail.agentconfig import DEFAULT_AGENT
 from hitchrail.config import Config
+from hitchrail.roots import RootError, split_identifier
 
-# The identifier of the agent every root runs unless it names another. It is
-# the operator's word for "the agent `--agent-binary` names", never a vendor's.
-DEFAULT_AGENT = "default"
+__all__ = ["DEFAULT_AGENT", "PACKAGES", "Agents", "Configured", "launch_folder"]
 
+# Keyed by `agentconfig.PACKAGE_NAMES`, which is what a config file may name;
+# a test holds the two sets equal.
 
 PACKAGES: dict[str, Callable[[Config], Agent]] = {
     "claude-code": lambda config: claude_ipc.ClaudeCode(
@@ -45,18 +47,33 @@ class Configured:
 
 class Agents:
     def __init__(self, config: Config) -> None:
-        default = Configured(
-            DEFAULT_AGENT, PACKAGES["claude-code"](config), config.spawn_agent_binary
-        )
-        self._by_ident: dict[str, Configured] = {DEFAULT_AGENT: default}
+        # The default first: `all()` is the order derivation asks in, and the
+        # agent that ran every root before #290 is the likeliest answer.
+        self._by_ident: dict[str, Configured] = {
+            DEFAULT_AGENT: Configured(
+                DEFAULT_AGENT, PACKAGES["claude-code"](config), config.spawn_agent_binary
+            )
+        }
+        for ident, spec in config.agents.items():
+            self._by_ident[ident] = Configured(
+                ident, PACKAGES[spec.package](config), spec.spawn_agent_binary
+            )
+        self._by_label = {root.label: root.agent for root in config.roots}
 
     def all(self) -> tuple[Configured, ...]:
         """Every configured agent, the default first."""
         return tuple(self._by_ident.values())
 
     def for_project(self, identifier: str) -> Configured:
-        """The agent a project's root runs."""
-        return self._by_ident[DEFAULT_AGENT]
+        """The agent a project's root runs. The default for a name no root
+        holds: derivation is asked about such names and must not raise, and
+        nothing can be started there, because `start` resolves the folder
+        first and refuses."""
+        try:
+            label, _ = split_identifier(identifier)
+        except RootError:
+            return self._by_ident[DEFAULT_AGENT]
+        return self._by_ident[self._by_label.get(label, DEFAULT_AGENT)]
 
 
 def launch_folder(config: Config, name: str) -> Path:

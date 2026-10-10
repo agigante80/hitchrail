@@ -24,6 +24,7 @@ from starlette.routing import Route
 
 from conftest import FakeTmux, procs_from
 from hitchrail import routes_settings
+from hitchrail.agentconfig import AgentSpec
 from hitchrail.config import Config
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
@@ -916,3 +917,31 @@ async def test_a_stop_policy_the_operator_set_is_pinned(
         assert "work" in [x["label"] for x in (await _listing(c))["roots"]]
     assert pinned.state_path is not None
     assert not pinned.state_path.exists()
+
+
+async def test_the_config_view_names_each_roots_agent_and_never_a_vendor(
+    config: Config, tmux: FakeTmux
+) -> None:
+    """#290. The identifier the operator chose, and the package beside it in
+    `agents`; a root with no `agent` key reads `default`."""
+    config = replace(
+        config,
+        roots=(replace(config.roots[0], agent="second"), *config.roots[1:]),
+        agents={"second": AgentSpec("claude-code", "/opt/second")},
+        sources={"agents": "file"},
+    )
+    engine = make_engine(config, tmux, procs_from(RUNNING_PS), PLENTY)
+    app = create_app(engine=engine, config=config, bus=EventBus())
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://localhost"
+    ) as client:
+        body = (await client.get("/api/config", headers=HEADERS)).json()
+    assert [(r["label"], r["agent"]) for r in body["roots"]] == [
+        ("work", "second"),
+        ("home", "default"),
+        ("vault", "default"),
+    ]
+    assert body["agents"] == {
+        "value": {"second": {"package": "claude-code", "binary": "/opt/second"}},
+        "source": "file",
+    }

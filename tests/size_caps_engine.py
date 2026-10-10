@@ -223,7 +223,9 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # derivation, and the trust map is keyed by agent. The seam the file
     # already has is `Machine` and `look`, one read of the machine, against
     # the questions asked of it; splitting there is #501.
-    "derive.py": 415,
+    # 438 for #290: both directions ask every configured agent, not only the
+    # root's, so a changed `agent` key cannot hide one still running.
+    "derive.py": 438,
     # tmux.py is the module that encodes what tmux actually does
     # rather than what its manual implies, and every entry is a footgun
     # that cost real debugging: prefix matching targets, the colon
@@ -390,7 +392,8 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # with them.
     # 846 for #437: the rule over a hosts argument, so assignment order cannot
     # matter. 848 for #436: the secure context question in the withheld rule.
-    "config.py": 848,
+    # 856 for #290: the `agents` field, checked at construction like roots.
+    "config.py": 856,
     # 409, nine lines over, down from 542. #115 deleted the `?token=`
     # carrier: 135 lines once the two blocks inside `TokenMiddleware`
     # that only served it are counted.

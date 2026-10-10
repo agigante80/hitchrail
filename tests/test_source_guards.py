@@ -245,12 +245,21 @@ def test_every_read_of_agent_binary_is_the_resolved_property_or_allowlisted() ->
         # Builds a Config from the operator's own flags: `args.agent_binary`
         # is what they typed, becoming `Config.agent_binary`, not a spawn.
         ("cli.py", "build_config", "args.agent_binary"): 1,
-        # What preflight is resolving. This function's whole job is finding
-        # the absolute path from the raw name: one lookup, one `dirname`, and
-        # three messages quoting what the operator typed (#341), plus whether
-        # a typed path that is not there was relative, so its message can say
-        # where it was looked for (#393).
-        ("cli.py", "preflight", "config.agent_binary"): 6,
+        # What preflight is resolving, handed to `_find_agent_binary`, whose
+        # lookup, `dirname` and messages (#341, #393) read its `raw`
+        # parameter and no attribute at all. Once for `--agent-binary`, once
+        # for each `[agents.<id>]` table (#290).
+        ("cli.py", "preflight", "config.agent_binary"): 1,
+        ("cli.py", "preflight", "spec.agent_binary"): 1,
+        # #290. An `[agents.<id>]` table's own shape check, and its own
+        # `spawn_agent_binary`, which is the safe read for that table exactly
+        # as `Config`'s is for `--agent-binary`.
+        ("agentconfig.py", "check_agents", "spec.agent_binary"): 1,
+        ("agentconfig.py", "spawn_agent_binary", "self.agent_binary"): 1,
+        # The settings page shows each table's raw binary, as it shows
+        # `agent_binary`, for the same reason. Keyed by the comprehension
+        # `_config_view` builds the `agents` value in.
+        ("routes_settings.py", "<dictcomp>", "spec.agent_binary"): 1,
         # `hitchrail update-plugins`: no Config exists yet, so this resolves
         # and checks its OWN copy of the raw `--agent-binary` flag before it
         # ever calls `claude_ipc.update_plugins` with the resolved value.

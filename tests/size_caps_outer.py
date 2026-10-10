@@ -91,7 +91,9 @@ OUTER_LAYER_CAPS: dict[str, int] = {
     # 1132 for #460: the group's count is rows, and why "listed" was one short.
     # 1142 for #491: an `updated` row's detail no longer hides the approved
     # command, and a stderr note says the version check never happened.
-    "cli.py": 1142,
+    # 1187 for #290: every `[agents]` binary goes through the same lookup as
+    # --agent-binary, now one function told which setting to name.
+    "cli.py": 1187,
     # 409 to 418 for #78: two entries in the exemption and the argument
     # beside them, which the set's own rule requires of every entry.
     # 418 to 436 for #160: the unauthenticated asset set and the argument
