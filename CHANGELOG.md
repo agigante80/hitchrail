@@ -32,6 +32,8 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+## 0.19.1 - 2026-10-11
+
 ### Fixed
 
 - A Restart that is cancelled no longer leaves the row saying it is
