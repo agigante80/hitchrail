@@ -60,7 +60,8 @@ _trust_cache: tuple[tuple[str, int, int], frozenset[str] | None] | None = None
 
 
 def trusted_folders(config_path: Path) -> frozenset[str] | None:
-    """Absolute paths Claude Code will not show a trust prompt for, or `None`.
+    """Absolute paths whose entry says trusted, or `None`. A folder under one
+    is trusted too: ask `folder_is_trusted`, never this set directly (#456).
 
     `None` means we could not tell, and it is deliberately not an empty set.
     Empty would say every folder is untrusted, which would put a warning on
@@ -121,6 +122,24 @@ def _read_trust(raw: object) -> frozenset[str] | None:
         # accepted no folders, so every row warning is the truth about it.
         return None
     return frozenset(p for p, e in entries.items() if e.get(_TRUST_KEY) is True)
+
+
+def folder_is_trusted(folder: Path, trusted: frozenset[str]) -> bool:
+    """Whether Claude Code starts in `folder` without its trust prompt.
+
+    **An ancestor's trust is inherited** (#456). Observed on Claude Code
+    2.1.296, 2026-10-10, on a private tmux server: a fresh folder under `/tmp`,
+    whose entry is true, started with no prompt, and so did one whose own
+    entry read false; a fresh folder under `~/.cache`, with no trusted
+    ancestor, showed the prompt. `--dangerously-skip-permissions` changed
+    neither, so the flag is not what skips it.
+
+    Exact match only was the first rule, and it put a permanent false warning
+    on every row under a root somebody trusted once as a whole. `folder` must
+    be the resolved path the agent was started in, which is the form the
+    map's keys take.
+    """
+    return any(str(p) in trusted for p in (folder, *folder.parents))
 
 
 def launch_argv(binary: str, project: str) -> list[str]:

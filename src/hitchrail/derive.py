@@ -329,7 +329,7 @@ def _awaiting_trust(name: str, machine: Machine, config: Config) -> bool:
         folder = discovery.resolve_identifier(config.roots, name)
     except (discovery.NoSuchProject, ValueError):
         return False
-    return str(folder) not in machine.trusted
+    return not claude_ipc.folder_is_trusted(folder, machine.trusted)
 
 
 def _tmux_server_above(pid: int, table: ProcTable) -> int | None:

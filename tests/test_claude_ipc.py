@@ -717,6 +717,55 @@ def test_a_changed_config_is_noticed_rather_than_cached_forever(tmp_path: Path) 
     assert trusted_folders(path) == frozenset({"/srv/a", "/srv/b"})
 
 
+@pytest.mark.parametrize(
+    ("trusted", "expected"),
+    [
+        ({"/srv"}, True),
+        ({"/srv/root/a"}, True),
+        ({"/"}, True),
+        ({"/srv/root/ab"}, False),
+        ({"/srv/root/a/inner"}, False),
+        (set(), False),
+    ],
+    ids=[
+        "an ancestor is trusted",
+        "the folder itself",
+        "the filesystem root",
+        "a sibling sharing a prefix",
+        "only a descendant",
+        "nothing",
+    ],
+)
+def test_a_folder_inherits_an_ancestors_trust(trusted: set[str], expected: bool) -> None:
+    """#456, observed on Claude Code 2.1.296: a folder under a trusted ancestor
+    starts without the prompt, even when its own entry reads false, which
+    the set cannot even carry since it holds only the true ones. Compared by
+    path component, never by string prefix: `/srv/root/ab` is not above
+    `/srv/root/a`."""
+    assert claude_ipc.folder_is_trusted(Path("/srv/root/a"), frozenset(trusted)) is expected
+
+
+def test_a_child_whose_own_entry_is_false_under_a_trusted_ancestor_is_trusted(
+    tmp_path: Path,
+) -> None:
+    """The observed case end to end through the file, with `/scratch` for the
+    `/tmp` it was seen under: the ancestor true, the child's own entry false,
+    and no prompt on screen."""
+    path = write_agent_config(
+        tmp_path,
+        {
+            "projects": {
+                "/scratch": {"hasTrustDialogAccepted": True},
+                "/scratch/root/demo": {"hasTrustDialogAccepted": False},
+            }
+        },
+    )
+    trusted = trusted_folders(path)
+    assert trusted is not None
+    assert claude_ipc.folder_is_trusted(Path("/scratch/root/demo"), trusted)
+    assert not claude_ipc.folder_is_trusted(Path("/var/root/demo"), trusted)
+
+
 def test_only_the_quarantine_types_into_a_pane() -> None:
     """#91 turns a described property into a checked one.
 
@@ -1095,7 +1144,7 @@ def test_the_package_still_offers_every_name_the_single_file_did() -> None:
 
 # Public names added after #368, kept apart so the list above stays a record
 # of what the single file offered.
-_ADDED_SINCE_THE_SPLIT = {"WrapUpWatch", "request_wrap_up"}  # #242
+_ADDED_SINCE_THE_SPLIT = {"WrapUpWatch", "request_wrap_up", "folder_is_trusted"}  # #242, #456
 
 
 def _submodule_imports(tree: ast.AST) -> list[str]:
