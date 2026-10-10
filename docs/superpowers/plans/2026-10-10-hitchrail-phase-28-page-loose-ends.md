@@ -127,20 +127,44 @@ three of them edit `app.css`. Each batch is reviewed once at its end.
 
 ### The close, task 258
 
-- [ ] **Task 258, #468 and #485.** On the S25 at 360 CSS px, Chrome only,
-      against a private root (never the real one): the bar, the settings
-      gear, the themes, the busy list, Restart, a wrap up's countdown, and
-      the grant page. Nothing on the phone changed; no screenshot of it in a
-      ticket or a commit.
+- [ ] **Task 258, MOVED OUT to Phase 23 as #468 and #485.** On the S25 at
+      360 CSS px, Chrome only, against a private root (never the real one):
+      the bar, the settings gear, the themes, the busy list, Restart, a wrap
+      up's countdown, and the grant page. Nothing on the phone changed; no
+      screenshot of it in a ticket or a commit.
+      Andrea was away from both phones on 2026-10-10. The same list was
+      watched on the laptop instead, in real Chromium at 360 and 1280 px
+      against the e2e harness (private root, private tmux, loopback). It read
+      as designed; two small surprises are #497.
 
 ## Done looks like
 
-- [ ] Every task ticked, or marked MOVED OUT or NOT BUILT with an issue number
-- [ ] Each bar behaviour in #465 has a test seen failing with it reverted
-- [ ] The layout is tested at 1280 px as well as 360 and 320
-- [ ] #467 is decided and written beside `canCreate`
-- [ ] The page has been watched on the S25 at 360 px
-- [ ] Roadmap says done, milestone closed, `check-phases.sh` passes
+- [x] Every task ticked, or marked MOVED OUT or NOT BUILT with an issue number
+- [x] Each bar behaviour in #465 has a test seen failing with it reverted
+- [x] The layout is tested at 1280 px as well as 360 and 320
+- [x] #467 is decided and written beside `canCreate`
+- [ ] The page has been watched on the S25 at 360 px: MOVED OUT, #468 and #485
+- [x] Roadmap says done, milestone closed, `check-phases.sh` passes
+
+## Close, 2026-10-10: re-shaped
+
+Tasks 252 to 257 landed and the S25 watch moved out a third time, which is
+Fails if 2 happening as written: Andrea was away from both phones. It goes
+to Phase 23 rather than the Backlog because that phase changes this page
+again, so one phone watch then covers both. The laptop watch stands in
+for it, and it is weaker on purpose: it cannot see the S25's font scale,
+its touch, or Chrome for Android.
+
+Reviews: batch 1 round 1 found only lows (#495). Batch 2 round 1 found two
+mediums, fixed in `bb13d97`; round 2 found three lows, all in that fix,
+filed on #496, and the loop stopped by rule. Batch 3 round 1 found one
+medium, fixed in `0217599` (the way home on `/` could not fail), and one
+low, fixed in the same commit. Its round 2 found a medium in that fix (a
+string predicate threw under the page's CSP instead of waiting), so the loop
+ended there by rule, as round 3 needs a high. The one line fix, which the
+reviewer had verified, is `37f527a` and was not reviewed again. Two rounds
+found a defect in a prior fix, in different batches, so the trip wire did
+not fire.
 
 ## Out of scope
 

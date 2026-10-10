@@ -46,28 +46,6 @@ suite is green. It is finished when the behaviour has been watched working in
 the running application, on the phone it is for. See
 [`tech-guidelines.md`](tech-guidelines.md) section 7.
 
-## Phase: Phase 28: The page's loose ends
-state: open
-plan: docs/superpowers/plans/2026-10-10-hitchrail-phase-28-page-loose-ends.md
-
-Close what Phase 24's reviews and its phone watch found on the page, and do
-the S25 watch that phase could not.
-
-Phase 24 shipped the bar, the settings gear, the themes and a busy list fit
-for a phone, and closed as re-shaped because neither phone was reachable.
-Its lows are a comment that promises a long press Android lacks, a theme toggle
-stale under System, a layout untested above 360 px, five bar behaviours no
-test would miss, and the per root create offer, which is Andrea's decision
-(#467). The watch on the S25 at 360 CSS px (#468) is this phase's own close
-watch, so it is done once, here.
-
-Done when each bar behaviour has a test that fails when it is reverted, the
-layout is tested at a desktop width too, #467 is decided and written beside
-`canCreate`, and the page has been watched on the S25 at 360 px.
-
-Placed before Phase 23, whose agent choice at start (#292) is the next
-addition to this page.
-
 ## Phase: Phase 23: More than one agent, one package each
 state: planned
 
@@ -103,6 +81,8 @@ session was, and designing it for one is rework. After Phases 26 to 28,
 because the stop path, the config and the page the second agent plugs into
 should be settled first. It also holds the open `claude_ipc` findings (#456,
 #460) by the first Backlog rule, since this phase re-cuts that package.
+And its close watch is on the S25: Phase 28 moved the page's phone watch
+here (#468, #485), because this phase changes the same page again.
 
 ## Phase: Phase 16: What survives a reboot
 state: planned
