@@ -15,11 +15,12 @@ import pytest
 from conftest import TRUST_MODAL, FakeClock, FakeTmux, procs_from, ps_row
 from hitchrail import agentconfig, agents, agy_ipc, claude_ipc
 from hitchrail.agentconfig import DEFAULT_AGENT, AgentSpec
-from hitchrail.cli import build_config, parse_args, preflight
+from hitchrail.cli import build_config, main, parse_args, preflight
 from hitchrail.config import Config, ConfigError
 from hitchrail.engine import Engine
 from hitchrail.roots import Root
 from hitchrail.sessions import State
+from test_engine import running_after
 from test_wrap_up import SETTLE
 
 
@@ -178,6 +179,67 @@ def test_the_spawned_binary_is_the_one_preflight_resolved(tmp_path: Path) -> Non
         },
     )
     assert agents.Agents(config).for_project("main~x").binary == "/abs/second-claude"
+
+
+def test_a_start_spawns_the_binary_preflight_resolved_for_the_roots_agent(
+    tmp_path: Path,
+) -> None:
+    """Round 1 of the batch 3 review: the registry answering the right path
+    proves nothing about the argv tmux is handed. The spawn reads the agent
+    it asks for here, and a regression to `config.spawn_agent_binary` would
+    start the default agent's binary under the second root."""
+    (tmp_path / "vessel").mkdir()
+    (tmp_path / ".sessions").mkdir()
+    tmux = FakeTmux()
+    engine = Engine(
+        Config(
+            roots=(Root("main", tmp_path.resolve(), agent="second"),),
+            agents={
+                "second": AgentSpec(
+                    "claude-code", "second-claude", resolved_agent_binary="/abs/second-claude"
+                )
+            },
+            agent_binary="claude",
+            resolved_agent_binary="/abs/claude",
+            sessions_dir=tmp_path / ".sessions",
+            agent_config_path=tmp_path / "none.json",
+        ),
+        tmux=tmux,
+        procs_fn=running_after("main~vessel"),
+        meminfo_fn=lambda: "MemAvailable: 8388608 kB\n",
+        ceiling_fn=lambda pid: None,
+    )
+    assert engine.start("main~vessel").state is State.RUNNING
+    _, _, argv = tmux.started[-1]
+    assert argv[0] == "/abs/second-claude"
+
+
+def test_main_threads_each_agents_resolved_binary_into_the_engine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Round 1 of the batch 3 review. `main()` replaces each `[agents.<id>]`
+    spec with the path preflight resolved; without it the engine spawns the
+    bare name, which tmux's server resolves on ITS PATH (#196). The
+    `--agent-binary` half of this has its own test in `test_cli.py`."""
+    path = _write(
+        tmp_path,
+        '[agents.second]\npackage = "claude-code"\nbinary = "second-claude"\n\n'
+        + _two_roots(tmp_path),
+    )
+    monkeypatch.setattr("shutil.which", lambda name: f"/opt/{name}")
+    monkeypatch.setattr("uvicorn.run", lambda *a, **k: None)
+    built: list[Config] = []
+    real_engine = Engine
+
+    def spy_engine(*, config: Config) -> Engine:
+        built.append(config)
+        return real_engine(config=config)
+
+    monkeypatch.setattr("hitchrail.cli.Engine", spy_engine)
+    assert main(["--config", str(path)]) == 0
+    assert built, "Engine was never constructed"
+    assert built[0].agents["second"].spawn_agent_binary == "/opt/second-claude"
+    assert agents.Agents(built[0]).for_project("home~x").binary == "/opt/second-claude"
 
 
 # -- derivation asks every agent -------------------------------------------
