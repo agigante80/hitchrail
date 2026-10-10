@@ -117,8 +117,12 @@ is the graceful stop above, unchanged, plus a mark that a new agent follows. It
 answers what `DELETE` answers for the same row, with the same codes: 404
 `unknown_project`, 423 `self_protected`, 409 `not_running` for a `stopped` row,
 409 `no_agent` for a `stale` or `detached` one, 409 `stop_unsafe`, 503
-`machine_unreadable` and 503 `root_unavailable`, and 202 with the row, which
-reads `stopping` and `restarting`. A refusal marks nothing. The mark is
+`machine_unreadable` and 503 `root_unavailable`, and 202 with the row. The row
+usually reads `stopping` and `restarting`; it reads `stopped` (still
+`restarting`) when the agent exited while the stop was being sent. A `restart`
+pressed while a `kill` is still holding the stop answers 202 with
+`restarting: false` and marks nothing, since a kill means "end this". A
+refusal marks nothing. The mark is
 in the server's memory and never persisted. The server starts the agent
 exactly once, and only from a `stopped` it derived with the stop over; a second
 `restart` while one is pending answers as a second `DELETE` does and still holds

@@ -38,7 +38,7 @@ import logging
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, cast
 
-from hitchrail.sessions import MachineUnreadable, Session, State
+from hitchrail.sessions import AlreadyRunning, Locked, MachineUnreadable, Session, State
 
 if TYPE_CHECKING:
     from hitchrail.engine_seam import EngineSeam
@@ -70,6 +70,14 @@ class RestartOverlay:
         still typing has no mark to forget yet, and the count is what tells
         `request` that someone ended it meanwhile."""
         self.ended[name] = self.ended.get(name, 0) + 1
+        self.pending.pop(name, None)
+
+    def forget(self, name: str) -> None:
+        """Forget a pending start WITHOUT counting. Under `stopping_guard`.
+        For an end that does not end the agent: the sweep's expiry of a stop
+        that ran out of time. Counting there would silence a Restart whose
+        `stop` returned just before the expiry and has not yet marked, though
+        the agent is still there to be restarted by the mark's own rules."""
         self.pending.pop(name, None)
 
     def epoch(self, name: str) -> int:
@@ -190,7 +198,21 @@ def _consume(engine: EngineSeam, name: str, session: Session) -> bool:
         name,
         session.state.value,
     )
+    # The row said "restarting" until now and nothing else will change it:
+    # announce, as `_start` does for a refusal.
+    with contextlib.suppress(MachineUnreadable):
+        engine.announce(engine.get(name))
     return False
+
+
+def _reason(exc: Exception) -> str:
+    """Words for the row. `Locked` and `AlreadyRunning` carry only the folder's
+    name, which on a row reads as "restart not started: main~vessel"."""
+    if isinstance(exc, Locked):
+        return "another start is already in flight for this folder"
+    if isinstance(exc, AlreadyRunning):
+        return "an agent is already running here"
+    return str(exc) or type(exc).__name__
 
 
 def _start(engine: EngineSeam, name: str) -> bool:
@@ -204,7 +226,7 @@ def _start(engine: EngineSeam, name: str) -> bool:
         # has (the memory guard, a lock, a folder that left) is a reason the
         # person reads on the row; none is retried, since a retry would loop on
         # the same refusal with nobody to read it.
-        reason = str(exc) or type(exc).__name__
+        reason = _reason(exc)
         logger.warning("restart %s: the start was refused: %s", name, reason)
         with engine.stopping_guard:
             engine.restarts.refused[name] = reason
