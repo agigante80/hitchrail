@@ -21,6 +21,7 @@ from hitchrail import claude_ipc
 from hitchrail.engine import Engine
 from hitchrail.sessions import NoAgent, NotRunning, Session, State, StopRefused, UnknownProject
 from support import DEFAULT_LABEL
+from test_engine_wrap_up import exits_sent, finish, typed
 from test_stop_policy import VESSEL, ender, policy_engine
 
 
@@ -79,6 +80,26 @@ def test_with_a_stop_prompt_the_closing_phase_runs_first_as_for_stop(root: Path)
     assert session.stopping_phase == "closing"
     assert session.restarting is True
     assert len(starts) == 0
+
+
+def test_with_a_stop_prompt_the_prompt_then_the_exit_then_one_start(root: Path) -> None:
+    """The whole order the Restart button promises when a closing message is
+    configured: the prompt is typed, the exit waits for the turn to end, and
+    the start waits for the agent to leave. The test above stops at `closing`."""
+    engine, tmux, clock, starts = restartable(root, stop_prompt="/wrapup")
+    engine.restart(VESSEL)
+    assert typed(tmux) == ["/wrapup"]
+    assert exits_sent(tmux) == 0, "the exit waits for the wrap up"
+    assert engine.advance_restarts() == []
+    assert finish(engine, clock) == [VESSEL]
+    assert exits_sent(tmux) == 1
+    assert engine.advance_restarts() == [], "the agent has not gone"
+    assert len(starts) == 0
+    agent_exits(tmux)
+    assert engine.advance_restarts() == [VESSEL]
+    assert starts.calls == [(VESSEL, False)]
+    assert typed(tmux) == ["/wrapup"], "the new agent is not sent the prompt"
+    assert engine.get(VESSEL).state is State.RUNNING
 
 
 def test_a_clean_restart_starts_once_from_the_stopped_it_derived(root: Path) -> None:
