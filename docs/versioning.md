@@ -76,6 +76,14 @@ onward and never falls.
 **1.0 cannot be cut until this has landed**, not merely until it has been decided. A decision
 recorded and not implemented leaves the interface exactly as unwilling to keep as it was.
 
+**More than one agent is decided too, and it does not move the 1.0 line** (#334, 2026-10-07,
+built in Phase 23). Each agent is its own quarantined package, chosen per root in the
+operator's config file; the page never names one, and the start route keeps its contract. The
+interface 1.0 promises to keep is therefore the one that already exists: a new agent is a
+config key and a package, a MINOR, never a change to a route. Letting the page choose an agent
+at start (#292, Backlog) WOULD change the start route, so it is either built before 1.0 or
+argued as a MAJOR after it.
+
 ## The machine ships the level; it never picks one
 
 #133 automated the release: a merge to `main` tags, releases and publishes, with no
