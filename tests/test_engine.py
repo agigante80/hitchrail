@@ -295,12 +295,13 @@ def test_a_folder_under_a_trusted_ancestor_is_not_waiting(root: Path, tmp_path: 
 
 
 def test_a_folder_with_no_trusted_ancestor_is_still_waiting(root: Path) -> None:
-    """The other half: a trusted SIBLING lends nothing."""
+    """The other half: a trusted SIBLING lends nothing, and `vess` is the one a
+    string prefix would wrongly count as an ancestor of `vessel`."""
     engine, _ = engine_for(
         root,
         sessions={proj("vessel"): PANE},
         table=RUNNING_MACHINE[1],
-        agent_config=agent_config(root, trusted=[str(root.resolve() / "vessel-other")]),
+        agent_config=agent_config(root, trusted=[str(root.resolve() / "vess")]),
     )
     assert engine.get(proj("vessel")).awaiting_trust is True
 

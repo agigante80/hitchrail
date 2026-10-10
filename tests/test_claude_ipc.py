@@ -745,6 +745,13 @@ def test_a_folder_inherits_an_ancestors_trust(trusted: set[str], expected: bool)
     assert claude_ipc.folder_is_trusted(Path("/srv/root/a"), frozenset(trusted)) is expected
 
 
+def test_a_trusted_folder_lends_nothing_to_one_its_name_prefixes() -> None:
+    """The direction a string prefix gets wrong: `/srv/root/a` trusted must not
+    make `/srv/root/ab` trusted (round 1 of Phase 23's batch 1 review, which
+    swapped in `startswith` and saw every other case here still pass)."""
+    assert not claude_ipc.folder_is_trusted(Path("/srv/root/ab"), frozenset({"/srv/root/a"}))
+
+
 def test_a_child_whose_own_entry_is_false_under_a_trusted_ancestor_is_trusted(
     tmp_path: Path,
 ) -> None:

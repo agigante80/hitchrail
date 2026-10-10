@@ -340,7 +340,8 @@ count then covers every row the listing returned, not only the ones that
 updated. The record keeps one outcome per row, so identical `skipped` rows
 (one plugin installed locally in six projects) are six in `outcomes` and in
 `counts`; the page and `hitchrail update-plugins` show them as one line with
-the number of times it was listed (#312). `abandoned` means the server shut down mid run (#361): that row and
+the number of rows it stands for (#312), which for a repeated `user` plugin is
+one fewer than the times it was listed, since its first row was updated (#460). `abandoned` means the server shut down mid run (#361): that row and
 every `user` scope row still waiting behind it in the listing never started,
 which is not the same claim as `failed`; a row at another scope, or a repeat,
 is still `skipped` for its own reason. A shutdown that lands DURING one of
