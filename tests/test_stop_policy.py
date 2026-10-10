@@ -440,6 +440,13 @@ def test_the_kill_is_journalled_before_a_read_that_fails(
         f"sent SIGHUP to pid {PANE + 1}, as stop_policy end_anyway says"
     ]
     assert "expired but the machine could not be read" not in caplog.text
+    # #478. Only a SIGHUP was sent, so the line says that and not "killed",
+    # and says survival is unknown rather than implying it died.
+    unreadable = [r for r in caplog.records if "machine unreadable after" in r.getMessage()]
+    assert [r.getMessage() for r in unreadable] == [
+        f"stop {VESSEL}: SIGHUP sent, machine unreadable after: pid {PANE + 1} may survive"
+    ]
+    assert "killed, but" not in caplog.text
 
 
 # -- #429: a redraw is not a question; two looks a settle apart must agree --

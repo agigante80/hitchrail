@@ -292,12 +292,11 @@ def signal_detached(
 def end_anyway(engine: EngineSeam, name: str, pid: int) -> bool:
     """End an expired stop's agent under `stop_policy = end_anyway` (#239).
 
-    By the pid `expire_stops` read at the look, through a handle (#418).
-    True when the signal went, and it has announced if the machine could be
-    read after. False on any refusal, and the caller reports the expiry
-    exactly as `ask` would: the unknown case does the thing that destroys
-    nothing. Never raises, for `expire_stops`' reason: a raise there loses
-    the rest of that pass.
+    By the pid `expire_stops` read, through a handle (#418). True when the
+    SIGHUP went and the agent is gone or the machine could not be read to say.
+    False on a refusal or when the agent outlived the SIGHUP, and the caller
+    reports the expiry as `ask` would: the unknown case destroys nothing. Never
+    raises, for `expire_stops`' reason: a raise there loses the rest of that pass.
     """
     try:
         _end_session_agent(engine, name, pid)
@@ -326,7 +325,9 @@ def end_anyway(engine: EngineSeam, name: str, pid: int) -> bool:
             engine.sleep(engine.poll_interval)
             settled = engine.get(name)
     except MachineUnreadable:
-        logger.warning("stop %s: killed, but the machine could not be read after", name)
+        logger.warning(
+            "stop %s: SIGHUP sent, machine unreadable after: pid %d may survive", name, pid
+        )
         return True
     engine.announce(settled)
     if settled.pid == pid:
