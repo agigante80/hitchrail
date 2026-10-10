@@ -28,7 +28,7 @@ from hitchrail.claude_ipc import PluginOutcome, PluginsFailed, update_plugins
 
 # A private constant, read from its own module: the package re-exports public names only.
 from hitchrail.claude_ipc import plugins as ipc_plugins
-from support import in_claude_ipc, source_modules
+from support import in_an_agent_package, in_claude_ipc, source_modules
 
 SRC = Path(__file__).parent.parent / "src" / "hitchrail"
 
@@ -1451,7 +1451,7 @@ def test_the_plugin_vocabulary_lives_only_in_the_quarantine() -> None:
     leaked = {
         rel: sorted(vocabulary & _string_constants(p))
         for rel, p in modules.items()
-        if not in_claude_ipc(rel) and vocabulary & _string_constants(p)
+        if not in_an_agent_package(rel) and vocabulary & _string_constants(p)
     }
     assert leaked == {}, f"plugin vocabulary outside the quarantine: {leaked}"
 

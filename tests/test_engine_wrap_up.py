@@ -106,7 +106,7 @@ def test_the_watch_is_installed_once_the_prompt_is_sent(root: Path) -> None:
     engine.stop(VESSEL)
     marker = engine._stopping[VESSEL]
     assert marker.phase == "closing"
-    assert marker.watch is not None
+    assert isinstance(marker.watch, claude_ipc.WrapUpWatch), "the default agent's watch"
     assert marker.watch.sent_at == clock()
     assert marker.exit_at is None
 

@@ -23,6 +23,8 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from hitchrail.agent import Agent
+    from hitchrail.agents import Agents
     from hitchrail.config import Config
     from hitchrail.derive import Machine
     from hitchrail.events import EventBus
@@ -73,6 +75,11 @@ class EngineSeam(Protocol):
     @property
     def pidfd(self) -> Seam:
         """The pidfd callables, `procs.py`'s unless a test injected its own."""
+        ...
+
+    def agent_for(self, name: str) -> Agent:
+        """The agent a project's root runs (#290): what to type a stop or
+        read a screen with."""
         ...
 
     # -- time ---------------------------------------------------------------
@@ -194,6 +201,7 @@ class SeamMembers:
     """
 
     if TYPE_CHECKING:
+        _agents: Agents
         _pidfd: Seam
         _stopping: dict[str, StopMarker]
         _stopping_guard: threading.Lock
@@ -249,6 +257,9 @@ class SeamMembers:
     @property
     def restarts(self) -> RestartOverlay:
         return self._restarts
+
+    def agent_for(self, name: str) -> Agent:
+        return self._agents.for_project(name).agent
 
     def now(self) -> float:
         return self._clock()

@@ -88,7 +88,10 @@ OUTER_LAYER_CAPS: dict[str, int] = {
     # 1130 for #464's round 1 review: neither line is said when no row was
     # heard, and the comment saying why a refresh and the last listing cannot
     # be told apart from here.
-    "cli.py": 1130,
+    # 1132 for #460: the group's count is rows, and why "listed" was one short.
+    # 1142 for #491: an `updated` row's detail no longer hides the approved
+    # command, and a stderr note says the version check never happened.
+    "cli.py": 1142,
     # 409 to 418 for #78: two entries in the exemption and the argument
     # beside them, which the set's own rule requires of every entry.
     # 418 to 436 for #160: the unauthenticated asset set and the argument

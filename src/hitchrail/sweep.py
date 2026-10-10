@@ -20,7 +20,8 @@ import logging
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from hitchrail import attention, claude_ipc, discovery, signals
+from hitchrail import attention, discovery, signals
+from hitchrail.agent import StopNotSafe
 from hitchrail.sessions import MachineUnreadable, State
 from hitchrail.tmux import TmuxUnavailable
 
@@ -175,8 +176,8 @@ def _pane_needs_a_person(engine: EngineSeam, name: str) -> bool:
     the markers, so a raise would lose every later name's report and
     announcement, though the server's sweep survives it (#181).
 
-    What "clear" means is Claude Code knowledge and stays in `claude_ipc`;
-    this asks and does not interpret.
+    What "clear" means is the agent package's knowledge (#290); this asks
+    and does not interpret.
     """
     try:
         pane = engine.tmux.capture_pane(name, escapes=True)
@@ -198,7 +199,7 @@ def _pane_needs_a_person(engine: EngineSeam, name: str) -> bool:
     # **`awaits_answer`, not `shows_input_box` directly (#429).** It is the
     # same answer today, and it is the one the answer route tests with
     # `is True`: this asks the vendor module the question it names.
-    return claude_ipc.awaits_answer(pane) is True
+    return engine.agent_for(name).awaits_answer(pane) is True
 
 
 def _held_by_a_second_look(
@@ -256,7 +257,7 @@ def advance_wrap_ups(engine: EngineSeam) -> list[str]:
     inside `scan_for_stuck`, which does nothing while no browser is
     connected: a wrap up has to finish with the phone in a pocket.
 
-    Whether a screen reads finished is `claude_ipc`'s, through the watch;
+    Whether a screen reads finished is the agent package's, through the watch;
     this only asks. Returns the names sent to the exit. Never raises: a
     refused exit's marker is dropped first, so a raise loses its report.
     """
@@ -294,9 +295,9 @@ def advance_wrap_ups(engine: EngineSeam) -> list[str]:
             watch.readings(),
         )
         try:
-            claude_ipc.request_stop(engine.tmux, name, settle=engine.sleep)
+            engine.agent_for(name).request_stop(engine.tmux, name, settle=engine.sleep)
             moved.append(name)
-        except (claude_ipc.StopNotSafe, TmuxUnavailable) as exc:
+        except (StopNotSafe, TmuxUnavailable) as exc:
             engine.drop(name, marker)
             logger.info("stop %s: exit refused after wrap up, %s", name, exc)
             # The stop ends here, so this is `expire_stops`' moment: one

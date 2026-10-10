@@ -297,6 +297,19 @@ def in_claude_ipc(rel: str) -> bool:
     return rel == "claude_ipc.py" or rel.startswith("claude_ipc/")
 
 
+# Every quarantine, one package per agent (#290). A guard that keeps an
+# agent's vocabulary, its typing or its submodules out of "everything else"
+# excludes all of them: each is the one place its own agent's internals live,
+# and a guard that excluded only `claude_ipc` would fail on the second agent's
+# package for doing exactly what a quarantine is for.
+AGENT_PACKAGES = ("claude_ipc", "agy_ipc")
+
+
+def in_an_agent_package(rel: str) -> bool:
+    """Whether a `source_modules` key is inside any agent's quarantine."""
+    return rel.split("/", 1)[0].removesuffix(".py") in AGENT_PACKAGES
+
+
 def module_name(rel: str) -> str:
     """The dotted import name of a `source_modules` key."""
     parts = ["hitchrail", *rel.removesuffix(".py").split("/")]

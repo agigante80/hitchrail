@@ -31,13 +31,15 @@ from hitchrail.claude_ipc import (
 )
 from hitchrail.claude_ipc import exit_menu as ipc_exit_menu
 from hitchrail.claude_ipc import screen as ipc_screen
-from support import in_claude_ipc, source_modules
+from support import AGENT_PACKAGES, in_an_agent_package, in_claude_ipc, source_modules
 
 SRC = Path(__file__).parent.parent / "src" / "hitchrail"
 
 
 def _outside_the_quarantine() -> dict[str, Path]:
-    """Every module but the quarantine, keyed by its path under `SRC` (#368).
+    """Every module outside every agent package, keyed by its path under `SRC`
+    (#368). Every agent's package is excluded, not only this one (#290): each
+    is the one place its own agent's keys and flags may live.
 
     A flat glob would not see into a `claude_ipc` package, and a test that
     excluded `claude_ipc.py` by name would then scan every one of its files
@@ -46,7 +48,7 @@ def _outside_the_quarantine() -> dict[str, Path]:
     """
     modules = source_modules(SRC)
     assert any(in_claude_ipc(rel) for rel in modules), "the walk saw no claude_ipc module"
-    return {rel: p for rel, p in modules.items() if not in_claude_ipc(rel)}
+    return {rel: p for rel, p in modules.items() if not in_an_agent_package(rel)}
 
 
 # Exact input rows captured from a real Claude Code session on 2026-09-02,
@@ -1156,23 +1158,39 @@ _ADDED_SINCE_THE_SPLIT = {
     "request_wrap_up",  # #242
     "folder_is_trusted",  # #456
     "UNCONFIRMED_DETAIL",  # #491
+    "ClaudeCode",  # #290
 }
 
 
+def _package_modules() -> dict[str, set[str]]:
+    """Each agent package's dotted name, with the submodules it has (#290)."""
+    return {
+        f"hitchrail.{pkg}": {p.stem for p in (SRC / pkg).glob("*.py") if p.stem != "__init__"}
+        for pkg in AGENT_PACKAGES
+        if (SRC / pkg).is_dir()
+    }
+
+
 def _submodule_imports(tree: ast.AST) -> list[str]:
-    """Every import in `tree` that reaches past the package into a submodule."""
+    """Every import in `tree` that reaches past an agent package into a
+    submodule, for every agent's package (#290)."""
+    packages = _package_modules()
     found: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            found += [a.name for a in node.names if a.name.startswith("hitchrail.claude_ipc.")]
+            found += [
+                a.name
+                for a in node.names
+                if a.name.startswith(tuple(f"{k}." for k in packages))
+            ]
         elif isinstance(node, ast.ImportFrom) and node.module:
-            if node.module.startswith("hitchrail.claude_ipc."):
+            if node.module.startswith(tuple(f"{k}." for k in packages)):
                 found.append(node.module)
-            elif node.module == "hitchrail.claude_ipc":
+            elif node.module in packages:
                 found += [
                     f"{node.module}.{a.name}"
                     for a in node.names
-                    if a.name in {"screen", "keys", "launch", "plugins", "exit_menu"}
+                    if a.name in packages[node.module]
                 ]
     return found
 

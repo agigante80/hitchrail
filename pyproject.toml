@@ -170,6 +170,8 @@ source_modules = [
   "hitchrail.tmuxnames",
   "hitchrail.procs",
   "hitchrail.claude_ipc",
+  "hitchrail.agent",
+  "hitchrail.agents",
   "hitchrail.ram",
   "hitchrail.events",
   "hitchrail.sessions",
@@ -317,6 +319,12 @@ also_copy = [
   "src/hitchrail/__init__.py",
   # #368: the package around the one mutated module.
   "src/hitchrail/claude_ipc/__init__.py",
+  # #290. Copied, not mutated: every agent package and the engine import the
+  # interface, and the engine builds its agents from `agents.py`. The closed
+  # mapping there is pinned by the config refusal tests directly.
+  "src/hitchrail/claude_ipc/adapter.py",
+  "src/hitchrail/agent.py",
+  "src/hitchrail/agents.py",
   "src/hitchrail/claude_ipc/exit_menu.py",
   "src/hitchrail/claude_ipc/keys.py",
   "src/hitchrail/claude_ipc/launch.py",

@@ -621,7 +621,10 @@ def test_no_vendor_name_is_in_the_operator_contract() -> None:
         and isinstance(node.args[0], ast.Constant)
         and isinstance(node.args[0].value, str)
     }
-    vendor = {f for f in flags if "claude" in f.lower()}
+    # Every vendor this project has an agent package for (#290), and the
+    # names its tools go by.
+    names = ("claude", "anthropic", "agy", "antigravity", "gemini", "google")
+    vendor = {f for f in flags if any(n in f.lower() for n in names)}
     assert not vendor, f"a vendor name reached the operator contract: {vendor}"
 
 

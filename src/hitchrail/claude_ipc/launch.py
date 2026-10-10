@@ -9,9 +9,9 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+
+from hitchrail.agent import SessionUrl
 
 logger = logging.getLogger(__name__)
 
@@ -153,20 +153,6 @@ def launch_argv(binary: str, project: str) -> list[str]:
     in this module and nowhere else.
     """
     return [binary, "--dangerously-skip-permissions", REMOTE_CONTROL_MARKER, project]
-
-
-@dataclass(frozen=True)
-class SessionUrl:
-    """A session link and WHERE IT CAME FROM.
-
-    The source is carried rather than a confidence score. We know exactly why a
-    scraped URL is uncertain, so naming the mechanism lets the interface say
-    "found in the terminal output, may be from an earlier session" instead of
-    "low confidence", which tells the user nothing they can act on.
-    """
-
-    url: str
-    source: Literal["bridge", "scraped"]
 
 
 def _valid_bridge_id(value: object) -> str | None:

@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import Protocol
 
+from hitchrail.agent import AnswerNotSafe, Pane, StopNotSafe
 from hitchrail.claude_ipc.exit_menu import exit_menu_appeared
 from hitchrail.claude_ipc.screen import awaits_answer, input_is_clear, queued_message
 
@@ -88,51 +88,6 @@ _LOOK_YOURSELF = "Open the session in a terminal to see what it is waiting on."
 # checkpoint a turn was interrupted. "Nothing was sent" was the first wording
 # and it was false, which is the exact untruth #89 exists to remove.
 _NOT_SENT = "it was never asked to exit"
-
-
-class AnswerNotSafe(RuntimeError):
-    """The screen does not hold a question, so no key was sent (#204).
-
-    A sibling of `StopNotSafe` and refused for the same reason: this module
-    would rather do nothing than act on a screen it cannot read. The engine
-    translates it, because nothing outside here may catch a type defined here.
-    """
-
-
-class StopNotSafe(RuntimeError):
-    """The graceful stop was abandoned before anything was typed.
-
-    Raised rather than returned, because every caller's correct response is the
-    same: do not continue, and tell the person. A boolean return invites a
-    caller to carry on with a warning, and carrying on here means submitting
-    text into somebody else's session.
-    """
-
-
-class Pane(Protocol):
-    """The narrow surface `request_stop` needs from whatever hosts the session.
-
-    Declared HERE, next to its consumer, and deliberately NOT `Tmux`. Naming
-    the concrete class would contradict the phase's rule that no adapter
-    imports another, contradict this module's "consumes nothing", and defeat
-    the point: it puts "the stop channel is tmux" back into the function
-    written to remove channel assumptions. An adapter that wanted to send a
-    signal would need the process table; one that wanted an HTTP call would
-    need neither.
-
-    `Tmux` satisfies this structurally, without either module importing the
-    other, and mypy checks it.
-    """
-
-    def send_keys(self, project: str, *keys: str) -> None: ...  # pragma: no cover
-
-    # #242. Literal text, never key names: `send_keys("Enter")` is a keystroke,
-    # `send_text("Enter")` is five characters.
-    def send_text(self, project: str, text: str) -> None: ...  # pragma: no cover
-
-    def capture_pane(  # pragma: no cover
-        self, project: str, lines: int = 40, escapes: bool = False
-    ) -> str: ...
 
 
 def request_stop(pane: Pane, project: str, settle: Callable[[float], None]) -> None:

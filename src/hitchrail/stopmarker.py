@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from hitchrail import claude_ipc
+from hitchrail.agent import WrapUpWatch
 
 
 @dataclass(eq=False)
@@ -63,7 +63,7 @@ class StopMarker:
     began: float
     phase: Literal["closing", "exiting"]
     policy: str
-    watch: claude_ipc.WrapUpWatch | None = None
+    watch: WrapUpWatch | None = None
     exit_at: float | None = None
     ceiling: bool = False
     typing: bool = False

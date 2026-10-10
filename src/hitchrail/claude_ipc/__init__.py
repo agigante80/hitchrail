@@ -26,12 +26,14 @@ THIS module and calls through its attributes, never a submodule, so that
 caller; a test forbids importing a submodule from outside the package.
 """
 
+# Re-exported from the neutral module since #290, where every agent package
+# shares them, so a test that catches `claude_ipc.StopNotSafe` still catches
+# what `agent.StopNotSafe` names.
+from hitchrail.agent import AnswerNotSafe, Pane, SessionUrl, StopNotSafe
+from hitchrail.claude_ipc.adapter import ClaudeCode
 from hitchrail.claude_ipc.keys import (
     ANSWER_KEYS,
     GRACEFUL_STOP_KEYS,
-    AnswerNotSafe,
-    Pane,
-    StopNotSafe,
     request_stop,
     request_wrap_up,
     send_answer,
@@ -39,7 +41,6 @@ from hitchrail.claude_ipc.keys import (
 from hitchrail.claude_ipc.launch import (
     REMOTE_CONTROL_MARKER,
     URL_BASE,
-    SessionUrl,
     bridge_url,
     folder_is_trusted,
     launch_argv,
@@ -72,6 +73,7 @@ __all__ = [
     "UNCONFIRMED_DETAIL",
     "URL_BASE",
     "AnswerNotSafe",
+    "ClaudeCode",
     "Pane",
     "PluginFailure",
     "PluginOutcome",
