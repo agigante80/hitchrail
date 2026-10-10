@@ -278,6 +278,34 @@ def test_trust_is_matched_on_the_path_the_agent_was_actually_started_in(
     )
 
 
+def test_a_folder_under_a_trusted_ancestor_is_not_waiting(root: Path, tmp_path: Path) -> None:
+    """#456: trusting a whole projects root once is the natural way to trust
+    it, and the row warned forever. Through a symlinked root, since resolution
+    is where #88's first version went wrong: the ancestor in the map is the
+    RESOLVED one."""
+    link = tmp_path / "by-another-name"
+    link.symlink_to(root, target_is_directory=True)
+    engine, _ = engine_for(
+        link,
+        sessions={proj("vessel"): PANE},
+        table=RUNNING_MACHINE[1],
+        agent_config=agent_config(root, trusted=[str(root.resolve())]),
+    )
+    assert engine.get(proj("vessel")).awaiting_trust is False
+
+
+def test_a_folder_with_no_trusted_ancestor_is_still_waiting(root: Path) -> None:
+    """The other half: a trusted SIBLING lends nothing, and `vess` is the one a
+    string prefix would wrongly count as an ancestor of `vessel`."""
+    engine, _ = engine_for(
+        root,
+        sessions={proj("vessel"): PANE},
+        table=RUNNING_MACHINE[1],
+        agent_config=agent_config(root, trusted=[str(root.resolve() / "vess")]),
+    )
+    assert engine.get(proj("vessel")).awaiting_trust is True
+
+
 def test_a_config_we_cannot_read_claims_nothing(root: Path) -> None:
     """Unknown is not untrusted. A shape change in that undocumented file must
     not put a warning on every running row at once."""

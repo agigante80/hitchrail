@@ -624,14 +624,54 @@ With a `stop_prompt` set, it applies once the exit is sent. A wrap up that
 ends on a question is reported for you to answer and never killed, because
 the exit it would have refused was never sent.
 
+### More than one agent
+
+Every root runs the agent `--agent-binary` names unless the config file says
+otherwise. To run a different one under a root, name it in an `[agents]`
+table and point the root at it:
+
+```toml
+[agents.agy]
+package = "antigravity"   # which agent this is; see the list below
+binary = "agy"            # what to start, looked up on PATH at startup
+
+[[roots]]
+label = "experiments"
+path = "~/projects/experiments"
+agent = "agy"             # absent means "default", the --agent-binary one
+```
+
+The table's name (`agy` here) is yours: it is what the page and the API show,
+lower case, up to 32 characters, and `default` is taken. `package` is one of
+the agents Hitchrail knows, and only those: `claude-code` and `antigravity`
+(Google's Antigravity CLI, read against 1.3.3). A second `claude-code` entry
+is how a root runs a different Claude Code binary. An unknown package, a
+binary not on `PATH`, or a root naming a table that does not exist stops the
+start with the reason, never the first tap on a phone.
+
+Rows say which agent they run once the roots shown run more than one. Start,
+Stop, Kill, Restart and `stop_prompt` work the same under every agent, and a
+stop always types the keys of the agent actually running in that folder,
+even if the root's `agent` changed since it started. What differs:
+
+- **agy is started trusting its folder.** Hitchrail starts it with the
+  project folder added, and agy takes that as trust, so its trust prompt
+  never shows and no row under an agy root warns about it. Put only folders
+  you would trust in a root that runs agy.
+- **An agy row never says it is waiting on a question**, and offers no
+  answers: Hitchrail has not seen agy's questions, so it reports them as
+  unknown rather than guessing. Open the pane to answer one.
+- **Plugins are updated for the default agent only**, below. The settings
+  page names the configured agents the update leaves out.
+
 ### Updating the agent's plugins
 
 ```sh
 hitchrail update-plugins                      # or --agent-binary /path/to/agent
 ```
 
-Refreshes the agent's marketplaces, then updates every plugin installed at
-`user` scope, and prints one line per plugin once the run ends (a plugin
+Refreshes the default agent's marketplaces, then updates every plugin
+installed at `user` scope, and prints one line per plugin once the run ends (a plugin
 skipped the same way in several projects is one line, with the count). No
 server is started and no root is needed. Exit 0 when nothing failed, 1 when
 a plugin failed, 2 when the update could not run at all: the agent is missing, the marketplaces did

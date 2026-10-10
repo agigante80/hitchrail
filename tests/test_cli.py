@@ -621,7 +621,10 @@ def test_no_vendor_name_is_in_the_operator_contract() -> None:
         and isinstance(node.args[0], ast.Constant)
         and isinstance(node.args[0].value, str)
     }
-    vendor = {f for f in flags if "claude" in f.lower()}
+    # Every vendor this project has an agent package for (#290), and the
+    # names its tools go by.
+    names = ("claude", "anthropic", "agy", "antigravity", "gemini", "google")
+    vendor = {f for f in flags if any(n in f.lower() for n in names)}
     assert not vendor, f"a vendor name reached the operator contract: {vendor}"
 
 
@@ -1219,6 +1222,29 @@ def test_update_plugins_says_which_moved_and_which_were_already_current(
     assert "1 updated, 1 current, 0 failed, 0 skipped" in out
 
 
+def test_update_plugins_says_when_the_second_listing_could_not_be_read(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#491. The updates finished and the confirming read failed: the row
+    says so, and stderr says what that means for the `updated` count."""
+    agent = FakeAgent([row("a@m")]).then_lists(done(1, stderr="boom"))
+    code, _ = _update(monkeypatch, agent)
+    captured = capsys.readouterr()
+    assert code == 0
+    assert captured.out.splitlines()[0] == (
+        "updated  a@m (not confirmed: the plugin list could not be read again)"
+    )
+    assert "which `updated` rows changed version is not known" in captured.err
+
+
+def test_update_plugins_says_nothing_unconfirmed_when_the_check_ran(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code, _ = _update(monkeypatch, FakeAgent([row("a@m")]))
+    assert code == 0
+    assert "not known" not in capsys.readouterr().err
+
+
 def test_update_plugins_prints_identical_skipped_rows_once_with_a_count(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1236,12 +1262,26 @@ def test_update_plugins_prints_identical_skipped_rows_once_with_a_count(
     out = capsys.readouterr().out
     assert code == 0
     assert out.splitlines()[:3] == [
-        "skipped  kit@x (local scope is not updated, listed 3 times)",
+        "skipped  kit@x (local scope is not updated, 3 rows)",
         "updated  a@m (1.0.0 to 2.0.0)",
         "skipped  other@x (local scope is not updated)",
     ]
     # The count is still every row the listing returned.
     assert "1 updated, 0 current, 0 failed, 4 skipped" in out
+
+
+def test_a_plugin_listed_three_times_counts_its_two_skipped_rows(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#460. The first `user` row is updated and only the two repeats are
+    skipped, so the group is two rows; "listed 2 times" read as one short."""
+    code, _ = _update(monkeypatch, FakeAgent([row("a@m")] * 3))
+    out = capsys.readouterr().out
+    assert code == 0
+    assert out.splitlines()[:2] == [
+        "updated  a@m (1.0.0 to 2.0.0)",
+        "skipped  a@m (listed more than once, 2 rows)",
+    ]
 
 
 def test_update_plugins_needs_no_root_and_no_config_file(

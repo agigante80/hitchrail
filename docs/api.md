@@ -167,7 +167,7 @@ in both directions by the suite:
 | `unsupported` | folders that cannot be projects, each with the rule it broke, capped |
 | `unsupported_total` | the true count behind that cap |
 | `memory` | the machine's `available_mb` and `total_mb`, null when unreadable |
-| `roots` | every root the interface shows as `{label, path}`, one root still a list |
+| `roots` | every root the interface shows as `{label, path, agent}`, one root still a list; `agent` is the identifier a project there starts (#290), `default` unless the config file names one |
 | `hidden_roots` | the labels of configured roots absent from the listing today, disabled in the config file or hidden by a request; an empty page says "hidden" rather than "no projects" |
 | `hidden_roots_editable` | of those, the ones a request can bring back: the config file's own `enabled = false` is not one, so an empty page can say where the choice lives |
 | `server` | this server, as distinct from this machine |
@@ -199,6 +199,7 @@ One project, as `projects` lists it, as `POST` and `DELETE` on
 | `stop_typing` | while `stopping`: the wrap up prompt or the exit is being typed into the pane this moment, so a `DELETE` now answers 202 and does nothing; false otherwise |
 | `stop_age_s` | while `stopping`: seconds since the stop was requested, as an AGE measured on the server's monotonic clock, never an instant; a client adds it to its own clock at the moment it received the row. A repeated `DELETE` on an `exiting` row starts a new stop and resets it; Exit now does not. Null otherwise |
 | `stop_policy` | while `stopping`: the `stop_policy` the stop was requested under, which is the one its expiry acts on whatever `server.stop_policy` says now (#419); null otherwise |
+| `agent` | the identifier of the configured agent derivation found running here (#294): `default`, or a key of the config file's `agents` table; null while nothing runs. It can differ from the root's `agent` when the config changed under a running session, and a stop types that agent's keys, never the root's |
 | `restarting` | a `restart` is pending: a new agent will be started once this stop ends with the agent gone (#472); false otherwise |
 | `restart_refused` | the reason the start that followed a restart was refused (the memory guard, say); the row is then `stopped`, and nothing is retried; null otherwise, and cleared when the row is anything but `stopped` |
 | `protected` | the self project; refuses every mutating route |
@@ -294,7 +295,14 @@ instance pointed at" without SSH. Every value is `{value, source}` where
 `expect_gateway_mac` (the flag's value, normalised, or null), the three
 memory figures, `config_file` and `state_file`.
 `roots` is every configured root as `{label, path, enabled, editable,
-source}`, hidden ones included, with `hidden_roots` beside it; `stop_timeout`
+source, agent}`, hidden ones included, with `hidden_roots` beside it. `agent`
+is the identifier of the agent a project there starts (#290): `default` for
+the one `agent_binary` names, or a key of `agents`, whose value maps each
+identifier the config file configures to `{package, binary, plugins}`, empty
+when it configures none. `plugins` says whether that agent has plugins at all;
+`POST /api/plugins/update` updates the default agent's only, whatever it says
+(#294). An identifier is the operator's word; `package` names which
+agent it is. Both are read only. `stop_timeout`
 and `stop_policy` (#239, #409) are each `{value, source, editable}`, the
 source `state` when the interface set it.
 **`token` carries its source and never its value**, and `none` means the
@@ -327,9 +335,12 @@ plugin whose update succeeded reads `updated` with no versions while the run
 is going, and after the last update the agent's plugin list is read again and compared with the
 first reading (#311). A plugin whose version moved is `updated`, with
 `from_version` and `to_version` set; one whose version did not is `current`.
-If the second reading cannot be understood, or either reading gives a row no
-version, that row stays `updated` with both versions null: the run did its
-work, and which plugins moved is not guessed. A plugin at any scope other than `user` is
+If either reading gives a row no version, that row stays `updated` with both
+versions null: the run did its work, and which plugins moved is not guessed.
+If the second reading cannot be had at all, every `updated` row stays
+`updated` with both versions null and detail `not confirmed: the plugin list
+could not be read again` (#491), so a check that never happened is not read as
+one that did. A plugin at any scope other than `user` is
 `skipped` with its scope, since it belongs to a project folder the agent's
 list does not name. A `user` scope plugin the listing names more than once is
 also `skipped`, with detail `listed more than once`, after the first is updated: the
@@ -337,7 +348,8 @@ count then covers every row the listing returned, not only the ones that
 updated. The record keeps one outcome per row, so identical `skipped` rows
 (one plugin installed locally in six projects) are six in `outcomes` and in
 `counts`; the page and `hitchrail update-plugins` show them as one line with
-the number of times it was listed (#312). `abandoned` means the server shut down mid run (#361): that row and
+the number of rows it stands for (#312), which for a repeated `user` plugin is
+one fewer than the times it was listed, since its first row was updated (#460). `abandoned` means the server shut down mid run (#361): that row and
 every `user` scope row still waiting behind it in the listing never started,
 which is not the same claim as `failed`; a row at another scope, or a repeat,
 is still `skipped` for its own reason. A shutdown that lands DURING one of

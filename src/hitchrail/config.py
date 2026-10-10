@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from hitchrail.agentconfig import AgentConfigError, AgentSpec, check_agents
 from hitchrail.gateway import normalise_mac
 from hitchrail.hostnames import (
     DEFAULT_PORTS,
@@ -219,6 +220,9 @@ class Config:
     # "what preflight found on this machine" and hold every spawn site to
     # the second: see the AST guard in test_source_guards.py for #298.
     resolved_agent_binary: str | None = None
+    # #290. The agents a root may name besides the default, from the config
+    # file's `[agents.<id>]` tables; `agentconfig` says what one IS.
+    agents: Mapping[str, AgentSpec] = field(default_factory=dict)
     # The default is Claude Code's state directory. The field name is neutral
     # because the directory is the agent adapter's business, not the server's.
     sessions_dir: Path = field(default_factory=lambda: Path.home() / ".claude" / "sessions")
@@ -286,6 +290,10 @@ class Config:
         self._check_session_prefix()
         object.__setattr__(self, "agent_binary", check_agent_binary(self.agent_binary))
         self._check_resolved_agent_binary()
+        try:
+            check_agents(self.agents, ((r.label, r.agent) for r in self.roots))
+        except AgentConfigError as exc:
+            raise ConfigError(str(exc)) from exc
         self._check_numbers()
         self._check_bind_host()
         self._check_extra_hosts()

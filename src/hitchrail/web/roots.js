@@ -44,6 +44,27 @@ export function severalRoots() {
   return (state.roots ?? []).length > 1;
 }
 
+/* -- #294: the agent a row runs ----------------------------------------
+ *
+ * Named on a row only when the roots shown start more than one agent, for
+ * the reason the root chip is: one possible answer is noise. The row's own
+ * `agent` wins over its root's, because it is the agent derivation found
+ * running, and that is the one a Stop types into; it differs from the root's
+ * when the config changed under a running session, and then the chip shows
+ * even with one agent configured, since that is the row that surprises. */
+function rootAgent(identifier) {
+  const { label } = splitProject(identifier);
+  return (state.roots ?? []).find((root) => root.label === label)?.agent ?? null;
+}
+
+export function agentChip(project) {
+  const configured = rootAgent(project.name);
+  const running = project.agent ?? configured;
+  if (!running) return null;
+  const several = new Set((state.roots ?? []).map((root) => root.agent)).size > 1;
+  return several || running !== configured ? running : null;
+}
+
 /* What to call a project where a person reads it, as opposed to where the API
  * addresses it. With one root that is the bare folder, exactly as before. */
 export function displayProject(identifier) {

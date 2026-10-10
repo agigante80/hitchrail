@@ -32,6 +32,47 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+## 0.19.0 - 2026-10-10
+
+### Added
+
+- The config file can name more than one agent: an `[agents.<id>]` table
+  gives a `package` and the `binary` to start, and a root's `agent = "<id>"`
+  picks which one its projects run. A root that names none runs the agent
+  `--agent-binary` points at, as before, so an existing config needs no
+  change. Every named binary is checked at startup, and an unknown package,
+  a bad identifier or a root naming an agent that is not configured stops
+  the start with the reason. `GET /api/config` shows each root's `agent`
+  and the `agents` table.
+- A second package, `antigravity`, starts Google's Antigravity CLI (`agy`,
+  read against 1.3.3) with its remote control link, which the row's link
+  opens. Stop, Kill, Restart and the closing message take the same steps as
+  for Claude Code. What Hitchrail has not seen on agy's screen it reports as
+  unknown rather than guessing: no agy row says it is waiting on a question,
+  so none offers an answer. **agy's trust prompt never shows**: Hitchrail
+  starts agy with the project folder added, which agy takes as trusting
+  it, so every folder under a root that runs agy is trusted without being
+  asked. Claude Code still asks.
+- With roots that run different agents, each row names the agent it runs,
+  and the settings page says the plugin update covers the default agent
+  only, naming the configured agents it leaves out. In the API, each row and
+  each listing `roots` entry carries `agent`, and each `agents` entry in
+  `GET /api/config` carries `plugins`.
+
+### Fixed
+
+- A running project in a folder under one you trusted as a whole (say, a
+  projects root you accepted once) no longer warns that it is waiting to be
+  trusted. Claude Code inherits a parent folder's trust and starts without
+  the prompt; Hitchrail now reads it the same way. Nothing to change.
+- A plugin listed three times by `claude plugin list` read "listed 2 times"
+  beside its skipped repeats; the grouped count now says rows ("2 rows"), on
+  the CLI and on the page. Nothing to change.
+- When the plugin list cannot be read again after a plugin update, each
+  `updated` row now says "not confirmed", and `hitchrail update-plugins`
+  adds a note on stderr, where before nothing said the version check had not
+  happened. Nothing to change.
+
 ## 0.18.0 - 2026-10-10
 
 ### Fixed

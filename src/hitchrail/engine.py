@@ -39,6 +39,8 @@ from dataclasses import replace
 from pathlib import Path
 
 from hitchrail import attention, claude_ipc, derive, discovery, ram, signals, statefile, sweep
+from hitchrail.agent import AnswerNotSafe, SessionUrl, StopNotSafe, WrapUpWatch
+from hitchrail.agents import Agents
 from hitchrail.config import TOKEN_ENV, Config
 from hitchrail.derive import Machine
 from hitchrail.engine_seam import SeamMembers
@@ -135,6 +137,8 @@ class Engine(SeamMembers, RestartMembers):
         cwd_of: Callable[[int], Path] | None = None,
     ) -> None:
         self.config = config
+        # #290. Which agent each root runs, fixed for the life of the engine.
+        self._agents = Agents(config)
         # #113. Named here rather than inside `Tmux`, because which variable
         # holds the token is this application's vocabulary and tmux knows
         # nothing about it. An injected adapter is a test's own, untouched.
@@ -240,9 +244,7 @@ class Engine(SeamMembers, RestartMembers):
     # -- reading -------------------------------------------------------
 
     def _look(self) -> Machine:
-        return derive.look(
-            self._procs_fn, self.tmux, self.config.agent_config_path, self._ceiling_mb
-        )
+        return derive.look(self._procs_fn, self.tmux, self._agents.all(), self._ceiling_mb)
 
     def _ceiling_mb(self, pid: int) -> int | None:
         """`ram.memory_ceiling_mb`, remembered per pid for the TTL."""
@@ -291,7 +293,15 @@ class Engine(SeamMembers, RestartMembers):
         # `self._stopping` is passed unguarded on purpose: see the note on
         # `_stopping_guard`. `derive` only asks `name in stopping`.
         session = self._restarts.overlay(
-            derive.derive(name, machine, self.config, self.tmux, self._stopping, needs_a_person)
+            derive.derive(
+                name,
+                machine,
+                self.config,
+                self.tmux,
+                self._stopping,
+                needs_a_person,
+                self._agents,
+            )
         )
         # **The membership test comes first, and it is not a micro optimisation
         # (#178).** The note on `_stopping_guard` says `_derive` reads
@@ -418,9 +428,7 @@ class Engine(SeamMembers, RestartMembers):
         with self._stopping_guard:
             marker.typing = False
 
-    def _give_back(
-        self, name: str, marker: StopMarker, resume: claude_ipc.WrapUpWatch | None
-    ) -> None:
+    def _give_back(self, name: str, marker: StopMarker, resume: WrapUpWatch | None) -> None:
         """Undo a claim whose sequence never went out.
 
         A refused Exit now goes back to the wrap up it interrupted (#407): the
@@ -636,7 +644,8 @@ class Engine(SeamMembers, RestartMembers):
         # fifteen seconds, so a claim left standing here is one nothing would
         # correct.
         self._forget_attention(name)
-        argv = claude_ipc.launch_argv(self.config.spawn_agent_binary, name)
+        configured = self._agents.for_project(name)
+        argv = configured.agent.launch_argv(configured.binary, name, Path(path_str))
         # The argv the scrub left (#113): the environment is withheld from
         # the child, never the arguments, so there is nothing in it to hide.
         logger.info("start %s: starting in %s with %s", name, path_str, argv)
@@ -837,7 +846,7 @@ class Engine(SeamMembers, RestartMembers):
         # #242. The claim: who may type is decided here, in one critical
         # section, and only the caller that wrote the marker types. The table
         # on the ticket is the whole rule.
-        resume: claude_ipc.WrapUpWatch | None = None
+        resume: WrapUpWatch | None = None
         with self._stopping_guard:
             current = self._stopping.get(name)
             held = self._kill_held.get(name)
@@ -862,12 +871,20 @@ class Engine(SeamMembers, RestartMembers):
                 # A repeated Stop on `exiting`, as before #242, keeping the
                 # ceiling flag so the dialog still says why it is exiting.
                 typing = StopMarker(
-                    now, "exiting", policy, exit_at=now, ceiling=current.ceiling, typing=True
+                    now,
+                    "exiting",
+                    policy,
+                    exit_at=now,
+                    ceiling=current.ceiling,
+                    typing=True,
+                    agent=session.agent,
                 )
             elif prompt is not None:
-                typing = StopMarker(now, "closing", policy)
+                typing = StopMarker(now, "closing", policy, agent=session.agent)
             else:
-                typing = StopMarker(now, "exiting", policy, exit_at=now, typing=True)
+                typing = StopMarker(
+                    now, "exiting", policy, exit_at=now, typing=True, agent=session.agent
+                )
             if typing is not None:
                 self._stopping[name] = typing
         if typing is None:
@@ -880,16 +897,17 @@ class Engine(SeamMembers, RestartMembers):
         # and that they travel through a pane. The engine owns the policy, the
         # timeout, the marker and the refusal to escalate; the adapter owns the
         # mechanism.
+        agent = self.agent_for(name, session.agent)
         try:
             if wrapping_up:
                 assert prompt is not None
-                claude_ipc.request_wrap_up(self.tmux, name, prompt, settle=self._sleep)
+                agent.request_wrap_up(self.tmux, name, prompt, settle=self._sleep)
             else:
-                claude_ipc.request_stop(self.tmux, name, settle=self._sleep)
+                agent.request_stop(self.tmux, name, settle=self._sleep)
         except TmuxUnavailable as exc:
             self._give_back(name, typing, resume)
             raise MachineUnreadable(str(exc)) from exc
-        except claude_ipc.StopNotSafe as exc:
+        except StopNotSafe as exc:
             logger.info("stop %s: refused, %s", name, exc)
             # The marker goes back for the same reason a vanished tmux takes it
             # back: a wait must not outlive a request that was never sent. The
@@ -901,8 +919,8 @@ class Engine(SeamMembers, RestartMembers):
             # What is true is that no exit was requested.
             #
             # Translated at this boundary rather than let through. The server
-            # catching a `claude_ipc` exception would put Claude Code knowledge
-            # in the HTTP layer, which is the whole point of the quarantine.
+            # catching an agent's exception would put agent knowledge in the
+            # HTTP layer, which is the whole point of the quarantine.
             self._give_back(name, typing, resume)
             raise StopRefused(str(exc)) from exc
         except BaseException:
@@ -924,7 +942,7 @@ class Engine(SeamMembers, RestartMembers):
         if wrapping_up:
             # On the object whatever the table holds (#387): see StopMarker.
             with self._stopping_guard:
-                typing.watch = claude_ipc.WrapUpWatch(sent_at=self._clock())
+                typing.watch = agent.wrap_up_watch(self._clock())
             logger.info(
                 "stop %s: wrap up sent, waiting up to %gs for it",
                 name,
@@ -1006,10 +1024,10 @@ class Engine(SeamMembers, RestartMembers):
         # One call, like the stop. The engine does not learn that answering is
         # a keystroke, nor that the check is a pane read.
         try:
-            claude_ipc.send_answer(self.tmux, name, key)
+            self.agent_for(name, session.agent).send_answer(self.tmux, name, key)
         except TmuxUnavailable as exc:
             raise MachineUnreadable(str(exc)) from exc
-        except claude_ipc.AnswerNotSafe as exc:
+        except AnswerNotSafe as exc:
             raise NotAsking(str(exc)) from exc
         return session
 
@@ -1227,7 +1245,7 @@ class Engine(SeamMembers, RestartMembers):
         except TmuxUnavailable as exc:
             raise MachineUnreadable(str(exc)) from exc
 
-    def session_url(self, name: str) -> claude_ipc.SessionUrl | None:
+    def session_url(self, name: str) -> SessionUrl | None:
         """The link, paid for on demand.
 
         The EXPENSIVE lookup listing deliberately skips: it captures a pane.
@@ -1246,9 +1264,8 @@ class Engine(SeamMembers, RestartMembers):
             if session.state is State.STOPPED:
                 raise NotRunning(name)
             return None
-        return claude_ipc.session_url(
-            session.pid, self.config.sessions_dir, self._safe_capture(name)
-        )
+        agent = self.agent_for(name, session.agent)
+        return agent.session_url(session.pid, self._safe_capture(name))
 
 
 __all__ = [

@@ -15,6 +15,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from hitchrail import engine as eng
+from hitchrail.agents import Agents
 from hitchrail.config import Config
 from hitchrail.routes_common import _UNPARSEABLE, _error, in_thread, logger
 
@@ -123,11 +124,13 @@ def settings_routes(engine: eng.Engine, config: Config) -> list[Route]:
         """Read only values as `{value, source}`; the two a request may write
         carry `editable` too. The token is its source alone."""
         src = config.sources
+        agents = {c.ident: c for c in Agents(config).all()}
 
         def shown(name: str, value: object) -> dict[str, object]:
             return {"value": value, "source": src.get(name, "default")}
 
         prefs = engine.prefs
+        agent_of = {root.label: root.agent for root in config.roots}
         return {
             "roots": [
                 {
@@ -136,9 +139,26 @@ def settings_routes(engine: eng.Engine, config: Config) -> list[Route]:
                     "enabled": v.enabled,
                     "editable": v.editable,
                     "source": src.get("roots", "default"),
+                    # #290. The operator's identifier, never a vendor's.
+                    "agent": agent_of[v.label],
                 }
                 for v in prefs.root_views()
             ],
+            # #290. Read only, like the roots that name them: which agents
+            # exist is the operator's file, never a request's.
+            "agents": {
+                "value": {
+                    ident: {
+                        "package": spec.package,
+                        "binary": spec.agent_binary,
+                        # #294. The plugin update runs the default agent's
+                        # binary only, so the page names what it leaves out.
+                        "plugins": agents[ident].agent.has_plugins,
+                    }
+                    for ident, spec in config.agents.items()
+                },
+                "source": src.get("agents", "default"),
+            },
             "hidden_roots": list(prefs.hidden_roots()),
             "stop_timeout": {
                 "value": prefs.stop_timeout(),

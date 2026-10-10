@@ -30,9 +30,11 @@ import os
 import pwd
 import stat
 import tomllib
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 
+from hitchrail.agentconfig import DEFAULT_AGENT, AgentSpec
 from hitchrail.projectnames import explain_name
 from hitchrail.roots import Root, RootError, parse_root_argument
 
@@ -157,14 +159,18 @@ class FileSettings:
     stop_prompt: str | None = None
     stop_prompt_timeout: int | None = None
     stop_policy: str | None = None
+    # #290. `[agents.<id>]` tables, by identifier. Empty is every root on the
+    # default agent, which is what a file written before #290 means.
+    agents: Mapping[str, AgentSpec] = field(default_factory=dict)
 
 
 # The schema is CLOSED. A misspelt key silently ignored is a setting the
 # operator believes is on, which on a file that draws the perimeter is the
 # wrong kind of quiet.
-_ROOT_KEYS = frozenset({"label", "path", "enabled"})
+_ROOT_KEYS = frozenset({"label", "path", "enabled", "agent"})
+_AGENT_KEYS = frozenset({"package", "binary"})
 _TOP_KEYS = frozenset(
-    {"roots", "session_prefix", "stop_prompt", "stop_prompt_timeout", "stop_policy"}
+    {"roots", "session_prefix", "stop_prompt", "stop_prompt_timeout", "stop_policy", "agents"}
 )
 
 
@@ -209,6 +215,9 @@ def read_config_file(path: Path) -> FileSettings:
         label = entry.get("label", "")
         folder = entry.get("path", "")
         enabled = entry.get("enabled", True)
+        agent = entry.get("agent", DEFAULT_AGENT)
+        if not isinstance(agent, str):
+            raise SettingsError(f"{path}: roots entry {index}: agent must be a string")
         if not isinstance(label, str) or not isinstance(folder, str):
             raise SettingsError(f"{path}: roots entry {index}: label and path must be strings")
         if not isinstance(enabled, bool):
@@ -233,7 +242,7 @@ def read_config_file(path: Path) -> FileSettings:
             root = parse_root_argument(f"{label}={folder}")
         except RootError as exc:
             raise SettingsError(f"{path}: roots entry {index}: {exc}") from exc
-        roots.append(Root(label=root.label, path=root.path, enabled=enabled))
+        roots.append(Root(label=root.label, path=root.path, enabled=enabled, agent=agent))
 
     prefix = data.get("session_prefix")
     if prefix is not None and not isinstance(prefix, str):
@@ -251,9 +260,36 @@ def read_config_file(path: Path) -> FileSettings:
     if policy is not None and not isinstance(policy, str):
         raise SettingsError(f"{path}: stop_policy must be a string")
     return FileSettings(
+        agents=_read_agents(path, data.get("agents", {})),
         roots=tuple(roots),
         session_prefix=prefix,
         stop_prompt=prompt,
         stop_prompt_timeout=wait,
         stop_policy=policy,
     )
+
+
+def _read_agents(path: Path, raw: object) -> dict[str, AgentSpec]:
+    """`[agents.<id>]` tables, types only. What a usable identifier, package
+    or binary IS lives in `agentconfig`, which `Config` calls, so a Config
+    built anywhere else is refused in the same words."""
+    if not isinstance(raw, dict):
+        raise SettingsError(f"{path}: `agents` must be a table of tables, `[agents.<id>]`")
+    found: dict[str, AgentSpec] = {}
+    for ident, entry in raw.items():
+        if not isinstance(entry, dict):
+            raise SettingsError(f"{path}: agents.{ident} is not a table")
+        stray = set(entry) - _AGENT_KEYS
+        if stray:
+            raise SettingsError(
+                f"{path}: agents.{ident} has an unknown key {sorted(stray)[0]!r}; "
+                f"the keys are {sorted(_AGENT_KEYS)}"
+            )
+        package = entry.get("package")
+        binary = entry.get("binary")
+        if not isinstance(package, str):
+            raise SettingsError(f"{path}: agents.{ident}: package must be a string")
+        if not isinstance(binary, str):
+            raise SettingsError(f"{path}: agents.{ident}: binary must be a string")
+        found[ident] = AgentSpec(package=package, agent_binary=binary)
+    return found

@@ -10,7 +10,7 @@ import secrets
 import shutil
 import ssl
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from importlib.metadata import PackageNotFoundError, metadata
 from pathlib import Path
@@ -416,6 +416,7 @@ def build_config(args: argparse.Namespace) -> Config:
         "extra_origins": source("allow_origins"),
         "self_project": source("self_project"),
         "agent_binary": source("agent_binary"),
+        "agents": "file" if file_settings.agents else "default",
         "session_prefix": source("session_prefix", file_settings.session_prefix is not None),
         "stop_timeout": source("stop_timeout"),
         "stop_prompt": source("stop_prompt", file_settings.stop_prompt is not None),
@@ -428,6 +429,7 @@ def build_config(args: argparse.Namespace) -> Config:
     }
     return Config(
         roots=roots,
+        agents=file_settings.agents,
         state_path=settings.state_path_for(config_path),
         config_path=config_path,
         sources=sources,
@@ -578,6 +580,15 @@ def startup_block(config: Config, found: Preflight, level: str) -> list[str]:
         f"TLS {'on' if config.tls_cert else 'off'}, token {credential}",
         f"answers to Host {', '.join(config.allowed_hosts)}",
         f"agent {config.agent_binary!r} at {config.spawn_agent_binary}",
+        *(
+            f"agent {ident} ({spec.package}) at {spec.spawn_agent_binary}"
+            for ident, spec in config.agents.items()
+        ),
+        *(
+            f"root {root.label} runs agent {root.agent}"
+            for root in config.roots
+            if config.agents
+        ),
         f"tmux {found.tmux_binary}, socket {config.tmux_socket or 'the default'}",
         f"sessions prefixed {config.session_prefix!r}, stop timeout {config.stop_timeout:g}s, "
         f"stop policy {config.stop_policy}",
@@ -647,6 +658,88 @@ class Preflight(NamedTuple):
     # #167. Where tmux was found, for the startup block; the adapter still
     # runs the bare name, as it always has.
     tmux_binary: str | None = None
+    # #290. Each `[agents.<id>]` binary, resolved the same way, by identifier;
+    # empty whenever `problems` is not.
+    agents: Mapping[str, str] = {}
+
+
+TMUX_MISSING = (
+    "tmux is not on PATH. Hitchrail runs every session inside tmux, so "
+    "there is nothing it can do without it. Install it with your "
+    "package manager, for example: sudo apt install tmux"
+)
+
+
+def _find_agent_binary(
+    raw: str, look: Callable[[str], str | None], setting: str
+) -> tuple[list[str], str | None]:
+    """`preflight`'s lookup for one agent's binary: the problems, and the
+    absolute path when there are none. `setting` is where the operator fixes
+    it, `--agent-binary` or an `[agents.<id>]` table (#290), so a second
+    agent's refusal does not send anybody to a flag that never named it."""
+    problems: list[str] = []
+    found = look(raw)
+    # #341. A value with a directory in it is a path the operator TYPED, and
+    # `shutil.which` does not search PATH for one: it checks that path where
+    # it stands and never makes it absolute. So neither PATH message below is
+    # true of it, and each would send the operator to fix a PATH never read.
+    # `os.path.dirname` and not `Path.parent`: `Path("./claude")` normalises
+    # the "./" away, and `which` decides by the same `dirname` test this is.
+    typed = bool(os.path.dirname(raw))  # noqa: PTH120
+    if found is None and typed:
+        # #393. Relative, it was looked for from the cwd, and `~` is not
+        # expanded; saying so also saves the round trip of the relative
+        # refusal below once the file is there.
+        where = (
+            ", looked for relative to the current directory; give an absolute path"
+            if not Path(raw).is_absolute()
+            else ""
+        )
+        problems.append(
+            f"{raw!r} is not an executable file{where}. That is "
+            "the agent Hitchrail starts, and a value containing a directory is "
+            "taken as a path to that file"
+        )
+    elif found is None:
+        # **"Install it" is the wrong first remedy, and #195 is why.** The case
+        # this actually fires in is a lingering systemd unit at boot: the agent
+        # IS installed, in `~/.local/bin`, and the user manager's PATH before
+        # any login is systemd's fallback, which does not include it. Telling
+        # somebody to install what they already installed sends them looking in
+        # the wrong place, and the message is the only thing they get, because
+        # this refusal happens with no terminal attached.
+        problems.append(
+            f"{raw!r} is not on PATH. That is the agent "
+            f"Hitchrail starts. Install it, point {setting} at the "
+            "executable, or if it is installed, put its directory on the PATH "
+            "THIS process has: under a systemd unit that is the unit's own "
+            "Environment=PATH rather than your login's"
+        )
+    elif not Path(found).is_absolute() and typed:
+        # Refused for the same reason as the relative PATH entry below: the
+        # child's cwd would decide which file runs. `update-plugins` accepts
+        # this shape instead, resolving it at once (#298), because there the
+        # check and the spawn are one command in one directory; a server
+        # spawns for as long as it runs.
+        problems.append(
+            f"{raw!r} is a relative path, which would be "
+            "looked up from wherever each agent is started. Give "
+            f"{setting} an absolute path, or a bare name found on PATH"
+        )
+        found = None
+    elif not Path(found).is_absolute():
+        # A PATH entry given as a relative directory, "." most often, is the
+        # one shape `shutil.which` will hand back unresolved: everything else
+        # it finds it joins onto an absolute directory first. Spawning that
+        # would be #298 again, decided by whatever the CHILD's cwd turns out
+        # to be rather than by this lookup, so it is refused here instead.
+        problems.append(
+            f"{found!r} resolved to a relative path from a relative PATH "
+            "entry. Put an absolute directory earlier on PATH, or point "
+            f"{setting} directly at the executable"
+        )
+        found = None
+    return problems, found
 
 
 def preflight(
@@ -677,75 +770,18 @@ def preflight(
     # `shutil.which` afterwards changes nothing and passes against a preflight
     # that never runs. Looked up per call, the patch lands.
     look = which if which is not None else shutil.which
-    problems = []
     tmux = look("tmux")
+    problems, found = _find_agent_binary(config.agent_binary, look, "--agent-binary")
     if tmux is None:
-        problems.append(
-            "tmux is not on PATH. Hitchrail runs every session inside tmux, so "
-            "there is nothing it can do without it. Install it with your "
-            "package manager, for example: sudo apt install tmux"
+        problems.insert(0, TMUX_MISSING)
+    agents: dict[str, str] = {}
+    for ident, spec in config.agents.items():
+        extra, resolved = _find_agent_binary(
+            spec.agent_binary, look, f"`binary` in [agents.{ident}] of the config file"
         )
-    found = look(config.agent_binary)
-    # #341. A value with a directory in it is a path the operator TYPED, and
-    # `shutil.which` does not search PATH for one: it checks that path where
-    # it stands and never makes it absolute. So neither PATH message below is
-    # true of it, and each would send the operator to fix a PATH never read.
-    # `os.path.dirname` and not `Path.parent`: `Path("./claude")` normalises
-    # the "./" away, and `which` decides by the same `dirname` test this is.
-    typed = bool(os.path.dirname(config.agent_binary))  # noqa: PTH120
-    if found is None and typed:
-        # #393. Relative, it was looked for from the cwd, and `~` is not
-        # expanded; saying so also saves the round trip of the relative
-        # refusal below once the file is there.
-        where = (
-            ", looked for relative to the current directory; give an absolute path"
-            if not Path(config.agent_binary).is_absolute()
-            else ""
-        )
-        problems.append(
-            f"{config.agent_binary!r} is not an executable file{where}. That is "
-            "the agent Hitchrail starts, and a value containing a directory is "
-            "taken as a path to that file"
-        )
-    elif found is None:
-        # **"Install it" is the wrong first remedy, and #195 is why.** The case
-        # this actually fires in is a lingering systemd unit at boot: the agent
-        # IS installed, in `~/.local/bin`, and the user manager's PATH before
-        # any login is systemd's fallback, which does not include it. Telling
-        # somebody to install what they already installed sends them looking in
-        # the wrong place, and the message is the only thing they get, because
-        # this refusal happens with no terminal attached.
-        problems.append(
-            f"{config.agent_binary!r} is not on PATH. That is the agent "
-            "Hitchrail starts. Install it, point --agent-binary at the "
-            "executable, or if it is installed, put its directory on the PATH "
-            "THIS process has: under a systemd unit that is the unit's own "
-            "Environment=PATH rather than your login's"
-        )
-    elif not Path(found).is_absolute() and typed:
-        # Refused for the same reason as the relative PATH entry below: the
-        # child's cwd would decide which file runs. `update-plugins` accepts
-        # this shape instead, resolving it at once (#298), because there the
-        # check and the spawn are one command in one directory; a server
-        # spawns for as long as it runs.
-        problems.append(
-            f"{config.agent_binary!r} is a relative path, which would be "
-            "looked up from wherever each agent is started. Give "
-            "--agent-binary an absolute path, or a bare name found on PATH"
-        )
-        found = None
-    elif not Path(found).is_absolute():
-        # A PATH entry given as a relative directory, "." most often, is the
-        # one shape `shutil.which` will hand back unresolved: everything else
-        # it finds it joins onto an absolute directory first. Spawning that
-        # would be #298 again, decided by whatever the CHILD's cwd turns out
-        # to be rather than by this lookup, so it is refused here instead.
-        problems.append(
-            f"{found!r} resolved to a relative path from a relative PATH "
-            "entry. Put an absolute directory earlier on PATH, or point "
-            "--agent-binary directly at the executable"
-        )
-        found = None
+        problems.extend(extra)
+        if resolved is not None:
+            agents[ident] = resolved
     if not meminfo.exists():
         problems.append(
             f"{meminfo} cannot be read, so the memory guard has nothing to "
@@ -753,7 +789,9 @@ def preflight(
             "rather than run without the check that stops it filling the "
             "machine with agents"
         )
-    return Preflight(problems, found if not problems else None, tmux)
+    if problems:
+        return Preflight(problems, None, tmux)
+    return Preflight(problems, found, tmux, agents)
 
 
 EXIT_REFUSED = 2
@@ -899,8 +937,13 @@ def _outcome_line(outcome: claude_ipc.PluginOutcome, times: int = 1) -> str:
     if outcome.from_version and outcome.to_version:
         notes.append(f"{outcome.from_version} to {outcome.to_version}")
     if outcome.detail:
-        notes.append(f"{outcome.detail}, listed {times} times" if times > 1 else outcome.detail)
-    elif outcome.approved_command:
+        # Counted in ROWS, which is what was grouped: "listed N times" was one
+        # short for a repeated `user` plugin, whose first row was updated and
+        # is not in the group (#460).
+        notes.append(f"{outcome.detail}, {times} rows" if times > 1 else outcome.detail)
+    # Not `elif` since #491: an `updated` row can now carry a detail too, and
+    # what the person approved must still show beside it.
+    if outcome.approved_command:
         notes.append(f"approved: {outcome.approved_command}")
     line = f"{outcome.result:<8} {outcome.plugin}"
     return f"{line} ({'; '.join(notes)})" if notes else line
@@ -1021,6 +1064,14 @@ def update_plugins_command(argv: list[str]) -> int:
         "An update applies when a session next starts: running sessions keep the old "
         "version until they are restarted."
     )
+    # #491. Beside the per row detail, on stderr like the other notes, so a
+    # script reading stdout's counts is told the `updated` there is unchecked.
+    if any(o.detail == claude_ipc.UNCONFIRMED_DETAIL for o in outcomes):
+        print(
+            "hitchrail: note: the plugin list could not be read after the updates, "
+            "so which `updated` rows changed version is not known.",
+            file=sys.stderr,
+        )
     return 1 if counts["failed"] else 0
 
 
@@ -1076,7 +1127,14 @@ def main(argv: list[str] | None = None) -> int:
     # plugin update run the file that was just checked, not a bare name that
     # tmux's own server, with its own inherited PATH, could resolve to
     # something else.
-    config = replace(config, resolved_agent_binary=found.agent_binary)
+    config = replace(
+        config,
+        resolved_agent_binary=found.agent_binary,
+        agents={
+            ident: replace(spec, resolved_agent_binary=found.agents[ident])
+            for ident, spec in config.agents.items()
+        },
+    )
     # #207. After the preflight, before the bind, and with two exit codes
     # because the unit reads them differently. A MISMATCH is exit 2, the
     # deliberate stop `RestartPreventExitStatus=2` keeps stopped until a

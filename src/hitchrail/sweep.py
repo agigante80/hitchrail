@@ -20,7 +20,8 @@ import logging
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from hitchrail import attention, claude_ipc, discovery, signals
+from hitchrail import attention, discovery, signals
+from hitchrail.agent import StopNotSafe
 from hitchrail.sessions import MachineUnreadable, State
 from hitchrail.tmux import TmuxUnavailable
 
@@ -80,8 +81,11 @@ def scan_for_stuck(engine: EngineSeam) -> list[str]:
     # these two lines happens without the lock, which is the whole point:
     # `attention.scan` runs a subprocess per row.
     epoch = engine.attention_epoch
+    agent_of = {row.name: row.agent for row in rows}
     stuck, clear = attention.scan(
-        attention.candidates(rows), lambda n: _pane_needs_a_person(engine, n), engine.now
+        attention.candidates(rows),
+        lambda n: _pane_needs_a_person(engine, n, agent_of.get(n)),
+        engine.now,
     )
     now = engine.now()
     with engine.stopping_guard:
@@ -167,7 +171,7 @@ def scan_for_stuck(engine: EngineSeam) -> list[str]:
     return stuck
 
 
-def _pane_needs_a_person(engine: EngineSeam, name: str) -> bool:
+def _pane_needs_a_person(engine: EngineSeam, name: str, agent: str | None) -> bool:
     """Whether this agent's screen is showing something only a human can
     answer. False whenever that cannot be told.
 
@@ -175,8 +179,8 @@ def _pane_needs_a_person(engine: EngineSeam, name: str) -> bool:
     the markers, so a raise would lose every later name's report and
     announcement, though the server's sweep survives it (#181).
 
-    What "clear" means is Claude Code knowledge and stays in `claude_ipc`;
-    this asks and does not interpret.
+    What "clear" means is the agent package's knowledge (#290); this asks
+    and does not interpret.
     """
     try:
         pane = engine.tmux.capture_pane(name, escapes=True)
@@ -198,7 +202,7 @@ def _pane_needs_a_person(engine: EngineSeam, name: str) -> bool:
     # **`awaits_answer`, not `shows_input_box` directly (#429).** It is the
     # same answer today, and it is the one the answer route tests with
     # `is True`: this asks the vendor module the question it names.
-    return claude_ipc.awaits_answer(pane) is True
+    return engine.agent_for(name, agent).awaits_answer(pane) is True
 
 
 def _held_by_a_second_look(
@@ -224,7 +228,7 @@ def _held_by_a_second_look(
         moved = marker.withdrawn or marker.typing or name in engine.stopping
     if moved or _agent_pid(engine, name) != seen:
         return False
-    return _pane_needs_a_person(engine, name)
+    return _pane_needs_a_person(engine, name, marker.agent)
 
 
 def _flag_waiting(engine: EngineSeam, name: str, epoch: int) -> None:
@@ -256,7 +260,7 @@ def advance_wrap_ups(engine: EngineSeam) -> list[str]:
     inside `scan_for_stuck`, which does nothing while no browser is
     connected: a wrap up has to finish with the phone in a pocket.
 
-    Whether a screen reads finished is `claude_ipc`'s, through the watch;
+    Whether a screen reads finished is the agent package's, through the watch;
     this only asks. Returns the names sent to the exit. Never raises: a
     refused exit's marker is dropped first, so a raise loses its report.
     """
@@ -294,9 +298,10 @@ def advance_wrap_ups(engine: EngineSeam) -> list[str]:
             watch.readings(),
         )
         try:
-            claude_ipc.request_stop(engine.tmux, name, settle=engine.sleep)
+            agent = engine.agent_for(name, marker.agent)
+            agent.request_stop(engine.tmux, name, settle=engine.sleep)
             moved.append(name)
-        except (claude_ipc.StopNotSafe, TmuxUnavailable) as exc:
+        except (StopNotSafe, TmuxUnavailable) as exc:
             engine.drop(name, marker)
             logger.info("stop %s: exit refused after wrap up, %s", name, exc)
             # The stop ends here, so this is `expire_stops`' moment: one
@@ -305,7 +310,7 @@ def advance_wrap_ups(engine: EngineSeam) -> list[str]:
             # report; `end_anyway` kills a stop that expired after its exit
             # was SENT, and this one never was.
             epoch = engine.attention_epoch
-            if _pane_needs_a_person(engine, name):
+            if _pane_needs_a_person(engine, name, marker.agent):
                 _flag_waiting(engine, name, epoch)
         finally:
             engine.done_typing(marker)
@@ -411,7 +416,7 @@ def expire_stops(engine: EngineSeam) -> list[str]:
         # two would pair the fresh agent's pid with the old one's question.
         seen = _agent_pid(engine, name) if end_anyway else None
         epoch = engine.attention_epoch
-        waiting = _pane_needs_a_person(engine, name)
+        waiting = _pane_needs_a_person(engine, name, marker.agent)
         # #239. The operator's answer, given in advance, to a stop that
         # ran out of time on a question: the kill the dialog offers at
         # this moment, taken without the tap. Only on THIS look at the

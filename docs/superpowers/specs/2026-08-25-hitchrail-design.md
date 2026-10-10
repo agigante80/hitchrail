@@ -66,51 +66,55 @@ Out of scope for v1, and stated so nobody plans around them:
 - User accounts, roles, or multi-tenancy.
 - Sending input to a session. Hitchrail starts and stops agents; it is not a
   terminal.
-- **Any agent other than Claude Code.** No second agent is planned, none has
-  been asked for, and none will be considered until long after v1 ships. This
-  is a non goal rather than an omission, and the paragraph below says what is
-  being kept open anyway and why.
+- **An agent chosen from a page, or any agent command a page can edit.** A
+  second agent was asked for (#290 to #296) and is built through the seam
+  below, but which agents exist and which one a root runs is the operator's
+  choice on the machine, never a request's. Section 3.1 says why.
 
-### 3.1 Multi agent: not built, not closed off
+### 3.1 Multi agent: one package per agent, chosen on the machine
 
-The temptation with a question like "could this run other agents one day" is to
-build a plugin system for one plugin. That is refused here. An interface derived
-from a single implementation is shaped like that implementation, and the second
-implementation is what teaches you the real interface; guessing it from one data
-point produces an abstraction that is harder to change than no abstraction.
+**Decided by Andrea on 2026-10-07 (#334), built in Phase 23.** Until then this
+section read "not built, not closed off", and its argument still holds: an
+interface derived from a single implementation is shaped like that
+implementation, and the second implementation is what teaches you the real
+interface. That is why nothing was abstracted while there was one agent, and
+why Phase 23 records the second agent's real shapes (Antigravity, `agy`)
+before it fixes the interface.
 
-What IS done, because each item costs nothing today and is expensive to retrofit:
+#334 weighed three answers. Staying single agent closed the question; a
+registry of agents whose command templates a settings page edits and writes
+to storage, as the epic of 2026-09-22 proposed, would have needed the
+security argument rewritten. The answer taken widens the seam instead, and
+keeps the three things the product rests on:
 
-1. **No vendor name appears in the operator or API contract.** Routes, states,
-   error codes and the `Session` fields are already neutral. The one exception,
-   the `claude_binary` setting, was renamed to `agent_binary` while nothing is
-   released. Under `docs/versioning.md` an operator facing rename is a MAJOR,
-   so this specific item goes from free to a major version bump the day v1
-   ships.
-2. **`claude_ipc` is the seam.** It already exists, quarantined for a
-   different reason (undocumented internals that change without notice), and
-   that is structurally the same boundary a second vendor would need. Its
-   members are an agent adapter interface in all but name: how to launch, how
-   to identify the process, how to ask for a graceful stop, how to find a
-   session link, and, since #124 (2026-09-23), how to update the agent's
-   plugins.
-3. **The engine asks for a stop; it does not know what a stop is.** See section
-   4.3. This is the one place the boundary would otherwise leak, and it leaks
-   in a costly direction.
+1. **Which agents exist is machine configuration, read once and never
+   written.** The config file's `[agents]` table names each agent by an
+   identifier the operator chooses, the package it uses and its binary; a
+   root's `agent` key says which one starts there. The package is chosen from
+   a closed set in code: the file selects among packages, it cannot load one.
+2. **No vendor name enters the operator or API contract** beyond that
+   operator chosen identifier. `agent_binary`, the routes, states, error codes
+   and `Session` fields stay neutral, as they were made to be while there was
+   one agent.
+3. **No text from a page reaches a spawn.** There are no command templates.
+   Each agent's argv is built in its own package, as `claude_ipc.launch_argv`
+   builds Claude Code's.
 
-What is deliberately NOT done: no plugin discovery, no entry points, no setting
-to select an agent, no second adapter written speculatively, and no further
-abstraction of tmux, the process table or the memory guard, which are already
-agnostic because none of them can tell what is running in a pane.
+**One quarantined package per agent**, each shaped like `claude_ipc/`: the
+only code that knows that agent's undocumented internals (how to launch it,
+how to find its process, how to ask it to stop, how to read its screen, and
+what it can update). The engine asks a root's agent and never knows which one
+it is. A daemon an agent needs (#293's codex) is not a process Hitchrail owns:
+it would be the first long lived child that is not a session, and is argued
+again when a package needs one. Letting the page choose among the configured
+agents at start (#292) is a different contract change and sits in Backlog.
 
-**The honest caveat.** The blocker on a second agent is unlikely to be code
-shape. Hitchrail's model is a long running headless process, in a tmux pane,
-that tolerates unattended operation and can be asked to stop politely. Claude
-Code fits because `--dangerously-skip-permissions` exists and it is a persistent
-terminal program. An agent that is request and response, or that needs
-interactive approval, does not fit that model however clean the adapter is. So
-the value of this seam is uncertain even though its cost is near zero, and that
-asymmetry is the entire argument for doing the cheap version and stopping.
+**The honest caveat still applies.** Hitchrail's model is a long running
+headless process, in a tmux pane, that tolerates unattended operation and can
+be asked to stop politely. An agent that is request and response, or that
+needs interactive approval, does not fit that model however clean its package
+is, which is why the second agent is chosen by whether it fits rather than by
+who asked.
 
 ## 4. Architecture
 

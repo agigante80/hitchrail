@@ -25,7 +25,9 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # abandoned row is seen too, so its repeat is not a second one. 639 for
     # #311: the second listing that splits `updated` from `current`, and why
     # every way it can fail leaves `updated` as it was.
-    "claude_ipc/plugins.py": 639,
+    # 651 for #491: every failed second listing marks each `updated` row
+    # unconfirmed, through one helper, and the constant the CLI and page read.
+    "claude_ipc/plugins.py": 651,
     # screen.py crossed the guideline for #475 (394 to 441): the rule that finds
     # the live input box between its two rules, the captured reason the row
     # count alone could not be it, and the watch's counts of what it read. The
@@ -195,7 +197,12 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # 1283 for #472: the overlay's slot and its two `cancel`s in Kill, and the
     # import. Restart's logic, its two entry points and its argument are in
     # `restart.py`, which is a mixin precisely so this file gained no methods.
-    "engine.py": 1283,
+    # 1291 for #290: the engine holds its `Agents` and asks the project's
+    # agent to start, stop, answer and link, where it called `claude_ipc`;
+    # the derive call wrapped once it passed them.
+    # 1300 for #294: a stop acts through the agent the row was derived
+    # running and records it on the marker, not through the root's agent.
+    "engine.py": 1300,
     # #473. The sweep, moved whole from `engine.py`. 465 is the move: most of
     # it is the notes on the races between a scan, a stop and a start, which
     # are the reason the code is shaped as it is. It does not want splitting
@@ -206,13 +213,26 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # 489 for #475: the ceiling line carries what the watch read.
     # 493 for #472: an expired stop cancels a pending restart in the same
     # critical section as the removal, and the comment says why it must.
-    "sweep.py": 493,
+    # 494 for #290: the exception is the neutral module's, one import more.
+    # 498 for #294: the sweep reads a screen and types an exit with the
+    # agent on the row or the marker.
+    "sweep.py": 498,
     # signals.py: 397 when #274 moved the pidfd path here. 414 for #426: `_close`,
     # and the note on why a close that fails must not replace the outcome.
     # 426 for #425: the survivor after the wait, journalled and reported as ask.
     # 438 for the restart kill epoch: `_ends_a_restart`, called before each of the two
     # signals, and the note on why the count is what a Restart still typing reads.
     "signals.py": 438,
+    # 399 to 415 for #290: the project's agent travels to each direction of
+    # derivation, and the trust map is keyed by agent. The seam the file
+    # already has is `Machine` and `look`, one read of the machine, against
+    # the questions asked of it; splitting there is #501.
+    # 438 for #290: both directions ask every configured agent, not only the
+    # root's, so a changed `agent` key cannot hide one still running.
+    # 460 for #294: the pane direction prefers the agent whose whole argv tail
+    # a process ends with, since agy's argv carries Claude Code's marker.
+    # 461 for #294: a row carries the identifier of the agent found.
+    "derive.py": 461,
     # tmux.py is the module that encodes what tmux actually does
     # rather than what its manual implies, and every entry is a footgun
     # that cost real debugging: prefix matching targets, the colon
@@ -379,7 +399,8 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # with them.
     # 846 for #437: the rule over a hosts argument, so assignment order cannot
     # matter. 848 for #436: the secure context question in the withheld rule.
-    "config.py": 848,
+    # 856 for #290: the `agents` field, checked at construction like roots.
+    "config.py": 856,
     # 409, nine lines over, down from 542. #115 deleted the `?token=`
     # carrier: 135 lines once the two blocks inside `TokenMiddleware`
     # that only served it are counted.

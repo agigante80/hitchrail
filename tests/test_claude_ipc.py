@@ -31,13 +31,15 @@ from hitchrail.claude_ipc import (
 )
 from hitchrail.claude_ipc import exit_menu as ipc_exit_menu
 from hitchrail.claude_ipc import screen as ipc_screen
-from support import in_claude_ipc, source_modules
+from support import AGENT_PACKAGES, in_an_agent_package, in_claude_ipc, source_modules
 
 SRC = Path(__file__).parent.parent / "src" / "hitchrail"
 
 
 def _outside_the_quarantine() -> dict[str, Path]:
-    """Every module but the quarantine, keyed by its path under `SRC` (#368).
+    """Every module outside every agent package, keyed by its path under `SRC`
+    (#368). Every agent's package is excluded, not only this one (#290): each
+    is the one place its own agent's keys and flags may live.
 
     A flat glob would not see into a `claude_ipc` package, and a test that
     excluded `claude_ipc.py` by name would then scan every one of its files
@@ -46,7 +48,7 @@ def _outside_the_quarantine() -> dict[str, Path]:
     """
     modules = source_modules(SRC)
     assert any(in_claude_ipc(rel) for rel in modules), "the walk saw no claude_ipc module"
-    return {rel: p for rel, p in modules.items() if not in_claude_ipc(rel)}
+    return {rel: p for rel, p in modules.items() if not in_an_agent_package(rel)}
 
 
 # Exact input rows captured from a real Claude Code session on 2026-09-02,
@@ -717,6 +719,62 @@ def test_a_changed_config_is_noticed_rather_than_cached_forever(tmp_path: Path) 
     assert trusted_folders(path) == frozenset({"/srv/a", "/srv/b"})
 
 
+@pytest.mark.parametrize(
+    ("trusted", "expected"),
+    [
+        ({"/srv"}, True),
+        ({"/srv/root/a"}, True),
+        ({"/"}, True),
+        ({"/srv/root/ab"}, False),
+        ({"/srv/root/a/inner"}, False),
+        (set(), False),
+    ],
+    ids=[
+        "an ancestor is trusted",
+        "the folder itself",
+        "the filesystem root",
+        "a sibling sharing a prefix",
+        "only a descendant",
+        "nothing",
+    ],
+)
+def test_a_folder_inherits_an_ancestors_trust(trusted: set[str], expected: bool) -> None:
+    """#456, observed on Claude Code 2.1.296: a folder under a trusted ancestor
+    starts without the prompt, even when its own entry reads false, which
+    the set cannot even carry since it holds only the true ones. Compared by
+    path component, never by string prefix: `/srv/root/ab` is not above
+    `/srv/root/a`."""
+    assert claude_ipc.folder_is_trusted(Path("/srv/root/a"), frozenset(trusted)) is expected
+
+
+def test_a_trusted_folder_lends_nothing_to_one_its_name_prefixes() -> None:
+    """The direction a string prefix gets wrong: `/srv/root/a` trusted must not
+    make `/srv/root/ab` trusted (round 1 of Phase 23's batch 1 review, which
+    swapped in `startswith` and saw every other case here still pass)."""
+    assert not claude_ipc.folder_is_trusted(Path("/srv/root/ab"), frozenset({"/srv/root/a"}))
+
+
+def test_a_child_whose_own_entry_is_false_under_a_trusted_ancestor_is_trusted(
+    tmp_path: Path,
+) -> None:
+    """The observed case end to end through the file, with `/scratch` for the
+    `/tmp` it was seen under: the ancestor true, the child's own entry false,
+    and no prompt on screen."""
+    path = write_agent_config(
+        tmp_path,
+        {
+            "projects": {
+                "/scratch": {"hasTrustDialogAccepted": True},
+                "/scratch/root/demo": {"hasTrustDialogAccepted": False},
+            }
+        },
+    )
+    trusted = trusted_folders(path)
+    assert trusted is not None
+    assert claude_ipc.folder_is_trusted(Path("/scratch/root/demo"), trusted)
+    assert not claude_ipc.folder_is_trusted(Path("/var/root/demo"), trusted)
+
+
 def test_only_the_quarantine_types_into_a_pane() -> None:
     """#91 turns a described property into a checked one.
 
@@ -1095,23 +1153,44 @@ def test_the_package_still_offers_every_name_the_single_file_did() -> None:
 
 # Public names added after #368, kept apart so the list above stays a record
 # of what the single file offered.
-_ADDED_SINCE_THE_SPLIT = {"WrapUpWatch", "request_wrap_up"}  # #242
+_ADDED_SINCE_THE_SPLIT = {
+    "WrapUpWatch",  # #242
+    "request_wrap_up",  # #242
+    "folder_is_trusted",  # #456
+    "UNCONFIRMED_DETAIL",  # #491
+    "ClaudeCode",  # #290
+}
+
+
+def _package_modules() -> dict[str, set[str]]:
+    """Each agent package's dotted name, with the submodules it has (#290)."""
+    return {
+        f"hitchrail.{pkg}": {p.stem for p in (SRC / pkg).glob("*.py") if p.stem != "__init__"}
+        for pkg in AGENT_PACKAGES
+        if (SRC / pkg).is_dir()
+    }
 
 
 def _submodule_imports(tree: ast.AST) -> list[str]:
-    """Every import in `tree` that reaches past the package into a submodule."""
+    """Every import in `tree` that reaches past an agent package into a
+    submodule, for every agent's package (#290)."""
+    packages = _package_modules()
     found: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            found += [a.name for a in node.names if a.name.startswith("hitchrail.claude_ipc.")]
+            found += [
+                a.name
+                for a in node.names
+                if a.name.startswith(tuple(f"{k}." for k in packages))
+            ]
         elif isinstance(node, ast.ImportFrom) and node.module:
-            if node.module.startswith("hitchrail.claude_ipc."):
+            if node.module.startswith(tuple(f"{k}." for k in packages)):
                 found.append(node.module)
-            elif node.module == "hitchrail.claude_ipc":
+            elif node.module in packages:
                 found += [
                     f"{node.module}.{a.name}"
                     for a in node.names
-                    if a.name in {"screen", "keys", "launch", "plugins", "exit_menu"}
+                    if a.name in packages[node.module]
                 ]
     return found
 

@@ -1174,7 +1174,9 @@ async def test_the_listing_carries_the_root_it_is_listing(
     # A LIST of labelled roots, even with one. A client that special cased
     # "one root" would be wrong the day a second was added, which is why #119
     # made the qualified form universal.
-    assert body["roots"] == [{"label": r.label, "path": str(r.path)} for r in config.roots]
+    assert body["roots"] == [
+        {"label": r.label, "path": str(r.path), "agent": r.agent} for r in config.roots
+    ]
 
 
 async def test_the_listing_reports_what_the_sweep_found_and_captures_nothing(

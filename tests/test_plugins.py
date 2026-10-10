@@ -28,7 +28,7 @@ from hitchrail.claude_ipc import PluginOutcome, PluginsFailed, update_plugins
 
 # A private constant, read from its own module: the package re-exports public names only.
 from hitchrail.claude_ipc import plugins as ipc_plugins
-from support import in_claude_ipc, source_modules
+from support import in_an_agent_package, in_claude_ipc, source_modules
 
 SRC = Path(__file__).parent.parent / "src" / "hitchrail"
 
@@ -204,6 +204,25 @@ def test_an_unreadable_second_listing_leaves_updated_as_it_was(
     outcomes = run(agent)
     assert results(outcomes) == [("a@m", "user", "updated"), ("b@m", "user", "updated")]
     assert [(o.from_version, o.to_version) for o in outcomes] == [(None, None)] * 2
+    # #491: still `updated`, and saying the check did not happen.
+    assert [o.detail for o in outcomes] == [ipc_plugins.UNCONFIRMED_DETAIL] * 2
+
+
+def test_an_unreadable_second_listing_marks_only_the_updated_rows() -> None:
+    """A failed or skipped row keeps its own detail: the second listing was
+    never going to confirm those."""
+    agent = FakeAgent(
+        [row("a@m"), row("b@m"), row("k@x", "local")], **{"b@m": done(1, stderr="no")}
+    ).then_lists(done(1, stderr="boom"))
+    details = {(o.plugin, o.result): o.detail for o in run(agent)}
+    assert details[("a@m", "updated")] == ipc_plugins.UNCONFIRMED_DETAIL
+    assert details[("b@m", "failed")] != ipc_plugins.UNCONFIRMED_DETAIL
+    assert details[("k@x", "skipped")] == "local scope is not updated"
+
+
+def test_a_confirmed_run_carries_no_unconfirmed_detail() -> None:
+    agent = FakeAgent([row("a@m"), row("b@m")]).unmoving("b@m")
+    assert all(o.detail is None for o in run(agent))
 
 
 def test_a_row_without_a_version_in_either_listing_stays_updated() -> None:
@@ -214,8 +233,13 @@ def test_a_row_without_a_version_in_either_listing_stays_updated() -> None:
 
 
 def test_a_plugin_missing_from_the_second_listing_stays_updated() -> None:
+    """Both versions null, never one (#460): dropping the `new is None` half of
+    the guard left the results right and the record carrying a `from_version`
+    with no `to_version`, against `docs/api.md`."""
     agent = FakeAgent([row("a@m")]).then_lists(done(stdout=json.dumps([row("z@m")])))
-    assert results(run(agent)) == [("a@m", "user", "updated")]
+    outcomes = run(agent)
+    assert results(outcomes) == [("a@m", "user", "updated")]
+    assert (outcomes[0].from_version, outcomes[0].to_version) == (None, None)
 
 
 def test_a_failed_update_is_never_reclassified() -> None:
@@ -1427,7 +1451,7 @@ def test_the_plugin_vocabulary_lives_only_in_the_quarantine() -> None:
     leaked = {
         rel: sorted(vocabulary & _string_constants(p))
         for rel, p in modules.items()
-        if not in_claude_ipc(rel) and vocabulary & _string_constants(p)
+        if not in_an_agent_package(rel) and vocabulary & _string_constants(p)
     }
     assert leaked == {}, f"plugin vocabulary outside the quarantine: {leaked}"
 

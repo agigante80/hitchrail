@@ -229,6 +229,7 @@ async def test_the_stream_carries_the_whole_session_shape(live: Fixture) -> None
         "foreign_server_pid",
         "restarting",
         "restart_refused",
+        "agent",
     }
     # #411, #428: what another browser reopens a wait from, over the wire.
     assert isinstance(event["stop_age_s"], float)

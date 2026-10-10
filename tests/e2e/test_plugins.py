@@ -175,9 +175,9 @@ async def test_identical_skipped_rows_collapse_into_one_with_a_count(
     await expect(skipped).to_have_count(2)
     grouped = skipped.filter(has_text="kit@x")
     await expect(grouped).to_have_count(1)
-    await expect(grouped).to_contain_text("local scope is not updated, listed 3 times")
+    await expect(grouped).to_contain_text("local scope is not updated, 3 rows")
     alone = skipped.filter(has_text="other@x")
-    await expect(alone).not_to_contain_text("listed")
+    await expect(alone).not_to_contain_text("rows")
 
 
 async def test_a_page_opened_mid_run_shows_where_the_run_is(

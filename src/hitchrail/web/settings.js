@@ -322,8 +322,25 @@ function renderFacts(config) {
   );
 }
 
+/* #294. The update runs the default agent's binary and nothing else, so with
+   more than one agent configured the section says which ones it leaves out:
+   those with no plugins at all, and those with plugins it does not reach. */
+function renderPluginScope(config) {
+  const scope = $("[data-plugins-scope]");
+  const others = Object.entries(config.agents?.value ?? {});
+  scope.hidden = others.length === 0;
+  if (scope.hidden) return;
+  const none = others.filter(([, agent]) => !agent.plugins).map(([ident]) => ident);
+  const unreached = others.filter(([, agent]) => agent.plugins).map(([ident]) => ident);
+  const lines = ["Updates the default agent's plugins only."];
+  if (unreached.length) lines.push(`Not updated from here: ${unreached.join(", ")}.`);
+  if (none.length) lines.push(`No plugins to update: ${none.join(", ")}.`);
+  scope.textContent = lines.join(" ");
+}
+
 function render(config) {
   renderRoots(config);
+  renderPluginScope(config);
   renderStop(config);
   renderPolicy(config);
   renderFacts(config);

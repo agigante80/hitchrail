@@ -13,13 +13,13 @@ be tested with three plain values instead of a constructed engine.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Container
-from dataclasses import dataclass
-from pathlib import Path
+from collections.abc import Callable, Container, Mapping
+from dataclasses import dataclass, field
 
-from hitchrail import claude_ipc, discovery
+from hitchrail import discovery
+from hitchrail.agents import Agents, Configured, launch_folder
 from hitchrail.config import Config
-from hitchrail.procs import ProcTable
+from hitchrail.procs import Proc, ProcTable
 from hitchrail.sessions import MachineUnreadable, Session, State
 from hitchrail.tmux import Tmux, TmuxUnavailable
 from hitchrail.tmuxnames import is_tmux_argv
@@ -49,11 +49,13 @@ class Machine:
     # The pid of the tmux server on our socket, or None with none running
     # (#189), from the same `list-panes -a`. See `_held_by_another_server`.
     server_pid: int | None = None
-    # Which folders the agent will not show a trust prompt for, or None when
-    # that cannot be told (#88). Read ONCE per look, like everything else here:
-    # the alternative is a `capture-pane` per running row on every listing,
-    # which is the cost the design refused for the session link.
-    trusted: frozenset[str] | None = None
+    # Which folders each agent will not show a trust prompt for, keyed by the
+    # agent's identifier, with None when that cannot be told (#88, #290). Read
+    # ONCE per look, like everything else here: the alternative is a
+    # `capture-pane` per running row on every listing, which is the cost the
+    # design refused for the session link. An agent absent from the map reads
+    # as unknown, never as untrusted.
+    trusted: Mapping[str, frozenset[str] | None] = field(default_factory=dict)
     # What bounds a process, by pid (#243). A callable rather than a map,
     # because it is asked only for the pids that derive as sessions, a
     # handful, where a map would read the ancestry of every process in the
@@ -65,13 +67,13 @@ class Machine:
 def look(
     procs_fn: Callable[[], ProcTable],
     tmux: Tmux,
-    agent_config: Path | None = None,
+    agents: tuple[Configured, ...] = (),
     ceiling_mb: Callable[[int], int | None] = lambda pid: None,
 ) -> Machine:
     """One tmux call and one `ps` call, whatever the project count.
 
-    Plus one file read when `agent_config` is given, for the same budget
-    reason: the trust map answers every project's question at once.
+    Plus one trust read per agent in `agents`, for the same budget reason:
+    each agent's trust map answers every project's question at once.
 
     **`ps` is read BEFORE tmux, deliberately, and #49 is why it says so.** The
     two reads cannot be one instant, so one of them is always the older, and
@@ -129,7 +131,7 @@ def look(
         owned=frozenset(owned),
         foreign_owners=foreign_owners,
         server_pid=panes.server_pid,
-        trusted=claude_ipc.trusted_folders(agent_config) if agent_config else None,
+        trusted={c.ident: c.agent.trusted() for c in agents},
         ceiling_mb=ceiling_mb,
     )
 
@@ -141,7 +143,19 @@ def derive(
     tmux: Tmux,
     stopping: Container[str],
     awaiting_input: Container[str] = (),
+    agents: Agents | None = None,
 ) -> Session:
+    # Built from the config when the caller has none: the mapping is a pure
+    # function of it (#290), and the engine passes the one it holds.
+    registry = agents or Agents(config)
+    configured = registry.for_project(name)
+    # #290. Every configured agent is asked, the root's own first, in BOTH
+    # directions: the root's `agent` may have changed while one of the other
+    # package's agents still ran, and asking only the new one reported that
+    # agent `stopped` and offered a second in the same folder. A row found
+    # through another package carries that package, so its link, its screen
+    # reader and the keys a stop or answer types are its own (#290 review).
+    asked = (configured, *(c for c in registry.all() if c is not configured))
     protected = config.self_project is not None and name == config.self_project
     # The SANITIZED name, because that is what tmux stored. Looking up the
     # raw name finds nothing and reports stopped while the agent runs.
@@ -168,8 +182,9 @@ def derive(
         # these consistent" resolved in the wrong direction is the failure this
         # project has already hit twice with removed workarounds, and both
         # behaviours now have a test that fails if either is changed.
-        agent = machine.table.first_matching_in_tree(pane_pid, claude_ipc.REMOTE_CONTROL_MARKER)
-        if agent is not None:
+        found = _pane_agent(name, pane_pid, machine, config, asked)
+        if found is not None:
+            owner, agent = found
             return live(
                 name,
                 agent.pid,
@@ -183,10 +198,11 @@ def derive(
                 # project in an untrusted folder would hit it if somebody
                 # started it, and warning before the fact is a different
                 # feature from describing what is on screen now.
-                awaiting_trust=_awaiting_trust(name, machine, config),
+                awaiting_trust=_awaiting_trust(name, machine, config, owner),
                 # Not derived here: the engine records it when a stop's wait
                 # ends, because that is the one moment worth a `capture-pane`.
                 awaiting_input=name in awaiting_input,
+                configured=owner,
             )
         # A session with no agent in it. Not stopped: the shell is there.
         return Session(
@@ -196,7 +212,14 @@ def derive(
             protected=protected,
         )
 
-    orphan = find_detached(name, machine, config)
+    orphan, owner = next(
+        (
+            (pid, c)
+            for c in asked
+            if (pid := find_detached(name, machine, config, c)) is not None
+        ),
+        (None, configured),
+    )
     if orphan is not None:
         return live(
             name,
@@ -224,6 +247,7 @@ def derive(
             # cannot name the session, only the server. Nothing here gates
             # an action; the engine reads it as "somebody holds this".
             foreign_server_pid=_held_by_another_server(orphan, machine),
+            configured=owner,
         )
 
     # Never `stopping` here, whatever the marker says. The graceful stop is an
@@ -241,7 +265,39 @@ def derive(
     )
 
 
-def find_detached(name: str, machine: Machine, config: Config) -> int | None:
+def _argv_tail(name: str, config: Config, configured: Configured) -> str:
+    """What `configured` would start `name` with, after the binary."""
+    argv = configured.agent.launch_argv(configured.binary, name, launch_folder(config, name))
+    return " ".join(argv[1:])
+
+
+def _pane_agent(
+    name: str, pane_pid: int, machine: Machine, config: Config, asked: tuple[Configured, ...]
+) -> tuple[Configured, Proc] | None:
+    """The agent in a pane's tree, and which configured agent it is.
+
+    #294. Markers overlap: agy's argv carries Claude Code's marker too, so
+    the first marker match can name the wrong package, and its link and its
+    stop with it. An agent whose whole launch tail the process ends with
+    wins. The first marker match is kept otherwise, because a pane may hold
+    an agent started by hand, which read `running` before #290 and must still.
+    """
+    found = [
+        (c, proc)
+        for c in asked
+        if (proc := machine.table.first_matching_in_tree(pane_pid, c.agent.marker))
+    ]
+    exact = (
+        (c, proc)
+        for c, proc in found
+        if proc.args.rstrip().endswith(_argv_tail(name, config, c))
+    )
+    return next(exact, found[0] if found else None)
+
+
+def find_detached(
+    name: str, machine: Machine, config: Config, configured: Configured
+) -> int | None:
     """An agent that outlived its terminal.
 
     Without this, such a session reads as stopped while it is very much
@@ -271,8 +327,9 @@ def find_detached(name: str, machine: Machine, config: Config) -> int | None:
     #
     # Built by calling `launch_argv`, so this cannot drift from what we
     # actually spawn, and the flags stay inside the quarantine.
-    suffix = " ".join(claude_ipc.launch_argv(config.spawn_agent_binary, name)[1:])
-    for proc in machine.table.matching(claude_ipc.REMOTE_CONTROL_MARKER):
+    agent = configured.agent
+    suffix = _argv_tail(name, config, configured)
+    for proc in machine.table.matching(agent.marker):
         if proc.pid in machine.owned:
             continue
         # #84. A tmux server keeps the argv of the invocation that started it,
@@ -302,7 +359,9 @@ def find_detached(name: str, machine: Machine, config: Config) -> int | None:
     return None
 
 
-def _awaiting_trust(name: str, machine: Machine, config: Config) -> bool:
+def _awaiting_trust(
+    name: str, machine: Machine, config: Config, configured: Configured
+) -> bool:
     """Whether this project's folder will stop the agent on a trust prompt.
 
     False when we could not read the map, never True. Unknown is not untrusted,
@@ -323,13 +382,14 @@ def _awaiting_trust(name: str, machine: Machine, config: Config) -> bool:
     far as we can tell, which is the same answer as unknown and reaches nobody:
     a row for a folder that no longer exists is not rendered.
     """
-    if machine.trusted is None:
+    trusted = machine.trusted.get(configured.ident)
+    if trusted is None:
         return False
     try:
         folder = discovery.resolve_identifier(config.roots, name)
     except (discovery.NoSuchProject, ValueError):
         return False
-    return str(folder) not in machine.trusted
+    return not configured.agent.folder_is_trusted(folder, trusted)
 
 
 def _tmux_server_above(pid: int, table: ProcTable) -> int | None:
@@ -372,6 +432,7 @@ def live(
     protected: bool,
     config: Config,
     stopping: Container[str],
+    configured: Configured,
     awaiting_trust: bool = False,
     awaiting_input: bool = False,
     foreign_session: str | None = None,
@@ -389,11 +450,12 @@ def live(
         # which is a subprocess per running row on every list. The link is
         # simply absent until the agent writes it, and the API's /url route
         # pays for the fallback when somebody actually asks for a link.
-        url=claude_ipc.bridge_url(pid, config.sessions_dir),
+        url=configured.agent.bridge_url(pid),
         stopping=name in stopping,
         protected=protected,
         awaiting_trust=awaiting_trust,
         awaiting_input=awaiting_input,
         foreign_session=foreign_session,
         foreign_server_pid=foreign_server_pid,
+        agent=configured.ident,
     )
