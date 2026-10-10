@@ -153,6 +153,31 @@ async def test_the_toggle_follows_a_system_scheme_change_while_system_is_chosen(
     assert await page.evaluate("document.documentElement.dataset.theme") == "dark"
 
 
+async def test_an_explicit_choice_holds_when_storage_throws(
+    page: Page, server: Harness
+) -> None:
+    """#496. The guard read storage, which is null when it throws (a private
+    window), so a system scheme change undid a tap that had nowhere to be
+    remembered. The attribute on the document is what remembers it."""
+    server.seed()
+    await page.add_init_script(
+        """for (const method of ["getItem", "setItem", "removeItem"]) {
+             Storage.prototype[method] = () => { throw new Error("blocked"); };
+           }"""
+    )
+    await page.emulate_media(color_scheme="light")
+    await page.goto(server.base)
+    toggle = page.locator("[data-theme-toggle]")
+    await expect(toggle).to_have_text("Dark")
+    await toggle.click()
+    await expect(toggle).to_have_text("Light")
+    assert await page.evaluate("document.documentElement.dataset.theme") == "dark"
+    await _change_scheme(page, "dark")
+    await _change_scheme(page, "light")
+    await expect(toggle).to_have_text("Light")
+    assert await page.evaluate("document.documentElement.dataset.theme") == "dark"
+
+
 async def _change_scheme(page: Page, scheme: Literal["light", "dark"]) -> None:
     """Emulate a device scheme change and return once the page has handled it.
     `emulate_media` returns before the `change` event is dispatched; this

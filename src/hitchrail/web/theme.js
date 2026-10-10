@@ -65,7 +65,9 @@ export function followSystemTheme() {
   window
     .matchMedia("(prefers-color-scheme: dark)")
     .addEventListener("change", () => {
-      if (!storedTheme()) applyTheme(null);
+      // The attribute, not storage (#496): with storage throwing, an explicit
+      // tap leaves no stored value, and only the attribute remembers it.
+      if (!document.documentElement.hasAttribute("data-theme")) applyTheme(null);
     });
 }
 
