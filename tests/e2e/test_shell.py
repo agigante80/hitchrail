@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import Literal
 
 import pytest
 from playwright.async_api import Page, ViewportSize, expect
@@ -122,12 +123,102 @@ async def test_an_explicit_choice_wins_over_the_system_preference(
     )
 
 
+async def test_the_toggle_follows_a_system_scheme_change_while_system_is_chosen(
+    page: Page, server: Harness
+) -> None:
+    """#466. Under System the toggle offers the other scheme, and it used to be
+    repainted only on a click, so it kept offering "Dark" after the phone went
+    dark. An explicit choice must NOT follow the system, so the second half
+    stores one and changes the scheme again."""
+    server.seed()
+    await page.emulate_media(color_scheme="light")
+    await page.goto(server.base)
+    toggle = page.locator("[data-theme-toggle]")
+    await expect(toggle).to_have_text("Dark")
+
+    await page.emulate_media(color_scheme="dark")
+    await expect(toggle).to_have_text("Light")
+    assert await toggle.locator("use").get_attribute("href") == "#icon-sun"
+    await page.emulate_media(color_scheme="light")
+    await expect(toggle).to_have_text("Dark")
+    assert await toggle.locator("use").get_attribute("href") == "#icon-moon"
+
+    await toggle.click()
+    await expect(toggle).to_have_text("Light")
+    # Awaited, not polled: "Light" is already on the toggle, so an assertion
+    # that only waits for it passes before a wrongly followed change lands.
+    await _change_scheme(page, "dark")
+    await _change_scheme(page, "light")
+    await expect(toggle).to_have_text("Light")
+    assert await page.evaluate("document.documentElement.dataset.theme") == "dark"
+
+
+async def _change_scheme(page: Page, scheme: Literal["light", "dark"]) -> None:
+    """Emulate a device scheme change and return once the page has handled it.
+    `emulate_media` returns before the `change` event is dispatched; this
+    listener is added after the app's, so it runs after it, and the frame
+    after that is when the repaint is visible."""
+    await page.evaluate(
+        """void (window.__schemeChanged = new Promise((done) =>
+             matchMedia("(prefers-color-scheme: dark)").addEventListener(
+               "change", () => requestAnimationFrame(() => done()), { once: true })))"""
+    )
+    await page.emulate_media(color_scheme=scheme)
+    await page.evaluate("window.__schemeChanged")
+
+
+async def test_a_theme_picked_in_settings_is_what_the_header_toggle_offers(
+    page: Page, server: Harness
+) -> None:
+    """#323 and #465, one way across the pages. The list's background was all
+    the old test read, which a page that painted dark and kept offering "Dark"
+    would pass."""
+    server.seed()
+    await page.emulate_media(color_scheme="light")
+    await page.goto(f"{server.base}/settings")
+    await page.locator('[data-theme-choice][value="dark"]').check()
+    await page.goto(server.base)
+    toggle = page.locator("[data-theme-toggle]")
+    await expect(toggle).to_have_text("Light")
+    assert await toggle.locator("use").get_attribute("href") == "#icon-sun"
+
+
+async def test_a_theme_picked_from_the_header_toggle_is_the_radio_checked_in_settings(
+    page: Page, server: Harness
+) -> None:
+    """#323 and #465, the other way. Under a light device System reads as
+    light, so the first click stores Dark, and settings must show Dark and
+    not System."""
+    server.seed()
+    await page.emulate_media(color_scheme="light")
+    await page.goto(server.base)
+    await page.locator("[data-theme-toggle]").click()
+    await page.goto(f"{server.base}/settings")
+    await expect(page.locator('[data-theme-choice][value="dark"]')).to_be_checked()
+    await expect(page.locator('[data-theme-choice][value="system"]')).not_to_be_checked()
+
+
 async def test_the_chosen_theme_survives_a_reload(page: Page, server: Harness) -> None:
     server.seed()
     await page.emulate_media(color_scheme="light")
     await page.goto(server.base)
     await page.get_by_role("button", name="Dark").click()
     await page.reload()
+    assert (
+        await page.evaluate("getComputedStyle(document.body).backgroundColor")
+        == "rgb(54, 45, 36)"
+    )
+
+
+async def test_the_logs_page_wears_the_stored_theme(page: Page, server: Harness) -> None:
+    """#466. The logs page lost its own copy of the start up block and reads the
+    theme through `theme.js`; a person who chose Dark on the list must still
+    land on a dark logs page under a light device."""
+    server.seed(stopped=["vessel"])
+    await page.emulate_media(color_scheme="light")
+    await page.goto(server.base)
+    await page.get_by_role("button", name="Dark").click()
+    await page.goto(f"{server.base}/logs/{server.project('vessel')}")
     assert (
         await page.evaluate("getComputedStyle(document.body).backgroundColor")
         == "rgb(54, 45, 36)"

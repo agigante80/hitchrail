@@ -32,6 +32,33 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+## 0.18.0 - 2026-10-10
+
+### Fixed
+
+- The startup banner no longer offers a link on a host whose plain http origin
+  is withheld (for example `localhost.localdomain` beside an https
+  `--allow-origin`), since the grant from it is refused. The startup block
+  already says what to browse instead. And the grant page, opened on such an
+  address, now shows the server's message naming the origin rather than "That
+  key was not accepted", so a correct token is not retyped. A wrong or missing
+  key still gets the one sentence. Nothing to change.
+- The header theme button now follows the device while Theme is System: when
+  the phone switches between light and dark, the button's icon and name
+  switch with it, where before they went stale until tapped. Nothing to change.
+- On a desktop width (900 px and wider) a long project name is no longer
+  squeezed onto two lines by the chips and buttons beside it; the chips wrap
+  instead. Phone layouts are unchanged. Nothing to change.
+
+### Changed
+
+- With `stop_prompt` set, a row wrapping up now reads "wrapping up" with the
+  time left (for example "wrapping up 4:32"), counted down on the page from
+  when the row arrived and resumed correctly after a reload, then "sending the
+  exit" at zero. Its Stop button reads "Exit now" and opens the wait, where
+  Exit now skips the rest of it. Once the exit is sent the chip reads "stopping", as before.
+  With no `stop_prompt` nothing changes. Nothing to change on your side.
+
 ## 0.17.0 - 2026-10-10
 
 ### Changed

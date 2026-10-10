@@ -436,3 +436,13 @@ def test_the_timed_out_dialog_gives_a_detached_agent_the_signal_route_and_never_
     branch = code[detached:guard]
     assert "confirmSignal(" in branch
     assert "killNow" not in branch
+
+
+def test_the_wrap_up_arithmetic_stays_pure() -> None:
+    """#474. The time left is a function of a session, a clock reading and a
+    ceiling handed in, so the browser tier can import it and hand it any
+    "now". An import would give it a state or a clock of its own, and the
+    table in `tests/e2e/test_wrap_up_chip.py` would stop proving it."""
+    code = _code("wrapup.js")
+    assert not re.search(r"^\s*import\b", code, re.M)
+    assert "Date.now" not in code and "document" not in code

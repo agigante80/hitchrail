@@ -54,7 +54,10 @@ export function buildActions(project, actions) {
       project.stopping_phase === "closing"
         ? () => reopenStop(project)
         : () => confirmStop(project);
-    add("Stop", "").addEventListener("click", onStop);
+    // #474. Says what it does on a row wrapping up: the dialog it reopens is
+    // the one with Exit now, which skips the rest of the wait.
+    const closing = project.stopping_phase === "closing";
+    add(closing ? "Exit now" : "Stop", "").addEventListener("click", onStop);
     // #472. Not while a stop is in flight: a Restart then would be the
     // route's second Stop, which on a `closing` row is Exit now, behind a
     // confirmation that promised a wrap up (#242 review). The row's wait and

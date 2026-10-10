@@ -20,7 +20,8 @@ import {
 import { state } from "/state.js";
 import { confirmStopAll } from "/stop_all.js";
 import { currentStream, onVisible, openStream, setReopenPace } from "/stream.js";
-import { applyTheme, storedTheme, toggleTheme } from "/theme.js";
+import { applyTheme, followSystemTheme, storedTheme, toggleTheme } from "/theme.js";
+import { tickWrapUps } from "/wrapup_tick.js";
 
 /* What this file exported before it was split, so the entry point still names
    it. Nothing imports it today: the tests reach the page through
@@ -34,6 +35,7 @@ export { setReopenPace } from "/stream.js";
 
 function boot() {
   applyTheme(storedTheme());
+  followSystemTheme();
   trackKeyboardInset();
   trackFooterHeight();
   $("[data-theme-toggle]")?.addEventListener("click", toggleTheme);
@@ -41,6 +43,7 @@ function boot() {
   $("[data-stop-all]")?.addEventListener("click", confirmStopAll);
   document.addEventListener("visibilitychange", onVisible);
   openStream();
+  setInterval(tickWrapUps, 1000);
   trackScroll();
   const search = $("[data-search]");
   search?.addEventListener("input", (event) => {

@@ -5,6 +5,7 @@ import contextlib
 import logging
 import os
 import pathlib
+import posixpath
 import re
 import shutil
 import signal
@@ -1783,6 +1784,54 @@ def test_every_file_the_server_serves_exists() -> None:
     assert not missing, missing
 
 
+# #461. Every form that makes the browser fetch a module: `import x from "u"`,
+# the side effect `import "u"`, `export ... from "u"` and a dynamic
+# `import("u")`. The check used to read only `from "/u"`, so the other forms
+# could name a script that is not served and stay green.
+_STATIC_IMPORT = re.compile(
+    r"""\b(?:import|export)\s*(?:[^'"();]*?\bfrom\s*)?(["'])(?P<u>[^"']+)\1"""
+)
+_DYNAMIC_IMPORT = re.compile(r"""\bimport\s*\(\s*(["'])(?P<u>[^"']+)\1\s*\)""")
+
+
+def _imported_urls(name: str, source: str) -> list[str]:
+    """The URL each import in a script resolves to, from the site root every
+    script is served at. A specifier that is neither absolute nor relative, or
+    a dynamic import of something that is not a literal, fails here rather than
+    being skipped, since a skipped import is exactly the hole this closes."""
+    urls = []
+    found = [m["u"] for m in _STATIC_IMPORT.finditer(source)]
+    dynamic = [m["u"] for m in _DYNAMIC_IMPORT.finditer(source)]
+    assert len(dynamic) == len(re.findall(r"\bimport\s*\(", source)), (
+        f"{name} has a dynamic import this check cannot read"
+    )
+    for target in found + dynamic:
+        assert target.startswith(("/", "./", "../")), f"{name} imports bare {target!r}"
+        urls.append(posixpath.normpath(posixpath.join("/", target)))
+    return urls
+
+
+def test_the_import_check_reads_every_import_form() -> None:
+    """#461, the check's own test: each form, absolute and relative, names the
+    file it fetches, and a missing one is therefore reportable."""
+    source = """
+      import { a } from "/a.js";
+      import "/side.js";
+      import def, * as ns from './rel.js';
+      export { b } from "/b.js";
+      export * from "./c.js";
+      const m = await import("/dyn.js");
+    """
+    assert sorted(_imported_urls("x.js", source)) == [
+        "/a.js",
+        "/b.js",
+        "/c.js",
+        "/dyn.js",
+        "/rel.js",
+        "/side.js",
+    ]
+
+
 def test_every_web_file_is_served_so_the_wheel_ships_and_the_page_can_load_it() -> None:
     """#68. The split made the page a graph of modules, and the browser asks
     for each one by URL. A module that is on disk but not in `ASSETS` is
@@ -1803,7 +1852,7 @@ def test_every_web_file_is_served_so_the_wheel_ships_and_the_page_can_load_it() 
             assert path == f"/{filename}", path
             assert media_type.startswith("text/javascript"), path
     for script in sorted(web.glob("*.js")):
-        for target in re.findall(r'from "(/[^"]+)"', script.read_text(encoding="utf-8")):
+        for target in _imported_urls(script.name, script.read_text(encoding="utf-8")):
             assert target in pages.ASSETS, (
                 f"{script.name} imports {target}, which is not served"
             )

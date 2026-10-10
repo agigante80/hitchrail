@@ -117,7 +117,7 @@ async def test_a_policy_changed_during_the_wait_does_not_change_its_words(
     await expect(dialog).to_be_hidden()
 
     row = page.locator(f'[data-project="{server.project("vessel")}"]')
-    await row.get_by_role("button", name="Stop").click()
+    await row.get_by_role("button", name="Exit now").click()
     await expect(dialog).to_contain_text("Asking it to wrap up")
     assert NOTE not in await dialog.inner_text()
 
@@ -152,7 +152,7 @@ async def test_a_wait_reopened_after_leaving_the_page_keeps_its_stops_policy(
     assert await page.evaluate("() => window.__hitchrail.state.server.stop_policy") == "ask"
     row = page.locator(f'[data-project="{server.project("vessel")}"]')
     await expect(row).to_have_attribute("data-stopping", "true")
-    await row.get_by_role("button", name="Stop").click()
+    await row.get_by_role("button", name="Exit now").click()
     await expect(dialog).to_contain_text("Asking it to wrap up")
     await expect(dialog).to_contain_text(NOTE)
 

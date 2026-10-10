@@ -176,6 +176,9 @@ function fail(message) {
   key.focus();
 }
 
+const NOT_ACCEPTED = "That key was not accepted. Check it and try again.";
+
+/* Resolves to null once the grant succeeded, else the sentence to show. */
 async function grant(token) {
   let response;
   try {
@@ -200,9 +203,21 @@ async function grant(token) {
        rather than after it, so a page stuck on "Checking." cannot be retried:
        the person would have to go back for the link. That is the cost of the
        clear, and this is what it buys back. */
-    return false;
+    return NOT_ACCEPTED;
   }
-  if (!response.ok) return false;
+  if (!response.ok) {
+    /* #493: ONE code gets the server's own words. `origin_rejected` is about
+       the address the page was opened on and names it, so it says nothing of
+       the key and a person who retypes a correct token gains nothing. Every
+       other refusal, a wrong key and a missing one included, stays the single
+       sentence: widening this to `code` in general is how the page would
+       become the oracle the submit handler's comment refuses to be. */
+    const body = await response.json().catch(() => null);
+    if (response.status === 403 && body?.code === "origin_rejected" && body.message) {
+      return body.message;
+    }
+    return NOT_ACCEPTED;
+  }
   /* No `replaceState` here. The key is already out of the address bar by this
      point, cleared before the request rather than after it, and clearing it a
      second time only looks like the thing protecting history.
@@ -211,7 +226,7 @@ async function grant(token) {
      That is a courtesy and not a control: the entry it would leave carries no
      key either. */
   window.location.replace("./");
-  return true;
+  return null;
 }
 
 form.addEventListener("submit", async (event) => {
@@ -223,7 +238,8 @@ form.addEventListener("submit", async (event) => {
   working.hidden = false;
   /* One message for a wrong key and for a missing one. The API refuses to be
      an oracle about which; the screen must not become the oracle instead. */
-  if (!(await grant(typed))) fail("That key was not accepted. Check it and try again.");
+  const refusal = await grant(typed);
+  if (refusal) fail(refusal);
 });
 
 const offered = new URLSearchParams(location.hash.slice(1)).get("token");
@@ -233,8 +249,8 @@ if (offered) {
      sit in the address bar, and in the history entry, for as long as the
      person stares at the failure. */
   history.replaceState(null, "", location.pathname);
-  grant(offered).then((ok) => {
-    if (!ok) fail("That key was not accepted. Check it and try again.");
+  grant(offered).then((refusal) => {
+    if (refusal) fail(refusal);
   });
 } else {
   form.hidden = false;

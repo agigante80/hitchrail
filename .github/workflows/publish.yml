@@ -80,10 +80,12 @@ jobs:
           # #68. `app.js` imports the rest of the interface as modules, so a
           # script left out of the wheel is a blank page. Every file in the
           # source `web/` is required, not a list that has to be remembered.
-          needed += [
-              "hitchrail/" + p.removeprefix("src/hitchrail/")
-              for p in glob.glob("src/hitchrail/web/*.js")
-          ]
+          # #461. A glob that matched nothing (a wrong working directory)
+          # would add no names and pass, so it must find files to count.
+          scripts = glob.glob("src/hitchrail/web/*.js")
+          if not scripts:
+              sys.exit("no scripts found under src/hitchrail/web: wrong cwd?")
+          needed += ["hitchrail/" + p.removeprefix("src/hitchrail/") for p in scripts]
           missing = [n for n in needed if n not in names]
           fonts = [n for n in names if n.startswith("hitchrail/web/fonts/")]
           # #157. `license-files = ["LICENSE"]` is what puts the text in the

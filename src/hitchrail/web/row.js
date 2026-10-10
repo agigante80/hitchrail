@@ -1,6 +1,7 @@
 import { buildActions } from "/actions.js";
 import { formatMemory, formatUptime } from "/format.js";
 import { TALL_STATES, severalRoots, splitProject } from "/roots.js";
+import { chipWords } from "/wrapup_tick.js";
 
 function badgeFor(project) {
   // The canvas: `live && live.controller ? 'controller' : 'running'`. The
@@ -122,7 +123,11 @@ export function renderRow(project) {
   const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
   use.setAttribute("href", `#badge-${word}`);
   glyph.append(use);
-  badge.append(glyph, word);
+  // #474. The glyph and the colour stay `stopping`; only the words change, and
+  // only while the wrap up runs. `exiting` keeps "stopping".
+  const closing = word === "stopping" && project.stopping_phase === "closing";
+  if (closing) badge.dataset.wrapUp = "";
+  badge.append(glyph, closing ? chipWords(project) : word);
   head.append(badge);
 
   const actions = document.createElement("div");

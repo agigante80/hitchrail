@@ -50,7 +50,11 @@ export function renderList() {
    query beside an empty list: a tab or a root chip can hide a folder that
    exists, and offering to create it again can only end in a refusal, or in
    a second folder of that name in another root. So it reads every project,
-   ignoring the filters, and needs a root to create in. */
+   ignoring the filters, and needs a root to create in.
+
+   Decided on #467, 2026-10-10: the offer stays off while ANY root has the
+   name. A same named folder in another root is rarely what a search meant,
+   and "New project" still reaches it. */
 function canCreate(typed) {
   if (!typed || (state.roots ?? []).length === 0) return false;
   const wanted = typed.toLowerCase();

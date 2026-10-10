@@ -15,9 +15,9 @@ import { applySession, refresh } from "/listing.js";
 
 let stream = null;
 
-/* Same reason as `resetActiveSuggestion`: the listing and the test seam read the
-   stream, and an imported `let` would hand them a binding that cannot be
-   reassigned underneath them when `openStream` replaces it. */
+/* An imported `let` is a live binding and would read correctly here; this is
+   an accessor for symmetry with `search.js`, whose reset IS needed because an
+   importer cannot assign an imported binding (#461). */
 export function currentStream() {
   return stream;
 }

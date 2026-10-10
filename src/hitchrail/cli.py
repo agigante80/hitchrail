@@ -478,7 +478,10 @@ def banner(config: Config) -> str:
     if not config.token:
         return ""
 
-    reachable = reachable_hosts(config.host, config.allowed_hosts, config.extra_hosts)
+    # #493: a withheld host's grant is a 403, and the startup block says what to browse.
+    skip = {*config.plain_origins_withheld, "::1", "[::1]"}
+    hosts = reachable_hosts(config.host, config.allowed_hosts, config.extra_hosts)
+    reachable = [h for h in hosts if h not in skip]
     # #110, decided with the unit in hand. Under a service stdout IS journald,
     # so every line here lands in a persistent log readable by root and by the
     # `systemd-journal` group. A token printed to a terminal scrolls away with
@@ -511,11 +514,7 @@ def banner(config: Config) -> str:
     # generated here rather than typed: `/grant#token=` is longer to paste and
     # costs nobody anything, which is the argument #21 settled the design on.
     fragment = "" if in_journal else f"#token={quote(config.token, safe='')}"
-    lines += [
-        f"    {config.scheme}://{h}:{config.port}/grant{fragment}"
-        for h in reachable
-        if h not in {"::1", "[::1]"}
-    ]
+    lines += [f"    {config.scheme}://{h}:{config.port}/grant{fragment}" for h in reachable]
     if in_journal:
         lines += [
             "",

@@ -11,18 +11,12 @@
    "deliberately later"; if this page makes the case for a stream, the case
    goes on its own ticket with the evidence. */
 
+import { applyTheme, storedTheme } from "/theme.js";
+
+applyTheme(storedTheme());
+
 const LINES = 200;
 const EVERY_MS = 2000;
-
-const THEME_KEY = "hitchrail-theme";
-try {
-  const theme = localStorage.getItem(THEME_KEY);
-  if (theme === "light" || theme === "dark") {
-    document.documentElement.setAttribute("data-theme", theme);
-  }
-} catch {
-  /* a private window; the system preference applies */
-}
 
 /* The project, from the URL and nowhere else. The server validated it before
    serving this page, and the API validates it again on every fetch, so this

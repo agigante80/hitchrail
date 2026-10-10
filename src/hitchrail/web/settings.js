@@ -17,20 +17,16 @@
    disabled arrives `editable: false` and gets no checkbox, and a stop wait
    pinned by a flag arrives the same way and gets no input. */
 
-const THEME_KEY = "hitchrail-theme";
-try {
-  const theme = localStorage.getItem(THEME_KEY);
-  if (theme === "light" || theme === "dark") {
-    document.documentElement.setAttribute("data-theme", theme);
-  }
-} catch {
-  /* a private window; the system preference applies */
-}
-
 import { startPlugins } from "/plugins.js";
 import { applyTheme, storedTheme, storeTheme } from "/theme.js";
 
 const $ = (selector) => document.querySelector(selector);
+
+/* The stored theme, through the one module that owns it. No earlier than the
+   copy at the top of this file was, since imports are hoisted above both; a
+   module is deferred, so a paint before it is possible either way, and only a
+   classic script in the head could prevent one. */
+applyTheme(storedTheme());
 
 /* #315. WHO wrote the text currently on the strip, "settings" or "plugins",
    or null when it is empty. The strip is one DOM element shared by two

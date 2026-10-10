@@ -20,6 +20,10 @@ from .conftest import Harness, e2e_name
 pytestmark = pytest.mark.e2e
 
 
+def _chip(page: Page, label: str):  # type: ignore[no-untyped-def]
+    return page.locator("[data-roots]").get_by_role("button", name=re.compile(rf"^{label}\b"))
+
+
 async def test_every_derived_state_renders_as_itself(page: Page, server: Harness) -> None:
     """All four from section 4.1. `detached` is the one a naive tool gets
     wrong, so it is drawn with its pid and never silently reconciled."""
@@ -158,22 +162,41 @@ async def test_search_filters_and_says_so_when_nothing_matches(
 async def test_the_search_clear_control_empties_only_the_text(
     page: Page, server: Harness, how: str
 ) -> None:
-    """#451. A phone draws no clear button for a search field, so emptying it
-    meant holding backspace. At 360px, the control appears with text, is a
-    real 44px target, clears the field and nothing else, and leaves focus in
-    the field. The tab and the chip chosen first must still be chosen."""
+    """#451 and #465. A phone draws no clear button for a search field, so
+    emptying it meant holding backspace. At 360px, the control appears with
+    text, is a real 44px target, clears the field and nothing else, leaves
+    focus in the field and takes the search's "shown" counter with it. The tab
+    and the root chip chosen first must still be chosen, which needs two roots
+    to mean anything: one root draws no chips."""
     await page.set_viewport_size({"width": 360, "height": 740})
-    server.seed(running=["vessel"], stopped=["koala", "media-sync"])
+    server.seed(
+        running=["vessel"],
+        stopped=["koala", "media-sync", "media-wiki"],
+        stopped_in={"bravo": ["media-sync", "koala"]},
+    )
     await page.goto(server.base)
-    await expect(page.locator("[data-project]")).to_have_count(3)
-    await page.get_by_role("tab", name="Stopped").click()
+    rows = page.locator("[data-project]")
+    await expect(rows).to_have_count(6)
+    shown = page.locator("[data-shown]")
     box = page.get_by_role("combobox", name="Search folders")
     clear = page.get_by_role("button", name="Clear search")
     await expect(clear).to_be_hidden()
 
+    # Nothing else filtering: the counter is the search's alone.
+    await box.fill("med")
+    await expect(shown).to_have_text("3 of 6 shown")
+    await clear.click()
+    await expect(shown).to_have_text("")
+    await expect(rows).to_have_count(6)
+
+    await page.get_by_role("tab", name="Stopped").click()
+    await _chip(page, "bravo").click()
+    await expect(rows).to_have_count(2)
+    await expect(shown).to_have_text("2 of 6 shown")
     await box.fill("med")
     await expect(clear).to_be_visible()
-    await expect(page.locator("[data-project]")).to_have_count(1)
+    await expect(rows).to_have_count(1)
+    await expect(shown).to_have_text("1 of 6 shown")
     size = await clear.bounding_box()
     assert size is not None and size["width"] >= 44 and size["height"] >= 44, size
 
@@ -185,10 +208,13 @@ async def test_the_search_clear_control_empties_only_the_text(
     await expect(box).to_have_value("")
     await expect(box).to_be_focused()
     await expect(clear).to_be_hidden()
-    await expect(page.locator("[data-project]")).to_have_count(2)
+    await expect(rows).to_have_count(2)
+    # The text's own share of the counter is gone; the tab's and the chip's stay.
+    await expect(shown).to_have_text("2 of 6 shown")
     await expect(page.get_by_role("tab", name="Stopped")).to_have_attribute(
         "aria-selected", "true"
     )
+    await expect(_chip(page, "bravo")).to_have_attribute("aria-pressed", "true")
 
 
 async def test_the_tabs_filter_and_carry_their_own_counts(page: Page, server: Harness) -> None:
@@ -672,10 +698,6 @@ async def test_fifty_rows_across_five_roots_all_render(page: Page, server: Harne
 
 
 # -- #146: filtering by root -------------------------------------------------
-
-
-def _chip(page: Page, label: str):  # type: ignore[no-untyped-def]
-    return page.locator("[data-roots]").get_by_role("button", name=re.compile(rf"^{label}\b"))
 
 
 async def test_root_chips_or_together_and_and_with_the_state_tab(

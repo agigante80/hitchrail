@@ -12,7 +12,7 @@ const SUGGESTION_CAP = 8;
 
 let activeSuggestion = -1;
 
-/* An imported `let` is read only in the importer, so the page's input handler
+/* An imported `let` cannot be assigned by its importer, so the page's input handler
    asks this module to forget the highlighted row instead of assigning it. */
 export function resetActiveSuggestion() {
   activeSuggestion = -1;
