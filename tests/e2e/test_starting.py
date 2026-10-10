@@ -231,6 +231,37 @@ async def test_no_offer_to_create_a_folder_a_filter_is_hiding(
     await expect(page.locator("[data-empty-create]")).to_be_hidden()
 
 
+async def test_no_offer_to_create_a_folder_when_no_root_is_listed(
+    page: Page, server: Harness
+) -> None:
+    """#465, `canCreate`'s first guard. With every root hidden nothing exists
+    to match the name, so the only thing standing between the person and an
+    offer that can only be refused (there is no root to create in) is the
+    check for a listed root."""
+    server.seed(stopped_in={"vacant": []}, disabled_roots=["main", "vacant"])
+    await page.goto(server.base)
+    await page.get_by_role("combobox", name="Search folders").fill("fresh-idea")
+    await expect(page.locator("[data-empty-reason]")).to_be_visible()
+    await expect(page.locator("[data-empty-create]")).to_be_hidden()
+
+
+async def test_no_offer_to_create_a_folder_another_root_holds_under_a_root_chip(
+    page: Page, server: Harness
+) -> None:
+    """#465 and #467, the root chip half. The chip hides a folder of that name
+    that exists in the other root, so the list is empty, and the offer reads
+    every project rather than the filtered ones (Andrea kept it that way)."""
+    server.seed(stopped=["vessel"], stopped_in={"bravo": ["elsewhere"]})
+    await page.goto(server.base)
+    await page.locator("[data-roots]").get_by_role("button", name="main").click()
+    box = page.get_by_role("combobox", name="Search folders")
+    await box.fill(e2e_name("elsewhere"))
+    await expect(page.get_by_text("No folder in main is called that.")).to_be_visible()
+    await expect(page.locator("[data-empty-create]")).to_be_hidden()
+    await box.fill("nowhere")
+    await expect(page.locator("[data-empty-create]")).to_have_text('Create folder "nowhere"')
+
+
 async def test_a_refused_creation_reports_it_and_leaves_nothing_on_disk(
     page: Page, server: Harness
 ) -> None:

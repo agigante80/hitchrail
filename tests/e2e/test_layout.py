@@ -343,13 +343,15 @@ async def test_the_bar_stays_on_one_line_with_every_control_present(
     assert page_overflow <= 0, f"the page scrolls sideways {where}"
 
 
-@pytest.mark.parametrize("path", ["/settings", "/logs/{vessel}"])
+@pytest.mark.parametrize("path", ["/", "/settings", "/logs/{vessel}"])
 async def test_every_page_with_a_bar_carries_the_mark_and_a_way_home(
     page: Page, server: Harness, path: str
 ) -> None:
-    """#324 and #333 on the pages that are not the list. The logs page sets its
-    heading's text from the URL, which would wipe a mark nested in it, so the
-    mark has to survive that script running."""
+    """#324 and #333 on every page with a bar, the list included (#465). The
+    logs page sets its heading's text from the URL, which would wipe a mark
+    nested in it, so the mark has to survive that script running. The ring is
+    the bar's own, `.bar-home:focus-visible`: Chromium supplies `auto` to any
+    focused link, so "not none" passed with the rule deleted."""
     server.seed(stopped=["vessel"])
     await page.set_viewport_size(BAR_WIDTHS[1])  # type: ignore[arg-type]
     await page.goto(server.base + path.format(vessel=server.project("vessel")))
@@ -357,12 +359,37 @@ async def test_every_page_with_a_bar_carries_the_mark_and_a_way_home(
     await expect(bar.locator("svg.bar-mark")).to_be_visible()
     name = "hitchrail home" if path.startswith("/logs") else "hitchrail"
     link = bar.get_by_role("link", name=name)
+    await expect(link).to_have_count(1)
     await expect(link).to_have_attribute("href", "/")
     box = await link.bounding_box()
     assert box is not None and box["height"] >= 43.99, box
     await link.focus()
-    outline = await link.evaluate("e => getComputedStyle(e).outlineStyle")
-    assert outline != "none", "the way home has no visible focus ring"
+    ring = await link.evaluate(
+        "e => { const s = getComputedStyle(e); return [s.outlineStyle, s.outlineWidth]; }"
+    )
+    assert ring == ["solid", "3px"], f"the way home has not the bar's own focus ring: {ring}"
+
+    # Following it, from every page including the one it names.
+    await link.click()
+    await page.wait_for_url(server.base + "/")
+    await expect(page.locator("[data-tabs]")).to_be_visible()
+
+
+async def test_settings_is_reached_from_the_bar_alone(page: Page, server: Harness) -> None:
+    """#320's negative case (#465). Settings moved from the footer to an icon
+    in the bar; the old footer link must not come back beside it, and the one
+    hook the page's script finds it by must name exactly one element."""
+    server.seed(stopped=["vessel"])
+    await page.goto(server.base)
+    await expect(page.locator("[data-project]")).to_have_count(1)
+    assert await page.locator("[data-settings-link]").count() == 1
+    assert (
+        await page.locator("footer a[href='/settings'], footer [data-settings-link]").count()
+        == 0
+    )
+    await expect(page.locator("header.bar [data-settings-link]")).to_have_attribute(
+        "href", "/settings"
+    )
 
 
 async def test_the_mark_shrinks_with_the_bar_when_scrolled(page: Page, server: Harness) -> None:

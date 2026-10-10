@@ -113,11 +113,13 @@ three of them edit `app.css`. Each batch is reviewed once at its end.
 
 ### Batch 3: tests that fail when reverted, tasks 256 and 257
 
-- [ ] **Task 256, #465.** All six: the bar's own focus ring, the title link
+- [x] **Task 256, #465.** All six: the bar's own focus ring, the title link
       from `/`, the footer with no settings link and `data-settings-link`
       exactly once, the theme state across pages both ways, the search clear
       with the counter and a chosen chip on two roots, and `canCreate`'s
       guard. Each seen failing with its behaviour reverted.
+      Landed: extended `test_layout.py`, `test_shell.py`, `test_list.py` and
+      `test_starting.py`; each seen failing once on a named revert.
 - [ ] **Task 257, #462.** The name does not shrink at 900 px and wider; a
       1280 px case in `test_layout.py` on the busy fixture.
 

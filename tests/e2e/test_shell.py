@@ -149,6 +149,37 @@ async def test_the_toggle_follows_a_system_scheme_change_while_system_is_chosen(
     await expect(toggle).to_have_text("Light")
 
 
+async def test_a_theme_picked_in_settings_is_what_the_header_toggle_offers(
+    page: Page, server: Harness
+) -> None:
+    """#323 and #465, one way across the pages. The list's background was all
+    the old test read, which a page that painted dark and kept offering "Dark"
+    would pass."""
+    server.seed()
+    await page.emulate_media(color_scheme="light")
+    await page.goto(f"{server.base}/settings")
+    await page.locator('[data-theme-choice][value="dark"]').check()
+    await page.goto(server.base)
+    toggle = page.locator("[data-theme-toggle]")
+    await expect(toggle).to_have_text("Light")
+    assert await toggle.locator("use").get_attribute("href") == "#icon-sun"
+
+
+async def test_a_theme_picked_from_the_header_toggle_is_the_radio_checked_in_settings(
+    page: Page, server: Harness
+) -> None:
+    """#323 and #465, the other way. Under a light device System reads as
+    light, so the first click stores Dark, and settings must show Dark and
+    not System."""
+    server.seed()
+    await page.emulate_media(color_scheme="light")
+    await page.goto(server.base)
+    await page.locator("[data-theme-toggle]").click()
+    await page.goto(f"{server.base}/settings")
+    await expect(page.locator('[data-theme-choice][value="dark"]')).to_be_checked()
+    await expect(page.locator('[data-theme-choice][value="system"]')).not_to_be_checked()
+
+
 async def test_the_chosen_theme_survives_a_reload(page: Page, server: Harness) -> None:
     server.seed()
     await page.emulate_media(color_scheme="light")
