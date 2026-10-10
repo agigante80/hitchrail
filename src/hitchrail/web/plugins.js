@@ -89,7 +89,9 @@ function outcomeItem({ outcome, count }) {
   // fixed scope-shaped sentence that would misname the second one.
   const lines = [];
   if (outcome.from_version && outcome.to_version) lines.push(`${outcome.from_version} to ${outcome.to_version}`);
-  if (outcome.detail) lines.push(count > 1 ? `${outcome.detail}, listed ${count} times` : outcome.detail);
+  // In rows, as the CLI counts them: a repeated `user` plugin's first row was
+  // updated and is not in the group, so "listed N times" was one short (#460).
+  if (outcome.detail) lines.push(count > 1 ? `${outcome.detail}, ${count} rows` : outcome.detail);
   if (outcome.approved_command) lines.push(`approved: ${outcome.approved_command}`);
   for (const text of lines) {
     const line = document.createElement("span");

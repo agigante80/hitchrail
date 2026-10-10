@@ -1236,12 +1236,26 @@ def test_update_plugins_prints_identical_skipped_rows_once_with_a_count(
     out = capsys.readouterr().out
     assert code == 0
     assert out.splitlines()[:3] == [
-        "skipped  kit@x (local scope is not updated, listed 3 times)",
+        "skipped  kit@x (local scope is not updated, 3 rows)",
         "updated  a@m (1.0.0 to 2.0.0)",
         "skipped  other@x (local scope is not updated)",
     ]
     # The count is still every row the listing returned.
     assert "1 updated, 0 current, 0 failed, 4 skipped" in out
+
+
+def test_a_plugin_listed_three_times_counts_its_two_skipped_rows(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#460. The first `user` row is updated and only the two repeats are
+    skipped, so the group is two rows; "listed 2 times" read as one short."""
+    code, _ = _update(monkeypatch, FakeAgent([row("a@m")] * 3))
+    out = capsys.readouterr().out
+    assert code == 0
+    assert out.splitlines()[:2] == [
+        "updated  a@m (1.0.0 to 2.0.0)",
+        "skipped  a@m (listed more than once, 2 rows)",
+    ]
 
 
 def test_update_plugins_needs_no_root_and_no_config_file(

@@ -899,7 +899,10 @@ def _outcome_line(outcome: claude_ipc.PluginOutcome, times: int = 1) -> str:
     if outcome.from_version and outcome.to_version:
         notes.append(f"{outcome.from_version} to {outcome.to_version}")
     if outcome.detail:
-        notes.append(f"{outcome.detail}, listed {times} times" if times > 1 else outcome.detail)
+        # Counted in ROWS, which is what was grouped: "listed N times" was one
+        # short for a repeated `user` plugin, whose first row was updated and
+        # is not in the group (#460).
+        notes.append(f"{outcome.detail}, {times} rows" if times > 1 else outcome.detail)
     elif outcome.approved_command:
         notes.append(f"approved: {outcome.approved_command}")
     line = f"{outcome.result:<8} {outcome.plugin}"

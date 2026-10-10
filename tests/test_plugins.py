@@ -214,8 +214,13 @@ def test_a_row_without_a_version_in_either_listing_stays_updated() -> None:
 
 
 def test_a_plugin_missing_from_the_second_listing_stays_updated() -> None:
+    """Both versions null, never one (#460): dropping the `new is None` half of
+    the guard left the results right and the record carrying a `from_version`
+    with no `to_version`, against `docs/api.md`."""
     agent = FakeAgent([row("a@m")]).then_lists(done(stdout=json.dumps([row("z@m")])))
-    assert results(run(agent)) == [("a@m", "user", "updated")]
+    outcomes = run(agent)
+    assert results(outcomes) == [("a@m", "user", "updated")]
+    assert (outcomes[0].from_version, outcomes[0].to_version) == (None, None)
 
 
 def test_a_failed_update_is_never_reclassified() -> None:

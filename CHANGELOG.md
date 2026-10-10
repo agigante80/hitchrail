@@ -32,6 +32,16 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+### Fixed
+
+- A running project in a folder under one you trusted as a whole (say, a
+  projects root you accepted once) no longer warns that it is waiting to be
+  trusted. Claude Code inherits a parent folder's trust and starts without
+  the prompt; Hitchrail now reads it the same way. Nothing to change.
+- A plugin listed three times by `claude plugin list` read "listed 2 times"
+  beside its skipped repeats; the grouped count now says rows ("2 rows"), on
+  the CLI and on the page. Nothing to change.
+
 ## 0.18.0 - 2026-10-10
 
 ### Fixed
