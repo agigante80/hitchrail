@@ -577,3 +577,24 @@ def test_a_failing_pidfd_close_after_the_signal_is_swallowed(root: Path) -> None
     assert session.pid == ORPHAN
     assert fake.signals == [signal.SIGTERM]
     assert ("close", 101) in fake.events
+
+
+def test_a_signal_to_a_detached_agent_ends_a_pending_restart(root: Path) -> None:
+    """#472. A signal is a Kill for a mark: cleared and counted before the
+    send, so that when the agent has gone and the row reads `stopped`, the
+    sweep starts nothing. Checked after the exit, where a mark left in place
+    would start an agent the person had said to end."""
+    fake = FakePidfd()
+    engine = _engine(root, Watched(fake, DETACHED), fake)
+    name = proj("vessel")
+    engine.restarts.pending[name] = 0.0
+    before = engine.restarts.epoch(name)
+    engine.signal_detached(name)
+    assert engine.restarts.pending == {}
+    assert engine.restarts.epoch(name) == before + 1
+    engine._procs_fn = lambda: ProcTable(parse_ps(""))
+    started: list[str] = []
+    engine.start = lambda n, acknowledged=False: started.append(n)  # type: ignore[method-assign,assignment,return-value]
+    assert engine.get(name).state is State.STOPPED
+    assert engine.advance_restarts() == []
+    assert started == []
