@@ -31,7 +31,7 @@ async def test_stop_on_a_wrapping_up_row_reopens_the_wait(page: Page, server: Ha
     await dialog.get_by_role("button", name="Hide, keep stopping").click()
     await expect(dialog).to_be_hidden()
 
-    await row.get_by_role("button", name="Stop").click()
+    await row.get_by_role("button", name="Exit now").click()
     await expect(dialog).to_contain_text("Asking it to wrap up")
     await expect(dialog.get_by_role("button", name="Exit now")).to_be_visible()
     assert "then to exit" not in await dialog.inner_text(), "a second confirm"
@@ -85,7 +85,7 @@ async def test_a_stop_whose_reply_was_lost_is_watched_when_reopened(
     await page.unroute("**/api/sessions/*")
     await expect(row).to_have_attribute("data-stopping", "true")
 
-    await row.get_by_role("button", name="Stop").click()
+    await row.get_by_role("button", name="Exit now").click()
     await expect(dialog.get_by_role("button", name="Exit now")).to_be_visible()
     await expect(dialog).to_contain_text("s so far")
     first = _count(await dialog.inner_text())
@@ -125,7 +125,7 @@ async def test_a_wait_reopened_after_a_reload_counts_from_the_stop(
 
     await page.reload()
     await expect(row).to_have_attribute("data-stopping", "true")
-    await row.get_by_role("button", name="Stop").click()
+    await row.get_by_role("button", name="Exit now").click()
     await expect(dialog).to_contain_text("s so far")
     assert _count(await dialog.inner_text()) >= 4
 
@@ -146,7 +146,7 @@ async def test_another_browser_is_offered_no_exit_now_while_the_prompt_is_typed(
     await page.goto(server.base)
     row = page.locator(f'[data-project="{name}"]')
     await expect(row).to_have_attribute("data-stopping", "true")
-    await row.get_by_role("button", name="Stop").click()
+    await row.get_by_role("button", name="Exit now").click()
     dialog = page.locator("[data-dialog]")
     await expect(dialog).to_contain_text("Asking it to wrap up, after its current task.")
     await expect(dialog).to_have_attribute("data-waiting", "sending")

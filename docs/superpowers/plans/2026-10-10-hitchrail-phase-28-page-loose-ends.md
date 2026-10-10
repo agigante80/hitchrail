@@ -86,10 +86,13 @@ three of them edit `app.css`. Each batch is reviewed once at its end.
       page on a withheld origin, and of a wrong key beside it.
       Landed: banner filter in `cli.py` (under its cap), `grant()` returns the
       sentence to show, tests in `test_cli.py` and `e2e/test_token.py`.
-- [ ] **Task 253, #474.** A `closing` row's chip reads "wrapping up" with the
+- [x] **Task 253, #474.** A `closing` row's chip reads "wrapping up" with the
       time left, "sending the exit" at zero, and its Stop says it skips the
       wait; `exiting` keeps `stopping`. A pure time left function with unit
       tests; e2e at 360 and 1280 px, reload included.
+      Landed: `wrapup.js` (pure) and `wrapup_tick.js`, the chip in `row.js`,
+      "Exit now" in `actions.js`; the table runs in the browser tier because
+      this project has no JavaScript runner.
 
 ### Batch 2: comments and guards that are true, tasks 254 and 255
 

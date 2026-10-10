@@ -58,6 +58,8 @@ ASSETS = {
     "/stream.js": ("stream.js", JS),
     "/theme.js": ("theme.js", JS),
     "/wait.js": ("wait.js", JS),
+    "/wrapup.js": ("wrapup.js", JS),
+    "/wrapup_tick.js": ("wrapup_tick.js", JS),
     "/logs.js": ("logs.js", JS),
     "/settings.js": ("settings.js", JS),
     "/plugins.js": ("plugins.js", JS),
