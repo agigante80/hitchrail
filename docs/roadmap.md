@@ -47,7 +47,8 @@ the running application, on the phone it is for. See
 [`tech-guidelines.md`](tech-guidelines.md) section 7.
 
 ## Phase: Phase 23: More than one agent, one package each
-state: planned
+state: open
+plan: docs/superpowers/plans/2026-10-10-hitchrail-phase-23-more-than-one-agent.md
 
 Build more than one agent through the seam `claude_ipc` already is: one
 quarantined package per agent, the agents chosen on the machine, and no
