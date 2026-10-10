@@ -399,7 +399,7 @@ async def test_every_page_with_a_bar_carries_the_mark_and_a_way_home(
     await page.evaluate("window.__beforeHome = 1")
     await link.click()
     await page.wait_for_url(server.base + "/")
-    await page.wait_for_function("window.__beforeHome === undefined")
+    await page.wait_for_function("() => window.__beforeHome === undefined", timeout=5_000)
     await expect(page.locator("[data-tabs]")).to_be_visible()
 
 
