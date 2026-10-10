@@ -116,26 +116,30 @@ at once; batches 3 onward run in order.
 
 ### Batch 1: the open `claude_ipc` findings, tasks 259 to 261
 
-- [ ] **259, #456.** `trusted_folders` honours a trusted ancestor; tests in
-  `test_launch.py` and `test_derive.py` as the ticket lists.
-- [ ] **260, #460.** "listed N times" counts the first `user` row; the
-  version guard's `new is None` half pinned by asserting the versions.
-- [ ] **261, #491.** A completed run whose second listing fails says so on
-  stderr and on the run record. Done here, before the re-cut, so the return
-  shape moves once.
+- [x] **259, #456.** A trusted ancestor's trust is inherited, read by
+  `folder_is_trusted` rather than `trusted_folders`, with the sibling whose
+  name a string prefix matches pinned untrusted; tests in
+  `test_claude_ipc.py` and `test_engine.py` (b29c214, 21ade62).
+- [x] **260, #460.** A skipped group is counted in rows rather than
+  listings, so the repeated plugin's updated first row reads; the version
+  guard's `new is None` half pinned by asserting the versions (e24d4be).
+- [x] **261, #491.** A completed run whose second listing fails marks each
+  updated row "not confirmed" in the detail the record already carries, on
+  stderr and on the run record, so the return shape did not move at all
+  (5f813a6).
 
 ### Batch 2: the decision written down, task 262
 
-- [ ] **262, #334.** Design section 3.1 says built, with the shape above;
+- [x] **262, #334.** Design section 3.1 says built, with the shape above;
   `docs/versioning.md`'s 1.0 terms name it; every Phase 23 ticket rewritten
-  or closed (done at planning, below).
+  or closed (done at planning, below; 532c6d4).
 
 ### Batch 3: the seam, tasks 263 and 264
 
-- [ ] **263, #290.** An agent interface (a Protocol) whose members are the
+- [x] **263, #290.** An agent interface (a Protocol) whose members are the
   calls the engine layer makes today, `claude_ipc` behind it unchanged, and
   the quarantine guards generalised to every agent package. No behaviour
-  change; suites compared by count before and after.
+  change; suites compared by count before and after (0dc5998).
 - [ ] **264, #290.** The `[agents]` table and the per root `agent` key,
   refused at startup when unknown; derivation and the engine ask the root's
   agent; `find_detached` asks every configured agent. `docs/api.md` and the
