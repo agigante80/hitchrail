@@ -1912,3 +1912,23 @@ def test_the_startup_block_does_not_advise_a_flag_that_cannot_help_a_loopback_na
     assert "http://localhost.localdomain:8787" in found[0]
     assert "Browse http://localhost:8787 instead" in found[0]
     assert "--allow-origin http://localhost.localdomain" not in found[0]
+
+
+def test_the_loopback_advice_names_the_address_the_bind_serves(tmp_path: Path) -> None:
+    """#488. `--host 127.0.0.2` is loopback, but `localhost` resolves to
+    127.0.0.1 where nothing listens there, so advising it sends the operator
+    to a refused connection."""
+    config = make_config(
+        tmp_path,
+        host="127.0.0.2",
+        token="t" * 24,
+        extra_hosts=("localhost.localdomain",),
+        extra_origins=("https://box.lan",),
+    )
+    lines = cli.startup_block(
+        config, cli.Preflight([], "/usr/bin/claude", "/usr/bin/tmux"), "info"
+    )
+    found = [line for line in lines if line.startswith("plain http origin not derived")]
+    assert len(found) == 1, lines
+    assert "Browse http://127.0.0.2:8787 instead" in found[0]
+    assert "Browse http://localhost" not in found[0]

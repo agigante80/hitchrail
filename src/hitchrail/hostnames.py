@@ -175,6 +175,22 @@ def origin_forms(scheme: str, host: str, port: int | None) -> set[str]:
     return forms
 
 
+def browse_origin(host: str, port: int | None) -> str:
+    """The shortest plain http origin for `host`, the one to print for a person."""
+    return min(origin_forms("http", host, port), key=len)
+
+
+def served_host(bind: str) -> str:
+    """The name that reaches a socket bound to `bind` from this machine (#488).
+
+    `localhost` for the three binds it resolves to. Any other loopback address,
+    `127.0.0.2` say, is not served by it: `localhost` resolves to 127.0.0.1,
+    where nothing listens, so the bound address is named instead.
+    """
+    bare = normalise_host(bind)
+    return "localhost" if bare in {"localhost", "127.0.0.1", "::1"} else bare
+
+
 def is_valid_host(value: str) -> bool:
     """A bare hostname or IP literal, and nothing else.
 

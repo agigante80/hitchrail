@@ -30,7 +30,7 @@ from hitchrail.config import (
 )
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
-from hitchrail.hostnames import is_loopback_host, origin_forms, reachable_hosts
+from hitchrail.hostnames import browse_origin, is_loopback_host, reachable_hosts, served_host
 from hitchrail.roots import Root, RootError, parse_root_argument
 from hitchrail.server import create_app
 
@@ -624,10 +624,10 @@ def startup_block(config: Config, found: Preflight, level: str) -> list[str]:
     for host in config.plain_origins_withheld:
         if host in https_hosts:
             continue
-        plain = min(origin_forms("http", host, config.port), key=len)
+        plain = browse_origin(host, config.port)
         # Loopback here is `localhost.localdomain` (#436); giving it keeps Secure on.
         fix = (
-            f"Browse http://localhost:{config.port} instead"
+            f"Browse {browse_origin(served_host(config.host), config.port)} instead"
             if is_loopback_host(host)
             else f"Give --allow-origin {plain} to serve it, which turns Secure off, "
             "so the token then crosses plain http to that host"
