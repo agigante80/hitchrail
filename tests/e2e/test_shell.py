@@ -122,12 +122,54 @@ async def test_an_explicit_choice_wins_over_the_system_preference(
     )
 
 
+async def test_the_toggle_follows_a_system_scheme_change_while_system_is_chosen(
+    page: Page, server: Harness
+) -> None:
+    """#466. Under System the toggle offers the other scheme, and it used to be
+    repainted only on a click, so it kept offering "Dark" after the phone went
+    dark. An explicit choice must NOT follow the system, so the second half
+    stores one and changes the scheme again."""
+    server.seed()
+    await page.emulate_media(color_scheme="light")
+    await page.goto(server.base)
+    toggle = page.locator("[data-theme-toggle]")
+    await expect(toggle).to_have_text("Dark")
+
+    await page.emulate_media(color_scheme="dark")
+    await expect(toggle).to_have_text("Light")
+    assert await toggle.locator("use").get_attribute("href") == "#icon-sun"
+    await page.emulate_media(color_scheme="light")
+    await expect(toggle).to_have_text("Dark")
+    assert await toggle.locator("use").get_attribute("href") == "#icon-moon"
+
+    await toggle.click()
+    await expect(toggle).to_have_text("Light")
+    await page.emulate_media(color_scheme="dark")
+    await page.emulate_media(color_scheme="light")
+    await expect(toggle).to_have_text("Light")
+
+
 async def test_the_chosen_theme_survives_a_reload(page: Page, server: Harness) -> None:
     server.seed()
     await page.emulate_media(color_scheme="light")
     await page.goto(server.base)
     await page.get_by_role("button", name="Dark").click()
     await page.reload()
+    assert (
+        await page.evaluate("getComputedStyle(document.body).backgroundColor")
+        == "rgb(54, 45, 36)"
+    )
+
+
+async def test_the_logs_page_wears_the_stored_theme(page: Page, server: Harness) -> None:
+    """#466. The logs page lost its own copy of the start up block and reads the
+    theme through `theme.js`; a person who chose Dark on the list must still
+    land on a dark logs page under a light device."""
+    server.seed(stopped=["vessel"])
+    await page.emulate_media(color_scheme="light")
+    await page.goto(server.base)
+    await page.get_by_role("button", name="Dark").click()
+    await page.goto(f"{server.base}/logs/{server.project('vessel')}")
     assert (
         await page.evaluate("getComputedStyle(document.body).backgroundColor")
         == "rgb(54, 45, 36)"

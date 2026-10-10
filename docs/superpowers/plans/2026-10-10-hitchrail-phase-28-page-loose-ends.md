@@ -96,11 +96,13 @@ three of them edit `app.css`. Each batch is reviewed once at its end.
 
 ### Batch 2: comments and guards that are true, tasks 254 and 255
 
-- [ ] **Task 254, #466.** The cut root line's comment says what Android
+- [x] **Task 254, #466.** The cut root line's comment says what Android
       Chrome does (no tooltip; the chips and settings carry it); the header
       toggle follows a `prefers-color-scheme` change under System, with an
       e2e test that emulates the change; `settings.js` and `logs.js` read the
       theme only through `theme.js`.
+      Landed: the comment is true, `followSystemTheme` in `theme.js`, both
+      pages apply the theme through it, e2e tests in `test_shell.py`.
 - [ ] **Task 255, #461 and #467.** The `stream.js` comment says why the
       accessor exists without the false claim about live bindings; the asset
       import check reads every import form; `publish.yml` asserts its glob

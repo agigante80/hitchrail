@@ -41,6 +41,9 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
   address, now shows the server's message naming the origin rather than "That
   key was not accepted", so a correct token is not retyped. A wrong or missing
   key still gets the one sentence. Nothing to change.
+- The header theme button now follows the device while Theme is System: when
+  the phone switches between light and dark, the button's icon and name
+  switch with it, where before they went stale until tapped. Nothing to change.
 
 ### Changed
 

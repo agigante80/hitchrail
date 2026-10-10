@@ -20,7 +20,7 @@ import {
 import { state } from "/state.js";
 import { confirmStopAll } from "/stop_all.js";
 import { currentStream, onVisible, openStream, setReopenPace } from "/stream.js";
-import { applyTheme, storedTheme, toggleTheme } from "/theme.js";
+import { applyTheme, followSystemTheme, storedTheme, toggleTheme } from "/theme.js";
 import { tickWrapUps } from "/wrapup_tick.js";
 
 /* What this file exported before it was split, so the entry point still names
@@ -35,6 +35,7 @@ export { setReopenPace } from "/stream.js";
 
 function boot() {
   applyTheme(storedTheme());
+  followSystemTheme();
   trackKeyboardInset();
   trackFooterHeight();
   $("[data-theme-toggle]")?.addEventListener("click", toggleTheme);

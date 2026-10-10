@@ -173,7 +173,10 @@ export async function refresh() {
   if (rootEl) {
     rootEl.textContent =
       roots.length === 1 ? roots[0].path : roots.map((r) => r.label).join(", ");
-    // One line in the bar (#320), so the full text is what a long press shows.
+    // One line in the bar (#320), cut with an ellipsis. The title is for a
+    // pointer: Android Chrome shows no tooltip for it (a tap or a long press
+    // opens tap to search, seen on a Pixel, #466), and the chips and the
+    // settings page carry the same text.
     rootEl.title = rootEl.textContent;
   }
   // `owed` holds only what arrived after this listing was asked for, so those

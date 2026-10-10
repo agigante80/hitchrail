@@ -58,6 +58,17 @@ export function applyTheme(theme) {
   }
 }
 
+/* Under System the header toggle's icon and name follow the scheme, so they
+   must follow a CHANGE of it too (#466): the toggle was only repainted on a
+   click and went stale until then. An explicit choice ignores the system. */
+export function followSystemTheme() {
+  window
+    .matchMedia("(prefers-color-scheme: dark)")
+    .addEventListener("change", () => {
+      if (!storedTheme()) applyTheme(null);
+    });
+}
+
 export function toggleTheme() {
   const dark = document.documentElement.getAttribute("data-theme") === "dark"
     || (!document.documentElement.hasAttribute("data-theme")
