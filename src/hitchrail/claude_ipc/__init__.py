@@ -47,6 +47,7 @@ from hitchrail.claude_ipc.launch import (
     trusted_folders,
 )
 from hitchrail.claude_ipc.plugins import (
+    UNCONFIRMED_DETAIL,
     PluginFailure,
     PluginOutcome,
     PluginResult,
@@ -68,6 +69,7 @@ __all__ = [
     "ANSWER_KEYS",
     "GRACEFUL_STOP_KEYS",
     "REMOTE_CONTROL_MARKER",
+    "UNCONFIRMED_DETAIL",
     "URL_BASE",
     "AnswerNotSafe",
     "Pane",

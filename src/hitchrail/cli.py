@@ -903,7 +903,9 @@ def _outcome_line(outcome: claude_ipc.PluginOutcome, times: int = 1) -> str:
         # short for a repeated `user` plugin, whose first row was updated and
         # is not in the group (#460).
         notes.append(f"{outcome.detail}, {times} rows" if times > 1 else outcome.detail)
-    elif outcome.approved_command:
+    # Not `elif` since #491: an `updated` row can now carry a detail too, and
+    # what the person approved must still show beside it.
+    if outcome.approved_command:
         notes.append(f"approved: {outcome.approved_command}")
     line = f"{outcome.result:<8} {outcome.plugin}"
     return f"{line} ({'; '.join(notes)})" if notes else line
@@ -1024,6 +1026,14 @@ def update_plugins_command(argv: list[str]) -> int:
         "An update applies when a session next starts: running sessions keep the old "
         "version until they are restarted."
     )
+    # #491. Beside the per row detail, on stderr like the other notes, so a
+    # script reading stdout's counts is told the `updated` there is unchecked.
+    if any(o.detail == claude_ipc.UNCONFIRMED_DETAIL for o in outcomes):
+        print(
+            "hitchrail: note: the plugin list could not be read after the updates, "
+            "so which `updated` rows changed version is not known.",
+            file=sys.stderr,
+        )
     return 1 if counts["failed"] else 0
 
 

@@ -327,9 +327,12 @@ plugin whose update succeeded reads `updated` with no versions while the run
 is going, and after the last update the agent's plugin list is read again and compared with the
 first reading (#311). A plugin whose version moved is `updated`, with
 `from_version` and `to_version` set; one whose version did not is `current`.
-If the second reading cannot be understood, or either reading gives a row no
-version, that row stays `updated` with both versions null: the run did its
-work, and which plugins moved is not guessed. A plugin at any scope other than `user` is
+If either reading gives a row no version, that row stays `updated` with both
+versions null: the run did its work, and which plugins moved is not guessed.
+If the second reading cannot be had at all, every `updated` row stays
+`updated` with both versions null and detail `not confirmed: the plugin list
+could not be read again` (#491), so a check that never happened is not read as
+one that did. A plugin at any scope other than `user` is
 `skipped` with its scope, since it belongs to a project folder the agent's
 list does not name. A `user` scope plugin the listing names more than once is
 also `skipped`, with detail `listed more than once`, after the first is updated: the

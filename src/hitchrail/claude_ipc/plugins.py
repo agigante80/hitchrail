@@ -85,6 +85,11 @@ _CUT_HEAD = 160
 # ordinary per-plugin failure or an internal defect.
 _ABANDONED_DETAIL = "never started: the server was shutting down"
 _SHUTTING_DOWN_MESSAGE = "the server was shutting down, so nothing was updated"
+# #491. On each `updated` row of a run whose update calls all finished but
+# whose second listing could not be read: the row is still `updated`, since
+# the update did exit cleanly, and this says the version check never happened,
+# which before this nothing on the CLI or the page did.
+UNCONFIRMED_DETAIL = "not confirmed: the plugin list could not be read again"
 
 PluginResult = Literal["updated", "current", "failed", "skipped", "abandoned"]
 PluginFailure = Literal[
@@ -480,19 +485,20 @@ def _classified(
 ) -> list[PluginOutcome]:
     """`outcomes` with each `updated` split by whether its version moved (#311).
 
-    Every failure of the second listing returns `outcomes` untouched, a closed
-    runner and a missing agent included: the updates already happened, so
-    this call cannot be the reason the run fails.
+    Every failure of the second listing returns `outcomes` with each `updated`
+    row marked `UNCONFIRMED_DETAIL` (#491), a closed runner and a missing
+    agent included: the updates already happened, so this call cannot be the
+    reason the run fails, and it must not pass for a check that happened.
     """
     try:
         listing = _call(run, [binary, "plugin", "list", "--json"], _LISTING_TIMEOUT_S)
     except (PluginsFailed, RunnerClosed):
-        return outcomes
+        return _unconfirmed(outcomes)
     if listing is None or listing.returncode != 0:
-        return outcomes
+        return _unconfirmed(outcomes)
     after = _read_listing(listing.stdout)
     if after is None:
-        return outcomes
+        return _unconfirmed(outcomes)
     was = _user_versions(before)
     now = _user_versions(after)
     classified = []
@@ -505,6 +511,12 @@ def _classified(
         else:
             classified.append(replace(o, from_version=old, to_version=new))
     return classified
+
+
+def _unconfirmed(outcomes: list[PluginOutcome]) -> list[PluginOutcome]:
+    return [
+        replace(o, detail=UNCONFIRMED_DETAIL) if o.result == "updated" else o for o in outcomes
+    ]
 
 
 def _user_versions(rows: list[tuple[str, str, str | None]]) -> dict[str, str]:

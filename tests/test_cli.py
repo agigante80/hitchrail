@@ -1219,6 +1219,29 @@ def test_update_plugins_says_which_moved_and_which_were_already_current(
     assert "1 updated, 1 current, 0 failed, 0 skipped" in out
 
 
+def test_update_plugins_says_when_the_second_listing_could_not_be_read(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#491. The updates finished and the confirming read failed: the row
+    says so, and stderr says what that means for the `updated` count."""
+    agent = FakeAgent([row("a@m")]).then_lists(done(1, stderr="boom"))
+    code, _ = _update(monkeypatch, agent)
+    captured = capsys.readouterr()
+    assert code == 0
+    assert captured.out.splitlines()[0] == (
+        "updated  a@m (not confirmed: the plugin list could not be read again)"
+    )
+    assert "which `updated` rows changed version is not known" in captured.err
+
+
+def test_update_plugins_says_nothing_unconfirmed_when_the_check_ran(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code, _ = _update(monkeypatch, FakeAgent([row("a@m")]))
+    assert code == 0
+    assert "not known" not in capsys.readouterr().err
+
+
 def test_update_plugins_prints_identical_skipped_rows_once_with_a_count(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

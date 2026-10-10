@@ -41,6 +41,10 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 - A plugin listed three times by `claude plugin list` read "listed 2 times"
   beside its skipped repeats; the grouped count now says rows ("2 rows"), on
   the CLI and on the page. Nothing to change.
+- When the plugin list cannot be read again after a plugin update, each
+  `updated` row now says "not confirmed", and `hitchrail update-plugins`
+  adds a note on stderr, where before nothing said the version check had not
+  happened. Nothing to change.
 
 ## 0.18.0 - 2026-10-10
 

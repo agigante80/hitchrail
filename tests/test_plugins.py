@@ -204,6 +204,25 @@ def test_an_unreadable_second_listing_leaves_updated_as_it_was(
     outcomes = run(agent)
     assert results(outcomes) == [("a@m", "user", "updated"), ("b@m", "user", "updated")]
     assert [(o.from_version, o.to_version) for o in outcomes] == [(None, None)] * 2
+    # #491: still `updated`, and saying the check did not happen.
+    assert [o.detail for o in outcomes] == [ipc_plugins.UNCONFIRMED_DETAIL] * 2
+
+
+def test_an_unreadable_second_listing_marks_only_the_updated_rows() -> None:
+    """A failed or skipped row keeps its own detail: the second listing was
+    never going to confirm those."""
+    agent = FakeAgent(
+        [row("a@m"), row("b@m"), row("k@x", "local")], **{"b@m": done(1, stderr="no")}
+    ).then_lists(done(1, stderr="boom"))
+    details = {(o.plugin, o.result): o.detail for o in run(agent)}
+    assert details[("a@m", "updated")] == ipc_plugins.UNCONFIRMED_DETAIL
+    assert details[("b@m", "failed")] != ipc_plugins.UNCONFIRMED_DETAIL
+    assert details[("k@x", "skipped")] == "local scope is not updated"
+
+
+def test_a_confirmed_run_carries_no_unconfirmed_detail() -> None:
+    agent = FakeAgent([row("a@m"), row("b@m")]).unmoving("b@m")
+    assert all(o.detail is None for o in run(agent))
 
 
 def test_a_row_without_a_version_in_either_listing_stays_updated() -> None:

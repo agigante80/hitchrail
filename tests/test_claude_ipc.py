@@ -1144,7 +1144,12 @@ def test_the_package_still_offers_every_name_the_single_file_did() -> None:
 
 # Public names added after #368, kept apart so the list above stays a record
 # of what the single file offered.
-_ADDED_SINCE_THE_SPLIT = {"WrapUpWatch", "request_wrap_up", "folder_is_trusted"}  # #242, #456
+_ADDED_SINCE_THE_SPLIT = {
+    "WrapUpWatch",  # #242
+    "request_wrap_up",  # #242
+    "folder_is_trusted",  # #456
+    "UNCONFIRMED_DETAIL",  # #491
+}
 
 
 def _submodule_imports(tree: ast.AST) -> list[str]:
