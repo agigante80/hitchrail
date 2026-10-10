@@ -109,6 +109,11 @@ async def test_a_closing_row_counts_down_and_its_stop_says_it_skips_the_wait(
 
     badge = row.locator(".badge")
     await expect(badge).to_have_text(_LEFT)
+    # Before the stream closes (#495): the row says Stop until the prompt is
+    # typed, and only the announce after the typing makes it Exit now. A
+    # reload under load can land inside the typing, and a closed stream would
+    # then keep the row on Stop for good.
+    await expect(row.get_by_role("button", name="Exit now")).to_be_visible()
     first = _left(await badge.inner_text())
     assert first is not None and 0 < first <= 300, first
     # Counted down in the page with no event to repaint it: the stream is
@@ -120,7 +125,7 @@ async def test_a_closing_row_counts_down_and_its_stop_says_it_skips_the_wait(
     # The glyph and the colour are the stopping ones: only the words moved.
     await expect(badge).to_have_attribute("data-badge", "stopping")
 
-    await expect(row.get_by_role("button", name="Exit now")).to_be_visible()
+    assert await row.get_by_role("button", name="Exit now").count() == 1
     assert await row.get_by_role("button", name="Stop", exact=True).count() == 0
 
     # The bar on one line: every control shares a top edge, the name keeps a
