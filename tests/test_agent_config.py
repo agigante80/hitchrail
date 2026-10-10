@@ -7,6 +7,7 @@ package for the length of one test. Nothing else in the suite sees it.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from hitchrail.events import EventBus
 from hitchrail.roots import Root
 from hitchrail.server import create_app
 from hitchrail.sessions import State
+from hitchrail.settings import read_config_file
 from test_engine import running_after
 from test_settings_route import HEADERS
 from test_wrap_up import SETTLE
@@ -422,3 +424,34 @@ def test_the_sweep_reads_a_screen_with_the_running_agents_reader(tmp_path: Path)
     engine, tmux = _claude_left_running(tmp_path)
     tmux.pane_text["main~vessel"] = TRUST_MODAL
     assert engine.scan_for_stuck() == ["main~vessel"]
+
+
+# -- #295: the documents' config examples -----------------------------------
+
+_DOCS = Path(__file__).resolve().parents[1]
+
+
+def _toml_blocks() -> list[tuple[str, int, str]]:
+    found = []
+    for doc in ("README.md", "CONTRIBUTING.md", "docs/api.md"):
+        text = (_DOCS / doc).read_text()
+        for match in re.finditer(r"^```toml\n(.*?)^```", text, re.M | re.S):
+            found.append((doc, text.count("\n", 0, match.start()) + 1, match.group(1)))
+    return found
+
+
+@pytest.mark.parametrize(("doc", "line", "block"), _toml_blocks(), ids=lambda v: str(v)[:20])
+def test_every_config_example_in_the_docs_is_one_the_loader_takes(
+    tmp_path: Path, doc: str, line: int, block: str
+) -> None:
+    """#295. An example that drifted from the loader is a startup refusal for
+    whoever copies it, so each is read the way the file is, and its agents
+    checked the way `Config` checks them."""
+    path = _write(tmp_path, block)
+    settings = read_config_file(path)
+    agentconfig.check_agents(settings.agents, [(r.label, r.agent) for r in settings.roots])
+
+
+def test_the_docs_hold_an_agents_example() -> None:
+    """The parametrisation above passes vacuously on no blocks at all."""
+    assert any("[agents." in block for _, _, block in _toml_blocks())

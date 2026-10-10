@@ -53,12 +53,50 @@ used, and what does it depend on.
   module per seam since #368, imported only through the package): how an
   agent is launched, stopped, found and linked to, and since #124 how its
   plugins are updated. The last makes it run subprocesses of its own.
+- `agy_ipc` is the same quarantine for Antigravity (#294). Since #290 every
+  agent is one such package, `<name>_ipc/`, and the engine reaches each only
+  through the `Agent` protocol in `agent.py`, never by importing a submodule.
 - `ram` reads memory and decides the guard. Pure, given its inputs.
 - `server` is Starlette and routing. It orchestrates; it holds no logic worth
   testing separately.
 
 The `engine` to `server` direction is enforced by an import-linter contract in
 CI. Import boundaries defended only by good intentions do not survive.
+
+### 3.1 Adding an agent package
+
+An agent is a code change and a release, never a config file entry: the file
+picks one of the packages below by name, and that closed set is the security
+property (`agents.py` says why). A new one takes these steps, and each guard
+named fails until it is done:
+
+1. **A package `src/hitchrail/<name>_ipc/`** with an adapter class that
+   satisfies `agent.Agent`: `package`, `marker`, `answer_keys`,
+   `has_plugins`, the launch argv, trust, the session link, the stop and wrap
+   up keys, answers and the screen reads. Implement only what was SEEN on the
+   agent's screen, with the captured bytes quoted on the ticket; anything
+   else answers as unknown (`None`, or an empty key set), because a guessed
+   screen types into a person's draft. `agy_ipc/` is the smallest example.
+2. **The marker and the argv tail are unique per agent.** Derivation tells
+   two agents apart by command line alone, so the tail after the binary must
+   name the project and carry nothing another agent's argv could.
+   `test_a_pane_holding_agy_under_a_claude_root_is_agys` is the case that
+   bit: both agents took `--remote-control`.
+3. **Register the name** in `agentconfig.PACKAGE_NAMES` and `agents.PACKAGES`;
+   a test holds the two sets equal.
+4. **Add the package to `AGENT_PACKAGES` in `tests/support.py`.** The
+   quarantine guards (nothing else types into a pane, nothing else names an
+   agent's vocabulary, nobody imports past a package into a submodule) treat
+   every listed package as inside, and every other module as outside.
+5. **Add it to the import-linter contract** in `pyproject.toml`, as an engine
+   layer module.
+6. **A stand in for each tier:** a fake for the hermetic tests, and a script
+   drawing the agent's captured screen in `test_live_tmux_agents.py` and the
+   e2e harness's `agy_roots`, so a root of each agent runs in one test.
+7. **No vendor name enters the operator or API contract.** The operator's
+   identifier is what the page and the API show; `package` is the only place
+   the agent's own name appears. `test_no_vendor_name_is_in_the_operator_contract`
+   holds the flags to it.
 
 When a file grows past roughly 400 lines, treat it as a signal that it is doing
 more than one thing, and split along the seam that is already there.

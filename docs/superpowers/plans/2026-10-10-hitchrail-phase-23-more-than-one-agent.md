@@ -172,8 +172,10 @@ at once; batches 3 onward run in order.
   update still runs the default agent's binary alone, so a second Claude Code
   agent's plugins are named as not updated from the page rather than
   updated: #505.
-- [ ] **269, #295.** README and the operator docs: the `[agents]` table, the
-  per root key, and how a new agent package is added.
+- [x] **269, #295.** README and the operator docs: the `[agents]` table, the
+  per root key, and how a new agent package is added. README's "More than
+  one agent" and `docs/tech-guidelines.md` section 3.1; every `toml` block in
+  the published docs is read by the loader in `test_agent_config.py`.
 
 ### Close, task 270
 
