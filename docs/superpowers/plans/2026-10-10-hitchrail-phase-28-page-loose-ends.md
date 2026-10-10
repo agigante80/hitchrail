@@ -120,8 +120,10 @@ three of them edit `app.css`. Each batch is reviewed once at its end.
       guard. Each seen failing with its behaviour reverted.
       Landed: extended `test_layout.py`, `test_shell.py`, `test_list.py` and
       `test_starting.py`; each seen failing once on a named revert.
-- [ ] **Task 257, #462.** The name does not shrink at 900 px and wider; a
+- [x] **Task 257, #462.** The name does not shrink at 900 px and wider; a
       1280 px case in `test_layout.py` on the busy fixture.
+      Landed: `.row-name` is `flex: 0 0 auto` from 900 px and the head wraps;
+      `app.css` stays at 765 lines.
 
 ### The close, task 258
 

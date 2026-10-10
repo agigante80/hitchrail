@@ -536,9 +536,9 @@ main { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
 
 /* -- desktop is the same data at a wider viewport, not a second interface */
 @media (min-width: 900px) {
-  /* Room for the one line again: the name shares it with its chip and badge. */
-  .row-head { flex-wrap: nowrap; }
-  .row-name { flex: 0 1 auto; }
+  /* Room for the one line again: the name shares it with its chip and badge,
+     and is the one that does not give way (#462). The chips wrap instead. */
+  .row-name { flex: 0 0 auto; max-width: 100%; }
   main { max-width: 1100px; margin: 0 auto; }
   .bar, .tabs, .chips, .search, .unsupported { max-width: 1100px; margin-inline: auto; }
   .row[data-state="running"], .row[data-state="detached"], .row[data-state="stale"] {

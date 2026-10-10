@@ -44,6 +44,9 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 - The header theme button now follows the device while Theme is System: when
   the phone switches between light and dark, the button's icon and name
   switch with it, where before they went stale until tapped. Nothing to change.
+- On a desktop width (900 px and wider) a long project name is no longer
+  squeezed onto two lines by the chips and buttons beside it; the chips wrap
+  instead. Phone layouts are unchanged. Nothing to change.
 
 ### Changed
 

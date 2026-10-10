@@ -182,6 +182,30 @@ async def test_no_name_on_the_busy_list_is_crushed(
         assert got["lines"] == got["atRow"], f"{await name.inner_text()!r} is crushed: {got}"
 
 
+WIDE = {"width": 1280, "height": 800}
+
+
+async def test_no_name_is_squeezed_at_a_desktop_width(page: Page, server: Harness) -> None:
+    """#462. From 900px the name shares its line with the chips and the
+    actions again, because there is room; it must not be the one that gives
+    way. A name that wraps to a second line, or is narrower than the text it
+    holds, has been squeezed by what sits beside it (`flex: 0 1 auto` let the
+    chips take the squeeze), where at 360px `_NAME`'s test reads the same
+    thing against the phone's one line per name."""
+    await _busy_list(page, server, WIDE)
+    names = page.locator(".row-name")
+    assert await names.count() >= 60
+    for name in await names.all():
+        got = await name.evaluate(_NAME)
+        text = await name.inner_text()
+        assert got["lines"] == got["atRow"], (
+            f"{text!r} is squeezed to {got['lines']} lines: {got}"
+        )
+        assert got["lines"] == 1, f"{text!r} no longer fits one line at 1280px: {got}"
+        clipped = await name.evaluate("e => e.scrollWidth - e.clientWidth")
+        assert clipped <= 0, f"{text!r} is clipped by {clipped}px"
+
+
 @phone
 async def test_a_stopped_row_stays_shorter_than_a_running_one(
     page: Page, server: Harness, viewport: dict[str, int]
