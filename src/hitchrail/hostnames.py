@@ -183,12 +183,19 @@ def browse_origin(host: str, port: int | None) -> str:
 def served_host(bind: str) -> str:
     """The name that reaches a socket bound to `bind` from this machine (#488).
 
-    `localhost` for the three binds it resolves to. Any other loopback address,
-    `127.0.0.2` say, is not served by it: `localhost` resolves to 127.0.0.1,
-    where nothing listens, so the bound address is named instead.
+    Asked only of a loopback bind. An IP literal other than 127.0.0.1 and ::1,
+    `127.0.0.2` say, is named as it is: `localhost` resolves to 127.0.0.1,
+    where nothing listens. A loopback NAME gets `localhost`, never itself:
+    `localhost.localdomain` resolves where `localhost` does, and it is the one
+    name whose plain http origin can be withheld, so advising it would send
+    the operator to the origin the same line says is refused.
     """
     bare = normalise_host(bind)
-    return "localhost" if bare in {"localhost", "127.0.0.1", "::1"} else bare
+    try:
+        ipaddress.ip_address(bare)
+    except ValueError:
+        return "localhost"
+    return "localhost" if bare in {"127.0.0.1", "::1"} else bare
 
 
 def is_valid_host(value: str) -> bool:

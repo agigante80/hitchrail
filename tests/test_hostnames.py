@@ -167,6 +167,7 @@ def test_localhost_localdomain_stays_loopback_for_every_other_rule(tmp_path: Pat
     [
         ("127.0.0.1", "http://localhost:8787"),
         ("localhost", "http://localhost:8787"),
+        ("localhost.localdomain", "http://localhost:8787"),
         ("[::1]", "http://localhost:8787"),
         ("127.0.0.2", "http://127.0.0.2:8787"),
         ("::2", "http://[::2]:8787"),
