@@ -86,7 +86,7 @@ async def test_the_time_left_is_whole_seconds_never_negative(
         [0, "sending the exit"],
         [0, "sending the exit"],
         [0, "sending the exit"],
-        [305, "wrapping up 5:05"],
+        [300, "wrapping up 5:00"],
         [10, "wrapping up 0:10"],
         [None, "wrapping up"],
         [None, "wrapping up"],

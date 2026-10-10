@@ -146,7 +146,10 @@ async def test_another_browser_is_offered_no_exit_now_while_the_prompt_is_typed(
     await page.goto(server.base)
     row = page.locator(f'[data-project="{name}"]')
     await expect(row).to_have_attribute("data-stopping", "true")
-    await row.get_by_role("button", name="Exit now").click()
+    # #495. The row's own control does not promise an Exit now either, while
+    # the prompt is still being typed.
+    assert await row.get_by_role("button", name="Exit now").count() == 0
+    await row.get_by_role("button", name="Stop", exact=True).click()
     dialog = page.locator("[data-dialog]")
     await expect(dialog).to_contain_text("Asking it to wrap up, after its current task.")
     await expect(dialog).to_have_attribute("data-waiting", "sending")
@@ -155,6 +158,7 @@ async def test_another_browser_is_offered_no_exit_now_while_the_prompt_is_typed(
     # The prompt is out: the wait's own ticker moves it on, and Exit now works.
     marker.watch = claude_ipc.WrapUpWatch(sent_at=engine._clock())
     await expect(dialog.get_by_role("button", name="Exit now")).to_be_visible()
+    await expect(row.get_by_role("button", name="Exit now")).to_be_visible()
 
 
 def _plant_exiting(server: Harness, folder: str) -> None:
