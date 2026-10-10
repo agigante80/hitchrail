@@ -157,6 +157,7 @@ def test_no_answer_is_ever_sent_and_no_question_is_claimed() -> None:
     """Not captured, so unknown: never a guess at which key a question wants."""
     agy = agy_ipc.Antigravity()
     assert agy.answer_keys == frozenset()
+    assert agy.has_plugins is False, "the settings page would offer agy an update"
     assert agy.awaits_answer(IDLE) is None
     pane = FakePane([IDLE])
     with pytest.raises(AnswerNotSafe):

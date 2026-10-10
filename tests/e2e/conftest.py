@@ -65,6 +65,7 @@ from playwright.async_api import Page, async_playwright
 
 from conftest import REAL_CWD_OF, REAL_PIDFD
 from hitchrail import claude_ipc, discovery
+from hitchrail.agentconfig import DEFAULT_AGENT, AgentSpec
 from hitchrail.config import Config
 from hitchrail.engine import Engine
 from hitchrail.events import EventBus
@@ -113,6 +114,28 @@ print("hitchrail-shim: started as " + " ".join(sys.argv[1:]), flush=True)
 # the fake was easier to satisfy than the thing it stands in for. A shim that
 # draws no box now refuses, correctly, so it draws one.
 print("\\x1b[39m\\u276f\\u00a0                     ", flush=True)
+"""
+
+# #294. agy 1.3.3's idle box as quoted on that ticket: a `>` row between two
+# grey rules and a `? for shortcuts` footer, which is all `agy_ipc.screen`
+# reads before it types. agy's stop sends no Escape, so `/exit` arrives as a
+# plain line. A whole script, like the dying agent, because nothing in the
+# Claude Code head above it would be true of agy.
+AGY_SCRIPT = """#!{python}
+import sys, time
+print("hitchrail-shim: agy started as " + " ".join(sys.argv[1:]), flush=True)
+RULE = "\\x1b[90m" + "\\u2500" * 40 + "\\x1b[39m"
+print(RULE, flush=True)
+print("\\x1b[94m>\\x1b[39m ", flush=True)
+print(RULE, flush=True)
+print("  ? for shortcuts", flush=True)
+while True:
+    line = sys.stdin.readline()
+    if line == "":
+        time.sleep(0.2)
+        continue
+    if line.strip() == "/exit":
+        sys.exit(0)
 """
 
 # Waits, and exits on the graceful request the engine sends through send-keys.
@@ -663,6 +686,7 @@ class Harness:
         wrap_up_stays_busy: bool = False,
         stop_policy: str = "ask",
         stop_policy_source: str | None = None,
+        agy_roots: list[str] | None = None,
     ) -> None:
         """Set the world up BEFORE the page loads.
 
@@ -690,6 +714,11 @@ class Harness:
         page must not offer a checkbox for it or send somebody looking for
         one. Labels here must also appear in `also_in` or `stopped_in`,
         since only those create a root to disable.
+
+        `agy_roots` names labels, from `also_in` or `stopped_in`, whose root
+        runs agy (#294): an `[agents]` entry of the antigravity package whose
+        binary is a stand in drawing agy's box, beside the Claude Code shim so
+        teardown's wait for every agent from that directory covers it too.
         """
         # `stopped_in` is `also_in` without the start: the root is registered
         # and the folders exist, and no shim runs in them. The fifty row
@@ -804,6 +833,14 @@ class Harness:
             )
         )
 
+        agy = set(agy_roots or ())
+        agents: dict[str, AgentSpec] = {}
+        if agy:
+            stand_in = self._agent.with_name("agent-agy")
+            stand_in.write_text(AGY_SCRIPT.format(python=sys.executable))
+            stand_in.chmod(0o755)
+            agents["agy"] = AgentSpec("antigravity", str(stand_in))
+
         sources = {"stop_timeout": "flag"} if pinned_stop_timeout else {}
         if stop_policy_source is not None:
             sources["stop_policy"] = stop_policy_source
@@ -819,7 +856,12 @@ class Harness:
                             enabled=DEFAULT_LABEL not in off,
                         ),
                         *(
-                            Root(label=label, path=path.resolve(), enabled=label not in off)
+                            Root(
+                                label=label,
+                                path=path.resolve(),
+                                enabled=label not in off,
+                                agent="agy" if label in agy else DEFAULT_AGENT,
+                            )
                             for label, path in self.extra_roots.items()
                         ),
                     ),
@@ -828,6 +870,7 @@ class Harness:
                     port=self.port,
                     tmux_socket=self._sock,
                     agent_binary=str(self._agent),
+                    agents=agents,
                     stop_timeout=stop_timeout,
                     stop_prompt=stop_prompt,
                     stop_prompt_timeout=stop_prompt_timeout,

@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from pathlib import Path
 
+import httpx
 import pytest
 
 from conftest import TRUST_MODAL, FakeClock, FakeTmux, procs_from, ps_row
@@ -18,9 +19,12 @@ from hitchrail.agentconfig import DEFAULT_AGENT, AgentSpec
 from hitchrail.cli import build_config, main, parse_args, preflight
 from hitchrail.config import Config, ConfigError
 from hitchrail.engine import Engine
+from hitchrail.events import EventBus
 from hitchrail.roots import Root
+from hitchrail.server import create_app
 from hitchrail.sessions import State
 from test_engine import running_after
+from test_settings_route import HEADERS
 from test_wrap_up import SETTLE
 
 
@@ -352,6 +356,24 @@ def test_a_pane_holding_agy_under_a_claude_root_is_agys(tmp_path: Path) -> None:
     claude = _agy_root(tmp_path, claude_ipc.launch_argv("claude", "main~vessel"))
     assert claude.get("main~vessel").awaiting_trust is True
     assert claude.get("main~vessel").agent == DEFAULT_AGENT
+
+
+@pytest.mark.integration
+async def test_the_listing_names_each_rows_agent_and_each_roots(tmp_path: Path) -> None:
+    """#294, task 268. The page names a row's agent from the row first and
+    its root second, so both travel: the root switched to agy while Claude
+    Code ran on reads `agy` on the root and `default` on the row, which is
+    the one row the page must not label from its root."""
+    engine = _agy_root(tmp_path, claude_ipc.launch_argv("claude", "main~vessel"), "agy")
+    app = create_app(engine=engine, config=engine.config, bus=EventBus())
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://localhost"
+    ) as client:
+        body = (await client.get("/api/projects", headers=HEADERS)).json()
+    assert [(r["label"], r["agent"]) for r in body["roots"]] == [("main", "agy")]
+    assert {p["name"]: p["agent"] for p in body["projects"]} == {"main~vessel": DEFAULT_AGENT}
+    stopped = _agy_root(tmp_path, ["sleep", "1"], "agy").get("main~vessel")
+    assert stopped.as_dict()["agent"] is None, "a row with nothing running names no agent"
 
 
 def _claude_left_running(

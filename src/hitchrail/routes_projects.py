@@ -74,7 +74,10 @@ def project_routes(
                 # an empty page can say so (#154); the settings route is
                 # where they are listed in full.
                 "roots": [
-                    {"label": r.label, "path": str(r.path)} for r in engine.prefs.active_roots()
+                    # #290. The agent with the root, so a row can say which
+                    # one it runs when more than one is configured.
+                    {"label": r.label, "path": str(r.path), "agent": r.agent}
+                    for r in engine.prefs.active_roots()
                 ],
                 "hidden_roots": list(engine.prefs.hidden_roots()),
                 # Of those, the ones a request can bring back (#256): the

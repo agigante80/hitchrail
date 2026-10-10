@@ -18,6 +18,8 @@ class Antigravity:
     package = "antigravity"
     marker = launch.MARKER
     answer_keys = keys.ANSWER_KEYS
+    # agy 1.3.3 has extensions, not plugins, and no update a CLI flag runs.
+    has_plugins = False
 
     def launch_argv(self, binary: str, project: str, folder: Path) -> list[str]:
         # The project is not used: agy refuses a trailing tag, and the folder

@@ -377,6 +377,7 @@ class Session:
             "awaiting_input": self.awaiting_input,
             "foreign_session": self.foreign_session,
             "foreign_server_pid": self.foreign_server_pid,
+            "agent": self.agent,
             "restarting": self.restarting,
             "restart_refused": self.restart_refused,
         }

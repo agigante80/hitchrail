@@ -19,6 +19,7 @@ class ClaudeCode:
     package = "claude-code"
     marker = launch.REMOTE_CONTROL_MARKER
     answer_keys = keys.ANSWER_KEYS
+    has_plugins = True
 
     def __init__(self, config_path: Path, sessions_dir: Path) -> None:
         self._config_path = config_path

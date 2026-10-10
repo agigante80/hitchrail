@@ -1,6 +1,6 @@
 import { buildActions } from "/actions.js";
 import { formatMemory, formatUptime } from "/format.js";
-import { TALL_STATES, severalRoots, splitProject } from "/roots.js";
+import { TALL_STATES, agentChip, severalRoots, splitProject } from "/roots.js";
 import { chipWords } from "/wrapup_tick.js";
 
 function badgeFor(project) {
@@ -108,6 +108,15 @@ export function renderRow(project) {
     where.dataset.rootLabel = label;
     where.textContent = label;
     head.append(where);
+  }
+
+  const agent = agentChip(project);
+  if (agent) {
+    const which = document.createElement("span");
+    which.className = "row-root row-agent";
+    which.dataset.agent = agent;
+    which.textContent = agent;
+    head.append(which);
   }
 
   const badge = document.createElement("span");

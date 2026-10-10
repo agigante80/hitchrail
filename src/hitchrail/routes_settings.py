@@ -15,6 +15,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from hitchrail import engine as eng
+from hitchrail.agents import Agents
 from hitchrail.config import Config
 from hitchrail.routes_common import _UNPARSEABLE, _error, in_thread, logger
 
@@ -123,6 +124,7 @@ def settings_routes(engine: eng.Engine, config: Config) -> list[Route]:
         """Read only values as `{value, source}`; the two a request may write
         carry `editable` too. The token is its source alone."""
         src = config.sources
+        agents = {c.ident: c for c in Agents(config).all()}
 
         def shown(name: str, value: object) -> dict[str, object]:
             return {"value": value, "source": src.get(name, "default")}
@@ -146,7 +148,13 @@ def settings_routes(engine: eng.Engine, config: Config) -> list[Route]:
             # exist is the operator's file, never a request's.
             "agents": {
                 "value": {
-                    ident: {"package": spec.package, "binary": spec.agent_binary}
+                    ident: {
+                        "package": spec.package,
+                        "binary": spec.agent_binary,
+                        # #294. The plugin update runs the default agent's
+                        # binary only, so the page names what it leaves out.
+                        "plugins": agents[ident].agent.has_plugins,
+                    }
                     for ident, spec in config.agents.items()
                 },
                 "source": src.get("agents", "default"),

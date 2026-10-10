@@ -167,7 +167,7 @@ in both directions by the suite:
 | `unsupported` | folders that cannot be projects, each with the rule it broke, capped |
 | `unsupported_total` | the true count behind that cap |
 | `memory` | the machine's `available_mb` and `total_mb`, null when unreadable |
-| `roots` | every root the interface shows as `{label, path}`, one root still a list |
+| `roots` | every root the interface shows as `{label, path, agent}`, one root still a list; `agent` is the identifier a project there starts (#290), `default` unless the config file names one |
 | `hidden_roots` | the labels of configured roots absent from the listing today, disabled in the config file or hidden by a request; an empty page says "hidden" rather than "no projects" |
 | `hidden_roots_editable` | of those, the ones a request can bring back: the config file's own `enabled = false` is not one, so an empty page can say where the choice lives |
 | `server` | this server, as distinct from this machine |
@@ -199,6 +199,7 @@ One project, as `projects` lists it, as `POST` and `DELETE` on
 | `stop_typing` | while `stopping`: the wrap up prompt or the exit is being typed into the pane this moment, so a `DELETE` now answers 202 and does nothing; false otherwise |
 | `stop_age_s` | while `stopping`: seconds since the stop was requested, as an AGE measured on the server's monotonic clock, never an instant; a client adds it to its own clock at the moment it received the row. A repeated `DELETE` on an `exiting` row starts a new stop and resets it; Exit now does not. Null otherwise |
 | `stop_policy` | while `stopping`: the `stop_policy` the stop was requested under, which is the one its expiry acts on whatever `server.stop_policy` says now (#419); null otherwise |
+| `agent` | the identifier of the configured agent derivation found running here (#294): `default`, or a key of the config file's `agents` table; null while nothing runs. It can differ from the root's `agent` when the config changed under a running session, and a stop types that agent's keys, never the root's |
 | `restarting` | a `restart` is pending: a new agent will be started once this stop ends with the agent gone (#472); false otherwise |
 | `restart_refused` | the reason the start that followed a restart was refused (the memory guard, say); the row is then `stopped`, and nothing is retried; null otherwise, and cleared when the row is anything but `stopped` |
 | `protected` | the self project; refuses every mutating route |
@@ -297,8 +298,10 @@ memory figures, `config_file` and `state_file`.
 source, agent}`, hidden ones included, with `hidden_roots` beside it. `agent`
 is the identifier of the agent a project there starts (#290): `default` for
 the one `agent_binary` names, or a key of `agents`, whose value maps each
-identifier the config file configures to `{package, binary}`, empty when it
-configures none. An identifier is the operator's word; `package` names which
+identifier the config file configures to `{package, binary, plugins}`, empty
+when it configures none. `plugins` says whether that agent has plugins at all;
+`POST /api/plugins/update` updates the default agent's only, whatever it says
+(#294). An identifier is the operator's word; `package` names which
 agent it is. Both are read only. `stop_timeout`
 and `stop_policy` (#239, #409) are each `{value, source, editable}`, the
 source `state` when the interface set it.

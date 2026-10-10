@@ -122,6 +122,13 @@ class Agent(Protocol):
         questions are not read, which makes every answer a refusal."""
         ...  # pragma: no cover
 
+    @property
+    def has_plugins(self) -> bool:
+        """Whether this agent has plugins a person could update. Only the
+        default agent's are updated (#297 runs `agent_binary`), so this is
+        what lets the settings page say which of the others it leaves out."""
+        ...  # pragma: no cover
+
     def launch_argv(self, binary: str, project: str, folder: Path) -> list[str]:
         """The argv that starts this agent. A LIST, never a string. Its tail
         after the binary must be unique per project and per agent: the

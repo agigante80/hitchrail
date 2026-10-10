@@ -159,16 +159,19 @@ at once; batches 3 onward run in order.
   answer keys refuse. Every action follows the agent derivation found running,
   not the root's (8ab756a and the owner fix after it). The flag skips agy's
   trust prompt: #504.
-- [ ] **267.** A fake `agy` beside the fake Claude Code in the e2e and
+- [x] **267.** A fake `agy` beside the fake Claude Code in the e2e and
   live_tmux tiers, so a root of each runs in one test. The live_tmux half is
   `test_live_tmux_agents.py`: start, polite stop, wrap up, stale and
   detached for a root of each on one engine, with agy's stand in refusing
-  Claude Code's keys. The e2e half lands with 268, whose page it proves.
+  Claude Code's keys. The e2e half is `tests/e2e/test_agents.py`, with 268.
 
 ### Batch 5: what a person sees, tasks 268 and 269
 
-- [ ] **268.** The page names a row's agent when more than one is
-  configured, and offers plugin updates only for agents that have them.
+- [x] **268.** The page names a row's agent when more than one is
+  configured, and offers plugin updates only for agents that have them. The
+  update still runs the default agent's binary alone, so a second Claude Code
+  agent's plugins are named as not updated from the page rather than
+  updated: #505.
 - [ ] **269, #295.** README and the operator docs: the `[agents]` table, the
   per root key, and how a new agent package is added.
 

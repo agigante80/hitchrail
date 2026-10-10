@@ -51,6 +51,11 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
   starts agy with the project folder added, which agy takes as trusting
   it, so every folder under a root that runs agy is trusted without being
   asked. Claude Code still asks.
+- With roots that run different agents, each row names the agent it runs,
+  and the settings page says the plugin update covers the default agent
+  only, naming the configured agents it leaves out. In the API, each row and
+  each listing `roots` entry carries `agent`, and each `agents` entry in
+  `GET /api/config` carries `plugins`.
 
 ### Fixed
 

@@ -927,7 +927,10 @@ async def test_the_config_view_names_each_roots_agent_and_never_a_vendor(
     config = replace(
         config,
         roots=(replace(config.roots[0], agent="second"), *config.roots[1:]),
-        agents={"second": AgentSpec("claude-code", "/opt/second")},
+        agents={
+            "second": AgentSpec("claude-code", "/opt/second"),
+            "agy": AgentSpec("antigravity", "/opt/agy"),
+        },
         sources={"agents": "file"},
     )
     engine = make_engine(config, tmux, procs_from(RUNNING_PS), PLENTY)
@@ -942,6 +945,11 @@ async def test_the_config_view_names_each_roots_agent_and_never_a_vendor(
         ("vault", "default"),
     ]
     assert body["agents"] == {
-        "value": {"second": {"package": "claude-code", "binary": "/opt/second"}},
+        # #294. `plugins` is the package's, not the identifier's: a second
+        # Claude Code has plugins the update does not reach, agy has none.
+        "value": {
+            "second": {"package": "claude-code", "binary": "/opt/second", "plugins": True},
+            "agy": {"package": "antigravity", "binary": "/opt/agy", "plugins": False},
+        },
         "source": "file",
     }
