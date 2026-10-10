@@ -160,7 +160,10 @@ at once; batches 3 onward run in order.
   not the root's (8ab756a and the owner fix after it). The flag skips agy's
   trust prompt: #504.
 - [ ] **267.** A fake `agy` beside the fake Claude Code in the e2e and
-  live_tmux tiers, so a root of each runs in one test.
+  live_tmux tiers, so a root of each runs in one test. The live_tmux half is
+  `test_live_tmux_agents.py`: start, polite stop, wrap up, stale and
+  detached for a root of each on one engine, with agy's stand in refusing
+  Claude Code's keys. The e2e half lands with 268, whose page it proves.
 
 ### Batch 5: what a person sees, tasks 268 and 269
 
