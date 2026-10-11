@@ -76,11 +76,13 @@ Phase 23 closed re-shaped on 2026-10-10 and left two things here. #504,
 agy's `--add-dir=` answering agy's trust prompt for every folder, was decided
 on 2026-10-11 as kept and stated, with a test tying the argv to the README;
 letting agy ask instead is #517 in Backlog, which starts with a measurement.
-The S25 watch at 360 CSS px ran on 2026-10-11: #468 closed, and #485 keeps
-only the largest font scale, which needs a settings change on Andrea's phone.
-It filed #518 (the row's buttons shrink into their padding) and #519 (a frozen
-uptime). The countdown and the agent chip were not on that screen and are
-still unwatched on the S25.
+The S25 watch at 360 CSS px ran on 2026-10-11 and closed #468. It filed #518
+(the row's buttons shrink into their padding) and #519 (a frozen uptime). The
+rest ran the same day on the Pixel, set to 360 CSS px. The wrap up countdown
+and the agent chip both fit the row. #485 closed: Android's font size does not
+reach the page in Chrome 155, and at Chrome's own enlarged zoom a Restart still
+lands, but the sticky header and fixed footer leave the list almost no room
+(#520), and the bar overlaps its wordmark (#521).
 
 Done when a reboot brings back what was running, exactly once each, without a
 person tapping anything, and the security argument has been rewritten rather
