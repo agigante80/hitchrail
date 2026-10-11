@@ -195,6 +195,28 @@ def test_every_folder_is_trusted_because_the_argv_skips_the_prompt(tmp_path: Pat
     assert agy.folder_is_trusted(tmp_path, trusted)
 
 
+# Measured on 1.3.3 (#294): this flag is what skips agy's trust prompt.
+TRUST_SKIPPING_FLAG = "--add-dir"
+README_TRUST_LINE = "**agy is started trusting its folder.**"
+
+
+def test_the_argv_the_package_and_the_readme_agree_on_trust(tmp_path: Path) -> None:
+    """#504, decided as option 1: keep the flag and say so. The argv, what
+    the package reports and what an operator reads move together, so a
+    change to how agy is started cannot leave the README promising, or
+    denying, a trust prompt that is not what happens. Dropping the flag
+    (#504's options 2 to 4) means changing all three in one commit."""
+    argv = agy_ipc.Antigravity().launch_argv("agy", "main~proj", tmp_path)
+    skips_the_prompt = any(a.startswith(TRUST_SKIPPING_FLAG) for a in argv)
+    agy = agy_ipc.Antigravity()
+    trusted = agy.trusted()
+    assert trusted is not None
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text()
+    assert skips_the_prompt
+    assert agy.folder_is_trusted(tmp_path, trusted) is skips_the_prompt
+    assert (README_TRUST_LINE in readme) is skips_the_prompt
+
+
 @pytest.mark.parametrize(
     ("pane", "link"),
     [

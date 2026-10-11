@@ -73,10 +73,14 @@ out if the phase runs long. `server.py`'s split (#205) moved to Phase 26 on
 2026-10-09, because the restart route reaches that file first.
 
 Phase 23 closed re-shaped on 2026-10-10 and left two things here. #504,
-agy's `--add-dir=` answering agy's trust prompt for every folder, is Andrea's
-decision and holds the next release, since agy is already in `## Unreleased`.
-And the S25 watch at 360 CSS px (#468, #485), which has slipped four phases
-running and covers the bar, Restart, the countdown and the agent chip.
+agy's `--add-dir=` answering agy's trust prompt for every folder, was decided
+on 2026-10-11 as kept and stated, with a test tying the argv to the README;
+letting agy ask instead is #517 in Backlog, which starts with a measurement.
+The S25 watch at 360 CSS px ran on 2026-10-11: #468 closed, and #485 keeps
+only the largest font scale, which needs a settings change on Andrea's phone.
+It filed #518 (the row's buttons shrink into their padding) and #519 (a frozen
+uptime). The countdown and the agent chip were not on that screen and are
+still unwatched on the S25.
 
 Done when a reboot brings back what was running, exactly once each, without a
 person tapping anything, and the security argument has been rewritten rather
