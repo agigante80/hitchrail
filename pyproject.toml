@@ -1,6 +1,6 @@
 [project]
 name = "hitchrail"
-version = "0.19.0"
+version = "0.19.1"
 description = "Start and stop headless Claude Code sessions across a folder of projects, from a phone-first web UI."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -213,8 +213,8 @@ forbidden_modules = [
 # distribution and unfixable afterwards, because a version number on PyPI
 # cannot be reused, only yanked.
 
-# #35. Mutation testing over the five modules between a web page and a shell,
-# and only those. Coverage says whether a line RAN; this says whether any
+# #35. Mutation testing over the modules between a web page and a shell, the
+# ones `source_paths` lists below, and only those. Coverage says whether a line RAN; this says whether any
 # assertion would have noticed the line being WRONG. Three defects in this
 # project shipped green at 98% branch coverage, and one of them was a teardown
 # assertion that ran after its socket was deleted and therefore could not fail.
@@ -310,10 +310,10 @@ source_paths = [
   # recorder fakes, which never open a real handle.
   "src/hitchrail/signals.py",
 ]
-# The tests that actually exercise those five. The full suite takes 34 seconds
+# The tests that actually exercise the modules in `source_paths`. The full suite takes 34 seconds
 # and would make a single run hours; these 441 take 1.5, which is what makes
 # the difference between a check that runs and one that is described.
-# The five mutated modules are copied mutated; everything else the tests import
+# The `source_paths` modules are copied mutated; everything else the tests import
 # has to be copied verbatim or the package will not import. Listed rather than
 # globbed on `src/hitchrail/`, which would copy the mutated files back over
 # themselves and make every run report zero mutants killed.
@@ -485,4 +485,7 @@ pytest_add_cli_args_test_selection = [
   # #274. Drives `signals.py` through `FakePidfd` and scripted tables: every
   # refusal and the order of handle, look and send, hermetic.
   "tests/test_signal.py",
+  # #487. `statefile.Preferences` is mutated and this file is what drives its
+  # stop policy: persisted, pinned by the config, and reloaded.
+  "tests/test_stop_policy.py",
 ]

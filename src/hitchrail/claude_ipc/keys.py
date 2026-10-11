@@ -191,7 +191,14 @@ def request_stop(pane: Pane, project: str, settle: Callable[[float], None]) -> N
         logger.warning("stop %s: could not look for the exit menu, pressed nothing", project)
         return
     if answer:
-        pane.send_keys(project, "Enter")
+        # The same rule for the press: the exit is already out, so an OSError
+        # here would turn a stop that was sent into an error (#479). The menu
+        # stays up, and the expiry reports the row as waiting on a person.
+        try:
+            pane.send_keys(project, "Enter")
+        except OSError:
+            logger.warning("stop %s: exit menu seen, Enter not sent", project)
+            return
         logger.info("stop %s: the exit asked about background work, sent Enter", project)
 
 

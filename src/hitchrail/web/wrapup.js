@@ -15,7 +15,9 @@ export const SENDING_EXIT = "sending the exit";
 export function wrapUpLeft(session, nowMs, ceilingS) {
   if (session?.stopping_phase !== "closing") return null;
   if (typeof session.stopBeganHere !== "number" || !Number.isFinite(ceilingS)) return null;
-  const elapsed = (nowMs - session.stopBeganHere) / 1000;
+  // Floored at zero (#495): a clock stepped backwards would otherwise read
+  // more time left than the ceiling, which no wrap up is ever given.
+  const elapsed = Math.max(0, (nowMs - session.stopBeganHere) / 1000);
   return Math.max(0, Math.ceil(ceilingS - elapsed));
 }
 

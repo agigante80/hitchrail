@@ -56,7 +56,9 @@ export function buildActions(project, actions) {
         : () => confirmStop(project);
     // #474. Says what it does on a row wrapping up: the dialog it reopens is
     // the one with Exit now, which skips the rest of the wait.
-    const closing = project.stopping_phase === "closing";
+    // #495. Still "Stop" while the prompt is being typed (`stop_typing`): the
+    // wait it reopens offers no Exit now then, since a DELETE is the no-op 202.
+    const closing = project.stopping_phase === "closing" && !project.stop_typing;
     add(closing ? "Exit now" : "Stop", "").addEventListener("click", onStop);
     // #472. Not while a stop is in flight: a Restart then would be the
     // route's second Stop, which on a `closing` row is Exit now, behind a

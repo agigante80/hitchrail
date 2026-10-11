@@ -31,7 +31,13 @@ from hitchrail.claude_ipc import (
 )
 from hitchrail.claude_ipc import exit_menu as ipc_exit_menu
 from hitchrail.claude_ipc import screen as ipc_screen
-from support import AGENT_PACKAGES, in_an_agent_package, in_claude_ipc, source_modules
+from support import (
+    AGENT_PACKAGES,
+    in_an_agent_package,
+    in_claude_ipc,
+    names_outside_the_quarantine,
+    source_modules,
+)
 
 SRC = Path(__file__).parent.parent / "src" / "hitchrail"
 
@@ -395,15 +401,23 @@ def test_the_launch_flags_live_only_here() -> None:
     assert leaked == {}, f"launch flags outside the quarantine: {leaked}"
 
 
-def test_the_engine_never_iterates_the_stop_keys() -> None:
-    """A usage pattern, not an import, so no contract can enforce it.
+def test_nothing_outside_the_quarantine_names_the_stop_keys() -> None:
+    """A usage pattern, not an import, so no contract can enforce it (#476).
 
-    Grepping for "/exit" alone passes while the engine still loops over the
+    Grepping for "/exit" alone passes while a module still loops over the
     sequence, which is the leak the design's section 4.3 exists to prevent.
+    It was only the engine that was read, and `request_stop` is now also
+    called from the sweep and `signals.py` acts on agents too, so every module
+    outside the quarantine is read, by syntax tree (see the helper).
     """
-    engine = (SRC / "engine.py").read_text()
-    assert "GRACEFUL_STOP_KEYS" not in engine
-    assert "send_keys" not in engine
+    seen = names_outside_the_quarantine()
+    assert "engine.py" in seen and "sweep.py" in seen, "the walk missed the callers"
+    leaked = {
+        rel: sorted(names & {"GRACEFUL_STOP_KEYS", "send_keys"})
+        for rel, names in seen.items()
+        if names & {"GRACEFUL_STOP_KEYS", "send_keys"}
+    }
+    assert leaked == {}, f"the stop sequence is named outside the quarantine: {leaked}"
 
 
 def test_this_module_carries_an_instability_warning() -> None:

@@ -19,7 +19,17 @@ import pytest
 from conftest import CLEAR_INPUT_BOX, FakeClock, FakeTmux, failing_procs, procs_from, ps_row
 from hitchrail import claude_ipc
 from hitchrail.engine import Engine
-from hitchrail.sessions import NoAgent, NotRunning, Session, State, StopRefused, UnknownProject
+from hitchrail.sessions import (
+    AlreadyRunning,
+    Locked,
+    NoAgent,
+    NotRunning,
+    Session,
+    StartFailed,
+    State,
+    StopRefused,
+    UnknownProject,
+)
 from support import DEFAULT_LABEL
 from test_engine_wrap_up import exits_sent, finish, typed
 from test_stop_policy import VESSEL, ender, policy_engine
@@ -344,6 +354,56 @@ def test_the_refusal_is_announced_and_goes_with_the_next_run(root: Path) -> None
     assert engine.get(VESSEL).restart_refused is None, "a new stop does not inherit it"
 
 
+@pytest.mark.parametrize(
+    ("refusal", "words"),
+    [
+        (Locked("main~vessel"), "another start is already in flight"),
+        (AlreadyRunning("main~vessel"), "an agent is already running here"),
+        (StartFailed("pane text"), "the session did not start"),
+    ],
+    ids=["locked", "already-running", "start-failed"],
+)
+def test_a_refusal_with_only_a_name_is_put_in_words_on_the_row(
+    root: Path, refusal: Exception, words: str
+) -> None:
+    """`Locked` and `AlreadyRunning` carry the folder's name alone, which read
+    on a row as "restart not started: main~vessel"."""
+    engine, tmux, _, starts = restartable(root)
+    engine.restart(VESSEL)
+    agent_exits(tmux)
+
+    def refuse(name: str, acknowledged: bool = False) -> Session:
+        starts.calls.append((name, acknowledged))
+        raise refusal
+
+    engine.start = refuse  # type: ignore[method-assign]
+    assert engine.advance_restarts() == []
+    reason = engine.get(VESSEL).restart_refused
+    assert reason is not None and words in reason
+    assert "main~vessel" not in reason
+
+
+def test_a_mark_cleared_on_a_row_that_is_not_stopped_is_announced(root: Path) -> None:
+    """Else the row keeps saying `restarting` until some other event."""
+    engine, _, _, starts = restartable(root)
+    published: list[dict[str, object]] = []
+
+    class Bus:
+        def publish(self, event: dict[str, object]) -> None:
+            published.append(event)
+
+    engine.attach_bus(Bus())  # type: ignore[arg-type]
+    engine.restart(VESSEL)
+    assert published[-1]["restarting"]
+    engine._drop(VESSEL, engine._stopping[VESSEL])
+    assert engine.get(VESSEL).state is State.RUNNING
+    published.clear()
+    assert engine.advance_restarts() == []
+    assert published, "the clear was announced"
+    assert not published[-1]["restarting"]
+    assert starts.calls == []
+
+
 def test_a_start_that_raises_unexpectedly_is_still_on_the_row(root: Path) -> None:
     engine, tmux, _, starts = restartable(root)
     engine.restart(VESSEL)
@@ -503,3 +563,29 @@ def test_end_anyway_while_the_exit_is_being_typed_starts_nothing(root: Path) -> 
     engine.restart(VESSEL)
     assert fired
     _nothing_started(engine, starts)
+
+
+def test_a_stop_expiring_between_the_stop_returning_and_the_mark_still_marks(
+    root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The sweep's expiry removes a marker; it does not end the agent. Counting
+    it as an end would silence this press and log "ended while the stop was
+    typing", which is false: the agent is there, and the mark is how a person's
+    Restart on a slow stop is remembered (the next tick clears it, as for any
+    stop that ended with the agent still running)."""
+    engine, _, clock, starts = restartable(root)
+    real_stop = engine.stop
+
+    def stop_then_expire(name: str) -> Session:
+        session = real_stop(name)
+        clock.advance(engine.prefs.stop_timeout() + 1)
+        assert engine.expire_stops() == [name]
+        return session
+
+    engine.stop = stop_then_expire  # type: ignore[method-assign]
+    with caplog.at_level(logging.INFO, logger="hitchrail.engine"):
+        engine.restart(VESSEL)
+    assert VESSEL in engine.restarts.pending, "the press still marks"
+    assert "ended while the stop was typing" not in caplog.text
+    assert engine.restarts.epoch(VESSEL) == 0, "an expiry is not an end"
+    assert starts.calls == []

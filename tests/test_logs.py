@@ -196,6 +196,37 @@ def test_an_unexpected_shape_on_another_uvicorn_logger_is_not_withheld() -> None
     assert record.getMessage() == "started"
 
 
+def test_a_cached_exc_text_is_redacted_too() -> None:
+    """#489. A record whose `exc_text` something already cached (a handler
+    that formatted it first) skips the formatting branch, so the redaction of
+    the cached text is its own line of code and needs its own test."""
+    record = logging.LogRecord("uvicorn.error", logging.ERROR, __file__, 1, "failed", (), None)
+    record.exc_text = "boom /x?token=SECRET"
+    assert logs.QueryFilter().filter(record)
+    assert "SECRET" not in (record.exc_text or "")
+    assert record.exc_text == "boom /x" + logs.QUERY_OMITTED
+
+
+def test_a_cached_exc_text_beside_exc_info_is_redacted_not_reformatted() -> None:
+    """#489. With `exc_info` set AND a cached `exc_text`, the cached text is
+    the one printed, so it is the one that must lose its query. The text is
+    deliberately unlike the live exception, to show it was not rebuilt."""
+    try:
+        raise RuntimeError("live /y?token=OTHER")
+    except RuntimeError:
+        exc_info = sys.exc_info()
+    record = logging.LogRecord(
+        "uvicorn.error", logging.ERROR, __file__, 1, "failed", (), exc_info
+    )
+    record.exc_text = "Traceback cached\nRuntimeError: boom /x?token=SECRET\nnext line"
+    assert logs.QueryFilter().filter(record)
+    assert (
+        record.exc_text
+        == "Traceback cached\nRuntimeError: boom /x" + logs.QUERY_OMITTED + "\nnext line"
+    )
+    assert "SECRET" not in logging.Formatter().format(record)
+
+
 def test_a_target_without_a_query_is_written_as_it_was(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

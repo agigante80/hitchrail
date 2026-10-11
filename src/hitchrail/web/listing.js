@@ -1,5 +1,5 @@
 import { api } from "/api.js";
-import { closeDialog } from "/dialogs.js";
+import { closeDetachedDialog, closeDialog } from "/dialogs.js";
 import { $ } from "/dom.js";
 import { render } from "/list.js";
 import { showRefusal } from "/refusal.js";
@@ -50,6 +50,7 @@ export function applySession(session) {
   // Any other dialog, a log view or a new folder sheet, carries no `for` and
   // is left alone.
   if (session.state !== "running") closeDialog(session.name);
+  closeDetachedDialog(session);
   render();
 }
 
@@ -197,6 +198,11 @@ export async function refresh() {
   state.hiddenRoots = result.body.hidden_roots ?? [];
   state.hiddenRootsEditable = result.body.hidden_roots_editable ?? [];
   state.memory = result.body.memory;
+  // #479. A listing is the only report of an agent that died unannounced.
+  const detachedFor = $("[data-dialog]")?.dataset.detachedFor;
+  if (detachedFor !== undefined) {
+    closeDetachedDialog(state.projects.find((p) => p.name === detachedFor) ?? { name: detachedFor });
+  }
   state.server = result.body.server ?? state.server;
   render();
   return result;

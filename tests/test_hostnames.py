@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from config_support import _r
+from hitchrail import hostnames
 from hitchrail.config import (
     Config,
     is_loopback_host,
@@ -159,3 +160,20 @@ def test_localhost_localdomain_stays_loopback_for_every_other_rule(tmp_path: Pat
         tls_key=key,
         extra_origins=("http://localhost.localdomain:8787",),
     )
+
+
+@pytest.mark.parametrize(
+    ("bind", "browse"),
+    [
+        ("127.0.0.1", "http://localhost:8787"),
+        ("localhost", "http://localhost:8787"),
+        ("localhost.localdomain", "http://localhost:8787"),
+        ("[::1]", "http://localhost:8787"),
+        ("127.0.0.2", "http://127.0.0.2:8787"),
+        ("::2", "http://[::2]:8787"),
+    ],
+)
+def test_the_address_advised_is_one_the_bind_serves(bind: str, browse: str) -> None:
+    """#488. `localhost` resolves to 127.0.0.1, so it is named only for a bind
+    that serves it, and an IPv6 literal is bracketed for a URL."""
+    assert hostnames.browse_origin(hostnames.served_host(bind), 8787) == browse

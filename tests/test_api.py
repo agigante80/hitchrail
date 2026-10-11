@@ -2791,6 +2791,29 @@ async def test_restart_the_adapter_declined_is_409_stop_unsafe_and_marks_nothing
     assert engine.restarts.pending == {}
 
 
+async def test_restart_on_an_unreadable_machine_is_503_and_marks_nothing(
+    config: Config,
+) -> None:
+    engine = make_engine(config, _unreadable_tmux(), procs_from(RUNNING_PS))
+    async with client_for(engine, config) as c:
+        r = await c.post(f"/api/sessions/{proj('vessel')}/restart", headers=HEADERS)
+    assert r.status_code == 503, r.text
+    assert r.json()["code"] == "machine_unreadable"
+    assert engine.restarts.pending == {}
+
+
+async def test_restart_under_a_vanished_root_is_503_and_marks_nothing(
+    config: Config, engine: Engine
+) -> None:
+    """The mirror of the DELETE case: a stopped name's ladder lists the root."""
+    shutil.rmtree(config.roots[0].path)
+    async with client_for(engine, config) as c:
+        r = await c.post(f"/api/sessions/{proj('network')}/restart", headers=HEADERS)
+    assert r.status_code == 503, r.text
+    assert r.json()["code"] == "root_unavailable"
+    assert engine.restarts.pending == {}
+
+
 async def test_restart_on_the_self_project_is_423(root: pathlib.Path) -> None:
     cfg = make_config(
         root,

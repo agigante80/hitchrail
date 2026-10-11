@@ -175,6 +175,29 @@ def origin_forms(scheme: str, host: str, port: int | None) -> set[str]:
     return forms
 
 
+def browse_origin(host: str, port: int | None) -> str:
+    """The shortest plain http origin for `host`, the one to print for a person."""
+    return min(origin_forms("http", host, port), key=len)
+
+
+def served_host(bind: str) -> str:
+    """The name that reaches a socket bound to `bind` from this machine (#488).
+
+    Asked only of a loopback bind. An IP literal other than 127.0.0.1 and ::1,
+    `127.0.0.2` say, is named as it is: `localhost` resolves to 127.0.0.1,
+    where nothing listens. A loopback NAME gets `localhost`, never itself:
+    `localhost.localdomain` resolves where `localhost` does, and it is the one
+    name whose plain http origin can be withheld, so advising it would send
+    the operator to the origin the same line says is refused.
+    """
+    bare = normalise_host(bind)
+    try:
+        ipaddress.ip_address(bare)
+    except ValueError:
+        return "localhost"
+    return "localhost" if bare in {"127.0.0.1", "::1"} else bare
+
+
 def is_valid_host(value: str) -> bool:
     """A bare hostname or IP literal, and nothing else.
 

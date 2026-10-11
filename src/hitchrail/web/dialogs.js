@@ -23,15 +23,29 @@ export function closeDialog(onlyIfFor) {
   dialog.close();
 }
 
+/* #479. A dialog about a DETACHED agent cannot carry `forProject`, whose
+   close rule is "the row left running" and which a detached row never is.
+   It carries `detachedFor` instead, and closes when the row leaves
+   `detached` (the agent died, or a terminal took it over): the End it offers
+   would otherwise be answered with a 409 `not_detached`. */
+export function closeDetachedDialog(session) {
+  const dialog = $("[data-dialog]");
+  if (!dialog?.open || dialog.dataset.detachedFor === undefined) return;
+  if (dialog.dataset.detachedFor !== session?.name) return;
+  if (session.state !== "detached") dialog.close();
+}
+
 /* `actions` are given SAFEST FIRST. The column layout means first is topmost
    and furthest from the thumb, which is the placement section 7 asks for. */
-export function showDialog({ title, body, actions, extra, forProject, wide = false }) {
+export function showDialog({ title, body, actions, extra, forProject, detachedFor, wide = false }) {
   const dialog = $("[data-dialog]");
   if (!dialog) return;
   dialog.replaceChildren();
   delete dialog.dataset.refusal;
   delete dialog.dataset.bulk;
   delete dialog.dataset.waiting;
+  delete dialog.dataset.detachedFor;
+  if (detachedFor !== undefined) dialog.dataset.detachedFor = detachedFor;
   // #168. Only the pane view asks for room, and only the stylesheet's wide
   // breakpoint grants it: the confirmation and the rest of the stop sequence
   // share this element and keep the phone's column at every width.

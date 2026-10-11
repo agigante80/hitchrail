@@ -32,6 +32,38 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+## 0.19.1 - 2026-10-11
+
+### Fixed
+
+- A Restart that is cancelled no longer leaves the row saying it is
+  restarting, and a refused start says why in words ("another start is
+  already in flight for this folder") rather than an internal name. A second
+  Restart pressed as the stop times out is no longer lost.
+- After a timed out Restart, the dialog says no new session will start.
+- The dialog for a detached agent that outlived its timeout closes when the
+  agent ends, and its button escalates to Kill once End was already sent,
+  as the row's does.
+- Stop all warns that work may be lost for every row it stops, not only the
+  fresh ones.
+- A failed Enter on Claude Code's exit menu is logged and the stop carries
+  on, instead of reporting an error for an exit that was already sent.
+- The wrap up countdown never reads above its ceiling after the clock steps
+  back, and a row still typing its closing message offers Stop, not Exit
+  now, until the exit can be sent.
+- With browser storage refused, a change of the system colour scheme no
+  longer undoes a theme you picked.
+- Started with `--host 127.0.0.2`, the startup advice names that address
+  instead of `localhost`, where nothing listens.
+- The log says a SIGHUP was sent, not that the agent was killed, when the
+  machine cannot be read afterwards.
+
+### Documentation
+
+- The README suggests what a wrap up prompt can ask, and what to keep out of
+  it. The prompt stays settable only in the config file: a page that could
+  set what Stop types would be a route that types any text into an agent.
+
 ## 0.19.0 - 2026-10-10
 
 ### Added

@@ -594,6 +594,24 @@ and still interrupts.
 - Neither setting can be changed from the phone: a request that could set
   what Stop types would be a route that types arbitrary text.
 
+Some ideas for what the prompt can ask, best written as one slash command
+that does all of it, kept in your projects (`.claude/commands/wrapup.md`) or
+in a plugin:
+
+- **Leave a handoff note.** What was done, what is left, what to try next,
+  in a file the next session reads first.
+- **Commit work in progress to a local branch**, such as `wip/<date>`, so
+  an uncommitted change survives a reboot or a Restart. Commit, never push.
+- **Update the project's memory or todo list**, so the next session does
+  not rediscover what this one learned.
+- **Stop background work cleanly**: a dev server, a watcher, a long test
+  run, rather than leaving it to the exit menu.
+
+What to keep out of it: anything that asks a question, since nobody is at
+the terminal to answer and the wait runs to `stop_prompt_timeout`; anything
+that publishes, such as a push, a deploy or a message; and anything slower
+than the timeout, since the exit then interrupts it.
+
 ### When a stop ends on a question
 
 Asked to exit with background work running, Claude Code asks whether to

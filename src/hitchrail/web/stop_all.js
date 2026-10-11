@@ -74,23 +74,19 @@ export function confirmStopAll() {
             + `task, then to exit. A wrap up longer than ${wrapUpSeconds()}s has its task `
             + "interrupted."
           : fresh === 1
-            ? "It will be interrupted, then asked to exit. "
-              + "Anything it is part way through may be lost."
-            : "Each will be interrupted, then asked to exit, one at a time. "
-              + "Anything they are part way through may be lost.",
+            ? "It will be interrupted, then asked to exit."
+            : "Each will be interrupted, then asked to exit, one at a time.",
       again.length === 0
         ? ""
         : `${again.map((p) => displayProject(p.name)).join(", ")} `
           + `${again.length === 1 ? "is" : "are"} already asked to exit, `
-          + "and will only be asked again."
-          // The exit is resent whatever `stop_prompt` says (#416), so this
-          // clause owes the warning the single row confirm gives an exiting
-          // row (#433). Not twice: the fresh clause above already says it
-          // when no wrap up prompt is set and there is a fresh row.
-          + (fresh > 0 && !state.server.stop_prompt_set
-            ? ""
-            : ` Anything ${again.length === 1 ? "it is" : "they are"} part way through `
-              + "may be lost."),
+          + "and will only be asked again.",
+      // #479. ONE warning for everything that gets the exit without a wrap up:
+      // the exit is resent to an `exiting` row whatever `stop_prompt` says
+      // (#416, #433), and with no prompt the fresh rows are interrupted too.
+      // It used to ride on the fresh clause, so a mixed set warned only
+      // about the fresh rows and the exiting ones were passed over.
+      lostWorkWarning(state.server.stop_prompt_set ? again.length : rows.length),
       endAnywayNote(),
     ].filter(Boolean).join(" "),
     actions: [
@@ -98,6 +94,11 @@ export function confirmStopAll() {
       ["Stop all", "", () => beginStopAll(rows)],
     ],
   });
+}
+
+function lostWorkWarning(count) {
+  if (count === 0) return "";
+  return `Anything ${count === 1 ? "it is" : "they are"} part way through may be lost.`;
 }
 
 async function beginStopAll(rows) {
