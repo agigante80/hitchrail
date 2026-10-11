@@ -202,7 +202,10 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # the derive call wrapped once it passed them.
     # 1300 for #294: a stop acts through the agent the row was derived
     # running and records it on the marker, not through the root's agent.
-    "engine.py": 1300,
+    # 1302 for #511: `NotRestarting` imported and re-exported, because every
+    # route reaches the engine's refusals as `eng.<Name>`; the call off itself
+    # is `restart.py`'s, so this file gained no logic.
+    "engine.py": 1302,
     # #473. The sweep, moved whole from `engine.py`. 465 is the move: most of
     # it is the notes on the races between a scan, a stop and a start, which
     # are the reason the code is shaped as it is. It does not want splitting

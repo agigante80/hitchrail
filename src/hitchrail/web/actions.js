@@ -7,7 +7,7 @@ import { showRefusal } from "/refusal.js";
 import { sessionHref, sessionLink, showSessionLink } from "/session_link.js";
 import { startProject } from "/start.js";
 import { state } from "/state.js";
-import { confirmClear, confirmStop, reopenStop } from "/stop.js";
+import { confirmClear, confirmStop, confirmStopInstead, reopenStop } from "/stop.js";
 
 export function buildActions(project, actions) {
   const add = (label, className) => {
@@ -59,7 +59,19 @@ export function buildActions(project, actions) {
     // #495. Still "Stop" while the prompt is being typed (`stop_typing`): the
     // wait it reopens offers no Exit now then, since a DELETE is the no-op 202.
     const closing = project.stopping_phase === "closing" && !project.stop_typing;
-    add(closing ? "Exit now" : "Stop", "").addEventListener("click", onStop);
+    if (project.restarting && !closing) {
+      // #511. A Stop here would be the route's second DELETE, which leaves
+      // the restart in place: the person pressing Stop on a restarting row
+      // means "no new session", and only `DELETE .../restart` says that.
+      // Exit now keeps its meaning on a `closing` row; its wait says a new
+      // session follows, and offers Stop instead beside it. On `exiting` this
+      // replaces the resend a Stop would be, deliberately: one button per row
+      // at 360 px, and after Stop instead the row reads Stop again, so the
+      // resend is one tap further away and never gone (#511 review, dropped).
+      add("Stop instead", "").addEventListener("click", () => confirmStopInstead(project));
+    } else {
+      add(closing ? "Exit now" : "Stop", "").addEventListener("click", onStop);
+    }
     // #472. Not while a stop is in flight: a Restart then would be the
     // route's second Stop, which on a `closing` row is Exit now, behind a
     // confirmation that promised a wrap up (#242 review). The row's wait and

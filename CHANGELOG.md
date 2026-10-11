@@ -32,6 +32,17 @@ While the version is `0.y.z`, a breaking change may ship as a MINOR.
 
 ## Unreleased
 
+### Added
+
+- **Stop instead, on a restarting row (#511).** Pressing Stop on a row that
+  was restarting used to leave the restart in place, so a new session started
+  anyway. The row's button now reads Stop instead, and the wait offers it too:
+  the stop already in flight goes on, a wrap up included, and no new session
+  starts. Exit now keeps its meaning (skip the rest of the wait) and its wait
+  now says a new session follows. For scripts, the new
+  `DELETE /api/sessions/{name}/restart` does the same; nothing you run needs
+  to change.
+
 ## 0.19.1 - 2026-10-11
 
 ### Fixed

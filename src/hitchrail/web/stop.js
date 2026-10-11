@@ -1,5 +1,6 @@
 import { api } from "/api.js";
 import { closeDialog, showDialog } from "/dialogs.js";
+import { $ } from "/dom.js";
 import { refresh } from "/listing.js";
 import { wrapUpSeconds } from "/patience.js";
 import { showRefusal } from "/refusal.js";
@@ -58,6 +59,47 @@ export function confirmStop(project, restart = false) {
       [restart ? "Restart" : "Stop", "", () => beginStop(project, restart)],
     ],
   });
+}
+
+/* #511. Calls off the start and nothing else: the stop already in flight
+   goes on, a wrap up included. Not a second stop, so no warning about lost
+   work, which the first stop's confirmation already gave. */
+export function confirmStopInstead(project) {
+  showDialog({
+    title: `Stop ${displayProject(project.name)} instead?`,
+    body: "The stop already asked for goes on, and no new session will start after it.",
+    actions: [
+      ["Cancel", "ghost", () => closeDialog()],
+      ["Stop instead", "", () => stopInstead(project)],
+    ],
+  });
+}
+
+export async function stopInstead(project) {
+  const result = await api(`/api/sessions/${encodeURIComponent(project.name)}/restart`, {
+    method: "DELETE",
+  });
+  if (!result.ok) {
+    showRefusal(result, project);
+    return;
+  }
+  // The live wait, if this page has one, is a stop's from now: left a
+  // restart's, it would read the row stopped as a start still to come.
+  const live = waits.get(project.name);
+  if (live && !live.over) live.restart = false;
+  // Pressed in the wait, the wait stays up and becomes a stop's.
+  if (live && !live.over && "waiting" in ($("[data-dialog]")?.dataset ?? {})) {
+    showWaiting(project, live, waitingPhase(live, result.body));
+    await refresh();
+    return;
+  }
+  // Pressed from the row: the stop is still going, so its wait opens, with
+  // Kill on it, rather than leaving a row whose next tap resends the exit
+  // with nothing on screen saying a stop is running (#511 review). After the
+  // refresh, so the wait it builds reads the row no longer restarting.
+  await refresh();
+  if (result.body.stopping) reopenStop(project);
+  else closeDialog();
 }
 
 export function confirmClear(project) {

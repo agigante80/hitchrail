@@ -135,6 +135,17 @@ export function showRefusal(result, project) {
     });
     return;
   }
+  if (code === "not_restarting") {
+    // #511. Not a failure: the restart was already called off, or the new
+    // session has started. The list says which.
+    showDialog({
+      title: "No restart to call off",
+      body: "The restart was already called off, or the new session has started. The list shows which.",
+      actions: [["Close", "ghost", () => closeDialog()]],
+    });
+    refresh();
+    return;
+  }
   if (["gone", "not_ours", "owned_elsewhere", "not_detached"].includes(code)) {
     // #107. The row was wrong about the world by the time of the tap, and
     // the server refused rather than guessed: the process left, or changed

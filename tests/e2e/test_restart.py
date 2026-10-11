@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 from playwright.async_api import Page, expect
 
-from .conftest import Harness, e2e_id
+from .conftest import Harness, e2e_id, e2e_name
 
 pytestmark = pytest.mark.e2e
 
@@ -131,3 +131,67 @@ async def test_a_restart_whose_stop_times_out_starts_no_second_agent(
     assert server.sessions_on_the_socket(server._sock) == [f"hr-{e2e_id('vessel')}"]
     assert server.engine is not None and server.engine.restarts.pending == {}
     await expect(row).not_to_have_attribute("data-restarting", "true")
+
+
+# -- #511: Stop instead ---------------------------------------------------------
+
+
+async def test_stop_instead_on_the_row_calls_off_the_start_and_the_stop_goes_on(
+    page: Page, server: Harness
+) -> None:
+    """A stop that will not finish on its own keeps the row restarting long
+    enough to press the row's button, and shows the stop outlasting the
+    call off: the marker is still there after it."""
+    server.seed(running=["vessel"], ignores_graceful_stop=True, stop_timeout=60.0)
+    row = await _open(page, server)
+    before = _pid(server)
+    await row.get_by_role("button", name="Restart", exact=True).click()
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Restart", exact=True).click()
+    await expect(dialog).to_contain_text("A new session starts once it has exited.")
+    await dialog.get_by_role("button", name="Hide, keep restarting").click()
+    await expect(row).to_have_attribute("data-restarting", "true")
+    assert await row.get_by_role("button", name="Stop", exact=True).count() == 0
+
+    await row.get_by_role("button", name="Stop instead", exact=True).click()
+    await expect(dialog).to_contain_text(f"Stop {server.displayed('vessel')} instead?")
+    await dialog.get_by_role("button", name="Stop instead", exact=True).click()
+    # The stop's own wait, with Kill on it: the stop is still running.
+    await expect(dialog).to_contain_text(f"Stopping {server.project('vessel')}")
+    await expect(dialog).not_to_contain_text("A new session starts")
+    await expect(dialog.get_by_role("button", name="Do not wait, kill it now")).to_be_visible()
+    await dialog.get_by_role("button", name="Hide, keep stopping").click()
+    await expect(row).not_to_have_attribute("data-restarting", "true")
+    await expect(row.get_by_role("button", name="Stop", exact=True)).to_be_visible()
+    assert server.engine is not None
+    assert server.engine.restarts.pending == {}
+    assert e2e_id("vessel") in server.engine.stopping, "the stop is still in flight"
+    assert server.is_running("vessel") and _pid(server) == before, "nothing was killed"
+
+
+async def test_stop_instead_in_a_wrap_up_lets_it_finish_and_starts_nothing(
+    page: Page, server: Harness
+) -> None:
+    """The case #511 was decided for: Exit now would cut the wrap up short,
+    and Stop instead must not."""
+    server.seed(running=["vessel"], stop_prompt="/wrapup", wrap_up_takes=3)
+    row = await _open(page, server)
+    await row.get_by_role("button", name="Restart", exact=True).click()
+    dialog = page.locator("[data-dialog]")
+    await dialog.get_by_role("button", name="Restart", exact=True).click()
+    await expect(dialog).to_contain_text("Asking it to wrap up")
+    await expect(dialog).to_contain_text("A new session starts once it has exited.")
+    await expect(dialog.get_by_role("button", name="Exit now")).to_be_visible()
+
+    await dialog.get_by_role("button", name="Stop instead", exact=True).click()
+    await expect(dialog).to_contain_text(f"Stopping {server.project('vessel')}")
+    await expect(dialog).not_to_contain_text("A new session starts")
+    assert await dialog.get_by_role("button", name="Stop instead").count() == 0
+
+    await expect(row).to_have_attribute("data-state", "stopped", timeout=30_000)
+    await expect(dialog).to_be_hidden()
+    assert (server.root / e2e_name("vessel") / "handoff.md").exists(), "the wrap up ran"
+    # Several sweeps after the exit: a start that was merely late would be here.
+    await page.wait_for_timeout(3_000)
+    assert not server.is_running("vessel")
+    assert server.engine is not None and server.engine.restarts.pending == {}

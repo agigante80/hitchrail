@@ -118,6 +118,15 @@ class StateUnwritable(EngineError):
     """
 
 
+class NotRestarting(EngineError):
+    """No restart is pending here, so there is nothing to call off (#511).
+
+    Its own refusal rather than a quiet 200: a page that pressed "Stop
+    instead" a moment after the new agent started would otherwise read
+    success while an agent it meant to be the last is running.
+    """
+
+
 class NotAsking(EngineError):
     """The screen is not showing a question, so no key was sent (#204).
 

@@ -1,4 +1,4 @@
-"""The session lifecycle routes: start, stop, answer, kill and the two signals.
+"""The session lifecycle routes: start, stop, restart, answer, kill and the signals.
 
 Split out of `server.py` at #205 along what the handlers touch: every one of
 these reaches the engine's mutating methods, and every one carries its own
@@ -125,6 +125,28 @@ def session_routes(engine: eng.Engine) -> list[Route]:
         except discovery.RootUnavailable as exc:
             return _error(503, "root_unavailable", str(exc))
         return JSONResponse(session.as_dict(), status_code=202)
+
+    async def stop_instead(request: Request) -> Response:
+        """Call off a pending restart and leave the stop running (#511).
+
+        DELETE on the restart's own path rather than a flag on the session's
+        DELETE: on a `closing` row that DELETE is Exit now, which skips the
+        wait, and folding "and do not start" into it would make one press mean
+        two things. 200, not 202: the mark is gone by the time this answers,
+        and the stop it leaves behind was already in flight.
+        """
+        name = request.path_params["name"]
+        try:
+            session = await in_thread(engine.cancel_restart, name)
+        except eng.UnknownProject as exc:
+            return _error(404, "unknown_project", str(exc))
+        except eng.NotRestarting as exc:
+            return _error(409, "not_restarting", f"no restart is pending for {exc}")
+        except eng.MachineUnreadable as exc:
+            return _error(503, "machine_unreadable", str(exc))
+        except discovery.RootUnavailable as exc:
+            return _error(503, "root_unavailable", str(exc))
+        return JSONResponse(session.as_dict(), status_code=200)
 
     async def answer(request: Request) -> Response:
         """Carry one keypress to a prompt the operator read (#204).
@@ -284,6 +306,7 @@ def session_routes(engine: eng.Engine) -> list[Route]:
         Route("/api/sessions/{name}/kill", kill, methods=["POST"]),
         # A stop that starts (#472): its own route, never a flag on DELETE.
         Route("/api/sessions/{name}/restart", restart, methods=["POST"]),
+        Route("/api/sessions/{name}/restart", stop_instead, methods=["DELETE"]),
         Route("/api/sessions/{name}/signal", signal_detached, methods=["POST"]),
         Route("/api/sessions/{name}/signal/force", signal_force, methods=["POST"]),
     ]

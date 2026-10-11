@@ -7,6 +7,7 @@ import { paneView } from "/log_drawer.js";
 import { stopTimeoutMs, wrapUpSeconds, wrapUpTimeoutMs } from "/patience.js";
 import { showRefusal } from "/refusal.js";
 import { state } from "/state.js";
+import { stopInstead } from "/stop.js";
 
 /* #242. The words follow the row's phase: `closing` while the wrap up runs
    behind the task, `exiting` once the exit is sent, and the ceiling named
@@ -23,8 +24,10 @@ export function waitingPhase(wait, current) {
 }
 
 function waitingBody(wait, phase) {
-  const note = endAnywayNote(wait.policy);
-  return note ? `${phaseBody(wait, phase)} ${note}` : phaseBody(wait, phase);
+  // #511. Exit now on a restart skips the wait and keeps the restart, so the
+  // wait says what follows, beside the Stop instead that would cancel it.
+  const after = wait.restart ? "A new session starts once it has exited." : "";
+  return [phaseBody(wait, phase), endAnywayNote(wait.policy), after].filter(Boolean).join(" ");
 }
 
 /* #239. A kill the operator configured a week ago must not surprise them:
@@ -70,6 +73,7 @@ export function showWaiting(project, wait, phase) {
   // 202, so the button would answer and do nothing. Another browser learns
   // of that window from the row's `stop_typing` (#408).
   if (phase === "closing") actions.push(["Exit now", "", () => exitNow(project, wait)]);
+  if (wait.restart) actions.push(["Stop instead", "", () => stopInstead(project)]);
   // Phrased as impatience rather than as an alternative, and available
   // for the WHOLE wait rather than only at the end.
   actions.push(["Do not wait, kill it now", "danger", () => killNow(project)]);
@@ -92,7 +96,11 @@ export function repaintWaiting(project, wait, current) {
   // note must match the marker the expiry acts on, not the one first shown.
   if (current?.stop_policy) wait.policy = current.stop_policy;
   const phase = waitingPhase(wait, current);
-  if (dialog.dataset.waiting !== phase) {
+  // #511. Called off in another browser: the title, the body and Stop
+  // instead are all a restart's, and no phase change would redraw them.
+  const calledOff = wait.restart && current?.stopping && current.restarting === false;
+  if (calledOff) wait.restart = false;
+  if (dialog.dataset.waiting !== phase || calledOff) {
     showWaiting(project, wait, phase);
     return;
   }
@@ -142,6 +150,9 @@ export function awaitStopped(project, wait) {
       closeDialog(project.name);
       return;
     }
+    // #511. A restart called off elsewhere, with this wait hidden: a stop's
+    // from here, or the row going stopped reads as a start still to come.
+    if (wait.restart && current.stopping && !current.restarting) wait.restart = false;
     if (wait.restart && !current.stopping) {
       // #472. The marker is gone. For a restart that is a success, a timeout
       // or a refused start, or the agent has gone and its successor is not up

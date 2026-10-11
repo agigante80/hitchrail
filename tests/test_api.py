@@ -2872,3 +2872,102 @@ async def test_restart_is_not_a_flag_on_delete(
     assert r.status_code == 202
     assert r.json()["restarting"] is False
     assert engine.restarts.pending == {}
+
+
+# -- #511: Stop instead ---------------------------------------------------------
+
+
+async def test_stop_instead_calls_off_the_restart_and_leaves_the_stop(
+    client: httpx.AsyncClient, engine: Engine, tmux: FakeTmux
+) -> None:
+    path = f"/api/sessions/{proj('vessel')}/restart"
+    await client.post(path, headers=HEADERS)
+    sent = list(tmux.sent)
+    r = await client.delete(path, headers=HEADERS)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["restarting"] is False and body["stopping"] is True
+    assert engine.restarts.pending == {}
+    assert tmux.sent == sent and tmux.killed == [], "nothing typed, nothing killed"
+    listed = (await client.get("/api/projects", headers=HEADERS)).json()["projects"]
+    row = next(p for p in listed if p["name"] == proj("vessel"))
+    assert row["restarting"] is False and row["stopping"] is True
+
+
+async def test_a_plain_delete_on_a_restarting_row_keeps_the_restart(
+    client: httpx.AsyncClient, engine: Engine
+) -> None:
+    """#511 decided this: DELETE on a `closing` row is Exit now, which skips
+    the wait and says nothing about what follows."""
+    await client.post(f"/api/sessions/{proj('vessel')}/restart", headers=HEADERS)
+    r = await client.delete(f"/api/sessions/{proj('vessel')}", headers=HEADERS)
+    assert r.status_code == 202
+    assert r.json()["restarting"] is True
+    assert list(engine.restarts.pending) == [proj("vessel")]
+
+
+async def test_stop_instead_with_no_restart_pending_is_409_not_restarting(
+    client: httpx.AsyncClient, engine: Engine
+) -> None:
+    for name in (proj("vessel"), proj("network")):  # running, and stopped
+        r = await client.delete(f"/api/sessions/{name}/restart", headers=HEADERS)
+        assert r.status_code == 409, name
+        assert r.json()["code"] == "not_restarting"
+
+
+async def test_stop_instead_404s_an_unknown_project(client: httpx.AsyncClient) -> None:
+    r = await client.delete(f"/api/sessions/{proj('nope')}/restart", headers=HEADERS)
+    assert r.status_code == 404
+    assert r.json()["code"] == "unknown_project"
+
+
+async def test_stop_instead_on_an_unreadable_machine_is_503_and_keeps_the_mark(
+    config: Config,
+) -> None:
+    engine = make_engine(config, _unreadable_tmux(), procs_from(RUNNING_PS))
+    engine.restarts.pending[proj("vessel")] = 0.0
+    async with client_for(engine, config) as c:
+        r = await c.delete(f"/api/sessions/{proj('vessel')}/restart", headers=HEADERS)
+    assert r.status_code == 503, r.text
+    assert r.json()["code"] == "machine_unreadable"
+    assert proj("vessel") in engine.restarts.pending
+
+
+async def test_stop_instead_under_a_vanished_root_is_503(
+    config: Config, engine: Engine
+) -> None:
+    shutil.rmtree(config.roots[0].path)
+    async with client_for(engine, config) as c:
+        r = await c.delete(f"/api/sessions/{proj('network')}/restart", headers=HEADERS)
+    assert r.status_code == 503, r.text
+    assert r.json()["code"] == "root_unavailable"
+
+
+async def test_stop_instead_is_origin_checked_and_refuses_before_it_clears(
+    client: httpx.AsyncClient, engine: Engine
+) -> None:
+    path = f"/api/sessions/{proj('vessel')}/restart"
+    await client.post(path, headers=HEADERS)
+    for origin in ("http://evil.example", None):
+        headers = {"host": "localhost"} if origin is None else {**HEADERS, "origin": origin}
+        r = await client.delete(path, headers=headers)
+        assert r.status_code == 403, origin
+    assert list(engine.restarts.pending) == [proj("vessel")]
+
+
+async def test_stop_instead_refuses_a_forged_host_and_a_missing_token(
+    tmp_path: pathlib.Path,
+) -> None:
+    engine, config = _token_app(tmp_path)
+    engine.restarts.pending[proj("vessel")] = 0.0
+    path = f"/api/sessions/{proj('vessel')}/restart"
+    async with client_for(engine, config) as c:
+        forged = await c.delete(
+            path, headers={"host": "evil.example", "origin": "http://localhost"}
+        )
+        no_token = await c.delete(
+            path, headers={"host": "localhost", "origin": "http://localhost"}
+        )
+    assert forged.status_code == 400 and forged.json()["code"] == "host_rejected"
+    assert no_token.status_code == 401
+    assert proj("vessel") in engine.restarts.pending

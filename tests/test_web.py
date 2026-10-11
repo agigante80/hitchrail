@@ -70,6 +70,12 @@ DIALOGS: dict[str, str] = {
     "`Stop ${sessionCount(rows.length)}?`,": _MUST_ACT,
     "`Stopping ${sessionCount(bulk.rows.length)}`,": _MUST_ACT,
     "`Clear ${project.name}?`,": _MUST_ACT,
+    "`Stop ${displayProject(project.name)} instead?`,": _MUST_ACT,
+    '"No restart to call off",': (
+        "#511. Informational: the mark is already gone, so nothing is left to "
+        "call off, and the page refreshes the list itself. A Stop or Kill "
+        "offered here would be a different decision than the one tapped."
+    ),
     '`${wait.restart ? "Restarting" : "Stopping"} ${project.name}`,': _MUST_ACT,
     "`Lost track of ${project.name}`,": (
         "Argued in place, and the argument is the opposite of #169's: the page "

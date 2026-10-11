@@ -22,7 +22,9 @@ from hitchrail.engine import Engine
 from hitchrail.sessions import (
     AlreadyRunning,
     Locked,
+    MachineUnreadable,
     NoAgent,
+    NotRestarting,
     NotRunning,
     Session,
     StartFailed,
@@ -589,3 +591,145 @@ def test_a_stop_expiring_between_the_stop_returning_and_the_mark_still_marks(
     assert "ended while the stop was typing" not in caplog.text
     assert engine.restarts.epoch(VESSEL) == 0, "an expiry is not an end"
     assert starts.calls == []
+
+
+# -- Stop instead (#511): call off the start, leave the stop ---------------------
+
+
+def test_stop_instead_calls_off_the_start_and_leaves_the_stop_in_flight(root: Path) -> None:
+    engine, tmux, _, starts = restartable(root)
+    engine.restart(VESSEL)
+    sent = list(tmux.sent)
+    session = engine.cancel_restart(VESSEL)
+    assert session.restarting is False and session.stopping is True
+    assert engine.restarts.pending == {}
+    assert VESSEL in engine.stopping, "the stop is still in flight"
+    assert tmux.sent == sent and tmux.killed == [], "nothing typed, nothing killed"
+    agent_exits(tmux)
+    assert engine.advance_restarts() == []
+    assert starts.calls == [], "the agent went and nothing followed it"
+
+
+def test_stop_instead_leaves_a_wrap_up_to_run_its_turn(root: Path) -> None:
+    """The point of the route: a plain DELETE on a `closing` row is Exit now,
+    which skips the wait. Stop instead must not."""
+    engine, tmux, clock, starts = restartable(root, stop_prompt="/wrapup")
+    engine.restart(VESSEL)
+    engine.cancel_restart(VESSEL)
+    assert engine.get(VESSEL).stopping_phase == "closing"
+    assert exits_sent(tmux) == 0, "the wrap up still has its turn"
+    assert finish(engine, clock) == [VESSEL]
+    assert exits_sent(tmux) == 1
+    agent_exits(tmux)
+    assert engine.advance_restarts() == []
+    assert starts.calls == []
+
+
+def test_stop_instead_is_announced(root: Path) -> None:
+    """Else every other browser keeps showing a restart that will not come."""
+    engine, _, _, _ = restartable(root)
+    published: list[dict[str, object]] = []
+
+    class Bus:
+        def publish(self, event: dict[str, object]) -> None:
+            published.append(event)
+
+    engine.attach_bus(Bus())  # type: ignore[arg-type]
+    engine.restart(VESSEL)
+    published.clear()
+    engine.cancel_restart(VESSEL)
+    assert published and published[-1]["restarting"] is False
+
+
+def test_a_restart_still_typing_its_stop_does_not_mark_after_stop_instead(
+    root: Path,
+) -> None:
+    """`cancel`, not `forget`: a second press whose `stop` returns after the
+    person said "stop instead" is the press that came before it."""
+    engine, _, _, starts = restartable(root)
+    engine.restart(VESSEL)
+    real_stop = engine.stop
+
+    def stop_then_call_off(name: str) -> Session:
+        session = real_stop(name)
+        engine.cancel_restart(name)
+        return session
+
+    engine.stop = stop_then_call_off  # type: ignore[method-assign]
+    engine.restart(VESSEL)
+    assert engine.restarts.pending == {}
+    assert starts.calls == []
+
+
+def test_stop_instead_while_the_first_restart_is_still_typing_is_honoured(
+    root: Path,
+) -> None:
+    """#511 review. The page offers Stop instead from the wait's first frame,
+    and with a wrap up the stop types for seconds before the mark exists. A
+    409 there was followed by the mark and a start nobody wanted."""
+    engine, tmux, _, starts = restartable(root)
+    real_stop = engine.stop
+    answers: list[Session] = []
+
+    def stop_then_call_off(name: str) -> Session:
+        session = real_stop(name)
+        assert engine.restarts.pending == {}, "no mark yet, while the stop types"
+        answers.append(engine.cancel_restart(name))
+        return session
+
+    engine.stop = stop_then_call_off  # type: ignore[method-assign]
+    session = engine.restart(VESSEL)
+    assert answers and answers[0].restarting is False
+    assert session.restarting is False
+    assert engine.restarts.pending == {} and engine.restarts.asked == {}
+    agent_exits(tmux)
+    assert engine.advance_restarts() == []
+    assert starts.calls == []
+
+
+def test_a_restart_whose_stop_raises_leaves_nothing_asked(root: Path) -> None:
+    engine, tmux, _, _ = restartable(root)
+    agent_exits(tmux)
+    with pytest.raises(NotRunning):
+        engine.restart(VESSEL)
+    assert engine.restarts.asked == {}
+    with pytest.raises(NotRestarting):
+        engine.cancel_restart(VESSEL)
+
+
+def test_stop_instead_with_no_restart_pending_is_refused(root: Path) -> None:
+    engine, tmux, _, _ = restartable(root)
+    engine.stop(VESSEL)
+    sent = list(tmux.sent)
+    with pytest.raises(NotRestarting):
+        engine.cancel_restart(VESSEL)
+    assert VESSEL in engine.stopping and tmux.sent == sent, "the stop is untouched"
+
+
+def test_stop_instead_after_the_new_agent_started_is_refused(root: Path) -> None:
+    """The mark is consumed by the start, so the late press is told, not
+    answered with a success over an agent it meant to be the last."""
+    engine, tmux, _, _ = restartable(root)
+    engine.restart(VESSEL)
+    agent_exits(tmux)
+    assert engine.advance_restarts() == [VESSEL]
+    with pytest.raises(NotRestarting):
+        engine.cancel_restart(VESSEL)
+    assert engine.get(VESSEL).state is State.RUNNING
+
+
+def test_stop_instead_on_an_unknown_project_is_refused(root: Path) -> None:
+    engine, _, _, _ = restartable(root)
+    with pytest.raises(UnknownProject):
+        engine.cancel_restart(f"{DEFAULT_LABEL}~nowhere")
+    with pytest.raises(UnknownProject):
+        engine.cancel_restart(f"{DEFAULT_LABEL}~bad.name")
+
+
+def test_stop_instead_on_an_unreadable_machine_keeps_the_mark(root: Path) -> None:
+    engine, _, _, _ = restartable(root)
+    engine.restart(VESSEL)
+    engine._procs_fn = failing_procs
+    with pytest.raises(MachineUnreadable):
+        engine.cancel_restart(VESSEL)
+    assert VESSEL in engine.restarts.pending, "a refusal changes nothing"

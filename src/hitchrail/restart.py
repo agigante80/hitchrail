@@ -27,6 +27,12 @@ marker with the agent still there (a refused exit given back, `_drop`): `advance
 clears those when it finds the row not stopped and no marker. Kill means "end
 this", not "end this faster", and nothing here escalates in order to restart.
 
+**Stop instead (#511) calls off the start and nothing else.** `withdraw`, on
+its own route (`DELETE .../restart`), clears the mark and leaves the stop in
+flight exactly as it was: a wrap up still runs its turn. A plain `DELETE`
+does NOT clear it, because on a `closing` row that DELETE is Exit now, which
+means "skip the wait", not "change what follows". One action, one route.
+
 This module is in the engine layer and imports nothing from the web layer;
 `lint-imports` enforces it.
 """
@@ -38,7 +44,14 @@ import logging
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, cast
 
-from hitchrail.sessions import AlreadyRunning, Locked, MachineUnreadable, Session, State
+from hitchrail.sessions import (
+    AlreadyRunning,
+    Locked,
+    MachineUnreadable,
+    NotRestarting,
+    Session,
+    State,
+)
 
 if TYPE_CHECKING:
     from hitchrail.engine_seam import EngineSeam
@@ -60,6 +73,10 @@ class RestartOverlay:
     # Name to how many times a Kill, a signal or an expiry has ended a restart
     # for it. `request` reads it before `stop` and again before it marks.
     ended: dict[str, int] = field(default_factory=dict)
+    # Name to how many Restarts are between their first look at the epoch and
+    # their mark: `stop` types for seconds, and a Stop instead pressed then
+    # has no mark to take but must still be honoured (#511 review).
+    asked: dict[str, int] = field(default_factory=dict)
 
     def __bool__(self) -> bool:
         return bool(self.pending or self.refused)
@@ -117,7 +134,20 @@ def request(engine: EngineSeam, name: str) -> Session:
     """
     with engine.stopping_guard:
         epoch = engine.restarts.epoch(name)
-    session = engine.stop(name)
+        engine.restarts.asked[name] = engine.restarts.asked.get(name, 0) + 1
+    try:
+        return _mark(engine, name, epoch, engine.stop(name))
+    finally:
+        with engine.stopping_guard:
+            left = engine.restarts.asked.get(name, 0) - 1
+            if left > 0:
+                engine.restarts.asked[name] = left
+            else:
+                engine.restarts.asked.pop(name, None)
+
+
+def _mark(engine: EngineSeam, name: str, epoch: int, session: Session) -> Session:
+    """The second half of `request`, once `stop` has returned."""
     if not (session.stopping or session.state is State.STOPPED):
         return session
     with engine.stopping_guard:
@@ -136,6 +166,34 @@ def request(engine: EngineSeam, name: str) -> Session:
         engine.restarts.pending.setdefault(name, engine.now())
     logger.info("restart %s: a start will follow the stop", name)
     session = replace(session, restarting=True, restart_refused=None)
+    engine.announce(session)
+    return session
+
+
+def withdraw(engine: EngineSeam, name: str) -> Session:
+    """Call off a pending restart, leaving the stop in flight (#511).
+
+    The row is read BEFORE the mark is touched, so a machine that cannot be
+    read refuses with nothing changed. `cancel`, not `forget`: the person said
+    "end this", as a Kill does, so a Restart whose `stop` is still typing (it
+    is in `asked`, and has no mark yet) must not mark after it: `request`
+    compares the count.
+    """
+    engine.require_addressable(name)
+    session = engine.get(name)
+    with engine.stopping_guard:
+        # `asked` too: a Restart still typing its stop has no mark yet, and a
+        # 409 there was followed by the mark and a start the person had just
+        # called off. Cancelling bumps the epoch, so that Restart marks nothing.
+        held = name in engine.restarts.pending or name in engine.restarts.asked
+        if held:
+            engine.restarts.cancel(name)
+    if not held:
+        # Asked last, on the way to a refusal only, as `_require_live` does.
+        engine.reject_if_not_a_project(name)
+        raise NotRestarting(name)
+    logger.info("restart %s: called off, the stop goes on and nothing will start", name)
+    session = replace(session, restarting=False)
     engine.announce(session)
     return session
 
@@ -237,12 +295,16 @@ def _start(engine: EngineSeam, name: str) -> bool:
 
 
 class RestartMembers:
-    """`Engine`'s two public entry points, as a mixin like `SeamMembers`, so
+    """`Engine`'s three public entry points, as a mixin like `SeamMembers`, so
     `engine.py` (held to a size cap) gains no methods. `self` is the engine."""
 
     def restart(self, name: str) -> Session:
         """A stop that starts (#472). `request` is the whole of it."""
         return request(cast("EngineSeam", self), name)
+
+    def cancel_restart(self, name: str) -> Session:
+        """Stop instead (#511): the start is called off, the stop goes on."""
+        return withdraw(cast("EngineSeam", self), name)
 
     def advance_restarts(self) -> list[str]:
         """Start rows whose restart reached `stopped`. The sweep's."""

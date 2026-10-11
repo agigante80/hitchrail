@@ -94,6 +94,7 @@ See `CHANGELOG.md`.
 | `POST` | `/api/sessions/{name}` | start a session |
 | `DELETE` | `/api/sessions/{name}` | begin a graceful stop, returns immediately |
 | `POST` | `/api/sessions/{name}/restart` | begin a graceful stop and start a new agent once it has exited, returns immediately |
+| `DELETE` | `/api/sessions/{name}/restart` | call off a pending restart and leave the stop running |
 | `POST` | `/api/sessions/{name}/kill` | kill now, valid at any point |
 | `POST` | `/api/sessions/{name}/signal` | SIGTERM to a detached agent nothing addressable owns, through a pidfd |
 | `POST` | `/api/sessions/{name}/signal/force` | SIGKILL to the same, a second explicit request |
@@ -130,6 +131,19 @@ one start. A timeout, a `kill`, or `end_anyway` ending the agent clears the mark
 and starts nothing. A start that is refused is reported in `restart_refused`
 and is not retried. The new run is a fresh conversation, as `POST
 /api/sessions/{name}` makes one.
+
+**Stop instead (#511).** `DELETE /api/sessions/{name}/restart` clears the
+mark and nothing else: the stop already in flight goes on as it was, a
+`closing` row still runs its wrap up turn, and nothing starts once the agent
+has gone. It answers 200 with the row, now `restarting: false`; that holds too
+while a `restart` is still sending its stop and has not marked yet, which then
+marks nothing. With no restart pending (none was asked for, it was already
+called off, or the new agent has started) it is 409 `not_restarting` and
+changes nothing. It is also 404
+`unknown_project`, 503 `machine_unreadable` (the mark is kept) and 503
+`root_unavailable`. A plain `DELETE /api/sessions/{name}` does NOT call off a
+restart: on a `closing` row that call is the one that skips the wait, and
+what follows the stop stays as it was.
 
 With `stop_prompt` set (#242), the graceful call first types that prompt into
 the agent's box WITHOUT interrupting it, so it runs after the task in flight;
@@ -488,6 +502,7 @@ than by position.
 | `no_agent` | 409 | there is no agent to act on, so the request cannot be honoured |
 | `invalid_key` | 400 | the key asked for is not one of the keys Hitchrail will send |
 | `not_asking` | 409 | a key was sent but the screen is not showing a question to answer |
+| `not_restarting` | 409 | `DELETE .../restart` found no restart pending for that project; nothing changed |
 | `not_running` | 409 | a stop or kill was asked for something that is not running |
 | `not_detached` | 409 | the signal route was asked for a row that is running, stale or stopped |
 | `owned_elsewhere` | 409 | a tmux Hitchrail can see holds the agent: `session` names it when the pane map saw it, else `server_pid` names a server on another socket found in the process tree |
