@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# check-phases-version: 5
+# check-phases-version: 11
 #
 # The roadmap-phases guard: four rules that make rolling wave planning mechanical.
 #
 #   check-phases.sh [--offline] [--roadmap FILE]
 #     default     check everything; rules 1, 3 and 4 call the host
 #     --offline   check only rule 2, which needs no host
+#   FORGE_DRY_RUN=1  changes nothing: both host reads are scoped to 0, so a flagged run prints
+#                    exactly what an unflagged one does (#306)
 #
 # Exit 0 clean, 1 a rule found something, 2 could not run, 3 the roadmap is malformed.
 #
@@ -31,12 +33,18 @@
 # 0 saying so, the same posture check-private-leaks.sh takes for a missing name list. This group is
 # optional and must not break a project that declines it.
 
+# NO `awk -v` IN THIS FILE (#259). `-v` runs a backslash-escape pass over its value and Apple's awk
+# refuses one holding a newline, so the one site that took a value, the MALFORMED diagnostic's
+# `--roadmap` path (caller text), reads it through ENVIRON instead: a path named `r\tmap.md` is
+# printed as typed rather than with a tab. scripts/test-check-phases.sh counts zero `awk ... -v`
+# lines (scripts/awkv-count.sh, continuations joined). No awk takes a file operand either (#405):
+# `--roadmap 'r=bad.md'` was read as an assignment and passed silently, so files come in through `<`.
 set -uo pipefail
 
 # The roadmap format lives in roadmap-lib.sh, defined once (#162). Anchored to this script's own
 # location, never the working directory: both assets land in the same directory in the source tree
 # and in a forge-adapt install, so adjacency holds in both shapes.
-_HERE_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_HERE_LIB="$(CDPATH= cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "$_HERE_LIB/roadmap-lib.sh" ]; then
   # shellcheck source=roadmap-lib.sh
   . "$_HERE_LIB/roadmap-lib.sh"
@@ -58,7 +66,7 @@ while [ $# -gt 0 ]; do
     --roadmap)  shift; [ $# -gt 0 ] || die "--roadmap needs a path"; ROADMAP="$1" ;;
     # Prints the whole comment header rather than a hardcoded line range, which is the bug that
     # made the leak scanners' --help truncate mid-sentence when their headers grew.
-    --help|-h)  awk 'NR==1{next} /^# *[a-z0-9-]+-version: [0-9]+$/{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$SELF"; exit 0 ;;
+    --help|-h)  awk 'NR==1{next} /^# *[a-z0-9-]+-version: [0-9]+$/{next} /^#/{sub(/^# ?/,""); print; next} {exit}' < "$SELF"; exit 0 ;;
     -*)         die "unknown flag: $1" ;;
     *)          die "unexpected argument: $1" ;;
   esac
@@ -77,9 +85,9 @@ fi
 
 
 PHASES="$(parse_roadmap "$ROADMAP")"
-if printf '%s\n' "$PHASES" | grep -q '^MALFORMED'; then
+if grep -q '^MALFORMED' <<< "$PHASES"; then
   printf '%s\n' "$PHASES" \
-    | awk -F'\t' -v f="$ROADMAP" '/^MALFORMED/ {printf("check-phases: %s: phase \"%s\": %s\n", f, $2, $3)}' >&2
+    | CP_F="$ROADMAP" awk -F'\t' '/^MALFORMED/ {printf("check-phases: %s: phase \"%s\": %s\n", ENVIRON["CP_F"], $2, $3)}' >&2
   echo "check-phases: state must be one of: planned, open, done, backlog." >&2
   echo "  NOTHING was checked. A partially parsed roadmap reports phases as compliant that were never read." >&2
   exit 3
@@ -113,7 +121,7 @@ if [ "$OFFLINE" = 1 ]; then
 fi
 
 # --- the host rules ---------------------------------------------------------
-HERE="$(cd "$(dirname "$SELF")" && pwd)"
+HERE="$(CDPATH= cd -- "$(dirname "$SELF")" && pwd)"
 # Resolving forge-lib.sh: BESIDE, then by SEARCH, never by $CLAUDE_PLUGIN_ROOT.
 #
 # In a forge-adapt install both assets land in scripts/ and adjacency works. In the forge-kit source
@@ -160,8 +168,15 @@ LIB="$(find_forge_lib)" || {
 # shellcheck source=forge-lib.sh
 . "$LIB"
 
-MS="$(forge_milestone_list 2>/dev/null)" || MS=""
-ISS="$(forge_issue_milestone_list 2>/dev/null)" || ISS=""
+# FORGE_DRY_RUN=0 is scoped to each read on purpose (#306, the defect #269 fixed in sync-phases.sh).
+# forge_api_paginate returns a literal `[]` under FORGE_DRY_RUN=1, GET included, and the -z guard
+# below never trips on `[]`: with the milestone read unscoped every phase reads as missing (false
+# rule 3), and with only that one scoped the issue read is empty and rules 1 and 4 report a false
+# clean. This script has no write path, so a flagged run must print exactly what an unflagged one
+# does. The prefix dies with the substitution's subshell, so the caller's flag is untouched. Do NOT
+# hoist it to a top-level `FORGE_DRY_RUN=0`: a write added later would then inherit it.
+MS="$(FORGE_DRY_RUN=0 forge_milestone_list 2>/dev/null)" || MS=""
+ISS="$(FORGE_DRY_RUN=0 forge_issue_milestone_list 2>/dev/null)" || ISS=""
 if [ -z "$MS" ] || [ -z "$ISS" ]; then
   echo "check-phases: the host could not be reached, so rules 1, 3 and 4 were SKIPPED." >&2
   echo "  They were NOT checked and NOT passed. Check the token and the forge configuration." >&2

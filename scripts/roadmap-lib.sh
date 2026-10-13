@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# roadmap-lib-version: 5
+# roadmap-lib-version: 13
 #
 # The roadmap format, defined ONCE and sourced by both roadmap assets (issue #162).
 #
@@ -37,6 +37,28 @@
 # two-argument set_prose passed the check and ERASED the phase prose with rc 0, and
 # set_plan could not clear a plan that rule 2 does not require. And the bounded symlink
 # walk stopped at the tenth hop and wrote there, severing a link mid-chain; it now refuses.
+#
+# v6 (#270) makes EMPTY prose a fixed point. set_prose "" used to emit its leading blank, an
+# empty prose line and a trailing blank, so a keyed-only block gained blank lines on every
+# call and the no-op short-circuit never fired. See the comments in set_prose and insert_at.
+#
+# v11 (#260) closes three edges. A phase NAME is validated by one helper, _rm_name_ok, called by
+# rename and insert_at (a tab in a name used to return 0 and split every consumer's TSV row).
+# set_plan fills a phase that has NO plan line instead of dying with 5, and counts `state:` lines
+# on every call. insert_at writes `plan:` with no trailing space for an empty plan, so it agrees
+# with set_plan; that reverses the literal `plan: ` #270 pinned, and the two assertions that pinned
+# it (the e4 and e5 cases of test-roadmap-lib.sh) were updated with this change.
+#
+# v12 (#345) makes _rm_prose_ok refuse a prose holding a column-0 `state:` or `plan:` line, rc 5. A
+# keyed line equal to the block's current value used to land as a second keyed line (rc 0) through
+# set_prose and insert_at. BEHAVIOUR CHANGE: a keyed prose line with a DIFFERENT value moves from rc 3
+# (the parse-back) to rc 5 (this guard, before the file is touched).
+#
+# v13 (#463) makes a plan path carrying an ASCII control character (TAB, CR, LF, DEL, SOH ...) a
+# refusal, rc 3, from set_plan and insert_at. A TAB used to land with rc 0, and parse_roadmap then
+# emitted a four-column row that every later set_plan on that phase refused. ONE helper,
+# _rm_plan_ok, beside _rm_name_ok. An empty path stays legal. In set_plan it runs right after
+# _rm_prepare, so a missing phase keeps rc 5, and before the block's state and plan counts.
 
 # --- portability ------------------------------------------------------------
 # macOS still ships bash 3.2 and a BSD readlink with no -f, and this is installed into other
@@ -49,7 +71,7 @@ fi
 abspath() {
   local d b
   d="$(dirname -- "$1")"; b="$(basename -- "$1")"
-  d="$(cd -- "$d" 2>/dev/null && pwd -P)" || { printf '%s' "$1"; return; }
+  d="$(CDPATH= cd -- "$d" 2>/dev/null && pwd -P)" || { printf '%s' "$1"; return; }
   printf '%s/%s' "$d" "$b"
 }
 
@@ -79,7 +101,7 @@ parse_roadmap() {
       }
       printf("%s\t%s\t%s\n", name, state, plan)
     }
-  ' "$1"
+  ' < "$1"
 }
 
 # --- the WRITE primitives (#246) ---------------------------------------------------------------
@@ -115,8 +137,10 @@ parse_roadmap() {
 # puts the value in that one command's environment and leaves nothing behind in the caller's.
 # The rule covers DERIVED text too, not only what a caller typed: a temp path built from the
 # roadmap's own directory carries whatever that directory is named, so the three sites that pass a
-# filename to awk pass it the same way. What `-v` may still carry is a line number, this library's
-# own `state`/`plan` literal, and awk's `OFS`; the suite allow-lists exactly those names.
+# filename to awk pass it the same way. No `-v` remains in this file (#412): line numbers and the
+# `state`/`plan` key go through RM_S/RM_E/RM_AT/RM_K and are read in BEGIN with `+ 0`, and `OFS` is
+# a program literal, `BEGIN { OFS = "\t" }`, never ENVIRON, because the awk lexer processes the
+# `\t` there while ENVIRON keeps it as two bytes (the parse-back check then refuses the write).
 #
 # THE WRITER'S EXTENT IS NARROWER THAN THE PARSER'S, on purpose: a block runs to the next `## `
 # line, not the next `## Phase:`, so a trailing `## Notes` section is never absorbed into the prose
@@ -128,6 +152,15 @@ parse_roadmap() {
 # name, are files the parser tolerates and a writer cannot act on: it cannot tell which line the
 # file means. Refusing is the only honest answer, and it is where the writer is deliberately
 # stricter than the parser, which must keep reading an imperfect file.
+#
+# ABSENCE IS FILLED, AMBIGUITY REFUSES (#260). set_plan on a block with zero `plan:` lines and a
+# non-empty path writes ONE `plan: <path>` line directly after the single `state:` line, which is
+# the order insert_at writes. More than one `state:` or more than one `plan:` still returns 5, and
+# the `state:` count runs on EVERY set_plan call that gets past the path check (#463: a control
+# character in the path is refused first, rc 3), replace and empty-path branches included, so a
+# no-op can never mask a malformed block (a two-`state:` block that set_plan once accepted is now
+# refused, as set_state always did). An empty path on a plan-less block is an rc 0 no-op. A block
+# with no `state:` line is malformed and returns 3 from _rm_prepare. set_plan never creates a block.
 #
 # NAMESPACE. This half reserves `RM_*` in the caller's shell. `RM_START`, `RM_END` and `RM_EXPECT`
 # are plain globals, because a shell function returns one integer and these need to return more.
@@ -156,7 +189,7 @@ _rm_block() {
       if (n > 1)  { print "DUPLICATE"; exit }
       print s[1] " " e[1]
     }
-  ' "$1"
+  ' < "$1"
 }
 
 # _rm_end_point <file> -> the line to insert a phase BEFORE so it lands after the last phase.
@@ -172,7 +205,7 @@ _rm_end_point() {
       next
     }
     END { if (instart) print NR + 1; else if (endp) print endp; else print NR + 1 }
-  ' "$1"
+  ' < "$1"
 }
 
 # _rm_split <file> <start> <end> <body-out> <strip-out>
@@ -187,8 +220,8 @@ _rm_end_point() {
 # and have nothing left to separate.
 _rm_split() {
   : > "$4"; : > "$5"
-  RM_BO="$4" RM_SO="$5" awk -v s="$2" -v e="$3" '
-    BEGIN { bo = ENVIRON["RM_BO"]; so = ENVIRON["RM_SO"] }
+  RM_BO="$4" RM_SO="$5" RM_S="$2" RM_E="$3" awk '
+    BEGIN { bo = ENVIRON["RM_BO"]; so = ENVIRON["RM_SO"]; s = ENVIRON["RM_S"] + 0; e = ENVIRON["RM_E"] + 0 }
     { lines[NR] = $0 }
     END {
       last = e - 1
@@ -200,7 +233,7 @@ _rm_split() {
       for (i = e; i <= NR; i++) print lines[i] > so
       close(bo); close(so)
     }
-  ' "$1"
+  ' < "$1"
 }
 
 # _rm_check <file> -> 0 when parse_roadmap reads it cleanly. MALFORMED only.
@@ -211,7 +244,7 @@ _rm_split() {
 _rm_check() {
   local out
   out="$(parse_roadmap "$1")" || return 3
-  printf '%s\n' "$out" | grep -q '^MALFORMED' && return 3
+  grep -q '^MALFORMED' <<< "$out" && return 3
   return 0
 }
 
@@ -226,6 +259,50 @@ _rm_prose_ok() {
   case "$1" in
     "## "*|*"
 ## "*) _rm_die "that prose opens a '## ' section, which would silently end the block" 5; return 5 ;;
+  esac
+  # #345: a column-0 `state:` or `plan:` line anywhere in the prose is refused too. set_prose keeps
+  # EVERY such line in a block and insert_at writes the prose after its own keyed lines, so a keyed
+  # line in the prose that equals the block's current value parsed back identically and landed as a
+  # SECOND keyed line (rc 0), which set_plan then refused. A DIFFERENT value used to be caught by the
+  # parse-back as rc 3; it is now rc 5 here, before any file is touched (a documented change, and
+  # /phase review reaches it through roadmap_set_prose). Only column 0 is keyed (the writers' awk
+  # tests index($0, "state:") == 1), so an indented or mid-line mention stays legal.
+  case "$1" in
+    "state:"*|*"
+state:"*) _rm_die "that prose carries a column-0 'state:' line, which would be read as a second keyed line" 5; return 5 ;;
+    "plan:"*|*"
+plan:"*) _rm_die "that prose carries a column-0 'plan:' line, which would be read as a second keyed line" 5; return 5 ;;
+  esac
+  return 0
+}
+
+# _rm_name_ok <name> -> 2 when the name could not travel as a heading and a TSV column. ONE
+# definition, called by roadmap_rename and roadmap_insert_at, for the reason _rm_prose_ok is one:
+# a check one writer has and the other lacks is the defect. It names the class and never echoes
+# the name. Every refusal is 2, a usage error, never 3.
+#   - empty;
+#   - any control character (TAB, CR, LF, DEL ...): it splits the TSV row every consumer reads with
+#     `IFS=<tab> read`, and the parse-back check cannot see it because intent and write agree;
+#   - a leading or trailing space or tab: parse_roadmap trims it, so the seam check used to refuse
+#     it with 3, the wrong code for a usage error;
+#   - a leading `-`: a phase named that way can never be addressed again by reassess-phases.sh,
+#     because every op takes its phase positionally and the option parser (`-*) die "unknown
+#     flag"`) has no `--` end-of-options case. The shipped caller blocks the name only in part:
+#     `rename` and `insert` take the new name positionally and refuse it, but `split --into
+#     <name>` accepts it, so this check is the only guard on that route;
+#   - a leading `#`: a POLICY choice with no claimed mechanism. `## Phase: #hash` parses, so the
+#     refusal prevents nothing the parser cannot read; it is the floor the original proposal named.
+# A TAB at an edge is a control character and is named as one. Inner spaces and punctuation stay
+# accepted.
+_rm_name_ok() {
+  local n="${1-}"
+  [ -n "$n" ] || { _rm_die "the phase name is empty"; return 2; }
+  case "$n" in
+    *[[:cntrl:]]*) _rm_die "the phase name carries a control character (a tab, CR or newline would split the roadmap's rows)"; return 2 ;;
+    " "*) _rm_die "the phase name starts with a blank, which the parser would trim"; return 2 ;;
+    *" ") _rm_die "the phase name ends with a blank, which the parser would trim"; return 2 ;;
+    -*) _rm_die "the phase name starts with '-', so reassess-phases.sh could never address it again"; return 2 ;;
+    "#"*) _rm_die "the phase name starts with '#' (refused by policy)"; return 2 ;;
   esac
   return 0
 }
@@ -259,7 +336,7 @@ _rm_commit() {
     link="$(readlink "$real")"
     case "$link" in
       /*) real="$link" ;;
-      *)  real="$(cd "$(dirname "$real")" && pwd -P)/$link" ;;
+      *)  real="$(CDPATH= cd -- "$(dirname "$real")" && pwd -P)/$link" ;;
     esac
     n=$((n + 1))
   done
@@ -284,7 +361,8 @@ _rm_one_open() {
 # _rm_keyed <file> <start> <end> <key> -> how many column-0 `<key>:` lines the block carries.
 # The key is this library's own literal, `state` or `plan`, never caller text.
 _rm_keyed() {
-  awk -v s="$2" -v e="$3" -v k="$4" 'NR > s && NR < e && index($0, k ":") == 1 { n++ } END { print n + 0 }' "$1"
+  RM_S="$2" RM_E="$3" RM_K="$4" awk 'BEGIN { s = ENVIRON["RM_S"] + 0; e = ENVIRON["RM_E"] + 0; k = ENVIRON["RM_K"] }
+    NR > s && NR < e && index($0, k ":") == 1 { n++ } END { print n + 0 }' < "$1"
 }
 
 _rm_prepare() {  # _rm_prepare <file> <phase> -> sets RM_START, RM_END; refuses otherwise
@@ -312,12 +390,30 @@ roadmap_set_state() {
     open="$(_rm_one_open "$f" "$phase")"
     [ -z "$open" ] || { _rm_die "'$open' is already open; at most one phase is open at a time" 5; return 5; }
   fi
-  RM_EXPECT="$(parse_roadmap "$f" | RM_P="$phase" RM_V="$st" awk -F'\t' -v OFS='\t' '$1 == ENVIRON["RM_P"] { $2 = ENVIRON["RM_V"] } { print }')"
+  RM_EXPECT="$(parse_roadmap "$f" | RM_P="$phase" RM_V="$st" awk -F'\t' 'BEGIN { OFS = "\t" } $1 == ENVIRON["RM_P"] { $2 = ENVIRON["RM_V"] } { print }')"
   cand="$(_rm_tmp "$f")"; [ -n "$cand" ] || { _rm_die "cannot create a temporary file beside '$f'"; return 2; }
-  RM_V="$st" awk -v s="$RM_START" -v e="$RM_END" '
+  RM_V="$st" RM_S="$RM_START" RM_E="$RM_END" awk '
+    BEGIN { s = ENVIRON["RM_S"] + 0; e = ENVIRON["RM_E"] + 0 }
     NR > s && NR < e && index($0, "state:") == 1 { print "state: " ENVIRON["RM_V"]; next } { print }
-  ' "$f" > "$cand" || { rm -f "$cand"; _rm_die "cannot build the new content"; return 2; }
+  ' < "$f" > "$cand" || { rm -f "$cand"; _rm_die "cannot build the new content"; return 2; }
   _rm_commit "$f" "$cand"; rc=$?; rm -f "$cand"; return $rc
+}
+
+# _rm_plan_ok <path> -> 3 when the plan path carries an ASCII control character (#463). ONE
+# definition, called by roadmap_set_plan and roadmap_insert_at, for the reason _rm_name_ok is one.
+# The path becomes the third TSV column of the phase row, so a TAB splits the row, and the
+# parse-back cannot see it because intent and write agree. 3, not _rm_name_ok's 2, because an LF
+# in the path was already 3 (the parse-back) and the two must not differ by character. The message
+# names the class and never echoes the path. An empty path is legal. `local LC_ALL=C` pins the class
+# to the ASCII control bytes whatever the caller's locale: unpinned, [[:cntrl:]] also matches U+0085
+# and U+2028 under a UTF-8 locale, which are ordinary characters in a path and survive the TSV row.
+# The assignment is local, so the caller's LC_ALL is untouched.
+_rm_plan_ok() {
+  local LC_ALL=C
+  case "${1-}" in
+    *[[:cntrl:]]*) _rm_die "the plan path carries a control character (a tab, CR or newline would split the roadmap's rows)" 3; return 3 ;;
+  esac
+  return 0
 }
 
 # roadmap_set_plan <file> <phase> <path>
@@ -327,18 +423,31 @@ roadmap_set_plan() {
   # back to `backlog` legitimately clears its plan, and a library that cannot express that edit
   # forces the hand edit it exists to replace.
   [ "$#" -ge 3 ] || { _rm_die "usage: roadmap_set_plan <file> <phase> <path>"; return 2; }
-  local f="${1-}" phase="${2-}" path="${3-}" cand rc
+  local f="${1-}" phase="${2-}" path="${3-}" cand rc np
   [ -n "$f" ] && [ -n "$phase" ] || { _rm_die "usage: roadmap_set_plan <file> <phase> <path>"; return 2; }
   _rm_prepare "$f" "$phase" || return $?
-  [ "$(_rm_keyed "$f" "$RM_START" "$RM_END" plan)" = 1 ] || {
+  # The path is validated right after the phase is found (a missing phase keeps rc 5) and before
+  # the block's counts. It reads no file, so it cannot mask a malformed block, only a bad argument.
+  _rm_plan_ok "$path" || return $?
+  # The state count runs first among the block checks and on every call (see ABSENCE IS FILLED in
+  # the header).
+  [ "$(_rm_keyed "$f" "$RM_START" "$RM_END" state)" -le 1 ] || {
+    _rm_die "the '$phase' block carries more than one column-0 state line; a writer cannot act on it" 5; return 5; }
+  np="$(_rm_keyed "$f" "$RM_START" "$RM_END" plan)"
+  [ "$np" -le 1 ] || {
     _rm_die "the '$phase' block carries no single column-0 plan line; a writer cannot act on it" 5; return 5; }
-  RM_EXPECT="$(parse_roadmap "$f" | RM_P="$phase" RM_V="$path" awk -F'\t' -v OFS='\t' '$1 == ENVIRON["RM_P"] { $3 = ENVIRON["RM_V"] } { print }')"
+  [ "$np" = 1 ] || [ -n "$path" ] || return 0   # plan-less block, empty path: nothing to write
+  RM_EXPECT="$(parse_roadmap "$f" | RM_P="$phase" RM_V="$path" awk -F'\t' 'BEGIN { OFS = "\t" } $1 == ENVIRON["RM_P"] { $3 = ENVIRON["RM_V"] } { print }')"
   cand="$(_rm_tmp "$f")"; [ -n "$cand" ] || { _rm_die "cannot create a temporary file beside '$f'"; return 2; }
-  RM_V="$path" awk -v s="$RM_START" -v e="$RM_END" '
-    NR > s && NR < e && index($0, "plan:") == 1 {
+  # np = 0 is the ADD path: the new line goes directly after the single state line.
+  RM_V="$path" RM_S="$RM_START" RM_E="$RM_END" RM_NP="$np" awk '
+    BEGIN { s = ENVIRON["RM_S"] + 0; e = ENVIRON["RM_E"] + 0; np = ENVIRON["RM_NP"] + 0 }
+    NR > s && NR < e && np == 1 && index($0, "plan:") == 1 {
       v = ENVIRON["RM_V"]; print (v == "" ? "plan:" : "plan: " v); next
-    } { print }
-  ' "$f" > "$cand" || { rm -f "$cand"; _rm_die "cannot build the new content"; return 2; }
+    }
+    NR > s && NR < e && np == 0 && index($0, "state:") == 1 { print; print "plan: " ENVIRON["RM_V"]; next }
+    { print }
+  ' < "$f" > "$cand" || { rm -f "$cand"; _rm_die "cannot build the new content"; return 2; }
   _rm_commit "$f" "$cand"; rc=$?; rm -f "$cand"; return $rc
 }
 
@@ -356,13 +465,24 @@ roadmap_set_prose() {
   # The hand-written format puts one blank line between the last keyed line and the prose, and
   # one between the prose and the next heading (or none at EOF): the leading "\n" below is what
   # makes an unchanged prose round-trip byte-identical on the FIRST call rather than only the second.
-  RM_PROSE="$prose" awk -v s="$RM_START" -v e="$RM_END" '
+  # EMPTY prose has ONE canonical shape (#270): a keyed-only block, then ONE blank line before the
+  # next heading and NONE at EOF, so the file ends with the `plan:` line and a single newline.
+  # roadmap_insert_at emits the same shape, which is what makes set_prose "" a no-op on a block
+  # insert_at just created. Two consequences are deliberate, written here so a later review does
+  # not re-litigate them. (1) A file whose last prose has no final newline is NORMALISED: the
+  # first call appends it and the second is a fixed point. Every awk writer in this library
+  # already does that (set_state included), so preserving it would be a library-wide change, not
+  # a set_prose fix. (2) A keyed-only block at EOF followed by one or two trailing blank lines is
+  # normalised once to the canonical shape and is a fixed point after that; two trailing blanks
+  # used to be the fixed point and no longer are. Empty prose over existing prose is a real edit.
+  RM_PROSE="$prose" RM_S="$RM_START" RM_E="$RM_END" awk '
+    BEGIN { s = ENVIRON["RM_S"] + 0; e = ENVIRON["RM_E"] + 0 }
     NR <= s { print; next }
-    NR >= e { if (!done) { printf "\n%s\n\n", ENVIRON["RM_PROSE"]; done = 1 } print; next }
+    NR >= e { if (!done) { if (ENVIRON["RM_PROSE"] != "") printf "\n%s\n\n", ENVIRON["RM_PROSE"]; else print ""; done = 1 } print; next }
     index($0, "state:") == 1 || index($0, "plan:") == 1 { print; next }
     { next }
-    END { if (!done) printf "\n%s\n", ENVIRON["RM_PROSE"] }
-  ' "$f" > "$cand" || { rm -f "$cand"; _rm_die "cannot build the new content"; return 2; }
+    END { if (!done && ENVIRON["RM_PROSE"] != "") printf "\n%s\n", ENVIRON["RM_PROSE"] }
+  ' < "$f" > "$cand" || { rm -f "$cand"; _rm_die "cannot build the new content"; return 2; }
   _rm_commit "$f" "$cand"; rc=$?; rm -f "$cand"; return $rc
 }
 
@@ -376,6 +496,8 @@ roadmap_insert_at() {
   esac
   [ -n "$f" ] && [ -n "$name" ] && [ -n "$st" ] || { _rm_die "usage: roadmap_insert_at <file> --before <phase>|--end <name> <state> <plan> <prose>"; return 2; }
   [ "$where" != --before ] || [ -n "$ref" ] || { _rm_die "usage: roadmap_insert_at <file> --before <phase> <name> <state> <plan> <prose>"; return 2; }
+  _rm_name_ok "$name" || return $?
+  _rm_plan_ok "$plan" || return $?
   case "$st" in planned|open|done|backlog) ;; *) _rm_die "unknown state '$st'"; return 2 ;; esac
   _rm_prose_ok "$prose" || return 5
   [ -f "$f" ] || { _rm_die "no such roadmap: $f"; return 2; }
@@ -402,15 +524,23 @@ roadmap_insert_at() {
     RM_EXPECT="$(parse_roadmap "$f"; printf '%s\n' "$row")"
   fi
   cand="$(_rm_tmp "$f")"; [ -n "$cand" ] || { _rm_die "cannot create a temporary file beside '$f'"; return 2; }
-  RM_NAME="$name" RM_STATE="$st" RM_PLAN="$plan" RM_PROSE="$prose" awk -v at="$at" '
+  RM_NAME="$name" RM_STATE="$st" RM_PLAN="$plan" RM_PROSE="$prose" RM_AT="$at" awk '
+    BEGIN { at = ENVIRON["RM_AT"] + 0 }
+    # Empty prose emits no lead blank and no prose line (the canonical shape set_prose also
+    # writes, #270). The separators stay position-owned, below. With --end on a file whose last
+    # line is not blank the insert therefore ends at the plan line; remove restores the original
+    # bytes only for a non-blank last line, because it strips the separator before an EOF block.
     function block() {
-      printf "## Phase: %s\nstate: %s\nplan: %s\n\n%s\n",
-             ENVIRON["RM_NAME"], ENVIRON["RM_STATE"], ENVIRON["RM_PLAN"], ENVIRON["RM_PROSE"]
+      # `plan:` with no trailing space for an empty plan, as set_plan writes it (#260).
+      pl = ENVIRON["RM_PLAN"]
+      printf "## Phase: %s\nstate: %s\nplan:%s\n",
+             ENVIRON["RM_NAME"], ENVIRON["RM_STATE"], (pl == "" ? "" : " " pl)
+      if (ENVIRON["RM_PROSE"] != "") printf "\n%s\n", ENVIRON["RM_PROSE"]
     }
     NR == at { block(); print ""; done = 1 }
     { prev = $0; print }
     END { if (!done) { if (prev != "") print ""; block() } }
-  ' "$f" > "$cand" || { rm -f "$cand"; _rm_die "cannot build the new content"; return 2; }
+  ' < "$f" > "$cand" || { rm -f "$cand"; _rm_die "cannot build the new content"; return 2; }
   _rm_commit "$f" "$cand"; rc=$?; rm -f "$cand"; return $rc
 }
 
@@ -455,12 +585,12 @@ roadmap_reorder() {
     --end)
       at="$(_rm_end_point "$cand.strip")" ;;
   esac
-  RM_BF="$cand.body" awk -v at="$at" '
-    BEGIN { bf = ENVIRON["RM_BF"] }
+  RM_BF="$cand.body" RM_AT="$at" awk '
+    BEGIN { bf = ENVIRON["RM_BF"]; at = ENVIRON["RM_AT"] + 0 }
     NR == at { while ((getline l < bf) > 0) print l; print ""; done = 1 }
     { prev = $0; print }
     END { if (!done) { if (prev != "") print ""; while ((getline l < bf) > 0) print l } }
-  ' "$cand.strip" > "$cand" || { rm -f "$cand" "$cand.body" "$cand.strip"; _rm_die "cannot build the new content"; return 2; }
+  ' < "$cand.strip" > "$cand" || { rm -f "$cand" "$cand.body" "$cand.strip"; _rm_die "cannot build the new content"; return 2; }
   rm -f "$cand.body" "$cand.strip"
   _rm_commit "$f" "$cand"; rc=$?; rm -f "$cand"; return $rc
 }
@@ -494,11 +624,12 @@ roadmap_remove() {
 roadmap_rename() {
   local f="${1-}" old="${2-}" new="${3-}" cand rc
   [ -n "$f" ] && [ -n "$old" ] && [ -n "$new" ] || { _rm_die "usage: roadmap_rename <file> <old> <new>"; return 2; }
+  _rm_name_ok "$new" || return $?
   _rm_prepare "$f" "$old" || return $?
   case "$(_rm_block "$f" "$new")" in NONE) ;; *) _rm_die "a phase named '$new' is already in the roadmap" 5; return 5 ;; esac
-  RM_EXPECT="$(parse_roadmap "$f" | RM_O="$old" RM_N="$new" awk -F'\t' -v OFS='\t' '$1 == ENVIRON["RM_O"] { $1 = ENVIRON["RM_N"] } { print }')"
+  RM_EXPECT="$(parse_roadmap "$f" | RM_O="$old" RM_N="$new" awk -F'\t' 'BEGIN { OFS = "\t" } $1 == ENVIRON["RM_O"] { $1 = ENVIRON["RM_N"] } { print }')"
   cand="$(_rm_tmp "$f")"; [ -n "$cand" ] || { _rm_die "cannot create a temporary file beside '$f'"; return 2; }
-  RM_N="$new" awk -v s="$RM_START" 'NR == s { print "## Phase: " ENVIRON["RM_N"]; next } { print }' "$f" > "$cand" \
+  RM_N="$new" RM_S="$RM_START" awk 'BEGIN { s = ENVIRON["RM_S"] + 0 } NR == s { print "## Phase: " ENVIRON["RM_N"]; next } { print }' < "$f" > "$cand" \
     || { rm -f "$cand"; _rm_die "cannot build the new content"; return 2; }
   _rm_commit "$f" "$cand"; rc=$?; rm -f "$cand"
   [ "$rc" = 0 ] && printf 'roadmap-lib: renamed in the roadmap only. forge-lib.sh has no milestone rename, so the host still carries the milestone titled "%s" with its tickets; create "%s" and move them, or the phase reads empty while all four rules pass.\n' "$old" "$new" >&2

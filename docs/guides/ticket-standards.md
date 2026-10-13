@@ -34,6 +34,19 @@ At least one positive and one negative scenario per independent condition, writt
 specific module, route and state names where the ticket makes them evident. Vague restatements of
 the description do not count.
 
+**Scope:** any ticket with an observable behaviour change. The gate derives this from the
+ticket type and the modules it affects; the author never self-declares it. N/A is permitted only
+where no behaviour delta exists (a pure artboard, a research spike), and the gate scores that
+N/A claim like any other.
+
+**Quality bar** (each point scorable by the gate):
+
+- exactly ONE `When` per scenario; multiple When/Then pairs mean multiple behaviours, split them
+- declarative, not click-by-click imperative
+- names a real module, route or state where the ticket makes one evident
+- the negative scenario asserts a SPECIFIC error `code` or message, never "it fails"
+- not a restatement of the summary
+
 **A refusal is a condition.** If the change adds a guard, the negative scenario is the guard
 firing, and it names the error `code` returned.
 
