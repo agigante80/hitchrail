@@ -373,9 +373,15 @@ which is not the same claim as `failed`; a row at another scope, or a repeat,
 is still `skipped` for its own reason. A shutdown that lands DURING one of
 the agent's calls ends that call, and is reported as what that call saw: the
 refresh as `marketplace_refresh_failed`, the listing as `plugins_unreadable`,
-and the plugin being updated as `failed`, exited -9. `detail` and `approved_command` are the agent's
-own words, with control characters escaped and cut to 240 characters: render
-them as text. `approved_command` is what `-y` approved without showing it,
+and the plugin being updated as `failed`, exited -9. `approved_command`, and the `detail` of a
+`failed` row other than `timed out`, are the agent's own words. They are
+cut to a 240 character budget first, as a 160 character head, ` (truncated) `
+and an 80 character tail (#353), and escaped after, a backslash doubled and
+each control character spelled out, so what arrives can be longer than 240.
+Hitchrail writes every other `detail` itself: `timed out`, each `skipped` and
+`abandoned` reason, and `not confirmed: the plugin list could not be read
+again` on an `updated` row whose version check never ran (#491). A plain
+`updated` or `current` row has no `detail`. Render all of them as text. `approved_command` is what `-y` approved without showing it,
 when the agent reports it; see `SECURITY.md`. Running sessions keep the old
 versions until they are restarted.
 

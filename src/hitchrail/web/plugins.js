@@ -81,9 +81,10 @@ function outcomeItem({ outcome, count }) {
   name.textContent = outcome.plugin;
   head.append(result, name);
   item.append(head);
-  // Rendered as text, never markup: for `updated` or `failed` this is the
-  // agent's own words, the server escaped control characters in it, and
-  // textContent means nothing here is parsed. For `skipped` it is ours, and
+  // Rendered as text, never markup: for a `failed` row other than `timed
+  // out` this is the agent's own words, the server escaped control characters
+  // in it, and textContent means nothing here is parsed. A `timed out`, the
+  // `not confirmed` mark on an `updated` row (#491), and `skipped` are ours, and
   // a skip has more than one reason since #300 (another scope, or a `user`
   // row the listing named more than once), so the detail is shown rather than a
   // fixed scope-shaped sentence that would misname the second one.
