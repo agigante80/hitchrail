@@ -205,7 +205,10 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # 1302 for #511: `NotRestarting` imported and re-exported, because every
     # route reaches the engine's refusals as `eng.<Name>`; the call off itself
     # is `restart.py`'s, so this file gained no logic.
-    "engine.py": 1302,
+    # 1319 for #513: a refused repeat Stop on `exiting` hands back the marker
+    # it replaced, whose exit had gone out, rather than leaving no stop at all;
+    # `_give_back` takes it, and its docstring says why it differs from a drop.
+    "engine.py": 1319,
     # #473. The sweep, moved whole from `engine.py`. 465 is the move: most of
     # it is the notes on the races between a scan, a stop and a start, which
     # are the reason the code is shaped as it is. It does not want splitting

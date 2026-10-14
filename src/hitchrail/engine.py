@@ -429,15 +429,30 @@ class Engine(SeamMembers, RestartMembers):
         with self._stopping_guard:
             marker.typing = False
 
-    def _give_back(self, name: str, marker: StopMarker, resume: WrapUpWatch | None) -> None:
+    def _give_back(
+        self,
+        name: str,
+        marker: StopMarker,
+        resume: WrapUpWatch | None,
+        restore: StopMarker | None = None,
+    ) -> None:
         """Undo a claim whose sequence never went out.
 
         A refused Exit now goes back to the wrap up it interrupted (#407): the
         prompt WAS sent and is still queued, so the person, shown a refusal,
-        is right to expect the wrap up to end in an exit. Every other claim
+        is right to expect the wrap up to end in an exit. A repeated Stop on
+        `exiting` replaced a marker whose exit DID go out, so that one goes
+        back (#513): dropping the claim alone left the row with no stop and
+        no timeout while the first exit was still landing. Every other claim
         has nothing to go back to and is dropped: a wait must not outlive a
         request that was never sent.
         """
+        if resume is None and restore is not None:
+            with self._stopping_guard:
+                marker.withdrawn = True
+                if self._stopping.get(name) is marker:
+                    self._stopping[name] = restore
+            return
         if resume is None:
             self._drop(name, marker)
             return
@@ -848,6 +863,7 @@ class Engine(SeamMembers, RestartMembers):
         # section, and only the caller that wrote the marker types. The table
         # on the ticket is the whole rule.
         resume: WrapUpWatch | None = None
+        replaced: StopMarker | None = None
         with self._stopping_guard:
             current = self._stopping.get(name)
             held = self._kill_held.get(name)
@@ -871,6 +887,7 @@ class Engine(SeamMembers, RestartMembers):
             elif current is not None:
                 # A repeated Stop on `exiting`, as before #242, keeping the
                 # ceiling flag so the dialog still says why it is exiting.
+                replaced = current
                 typing = StopMarker(
                     now,
                     "exiting",
@@ -906,7 +923,7 @@ class Engine(SeamMembers, RestartMembers):
             else:
                 agent.request_stop(self.tmux, name, settle=self._sleep)
         except TmuxUnavailable as exc:
-            self._give_back(name, typing, resume)
+            self._give_back(name, typing, resume, replaced)
             raise MachineUnreadable(str(exc)) from exc
         except StopNotSafe as exc:
             logger.info("stop %s: refused, %s", name, exc)
@@ -922,13 +939,13 @@ class Engine(SeamMembers, RestartMembers):
             # Translated at this boundary rather than let through. The server
             # catching an agent's exception would put agent knowledge in the
             # HTTP layer, which is the whole point of the quarantine.
-            self._give_back(name, typing, resume)
+            self._give_back(name, typing, resume, replaced)
             raise StopRefused(str(exc)) from exc
         except BaseException:
             # Anything else, too (#407): a marker left `closing` with no watch
             # made every later Stop a no-op and was invisible to the sweep and
             # to expiry, so only a Kill could clear it.
-            self._give_back(name, typing, resume)
+            self._give_back(name, typing, resume, replaced)
             raise
         else:
             # On success only (#427), and this was a `finally`. Every failure

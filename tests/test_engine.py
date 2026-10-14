@@ -1652,6 +1652,28 @@ def test_a_stop_the_adapter_will_not_send_is_an_honest_refusal(root: Path) -> No
     assert engine.stopping_since(proj("vessel")) is None
 
 
+def test_a_refused_repeat_stop_leaves_the_first_exit_in_place(root: Path) -> None:
+    """#513. A second Stop on `exiting` claims a fresh marker; refused, it was
+    dropped, and with it the FIRST stop's, whose exit had gone out: the row
+    showed no stop and lost its timeout while that exit was still landing."""
+    clock = FakeClock()
+    engine, tmux = engine_for(
+        root, sessions={proj("vessel"): PANE}, table=RUNNING_MACHINE[1], clock=clock
+    )
+    engine.stop(proj("vessel"))
+    first = engine._stopping[proj("vessel")]
+    began, exit_at = first.began, first.exit_at
+
+    clock.advance(5)
+    tmux.pane_text[proj("vessel")] = DIRTY_INPUT_BOX
+    with pytest.raises(StopRefused):
+        engine.stop(proj("vessel"))
+
+    assert engine._stopping.get(proj("vessel")) is first
+    assert (first.began, first.exit_at, first.withdrawn) == (began, exit_at, False)
+    assert engine.stopping_since(proj("vessel")) == began
+
+
 def test_a_refused_stop_types_nothing(root: Path) -> None:
     """The half that matters. A refusal that had already sent `/exit` would be
     a refusal in name only, and the thing being refused is submitting text into

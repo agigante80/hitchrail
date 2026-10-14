@@ -712,8 +712,10 @@ def test_a_refused_exit_now_does_not_clear_the_flag_the_sweep_set_after_it(root:
     sweep = threading.Thread(target=engine.advance_wrap_ups, name="sweep")
     real_give_back = engine._give_back
 
-    def give_back(name: str, marker: StopMarker, resume: Any) -> None:
-        real_give_back(name, marker, resume)
+    def give_back(
+        name: str, marker: StopMarker, resume: Any, restore: StopMarker | None = None
+    ) -> None:
+        real_give_back(name, marker, resume, restore)
         # Stop has handed the marker back and holds no lock. The pane is
         # idle now, so the sweep may type, and it claims the same object.
         del tmux.pane_text[VESSEL]
