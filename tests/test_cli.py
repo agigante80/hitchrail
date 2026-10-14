@@ -1306,6 +1306,23 @@ def test_update_plugins_shows_what_y_approved(
     )
 
 
+def test_an_unconfirmed_row_still_shows_what_y_approved(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#500. Since #491 a detail and an approved command can share a row;
+    an `elif` between them would drop the approval and pass every other test."""
+    line = '{"shownCommand": {"command": "curl -s https://x/i", "sha256": "ab"}}'
+    agent = FakeAgent([row("a@m")], **{"a@m": done(0, stdout=line)}).then_lists(
+        done(1, stderr="boom")
+    )
+    code, _ = _update(monkeypatch, agent)
+    assert code == 0
+    assert capsys.readouterr().out.splitlines()[0] == (
+        "updated  a@m (not confirmed: the plugin list could not be read again; "
+        "approved: curl -s https://x/i)"
+    )
+
+
 def test_update_plugins_exits_one_when_a_plugin_failed(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1377,6 +1394,32 @@ def test_a_ctrl_c_before_any_update_finished_claims_no_rows(
     assert code == 130
     assert captured.out == ""
     assert "no plugin update had finished" in captured.err
+    assert "provisional" not in captured.err
+
+
+def test_a_ctrl_c_after_only_skipped_rows_claims_no_update(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#492. A skipped row prints no `...`, so a Ctrl-C after one may say
+    neither "provisional" nor "after the last `...`"."""
+    agent = FakeAgent([row("adapt@kit", "local"), row("a@m")], **{"a@m": KeyboardInterrupt()})
+    code, _ = _update(monkeypatch, agent)
+    captured = capsys.readouterr()
+    assert code == 130
+    assert captured.out.splitlines() == ["skipped  adapt@kit (local scope is not updated)"]
+    assert "no plugin update had finished" in captured.err
+    assert "provisional" not in captured.err
+
+
+def test_a_failure_after_only_skipped_rows_adds_no_provisional_note(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#492, the failure branch of the same gate."""
+    agent = FakeAgent([row("adapt@kit", "local"), row("a@m")], **{"a@m": FileNotFoundError()})
+    code, _ = _update(monkeypatch, agent)
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "agent_missing:" in captured.err
     assert "provisional" not in captured.err
 
 

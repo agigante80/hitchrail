@@ -949,6 +949,11 @@ def _outcome_line(outcome: claude_ipc.PluginOutcome, times: int = 1) -> str:
     return f"{line} ({'; '.join(notes)})" if notes else line
 
 
+def _ran(heard: list[claude_ipc.PluginOutcome]) -> bool:
+    """Whether any heard row is one `progress` printed a `...` for."""
+    return any(o.result != "skipped" for o in heard)
+
+
 # No second listing ran behind the rows of an interrupt or a failure (#464).
 _PROVISIONAL = "The rows above are provisional: `updated` only means the update ran cleanly."
 
@@ -1032,8 +1037,9 @@ def update_plugins_command(argv: list[str]) -> int:
         # a script or a person can match on it rather than on the prose.
         print(f"hitchrail: {exc.code}: {exc}", file=sys.stderr)
         # Only with rows to qualify: a refresh or a first listing that fails
-        # leaves none. `note:` keeps a second line from reading as a code.
-        if heard:
+        # leaves none, and a `skipped` row qualifies nothing, since no update
+        # ran for it (#492). `note:` keeps a second line from reading as a code.
+        if _ran(heard):
             print(f"hitchrail: note: {_PROVISIONAL}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
@@ -1046,9 +1052,11 @@ def update_plugins_command(argv: list[str]) -> int:
         # The progress line arrives when an update FINISHES, so the one in
         # flight is on neither stream. "If": a Ctrl-C during the refresh, a
         # listing, or after the last update had none in flight, and from
-        # here those cannot be told apart.
+        # here those cannot be told apart. Only rows that printed a `...`
+        # count: skipped rows print none, so "after the last `...`" would
+        # point at a line that was never written (#492).
         said = "no plugin update had finished."
-        if heard:
+        if _ran(heard):
             said = f"{_PROVISIONAL} If one was running, it is the plugin after the last `...`."
         print(f"hitchrail: interrupted: {said}", file=sys.stderr)
         return 130

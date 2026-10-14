@@ -93,7 +93,10 @@ OUTER_LAYER_CAPS: dict[str, int] = {
     # command, and a stderr note says the version check never happened.
     # 1187 for #290: every `[agents]` binary goes through the same lookup as
     # --agent-binary, now one function told which setting to name.
-    "cli.py": 1187,
+    # 1195 for #492: a run whose heard rows were all skipped printed no `...`,
+    # so neither the provisional note nor "after the last `...`" may be said,
+    # and `_ran` is the one predicate both branches ask.
+    "cli.py": 1195,
     # 409 to 418 for #78: two entries in the exemption and the argument
     # beside them, which the set's own rule requires of every entry.
     # 418 to 436 for #160: the unauthenticated asset set and the argument
