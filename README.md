@@ -291,7 +291,7 @@ does not vendor or install any of them.
 | **tmux 2.1+** | every session Hitchrail starts lives in a tmux session; this is the whole mechanism, not an option. 2.1 is where exact `=` targets and the `#{pid}` format arrived, and older fails closed with every agent shown as detached; only 3.x is tested | `tmux -V` |
 | **Claude Code on `PATH`** | it is what Hitchrail runs. Configurable with `--agent-binary`. The binary is self contained: no node, no npm, whichever installer you used, because the npm package ships the same native executable | `claude --version` |
 | **Linux** | memory pressure is read from `/proc/meminfo`, and the process table from `ps`. macOS has neither in this form, which is why the package declares `Operating System :: POSIX :: Linux` | |
-| **Python 3.11+** | `uvx` and `pipx` handle this for you; `pip` needs it already there | `python3 --version` |
+| **Python 3.11+** | `uvx` handles this for you. `pipx` installs with the Python it runs on unless given `--python 3.11 --fetch-python=missing`, and `pip` needs it already there | `python3 --version` |
 
 **Hitchrail installs no runtime and checks no version of one.** That table is
 the whole list, and the agent needs nothing beyond itself. Your own PROJECTS are
