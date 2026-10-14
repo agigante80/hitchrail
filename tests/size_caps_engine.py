@@ -232,7 +232,8 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # 399 to 415 for #290: the project's agent travels to each direction of
     # derivation, and the trust map is keyed by agent. The seam the file
     # already has is `Machine` and `look`, one read of the machine, against
-    # the questions asked of it; splitting there is #501.
+    # the questions asked of it. #501 proposed that split and was dropped on
+    # 2026-10-14: size alone names no failure.
     # 438 for #290: both directions ask every configured agent, not only the
     # root's, so a changed `agent` key cannot hide one still running.
     # 460 for #294: the pane direction prefers the agent whose whole argv tail
