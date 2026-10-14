@@ -94,5 +94,9 @@ def launch_folder(config: Config, name: str) -> Path:
     """
     try:
         return discovery.resolve_identifier(config.roots, name)
-    except (discovery.NoSuchProject, ValueError):
+    # A symlink loop raises `RuntimeError` on 3.11 and 3.12, and `OSError` is
+    # the filesystem failing underneath: both are a folder that cannot be
+    # resolved, and must not reach a route as a 500 (#502). `engine.py`'s
+    # `_resolve` catches the same set and argues it.
+    except (discovery.NoSuchProject, ValueError, RuntimeError, OSError):
         return Path(name)

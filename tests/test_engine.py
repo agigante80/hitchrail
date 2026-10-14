@@ -278,6 +278,22 @@ def test_trust_is_matched_on_the_path_the_agent_was_actually_started_in(
     )
 
 
+def test_a_running_folder_turned_into_a_symlink_loop_is_not_waiting(root: Path) -> None:
+    """#502, the trust half: the folder became a loop after its agent started,
+    and resolving it for the trust check raised `RuntimeError` on 3.11 and
+    3.12, a 500 for the row. Unresolvable reads as gone, which warns nobody."""
+    shutil.rmtree(root / "vessel")
+    (root / "vessel").symlink_to(root / "vessel2", target_is_directory=True)
+    (root / "vessel2").symlink_to(root / "vessel", target_is_directory=True)
+    engine, _ = engine_for(
+        root,
+        sessions={proj("vessel"): PANE},
+        table=RUNNING_MACHINE[1],
+        agent_config=agent_config(root, trusted=[]),
+    )
+    assert engine.get(proj("vessel")).awaiting_trust is False
+
+
 def test_a_folder_under_a_trusted_ancestor_is_not_waiting(root: Path, tmp_path: Path) -> None:
     """#456: trusting a whole projects root once is the natural way to trust
     it, and the row warned forever. Through a symlinked root, since resolution
@@ -1505,6 +1521,20 @@ def test_a_symlink_loop_is_an_engine_error_not_a_runtime_error(tmp_path: Path) -
     engine, _, _ = start_engine(tmp_path)
     with pytest.raises(UnknownProject):
         engine.start(proj("a"))
+
+
+def test_a_symlink_loop_derives_like_a_missing_project(tmp_path: Path) -> None:
+    """#502. Deriving one row resolves its folder for the argv match, and a
+    loop raised a bare `RuntimeError` there on 3.11 and 3.12, a 500 at the
+    route. On 3.13 `resolve` does not raise, so this passes there either way."""
+    (tmp_path / "a").symlink_to(tmp_path / "b", target_is_directory=True)
+    (tmp_path / "b").symlink_to(tmp_path / "a", target_is_directory=True)
+    engine, _, _ = start_engine(tmp_path)
+    assert engine.get(proj("a")).state is State.STOPPED
+    with pytest.raises(UnknownProject):
+        engine.stop(proj("a"))
+    with pytest.raises(UnknownProject):
+        engine.kill(proj("a"))
 
 
 # -- tmux vanishing mid run ------------------------------------------------

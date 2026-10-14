@@ -235,7 +235,9 @@ ENGINE_LAYER_CAPS: dict[str, int] = {
     # 460 for #294: the pane direction prefers the agent whose whole argv tail
     # a process ends with, since agy's argv carries Claude Code's marker.
     # 461 for #294: a row carries the identifier of the agent found.
-    "derive.py": 461,
+    # 462 for #502: a symlink loop or a failing filesystem under a running
+    # row reads as a folder that is gone, as `agents.launch_folder` does.
+    "derive.py": 462,
     # tmux.py is the module that encodes what tmux actually does
     # rather than what its manual implies, and every entry is a footgun
     # that cost real debugging: prefix matching targets, the colon

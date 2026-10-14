@@ -387,7 +387,8 @@ def _awaiting_trust(
         return False
     try:
         folder = discovery.resolve_identifier(config.roots, name)
-    except (discovery.NoSuchProject, ValueError):
+    # A symlink loop or a failing filesystem, as in `agents.launch_folder` (#502).
+    except (discovery.NoSuchProject, ValueError, RuntimeError, OSError):
         return False
     return not configured.agent.folder_is_trusted(folder, trusted)
 
