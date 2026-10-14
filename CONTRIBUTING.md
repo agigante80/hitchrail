@@ -94,14 +94,22 @@ The loop is bounded, because "review until green" has no natural end: a
 reviewer asked to find problems will find them, eventually in the fixes from
 the previous round.
 
-- **Round 1** reviews the change. Findings at high or medium are fixed;
-  anything below becomes a ticket.
+- **Every finding names its failure**: these inputs or this state, this wrong
+  output or crash. A finding that cannot name one is dropped, whatever its
+  severity says.
+- **Round 1** reviews the change. Findings at high or medium are fixed. Each
+  low gets exactly one outcome, decided in the same batch:
+  - **fix** it now, when it is small and inside the files the change touches;
+  - **ticket** it, only when a user or operator could really hit its failure
+    and it is too big to fix now, one problem per ticket;
+  - **drop** it, with one line in the review summary.
 - **Round 2** reviews only the fix commits. The target does not grow.
 - **Hard stop after four rounds**, and immediately if two consecutive rounds
   find a defect inside the previous round's fix.
 
-**Anything unfixed when the loop ends becomes a ticket.** A ticket is a
-finished outcome for a finding, not a failure to fix it.
+Anything unfixed when the loop ends gets the same fix, ticket or drop
+decision. A low is not ticketed by default: that rule was retired in 2026-10
+after review bundles became most of the backlog (#522).
 
 ## Commits
 
