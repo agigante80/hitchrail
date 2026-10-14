@@ -103,7 +103,9 @@ ignore = [
 "tests/*" = ["S104", "S105", "S106", "S603", "S607"]
 
 [tool.mypy]
-python_version = "3.11"
+# No python_version, deliberately (#10): mypy then checks the interpreter it
+# runs on, so each CI matrix leg types its own Python. A pin here made all
+# three legs check 3.11. The 3.11 floor is held by the 3.11 leg.
 strict = true
 files = ["src", "tests"]
 warn_unreachable = true
