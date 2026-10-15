@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# check-phases-version: 11
+# check-phases-version: 12
 #
 # The roadmap-phases guard: four rules that make rolling wave planning mechanical.
 #
@@ -175,8 +175,12 @@ LIB="$(find_forge_lib)" || {
 # clean. This script has no write path, so a flagged run must print exactly what an unflagged one
 # does. The prefix dies with the substitution's subshell, so the caller's flag is untouched. Do NOT
 # hoist it to a top-level `FORGE_DRY_RUN=0`: a write added later would then inherit it.
-MS="$(FORGE_DRY_RUN=0 forge_milestone_list 2>/dev/null)" || MS=""
-ISS="$(FORGE_DRY_RUN=0 forge_issue_milestone_list 2>/dev/null)" || ISS=""
+# #452: stderr is NOT discarded, so a refusal (an http FORGE_API_URL, a bad URL) shows its own reason
+# above the SKIPPED lines. The issue read runs only when the milestone read returned something, so
+# a refusal prints once rather than twice.
+MS="$(FORGE_DRY_RUN=0 forge_milestone_list)" || MS=""
+ISS=""
+[ -z "$MS" ] || ISS="$(FORGE_DRY_RUN=0 forge_issue_milestone_list)" || ISS=""
 if [ -z "$MS" ] || [ -z "$ISS" ]; then
   echo "check-phases: the host could not be reached, so rules 1, 3 and 4 were SKIPPED." >&2
   echo "  They were NOT checked and NOT passed. Check the token and the forge configuration." >&2
