@@ -60,6 +60,8 @@ N/A claim like any other.
 **A refusal is a condition.** If the change adds a guard, the negative scenario is the guard
 firing, and it names the error `code` returned.
 
+<!-- adapt-dropped: host-divergent-conditions (nothing here branches on forge host) -->
+
 ### 2. Unit test specs
 
 Concrete cases: a specific test file path, a concrete input value, and the expected output or
@@ -234,6 +236,8 @@ installed. Those restatements are sanctioned exceptions to the single-source rul
   legitimately blocking.
 
 Editing a rule here therefore means checking the gate for its restatement in the same change.
+
+<!-- adapt-dropped: precedence-anchor-list (check-restatements.sh is kit-only) -->
 
 <!-- project rule: forge-kit's anchor list and scripts/check-restatements.sh are kit-only and not installed here -->
 **Citations are by TITLE, never by number.** This document inserts a section the kit's does not
