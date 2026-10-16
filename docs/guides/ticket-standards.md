@@ -1,4 +1,5 @@
 <!-- template-version: 7 -->
+<!-- doc-rules-version: 21 -->
 
 # Ticket standards (canonical)
 
@@ -8,6 +9,13 @@ repository. The five work issue templates (`feature`, `bug`, `security`, `infras
 reasons. The `ticket-gate` agent enforces them, and `scripts/check-template-lockstep.sh` keeps
 the templates and this document on one shared `template-version`, so the standard cannot
 silently drift apart from the forms that implement it.
+
+**This doc carries two markers, and they answer different questions.** `template-version` says
+*which form this doc describes*: it is version-locked to the five work templates, and bumping it
+is what makes `ticket-gate` re-synthesise every open ticket. `doc-rules-version` says *which
+revision the rules text below is at*, against forge-kit's canonical copy. A change to the rules
+that does not change the form fields bumps **only** `doc-rules-version`, costs nothing
+downstream, and triggers no synthesis.
 
 It sits under `docs/tech-guidelines.md`, not beside it. The guidelines are binding for code; this
 says what a ticket must contain before that code is written. Where the two appear to disagree,
@@ -19,7 +27,8 @@ The requirement text used to be restated in each template, in `CLAUDE.md`, and i
 copies drift: prose says one thing while a template says another, and nobody notices until a
 ticket is gated against a stale rule. Keeping the rules here, referenced rather than restated
 elsewhere, plus the lockstep guard, makes "the standard is the same everywhere" mechanically true
-instead of a matter of discipline.
+instead of a matter of discipline. (One sanctioned restatement exists: the gate's hard-fail bars,
+governed by the Precedence section below.)
 
 ## Required sections
 
@@ -47,6 +56,7 @@ N/A claim like any other.
 - the negative scenario asserts a SPECIFIC error `code` or message, never "it fails"
 - not a restatement of the summary
 
+<!-- project rule: every guard here is a security control, so its refusal is a scenario of its own -->
 **A refusal is a condition.** If the change adds a guard, the negative scenario is the guard
 firing, and it names the error `code` returned.
 
@@ -60,11 +70,14 @@ network, or the filesystem outside a temporary root. tmux, the process table, me
 the Claude state directory and the clock are faked behind injectable seams, so a ticket that
 introduces a new external surface must say how that surface is injected.
 
+<!-- project rule: no accounts or users, so the kit's 401/403/IDOR/rate-limit enumeration becomes every documented refusal and its code -->
 **When a ticket adds or modifies an HTTP route**, complete coverage of that route is required:
 the success path, every documented refusal with the `code` it returns, and the error body shape.
+Where the change touches shared code, integration and regression coverage is named too.
 
 ### 3. Integration test specs
 
+<!-- project rule: an extra tier between unit and E2E; the ASGITransport tier is where routing and middleware are proven -->
 The API driven through `httpx.ASGITransport` against a real Starlette app with a faked engine. No
 socket is opened and no server is started. This is the tier that proves routing, middleware,
 status codes, error bodies and the SSE contract.
@@ -84,12 +97,16 @@ in, the layout holding at a phone viewport, a forged `Host` refused on a live so
 
 API-only and engine-only tickets mark this N/A with justification rather than inventing a flow.
 
+<!-- adapt-dropped: emulator-clause -->
+
+<!-- project rule: a bare tmux honours $TMUX, so an E2E run from inside tmux would drive the developer's real server -->
 **The E2E tier drives a private tmux server on its own socket**, addressed as `tmux -S "$SOCK"`
 and invoked through `env -u TMUX`. A ticket that adds E2E coverage inherits that rule; a ticket
 that proposes E2E coverage without it is not ready.
 
 ### 5. Blast radius
 
+<!-- project rule: replaces the kit's personal-data section; what this project risks is code execution as the operator, not personal data -->
 There is no GDPR section in this repository's templates, and its absence is deliberate.
 Hitchrail stores no personal data and has no database: state is derived on demand from the
 operating system, and the only thing it holds in memory is an in-flight stop marker. A GDPR
@@ -110,8 +127,17 @@ as the user who started it. Every ticket states, in plain terms:
 That last one is the one people skip. A guard that fails open, or an error rendered as a success,
 is worse than no guard.
 
+### Personal data handling (not a ticket section here)
+
+<!-- project rule: the heading exists so section citations from forge-kit's plugin files resolve; it adds no form field -->
+The kit's seven personal-data facts do not apply to this repository, and no template asks for
+them: Hitchrail holds no personal data, for the reasons section "Blast radius" gives above. A
+gate or companion file citing this section reads section "Blast radius" in its place. Reinstating
+a personal-data ticket section needs this document changed first, with the reason.
+
 ### 6. Security checklist
 
+<!-- project rule: the kit's generic auth, validation and OWASP list, restated as this project's seven controls and their order -->
 Which control applies, what the allowlist pattern is, which stable error `code` the refusal
 returns, and whether the route is mutating (Origin checked) or a `GET` (exempt, because
 `EventSource` cannot set headers).
@@ -123,13 +149,17 @@ A `security` label dispatches the security lens regardless of what the content s
 
 ### 7. Required reviews
 
-The reviews the ticket must pass before it is done, checked off explicitly. This is the author
-acknowledging the gate, not a substitute for it.
+The reviews the ticket must pass before it is considered done, checked off explicitly. This is
+the ticket author's acknowledgement of the gate, not a substitute for it.
 
-### 8. Documentation impact
+### 8. Documentation currency
 
+<!-- project rule: the templates' form field keeps its label "Documentation impact"; stricter than the kit, it names the edit for each file and the three cases that may not be N/A -->
 Which documents this change makes wrong, and the edit that fixes each. Named files, not
-"update the docs".
+"update the docs". **Scope is deliberately every work ticket**: this is the one rule where
+always-asked is the point. It stays passable because "none, no user-visible surface" is a
+legitimate answer, and the gate scores that claim like any other N/A, judged against the
+ticket's own file list.
 
 This section exists because the project shipped two phases without the README once
 mentioning tmux, while every session Hitchrail starts lives in one. Nothing was
@@ -168,6 +198,7 @@ restores documented behaviour, changes no document. Say that, with the reason.
 
 ### 9. Implementation and dependency concreteness
 
+<!-- project rule: layer boundaries, declared test tiers, a three-dependency budget, and a subprocess per row as the N+1 equivalent -->
 Judged against the fields a template already provides (`files`, `implementation`,
 `dependencies`, and `root_and_deps` on the infrastructure form), not a new form field. That is
 why this rule adds no section and no `template-version` bump.
@@ -188,10 +219,10 @@ why this rule adds no section and no `template-version` bump.
 A ticket whose template carries none of these fields (the design form) records N/A by domain,
 per the N/A rule below.
 
-## Precedence against the gate
+## Precedence
 
 The `ticket-gate` agent restates some of these rules, so they hold where this document is not
-installed. Where it IS installed, its text governs, and three cases are distinguished:
+installed. Those restatements are sanctioned exceptions to the single-source rule above. Where it IS installed, its text governs, and three cases are distinguished:
 
 - **Conflict.** The gate's copy and this document say different things: **this document
   wins.** The gate's copy is a convenience restatement, never a fork.
@@ -203,8 +234,14 @@ installed. Where it IS installed, its text governs, and three cases are distingu
   legitimately blocking.
 
 Editing a rule here therefore means checking the gate for its restatement in the same change.
-The gate cites this document's rule numbers, which differ from forge-kit's upstream doc because
-rule 3 here is the integration tier.
+
+<!-- project rule: forge-kit's anchor list and scripts/check-restatements.sh are kit-only and not installed here -->
+**Citations are by TITLE, never by number.** This document inserts a section the kit's does not
+have (section "Integration test specs"), so its numbers differ from forge-kit's and from
+themselves whenever a section is added. The gate and its companion files cite a section as
+`section "Title"`, the title exactly as the `### N. Title` heading spells it with any trailing
+parenthetical dropped, and forge-adapt's citation check resolves each one against the headings
+here. Renaming a heading therefore means checking that check in the same change.
 
 ## The N/A rule (load-bearing)
 
