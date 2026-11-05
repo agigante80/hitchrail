@@ -46,7 +46,7 @@ dev = [
   "ruff>=0.16",
   "mypy>=2.3",
   "import-linter>=2.13",
-  "coverage[toml]>=7.15",
+  "coverage[toml]>=7.16.1",
   "hypothesis>=6.165.10",
   "playwright>=1.50",
 ]
